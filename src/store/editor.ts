@@ -21,7 +21,9 @@ import {
   type ClipItem,
   type Pos,
 } from '../edit/ops';
+import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import type { SongFolder } from '../fs/folder';
+import { useInputSettings } from '../input/settings';
 import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, soundEvents, tempoOf, wavSources } from './derived';
 import { loadSidecar, useSidecar } from './sidecar';
@@ -250,14 +252,22 @@ function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
   return no;
 }
 
-export function placeChip(lane: number, alt: boolean, pos: Pos) {
-  placeChips([{ lane, alt, pos }], { select: true, preview: get().previewOnPlace });
+/** 置く強さ（強さの操作は store/velocity が受け持つ。循環を避けるため関数で受け取る） */
+let placeVelProvider: () => number = () => 100;
+export function setPlaceVelProvider(fn: () => number) {
+  placeVelProvider = fn;
+}
+
+export function placeChip(lane: number, alt: boolean, pos: Pos, vel?: number) {
+  placeChips([{ lane, alt, pos, vel }], { select: true, preview: get().previewOnPlace });
 }
 
 export interface PlaceItem {
   lane: number;
   alt: boolean;
   pos: Pos;
+  /** 強さ（1〜100）。省くと操作バーで選んでいる強さ */
+  vel?: number;
 }
 
 /**
@@ -272,13 +282,16 @@ export function placeChips(items: readonly PlaceItem[], opts: { label?: string; 
   const one = items[0];
   const def = DRUM_LANES[one.lane];
   const label = opts.label ?? (items.length === 1 ? `${one.alt && def.altName ? def.altName : def.mainName}を置く` : `${items.length}個のチップを置く`);
+  const step = useInputSettings.getState().velStep;
+  const defVel = placeVelProvider();
   edit(
     label,
     (d) => {
       for (const it of items) {
         const lane = DRUM_LANES[it.lane];
         const ch = it.alt && lane.alt !== undefined ? lane.alt : lane.main;
-        const v = wavForChannel(d, ch);
+        const base = wavForChannel(d, ch);
+        const v = wavVariant(d, base, quantizeVel(it.vel ?? defVel, step));
         if (!firstV) firstV = v;
         ids.push(opPlace(d, ch, it.pos, v));
       }
@@ -520,7 +533,18 @@ export async function prepareSounds(): Promise<void> {
 
 export function previewWav(no: number) {
   engine.ensure();
-  engine.preview(no);
+  if (engine.preview(no)) return;
+  // 作ったばかりの強さ違いはまだ読み込まれていない：同じファイルの音を強さの比で鳴らす
+  const fields = get().doc.fields;
+  const path = fields['WAV' + toBase36x2(no)];
+  if (path === undefined) return;
+  for (const [k, v] of Object.entries(fields)) {
+    if (!/^WAV[0-9A-Z]{2}$/.test(k) || v.toLowerCase() !== path.toLowerCase()) continue;
+    const other = parseInt(k.slice(3), 36);
+    if (other === no || !engine.has(other)) continue;
+    engine.preview(other, velOfWav(fields, no) / Math.max(1, velOfWav(fields, other)));
+    return;
+  }
 }
 
 /**

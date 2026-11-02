@@ -29,6 +29,12 @@ export interface InputSettings {
   profileId: string;
   /** 叩いてから届くまでの遅れ（ミリ秒）。録音した位置からこの分を引く */
   latencyMs: number;
+  /** 置く強さ「強・中・弱」の値 */
+  velPresets: [number, number, number];
+  /** 書き出しで強さをまとめる刻み（1 = まとめない） */
+  velStep: number;
+  /** 電子ドラムの強さの変換カーブ */
+  velCurve: 'soft' | 'normal' | 'hard';
 }
 
 /** レーン順（LC HH LP SD HT BD LT FT CY RD）のキー */
@@ -84,7 +90,7 @@ export function newProfile(name: string): MidiProfile {
 const KEY = 'dtxe.input.v1';
 
 function load(): InputSettings {
-  const base: InputSettings = { keys: { ...DEFAULT_KEYS }, profiles: [], profileId: '', latencyMs: 0 };
+  const base: InputSettings = { keys: { ...DEFAULT_KEYS }, profiles: [], profileId: '', latencyMs: 0, velPresets: [100, 70, 35], velStep: 5, velCurve: 'normal' };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -93,6 +99,9 @@ function load(): InputSettings {
       if (Array.isArray(j.profiles)) base.profiles = j.profiles.filter((p) => p && typeof p.id === 'string' && p.notes);
       if (typeof j.profileId === 'string') base.profileId = j.profileId;
       if (Number.isFinite(j.latencyMs)) base.latencyMs = Number(j.latencyMs);
+      if (Array.isArray(j.velPresets) && j.velPresets.length === 3 && j.velPresets.every((v) => Number.isFinite(v))) base.velPresets = j.velPresets as [number, number, number];
+      if (j.velStep === 1 || j.velStep === 5 || j.velStep === 10) base.velStep = j.velStep;
+      if (j.velCurve === 'soft' || j.velCurve === 'normal' || j.velCurve === 'hard') base.velCurve = j.velCurve;
     }
   } catch {
     // 読めなければ初期値
@@ -106,7 +115,10 @@ export const useInputSettings = create<InputSettings>(() => load());
 
 useInputSettings.subscribe((s) => {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ keys: s.keys, profiles: s.profiles, profileId: s.profileId, latencyMs: s.latencyMs }));
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({ keys: s.keys, profiles: s.profiles, profileId: s.profileId, latencyMs: s.latencyMs, velPresets: s.velPresets, velStep: s.velStep, velCurve: s.velCurve }),
+    );
   } catch {
     // 保存できなくても使える
   }

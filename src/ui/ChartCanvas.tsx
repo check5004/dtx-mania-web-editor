@@ -11,7 +11,7 @@ import { DRUM_LANES } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import { bandOnsets, currentGhosts, dismissGhosts, ghostsInRange, setLoop, setWaveMode, useAssist, type AssistState } from '../store/assist';
-import { bgmSource, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, type ChipView } from '../store/derived';
+import { bgmSource, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
 import {
   deleteChips,
   moveSelection,
@@ -24,6 +24,7 @@ import {
   zoom,
 } from '../store/editor';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
+import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { promptDialog } from './dialogs';
 import { songLength } from './hooks';
 import { chipBpmLabel, meterLabel } from './format';
@@ -44,6 +45,9 @@ export const GEO = {
   waveX: 588,
   waveW: 108,
   miniW: 72,
+  /** 強さのレーン（強さの編集モード） */
+  velGap: 10,
+  velW: 84,
 };
 
 const BASE_W = GEO.bgmX + GEO.bgmW;
@@ -73,8 +77,10 @@ const C = {
 };
 
 type Drag =
-  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos }
+  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean }
   | { type: 'rubber'; x0: number; y0: number; x1: number; y1: number; additive: boolean; base: number[] }
+  | { type: 'velPencil'; idx: number; group: string; lastY: number }
+  | { type: 'velLine'; idx: number; y0: number; v0: number; y1: number; v1: number }
   | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean }
   | { type: 'erase'; ids: Set<number>; ghosts: Set<string> }
   | { type: 'cursor' }
@@ -113,8 +119,25 @@ export function visibleBeats(): { from: number; to: number } {
   return { from: Math.max(0, scroll), to: Math.max(0, scroll + (viewport.h - GEO.head - GEO.bottom) / s.view.pxPerBeat) };
 }
 
-function chartWidth(): number {
+function baseWidth(): number {
   return useAssist.getState().audioCols ? FULL_W : BASE_W;
+}
+
+function chartWidth(): number {
+  const v = useVel.getState();
+  return baseWidth() + (v.mode ? GEO.velGap + v.lanes.length * GEO.velW : 0);
+}
+
+/** 強さのレーン i の左端（譜面の左端から） */
+function velLaneX(i: number): number {
+  return baseWidth() + GEO.velGap + i * GEO.velW;
+}
+
+const VEL_PAD = 6;
+const velBarW = () => GEO.velW - VEL_PAD - 24;
+
+function velFromX(rx: number, i: number): number {
+  return Math.max(1, Math.min(100, Math.round(((rx - velLaneX(i) - VEL_PAD) / velBarW()) * 100)));
 }
 
 export function ChartCanvas() {
@@ -161,6 +184,12 @@ export function ChartCanvas() {
       }),
     ];
 
+    const unsubVel = useVel.subscribe(() => {
+      l.dirty = true;
+      l.mini = null;
+    });
+    unsubs.push(unsubVel);
+
     let raf = 0;
     const loop = () => {
       raf = requestAnimationFrame(loop);
@@ -180,6 +209,17 @@ export function ChartCanvas() {
       e.preventDefault();
       const s = useEditor.getState();
       const g = geom(l, s.view.scrollBeat, s.view.pxPerBeat);
+      if (e.altKey) {
+        // Alt+ホイール：選んだチップの強さ（Shift で1ずつ）。強さのレーンの上なら、そのチップ
+        const h = hitTest(l, g, e.offsetX, e.offsetY);
+        const step = e.shiftKey ? 1 : 5;
+        const dir = (e.deltaY || e.deltaX) < 0 ? 1 : -1;
+        if (h?.kind === 'velChip' && !s.selection.includes(h.view.c.id)) {
+          useEditor.setState({ selection: [h.view.c.id] });
+        }
+        nudgeSelection(dir * step);
+        return;
+      }
       if (e.ctrlKey || e.metaKey) {
         const beat = g.yToBeat(e.offsetY);
         zoom(Math.exp(-e.deltaY * 0.0022), beat, l.h - GEO.bottom - e.offsetY);
@@ -229,6 +269,32 @@ export function ChartCanvas() {
     }
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
     l.pointer = { x, y };
+    if (h.kind === 'vel' || h.kind === 'velChip') {
+      if (e.button !== 0) return;
+      const tool = useVel.getState().tool;
+      if (tool === 'pencil') {
+        const group = `vel-pencil-${Date.now()}`;
+        l.drag = { type: 'velPencil', idx: h.idx, group, lastY: y };
+        pencilApply(l, g, h.idx, y, y, x, group);
+        return;
+      }
+      if (tool === 'line') {
+        const val = velFromX(x - g.ox, h.idx);
+        l.drag = { type: 'velLine', idx: h.idx, y0: y, v0: val, y1: y, v1: val };
+        return;
+      }
+      if (h.kind === 'velChip') {
+        const id = h.view.c.id;
+        const already = s.selection.includes(id);
+        if (e.ctrlKey || e.metaKey) useEditor.setState({ selection: already ? s.selection.filter((i) => i !== id) : [...s.selection, id] });
+        else if (e.shiftKey) useEditor.setState({ selection: already ? s.selection : [...s.selection, id] });
+        else useEditor.setState({ selection: [id] });
+        return;
+      }
+      const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+      l.drag = { type: 'rubber', x0: x, y0: y, x1: x, y1: y, additive, base: additive ? s.selection : [] };
+      return;
+    }
     if (e.button === 2) {
       if (h.kind === 'chip') {
         l.drag = { type: 'erase', ids: new Set([h.view.c.id]), ghosts: new Set() };
@@ -290,7 +356,7 @@ export function ChartCanvas() {
     if (h.kind === 'lane' || h.kind === 'bgm' || h.kind === 'bpm') {
       const beat = Math.max(0, g.yToBeat(y));
       const pos = snapToGrid(tempoOf(s.doc), beat, s.view.div);
-      l.drag = { type: 'pending', x0: x, y0: y, lane: h.kind === 'lane' ? h.lane : -1, alt: e.shiftKey, pos };
+      l.drag = { type: 'pending', x0: x, y0: y, lane: h.kind === 'lane' ? h.lane : -1, alt: e.shiftKey, pos, weak: e.altKey };
     }
   };
 
@@ -311,10 +377,17 @@ export function ChartCanvas() {
       } else if (h && h.kind === 'ghost') {
         l.hover = { x, y, lane: h.ghost.lane, pos: null, alt: false, ghost: h.ghost };
       } else {
-        l.hover = h && h.kind !== 'mini' ? { x, y, lane: -1, pos: null, alt: false, ghost: null } : null;
+        l.hover = h && h.kind !== 'mini' && h.kind !== 'vel' && h.kind !== 'velChip' ? { x, y, lane: -1, pos: null, alt: false, ghost: null } : null;
       }
+      const tool = useVel.getState().tool;
       const cur =
-        h?.kind === 'chip'
+        h?.kind === 'vel' || h?.kind === 'velChip'
+          ? tool === 'pencil' || tool === 'line'
+            ? 'crosshair'
+            : h.kind === 'velChip'
+              ? 'pointer'
+              : 'default'
+          : h?.kind === 'chip'
           ? 'grab'
           : h?.kind === 'ghost' || h?.kind === 'section'
             ? 'pointer'
@@ -336,6 +409,16 @@ export function ChartCanvas() {
     if (d.type === 'rubber') {
       d.x1 = x;
       d.y1 = y;
+      return;
+    }
+    if (d.type === 'velPencil') {
+      pencilApply(l, g, d.idx, d.lastY, y, x, d.group);
+      d.lastY = y;
+      return;
+    }
+    if (d.type === 'velLine') {
+      d.y1 = y;
+      d.v1 = velFromX(x - g.ox, d.idx);
       return;
     }
     if (d.type === 'erase') {
@@ -378,8 +461,31 @@ export function ChartCanvas() {
     if (!d) return;
     const s = useEditor.getState();
     if (d.type === 'pending') {
-      if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos);
+      if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos, d.weak ? weakVel() : undefined);
       else useEditor.setState({ selection: [] });
+      return;
+    }
+    if (d.type === 'velPencil') return;
+    if (d.type === 'velLine') {
+      const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+      const lane = useVel.getState().lanes[d.idx];
+      const bA = g.yToBeat(d.y0);
+      const bB = g.yToBeat(d.y1);
+      const lo = Math.min(bA, bB);
+      const hi = Math.max(bA, bB);
+      const span = hi - lo;
+      const views = viewsInRange(chipViews(s.doc), lo - 1e-6, hi + 1e-6).filter((v) => v.col === lane && v.kind === 'normal');
+      if (views.length === 0) return;
+      const at = new Map(views.map((v) => [v.c.id, v.beat]));
+      applyVel(
+        `直線で強さを変える（${d.v0}→${d.v1}）`,
+        [...at.keys()],
+        (_cur, c) => {
+          if (span < 1e-6) return d.v1;
+          const t = ((at.get(c.id) ?? lo) - bA) / (bB - bA);
+          return d.v0 + (d.v1 - d.v0) * Math.max(0, Math.min(1, t));
+        },
+      );
       return;
     }
     if (d.type === 'rubber') {
@@ -547,7 +653,9 @@ type Hit =
   | { kind: 'bgm' }
   | { kind: 'audio' }
   | { kind: 'header' }
-  | { kind: 'mini' };
+  | { kind: 'mini' }
+  | { kind: 'vel'; idx: number; lane: number }
+  | { kind: 'velChip'; idx: number; lane: number; view: ChipView };
 
 function colAt(g: Geom, x: number): number | 'gutter' | 'audio' | null {
   const rx = x - g.ox;
@@ -576,6 +684,28 @@ function sectionTagAt(g: Geom, x: number, y: number): number | null {
 function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   if (x >= l.w - GEO.miniW) return { kind: 'mini' };
   if (y < GEO.head) return { kind: 'header' };
+  const vs = useVel.getState();
+  if (vs.mode) {
+    const rx = x - g.ox;
+    for (let i = 0; i < vs.lanes.length; i++) {
+      const lx = velLaneX(i);
+      if (rx < lx || rx >= lx + GEO.velW) continue;
+      const lane = vs.lanes[i];
+      const beat = g.yToBeat(y);
+      const tol = 6 / g.px;
+      let best: ChipView | null = null;
+      let bestD = Infinity;
+      for (const v of viewsInRange(chipViews(useEditor.getState().doc), beat - tol, beat + tol)) {
+        if (v.col !== lane || v.kind !== 'normal') continue;
+        const dd = Math.abs(v.beat - beat);
+        if (dd < bestD) {
+          best = v;
+          bestD = dd;
+        }
+      }
+      return best ? { kind: 'velChip', idx: i, lane, view: best } : { kind: 'vel', idx: i, lane };
+    }
+  }
   const sm = sectionTagAt(g, x, y);
   if (sm !== null) return { kind: 'section', m: sm };
   const col = colAt(g, x);
@@ -621,12 +751,38 @@ function chipsInRect(l: Local, g: Geom, x0: number, y0: number, x1: number, y1: 
   const b0 = g.yToBeat(Math.max(y0, y1));
   const b1 = g.yToBeat(Math.min(y0, y1));
   const out: number[] = [];
+  const vs = useVel.getState();
   for (const v of viewsInRange(chipViews(s.doc), b0, b1)) {
     const cx = g.ox + colCenter(v.col);
-    if (cx >= xa && cx <= xb) out.push(v.c.id);
+    if (cx >= xa && cx <= xb) {
+      out.push(v.c.id);
+      continue;
+    }
+    if (vs.mode && v.kind === 'normal') {
+      const i = vs.lanes.indexOf(v.col);
+      if (i < 0) continue;
+      const vx0 = g.ox + velLaneX(i);
+      if (vx0 + GEO.velW >= xa && vx0 <= xb) out.push(v.c.id);
+    }
   }
   void l;
   return out;
+}
+
+/** 鉛筆：なぞった縦の範囲にあるチップを、なぞった位置の強さにする */
+function pencilApply(l: Local, g: Geom, idx: number, yA: number, yB: number, x: number, group: string) {
+  const s = useEditor.getState();
+  const lane = useVel.getState().lanes[idx];
+  const tol = 5 / g.px;
+  const lo = g.yToBeat(Math.max(yA, yB)) - tol;
+  const hi = g.yToBeat(Math.min(yA, yB)) + tol;
+  const ids = viewsInRange(chipViews(s.doc), lo, hi)
+    .filter((v) => v.col === lane && v.kind === 'normal')
+    .map((v) => v.c.id);
+  if (ids.length === 0) return;
+  const val = velFromX(x - g.ox, idx);
+  applyVel('鉛筆で強さを変える', ids, () => val, { group, similar: false });
+  void l;
 }
 
 function colCenter(col: number): number {
@@ -669,6 +825,24 @@ function autoScrollWhileDragging(l: Local) {
 }
 
 // ---- 描画 ---------------------------------------------------------------------
+
+const shadeCache = new Map<string, string>();
+
+/** 弱いチップほど暗くする（背景の色に寄せる） */
+function shade(color: string, vel: number): string {
+  if (vel >= 100) return color;
+  const key = `${color}|${vel}`;
+  let out = shadeCache.get(key);
+  if (out) return out;
+  const t = 0.3 + 0.7 * (vel / 100);
+  const r = parseInt(color.slice(1, 3), 16);
+  const gg = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  const mix = (c: number, bg: number) => Math.round(bg + (c - bg) * t);
+  out = `rgb(${mix(r, 11)},${mix(gg, 14)},${mix(b, 19)})`;
+  shadeCache.set(key, out);
+  return out;
+}
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
@@ -864,6 +1038,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     }
   }
 
+  const velMode = useVel.getState().mode;
   const drawChip = (v: ChipView, beat: number, col: number, alpha: number, selected: boolean) => {
     const y = g.beatToY(beat);
     if (col >= 0) {
@@ -873,8 +1048,21 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.globalAlpha = alpha;
       roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
       if (v.kind === 'normal') {
-        ctx.fillStyle = color;
+        const vel = wavVel(doc, v.c.v);
+        ctx.fillStyle = shade(color, vel);
         ctx.fill();
+        if (vel <= 50) {
+          // 弱いチップは縁取り（点線の候補チップとは見分けられるよう実線）
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+        if (velMode && px >= 16) {
+          ctx.fillStyle = vel > 50 ? 'rgba(11,14,19,.85)' : '#E7EBF1';
+          ctx.font = '600 8.5px "JetBrains Mono", ui-monospace, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(vel), cx, y + 0.5);
+        }
         if (v.alt) {
           // HHオープン・左バスドラムは中に印
           ctx.fillStyle = 'rgba(11,14,19,.75)';
@@ -940,6 +1128,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       drawChip(v, v.beat + dB, col, 0.9, true);
     }
   }
+
+  // 強さのレーン
+  if (velMode) drawVelLanes(ctx, g, H, sel, d);
+  else drawVelBubble(ctx, g, sel, H);
 
   // 置く位置のプレビュー
   const hv = l.hover;
@@ -1047,7 +1239,148 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.fillText(a.waveMode === 'wave' ? '原曲の波形 ⇄' : 'スペクトル ⇄', ox + GEO.waveX + GEO.waveW / 2, GEO.head / 2);
   }
 
+  if (velMode) {
+    ctx.font = '600 10px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    useVel.getState().lanes.forEach((lane, i) => {
+      const def = DRUM_LANES[lane];
+      const cx = ox + velLaneX(i) + GEO.velW / 2;
+      ctx.fillStyle = def.color;
+      ctx.fillText(`${def.key}`, cx - 14, GEO.head / 2);
+      ctx.fillStyle = C.text;
+      ctx.fillText('の強さ', cx + 12, GEO.head / 2);
+    });
+  }
+
   drawMinimap(ctx, l, g, playBeat, a);
+}
+
+// ---- 強さ -----------------------------------------------------------------------
+
+function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Set<number>, d: Drag | null) {
+  const v = useVel.getState();
+  const doc = useEditor.getState().doc;
+  const views = viewsInRange(chipViews(doc), g.minBeat - 0.5, g.maxBeat + 0.5);
+  const bw = velBarW();
+  ctx.textBaseline = 'middle';
+  v.lanes.forEach((lane, i) => {
+    const x = g.ox + velLaneX(i);
+    const bx = x + VEL_PAD;
+    ctx.fillStyle = '#0D1015';
+    ctx.fillRect(x, GEO.head, GEO.velW, H);
+    ctx.fillStyle = C.sep;
+    ctx.fillRect(x - 0.5, GEO.head, 1, H);
+    ctx.fillRect(x + GEO.velW - 0.5, GEO.head, 1, H);
+    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillRect(Math.round(bx + bw * 0.5), GEO.head, 1, H);
+    ctx.fillRect(Math.round(bx + bw), GEO.head, 1, H);
+    const color = DRUM_LANES[lane].color;
+    ctx.font = '9px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    for (const cv of views) {
+      if (cv.col !== lane || cv.kind !== 'normal') continue;
+      const y = g.beatToY(cv.beat);
+      if (y < GEO.head - 6 || y > H + 6) continue;
+      const vel = wavVel(doc, cv.c.v);
+      const selected = sel.has(cv.c.id);
+      const w = (bw * vel) / 100;
+      ctx.globalAlpha = selected ? 1 : 0.7;
+      ctx.fillStyle = color;
+      ctx.fillRect(bx, y - 1.5, w, 3);
+      ctx.beginPath();
+      ctx.arc(bx + w, y, selected ? 4 : 3, 0, Math.PI * 2);
+      ctx.fill();
+      if (selected) {
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      const prop = v.proposal?.get(cv.c.id);
+      if (prop !== undefined) {
+        const pw = (bw * prop) / 100;
+        ctx.setLineDash([3, 2]);
+        ctx.strokeStyle = C.amber;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(bx, y + 4);
+        ctx.lineTo(bx + pw, y + 4);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.amber;
+        ctx.fillRect(bx + pw - 1, y + 2, 2, 5);
+      }
+      if (g.px >= 12) {
+        ctx.fillStyle = selected ? '#E7EBF1' : '#8B95A4';
+        ctx.fillText(String(prop ?? vel), bx + Math.max(w, prop !== undefined ? (bw * prop) / 100 : 0) + 6, y - (prop !== undefined ? 3 : 0));
+      }
+    }
+  });
+  if (d?.type === 'velLine') {
+    const x = g.ox + velLaneX(d.idx) + VEL_PAD;
+    const xa = x + (bw * d.v0) / 100;
+    const xb = x + (bw * d.v1) / 100;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = C.amber;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xa, d.y0);
+    ctx.lineTo(xb, d.y1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const label = `直線 ${d.v0} → ${d.v1}`;
+    ctx.font = '10px system-ui, sans-serif';
+    const tw = ctx.measureText(label).width + 12;
+    const ly = Math.min(d.y0, d.y1) - 12;
+    roundRect(ctx, x - 2, ly - 8, tw, 16, 4);
+    ctx.fillStyle = '#1E1A12';
+    ctx.fill();
+    ctx.strokeStyle = '#6B5326';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = C.amber;
+    ctx.textAlign = 'left';
+    ctx.fillText(label, x + 4, ly);
+  }
+}
+
+/** 1つだけ選んだチップの横に強さの吹き出し */
+function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>, H: number) {
+  if (sel.size !== 1) return;
+  const doc = useEditor.getState().doc;
+  const id = [...sel][0];
+  const v = chipViews(doc).find((x) => x.c.id === id);
+  if (!v || v.col < 0 || v.kind !== 'normal') return;
+  const y = g.beatToY(v.beat);
+  if (y < GEO.head + 8 || y > H - 8) return;
+  const vel = wavVel(doc, v.c.v);
+  const x = g.ox + GEO.laneX + v.col * GEO.laneW + GEO.laneW / 2 + 22;
+  ctx.font = '10px system-ui, sans-serif';
+  const label = '強さ';
+  const hint = 'Alt+ホイール';
+  ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
+  const numW = ctx.measureText(String(vel)).width;
+  ctx.font = '10px system-ui, sans-serif';
+  const w = ctx.measureText(label).width + numW + ctx.measureText(hint).width + 26;
+  roundRect(ctx, x, y - 9, w, 18, 9);
+  ctx.fillStyle = 'rgba(18,22,29,.94)';
+  ctx.fill();
+  ctx.strokeStyle = '#2C3440';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  let tx = x + 8;
+  ctx.fillStyle = '#A3ADBB';
+  ctx.fillText(label, tx, y + 0.5);
+  tx += ctx.measureText(label).width + 5;
+  ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillStyle = '#E7EBF1';
+  ctx.fillText(String(vel), tx, y + 0.5);
+  tx += numW + 7;
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.fillStyle = '#5F6978';
+  ctx.fillText(hint, tx, y + 0.5);
 }
 
 // ---- 原曲の列 -------------------------------------------------------------------

@@ -19,7 +19,10 @@ import {
   toggleSolo,
   useAssist,
 } from '../store/assist';
-import { docStats, tempoOf, wavPath } from '../store/derived';
+import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
+import { useInputSettings } from '../input/settings';
+import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
+import { useState } from 'react';
 import { deleteSelection, setMeasureLength, setKind, setMix, setSelectionWav, useEditor } from '../store/editor';
 import { chipBpmLabel, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
@@ -138,6 +141,7 @@ function SelectionCard() {
                 </button>
               ))}
             </div>
+            <VelRow chips={drums} />
           </>
         )}
         {one && (one.ch === CH.BPM || one.ch === CH.BPM_EX) && (
@@ -148,6 +152,55 @@ function SelectionCard() {
         )}
       </div>
     </div>
+  );
+}
+
+/** 選んだチップの強さ（スライダーと強・中・弱） */
+function VelRow({ chips }: { chips: { v: number }[] }) {
+  const doc = useEditor((s) => s.doc);
+  const presets = useInputSettings((s) => s.velPresets);
+  const vals = chips.map((c) => wavVel(doc, c.v));
+  const same = vals.every((x) => x === vals[0]);
+  const avg = Math.round(vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length));
+  const [drag, setDrag] = useState<number | null>(null);
+  const shown = drag ?? avg;
+  return (
+    <>
+      <span className="lbl">強さ</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div className="vel-row">
+          <span className="mono" style={{ fontSize: 12 }}>
+            {same || drag !== null ? shown : `~${avg}`}
+          </span>
+          <input
+            type="range"
+            min={1}
+            max={100}
+            value={shown}
+            onChange={(e) => setDrag(Number(e.target.value))}
+            onPointerUp={() => {
+              if (drag !== null) setSelectionVel(drag);
+              setDrag(null);
+            }}
+            onKeyUp={() => {
+              if (drag !== null) setSelectionVel(drag);
+              setDrag(null);
+            }}
+            aria-label="選んだチップの強さ"
+          />
+          <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(true)} title="強さの編集（V）" aria-label="強さの編集">
+            {Icon.bars(14)}
+          </button>
+        </div>
+        <div className="seg small" style={{ display: 'flex' }}>
+          {VEL_PRESET_NAMES.map((name, i) => (
+            <button key={name} style={{ flex: 1 }} className={same && vals[0] === presets[i] ? 'on' : ''} onClick={() => setSelectionVel(presets[i])}>
+              {name} <span className="mono lbl">{presets[i]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 

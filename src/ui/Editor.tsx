@@ -30,6 +30,8 @@ import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
 import { SettingsPage } from './SettingsPage';
 import { tapKey } from './TapTempoPanel';
+import { VelocityPanel } from './VelocityPanel';
+import { nudgeSelection, setPreset, toggleVelMode, useVel } from '../store/velocity';
 import { TempoPage } from './TempoPage';
 import { TopBar } from './TopBar';
 import { Transport } from './Transport';
@@ -110,9 +112,27 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     }
     return;
   }
+  // 強さ：Alt+↑↓ で選んだチップの強さ（Shift で1ずつ）
+  if (e.altKey && (k === 'ArrowUp' || k === 'ArrowDown')) {
+    e.preventDefault();
+    nudgeSelection((k === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 1 : 5));
+    return;
+  }
   // ドラムのキー（試し打ち・キー入力・録音）
   if (!e.altKey && keyHit(e)) {
     e.preventDefault();
+    return;
+  }
+  // 1・2・3：置く強さ（強・中・弱）
+  if (!e.altKey && !e.shiftKey && (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3')) {
+    e.preventDefault();
+    setPreset((Number(e.code.slice(5)) - 1) as 0 | 1 | 2);
+    return;
+  }
+  // V：強さの編集モード
+  if (!e.altKey && e.code === 'KeyV') {
+    e.preventDefault();
+    toggleVelMode();
     return;
   }
   // T: 曲に合わせて叩いてBPMを測る
@@ -140,6 +160,10 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       deleteSelection();
       return;
     case 'Escape':
+      if (useVel.getState().mode) {
+        toggleVelMode(false);
+        return;
+      }
       useEditor.setState({ selection: [] });
       return;
     case 'ArrowUp':
@@ -183,6 +207,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
 export function Editor() {
   const folderInput = useRef<HTMLInputElement>(null);
   const page = useEditor((s) => s.page);
+  const velMode = useVel((s) => s.mode);
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -215,12 +240,12 @@ export function Editor() {
         <>
           <TopBar folderInput={folderInput} />
           <Transport />
-          <div className="main">
-            <LeftPanel />
+          <div className={`main ${velMode ? 'vel-mode' : ''}`}>
+            {!velMode && <LeftPanel />}
             <section className="chart-area">
               <ChartCanvas />
             </section>
-            <RightPanel />
+            {velMode ? <VelocityPanel /> : <RightPanel />}
           </div>
           <Footer />
         </>

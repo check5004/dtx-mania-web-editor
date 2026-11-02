@@ -16,8 +16,8 @@ export interface WavSource {
 export interface SoundEvent {
   sec: number;
   wav: number;
-  /** 'bgm' は途中から再生しても鳴らす。ドラムは choke でグループの前の音を止める */
-  bus: 'bgm' | 'drum' | 'se';
+  /** 'bgm'・'stem' は途中から再生しても鳴らす。ドラムは choke でグループの前の音を止める */
+  bus: 'bgm' | 'drum' | 'se' | 'stem';
   choke: string | null;
   /** ドラムのレーン（0〜9）。それ以外は -1 */
   lane: number;
@@ -48,10 +48,32 @@ export interface PlayRequest {
 
 export interface Mix {
   master: number;
+  /** 原曲（ステムがあれば全ステムの合計） */
   bgm: number;
+  /** 譜面の音（チップのドラム） */
   drums: number;
   metronome: boolean;
+  bgmMute: boolean;
+  drumMute: boolean;
+  /** クリックの音量 */
+  click: number;
+  /** クリックを小節の頭だけ鳴らす */
+  clickBarOnly: boolean;
+  /** 譜面の音のパン（聴き比べで右に振る） */
+  drumPan: number;
 }
+
+/** ステムのトラックの鳴らし方 */
+export interface StemStrip {
+  /** ステムを登録した番号（WAV 番号と重ならない 2000 番台） */
+  no: number;
+  gain: number;
+  pan: number;
+  /** ミュート・ソロを反映して鳴らすか */
+  audible: boolean;
+}
+
+export const STEM_BASE = 2000;
 
 export type BgmFilter = 'all' | 'low' | 'mid' | 'high';
 
@@ -63,6 +85,7 @@ interface Voice {
 /** スロー再生のときの BGM。伸ばした音を区切り（チャンク）ごとにつないで鳴らす */
 interface Stream {
   wav: number;
+  bus: 'bgm' | 'stem';
   nextSrc: number;
   nextCtx: number;
   voices: Voice[];
@@ -114,10 +137,12 @@ class AudioEngine {
   private master!: GainNode;
   private buses!: Record<'bgm' | 'drum' | 'se' | 'click', GainNode>;
   private bgmOut!: GainNode;
+  private drumPanNode: StereoPannerNode | null = null;
+  private strips = new Map<number, { gain: GainNode; pan: StereoPannerNode | null; def: StemStrip }>();
   private filters!: Record<Exclude<BgmFilter, 'all'>, { input: AudioNode; output: AudioNode }>;
   private cache = new Map<string, Promise<AudioBuffer | null>>();
   private table = new Map<number, { buf: AudioBuffer | null; volume: number; pan: number; key: string }>();
-  mix: Mix = { master: 0.9, bgm: 0.8, drums: 0.9, metronome: false };
+  mix: Mix = { master: 0.9, bgm: 0.8, drums: 0.9, metronome: false, bgmMute: false, drumMute: false, click: 0.5, clickBarOnly: false, drumPan: 0 };
   bgmFilter: BgmFilter = 'all';
   /** BGM を鳴らさない（YouTube の音で聴くとき） */
   bgmMuted = false;
@@ -140,7 +165,13 @@ class AudioEngine {
       };
       this.bgmOut = ctx.createGain();
       this.bgmOut.connect(this.master);
-      this.buses = { bgm: bus(this.bgmOut), drum: bus(), se: bus(), click: bus() };
+      let drumOut: AudioNode = this.master;
+      if (ctx.createStereoPanner) {
+        this.drumPanNode = ctx.createStereoPanner();
+        this.drumPanNode.connect(this.master);
+        drumOut = this.drumPanNode;
+      }
+      this.buses = { bgm: bus(this.bgmOut), drum: bus(drumOut), se: bus(), click: bus() };
       const chain = (...nodes: BiquadFilterNode[]) => {
         for (let i = 0; i + 1 < nodes.length; i++) nodes[i].connect(nodes[i + 1]);
         nodes[nodes.length - 1].connect(this.master);
@@ -177,11 +208,59 @@ class AudioEngine {
 
   private applyMix() {
     if (!this.ctx) return;
-    this.master.gain.value = this.mix.master;
-    this.buses.bgm.gain.value = this.bgmMuted ? 0 : this.mix.bgm;
-    this.buses.se.gain.value = this.mix.bgm;
-    this.buses.drum.gain.value = this.mix.drums;
-    this.buses.click.gain.value = this.mix.metronome || this.forceClick ? 0.5 : 0;
+    const m = this.mix;
+    this.master.gain.value = m.master;
+    this.buses.bgm.gain.value = this.bgmMuted || m.bgmMute ? 0 : m.bgm;
+    this.buses.se.gain.value = m.bgmMute ? 0 : m.bgm;
+    this.buses.drum.gain.value = m.drumMute ? 0 : m.drums;
+    this.buses.click.gain.value = m.metronome || this.forceClick ? Math.max(0.05, m.click) : 0;
+    if (this.drumPanNode) this.drumPanNode.pan.value = Math.max(-1, Math.min(1, m.drumPan));
+    for (const st of this.strips.values()) this.applyStrip(st);
+  }
+
+  private applyStrip(st: { gain: GainNode; pan: StereoPannerNode | null; def: StemStrip }) {
+    st.gain.gain.value = st.def.audible ? Math.max(0, st.def.gain) : 0;
+    if (st.pan) st.pan.pan.value = Math.max(-1, Math.min(1, st.def.pan));
+  }
+
+  /** ステムのトラック（音量・パン・ミュート）。無くなったトラックは外す */
+  setStemStrips(list: StemStrip[]) {
+    const ctx = this.ensure();
+    const keep = new Set(list.map((x) => x.no));
+    for (const [no, st] of this.strips) {
+      if (keep.has(no)) continue;
+      st.gain.disconnect();
+      this.strips.delete(no);
+    }
+    for (const def of list) {
+      let st = this.strips.get(def.no);
+      if (!st) {
+        const gain = ctx.createGain();
+        let pan: StereoPannerNode | null = null;
+        if (ctx.createStereoPanner) {
+          pan = ctx.createStereoPanner();
+          gain.connect(pan);
+          pan.connect(this.buses.bgm);
+        } else {
+          gain.connect(this.buses.bgm);
+        }
+        st = { gain, pan, def };
+        this.strips.set(def.no, st);
+      }
+      st.def = def;
+      this.applyStrip(st);
+    }
+  }
+
+  /** ステムの音を登録する（WAV の表とは別に持つ） */
+  setStemBuffers(list: { no: number; key: string; buf: AudioBuffer }[]) {
+    this.stemTable = new Map(list.map((x) => [x.no, { buf: x.buf, volume: 100, pan: 0, key: x.key }]));
+  }
+
+  private stemTable = new Map<number, { buf: AudioBuffer | null; volume: number; pan: number; key: string }>();
+
+  private entry(no: number) {
+    return no >= STEM_BASE ? this.stemTable.get(no) : this.table.get(no);
   }
 
   /** テンポ合わせ画面では、ミックスの設定に関係なくクリックを鳴らす */
@@ -248,16 +327,16 @@ class AudioEngine {
   }
 
   duration(no: number): number {
-    return this.table.get(no)?.buf?.duration ?? 0;
+    return this.entry(no)?.buf?.duration ?? 0;
   }
 
   /** 読み込んだ音（解析に使う） */
   buffer(no: number): { buf: AudioBuffer; key: string } | null {
-    const t = this.table.get(no);
+    const t = this.entry(no);
     return t?.buf ? { buf: t.buf, key: t.key } : null;
   }
 
-  private connectVoice(buf: AudioBuffer, volume: number, pan: number, bus: 'bgm' | 'drum' | 'se'): Voice {
+  private connectVoice(buf: AudioBuffer, volume: number, pan: number, bus: SoundEvent['bus'], no = 0): Voice {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -269,15 +348,20 @@ class AudioEngine {
       p.pan.value = Math.max(-1, Math.min(1, pan / 100));
       node = node.connect(p);
     }
-    node.connect(this.buses[bus]);
+    if (bus === 'stem') {
+      const st = this.strips.get(no);
+      node.connect(st ? st.gain : this.buses.bgm);
+    } else {
+      node.connect(this.buses[bus]);
+    }
     return { src, gain };
   }
 
-  private startVoice(no: number, when: number, offset: number, bus: 'bgm' | 'drum' | 'se'): Voice | null {
-    const t = this.table.get(no);
+  private startVoice(no: number, when: number, offset: number, bus: SoundEvent['bus']): Voice | null {
+    const t = this.entry(no);
     if (!this.ctx || !t?.buf) return null;
     if (offset >= t.buf.duration) return null;
-    const v = this.connectVoice(t.buf, t.volume, t.pan, bus);
+    const v = this.connectVoice(t.buf, t.volume, t.pan, bus, no);
     if (offset > 0.001) {
       // 途中から鳴らすときは小さくフェードイン（プチッと鳴らさない）
       const g = v.gain.gain.value;
@@ -292,7 +376,7 @@ class AudioEngine {
   preview(no: number, gain = 1): boolean {
     const ctx = this.ensure();
     const v = this.startVoice(no, ctx.currentTime + 0.005, 0, 'drum');
-    if (v && gain < 1) v.gain.gain.value *= Math.max(0, gain);
+    if (v && gain !== 1) v.gain.gain.value *= Math.max(0, Math.min(4, gain));
     return v !== null;
   }
 
@@ -398,8 +482,8 @@ class AudioEngine {
   }
 
   private startLong(run: Run, e: SoundEvent, song: number, when: number, offset: number) {
-    if (e.bus === 'bgm' && run.rate < 0.999 && this.stretch) {
-      run.streams.push({ wav: e.wav, nextSrc: offset, nextCtx: when, voices: [], dead: false });
+    if ((e.bus === 'bgm' || e.bus === 'stem') && run.rate < 0.999 && this.stretch) {
+      run.streams.push({ wav: e.wav, bus: e.bus, nextSrc: offset, nextCtx: when, voices: [], dead: false });
       void song;
       return;
     }
@@ -454,12 +538,12 @@ class AudioEngine {
           }
           break;
         }
-        const t = this.table.get(st.wav);
+        const t = this.entry(st.wav);
         const endSrc = Math.min(dur, (k + 1) * sp.chunkSec);
         const when = Math.max(ctx.currentTime, st.nextCtx);
         const lateBy = when - st.nextCtx;
         const offset = (st.nextSrc - got.fromSec) / run.rate + lateBy;
-        const v = this.connectVoice(got.buf, t?.volume ?? 100, t?.pan ?? 0, 'bgm');
+        const v = this.connectVoice(got.buf, t?.volume ?? 100, t?.pan ?? 0, st.bus, st.wav);
         const g = v.gain.gain.value;
         v.gain.gain.setValueAtTime(0, when);
         v.gain.gain.linearRampToValueAtTime(g, when + XF);
@@ -519,6 +603,7 @@ class AudioEngine {
       while (run.clickIdx < clicks.length && clicks[run.clickIdx].sec < limit) {
         const c = clicks[run.clickIdx++];
         if (c.sec < seg.song - 1e-6) continue;
+        if (this.mix.clickBarOnly && !c.accent && !this.forceClick) continue;
         if (this.mix.metronome || this.forceClick) this.click(Math.max(now, toCtx(c.sec)), c.accent);
       }
       run.sched = Math.max(run.sched, limit);
@@ -587,7 +672,7 @@ class AudioEngine {
   clickAt(when: number, accent = false) {
     this.ensure();
     const prev = this.mix.metronome;
-    this.buses.click.gain.value = 0.5;
+    this.buses.click.gain.value = Math.max(0.3, this.mix.click);
     this.click(when, accent);
     if (!prev) window.setTimeout(() => this.applyMix(), Math.max(0, (when - this.ctx!.currentTime) * 1000) + 120);
   }

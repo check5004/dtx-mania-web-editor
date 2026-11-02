@@ -147,4 +147,75 @@ export const Icon = {
       <circle cx="11" cy="7" r=".7" fill="currentColor" />
     </Svg>
   ),
+  bars: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 13.5h11" />
+      <path d="M4 11.5V9M7 11.5V5M10 11.5V7.5M13 11.5V3.5" strokeWidth="2" />
+    </Svg>
+  ),
+  speakerOff: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" />
+      <path d="m10.5 6 3.5 4M14 6l-3.5 4" />
+    </Svg>
+  ),
+  chart: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <path d="M5 10h2M9 6.5h2M5 6.5h1.5M9 10h2" strokeWidth="1.8" />
+    </Svg>
+  ),
+  chartOff: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <path d="M3.5 12.5 12.5 3.5" />
+    </Svg>
+  ),
+  sliders: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4 2.5v11M8 2.5v11M12 2.5v11" />
+      <rect x="2.5" y="8.5" width="3" height="2.2" rx=".6" fill="currentColor" />
+      <rect x="6.5" y="4.5" width="3" height="2.2" rx=".6" fill="currentColor" />
+      <rect x="10.5" y="10" width="3" height="2.2" rx=".6" fill="currentColor" />
+    </Svg>
+  ),
+  download: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2" />
+      <path d="M2.8 12.2v1.3h10.4v-1.3" />
+    </Svg>
+  ),
+  wave: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2 8h1.5M4.5 5v6M7 3v10M9.5 6v4M12 4.5v7M14 8h.5" />
+    </Svg>
+  ),
+  library: (s?: number) => (
+    <Svg size={s}>
+      <path d="M3 2.8v10.4M6 2.8v10.4" />
+      <path d="m8.8 3.4 2.6-.7 2.4 9.8-2.6.7z" />
+    </Svg>
+  ),
+  sparkle: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 1.8 9.5 6 13.8 7.5 9.5 9 8 13.2 6.5 9 2.2 7.5 6.5 6z" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  search: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="7" cy="7" r="4.2" />
+      <path d="m10.2 10.2 3.3 3.3" />
+    </Svg>
+  ),
+  star: (s?: number, filled = false) => (
+    <Svg size={s}>
+      <path d="m8 2.2 1.8 3.7 4 .6-2.9 2.8.7 4L8 11.4l-3.6 1.9.7-4-2.9-2.8 4-.6z" fill={filled ? 'currentColor' : 'none'} />
+    </Svg>
+  ),
+  eye: (s?: number) => (
+    <Svg size={s}>
+      <path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z" />
+      <circle cx="8" cy="8" r="2" />
+    </Svg>
+  ),
 };

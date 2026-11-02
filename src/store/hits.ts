@@ -5,10 +5,12 @@ import { kitByChannel, loadKit } from '../audio/kit';
 import { DRUM_LANES } from '../dtx/model';
 import { snapToGrid } from '../edit/ops';
 import { emitHit, setHitHandler } from '../input/midi';
+import { midiToVel } from '../edit/velocity';
 import { useInputSettings } from '../input/settings';
 import { loopSec, useAssist } from './assist';
 import { tempoOf } from './derived';
 import { chipAt, deleteChips, onPlayback, placeChips, useEditor, wavForLane } from './editor';
+import { placeVel } from './velocity';
 
 let take = 0;
 let takeHits = 0;
@@ -37,21 +39,23 @@ export function previewLane(lane: number, alt: boolean, gain = 1) {
   });
 }
 
-function onHit(lane: number, alt: boolean, velocity: number, perfMs: number) {
+function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, source: 'midi' | 'key') {
   const s = useEditor.getState();
+  // キーボードは操作バーで選んだ強さ、電子ドラムは叩いた強さ（変換カーブ）
+  const vel = source === 'midi' ? midiToVel(velocity, useInputSettings.getState().velCurve) : placeVel();
   if (s.screen !== 'editor' || s.page !== 'chart') {
-    previewLane(lane, alt, velocity);
+    previewLane(lane, alt, vel / 100);
     return;
   }
   const a = useAssist.getState();
   // 再生中は譜面の音が鳴るので、録音のときも叩いた音はすぐ鳴らす
-  previewLane(lane, alt, velocity);
+  previewLane(lane, alt, vel / 100);
   if (a.inputMode === 'key') {
     const tempo = tempoOf(s.doc);
     const pos = snapToGrid(tempo, s.cursorBeat, s.view.div);
     const id = chipAt(lane, alt, pos);
     if (id !== null) deleteChips([id]);
-    else placeChips([{ lane, alt, pos }], { select: false });
+    else placeChips([{ lane, alt, pos, vel }], { select: false });
     return;
   }
   if (a.inputMode === 'rec' && engine.playing) {
@@ -74,11 +78,11 @@ function onHit(lane: number, alt: boolean, velocity: number, perfMs: number) {
       pos = snapToGrid(tempo, a.loop.a, s.view.div);
     }
     takeHits++;
-    placeChips([{ lane, alt, pos }], { label: `録音で ${takeHits} 打を置く`, group: `rec-${take}`, select: false });
+    placeChips([{ lane, alt, pos, vel }], { label: `録音で ${takeHits} 打を置く`, group: `rec-${take}`, select: false });
   }
 }
 
-setHitHandler((lane, alt, velocity, perfMs) => onHit(lane, alt, velocity, perfMs));
+setHitHandler((lane, alt, velocity, perfMs, source) => onHit(lane, alt, velocity, perfMs, source));
 
 /** キーボードで叩く。割り当てたキーなら true */
 export function keyHit(e: KeyboardEvent): boolean {

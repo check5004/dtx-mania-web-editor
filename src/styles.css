@@ -402,8 +402,8 @@ kbd {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 14px;
+  gap: 8px;
+  padding: 0 12px;
   background: var(--bar);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
@@ -1787,4 +1787,133 @@ input[type='range'] {
   cursor: pointer;
   font: inherit;
   text-decoration: underline;
+}
+
+/* ---- 強さ ---- */
+
+.vel-seg button {
+  padding: 0 8px;
+  gap: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.vel-seg .vel-mark {
+  display: inline-block;
+  width: 3px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.vel-panel .card {
+  padding: 12px;
+}
+
+.vel-lanes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.vel-lanes button {
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line3);
+  background: var(--bg);
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.vel-lanes button.on {
+  background: #151b23;
+  font-weight: 700;
+}
+
+.vel-hist {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  align-items: end;
+  gap: 3px;
+  height: 34px;
+  border-bottom: 1px solid var(--line3);
+}
+
+.vel-hist span {
+  display: block;
+  border-radius: 2px 2px 0 0;
+}
+
+.vel-ops {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.vel-ops label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vel-ops .field {
+  height: 28px;
+  min-width: 0;
+}
+
+.vel-slots {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.vel-slots label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.vel-slots .field {
+  height: 26px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+.vel-slots .slot-bar {
+  height: 28px;
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.vel-slots .slot-bar i {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+.vel-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+}
+
+.main.vel-mode {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+@media (max-width: 1180px) {
+  .main.vel-mode {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .main.vel-mode .vel-panel {
+    display: flex !important;
+  }
 }

@@ -19,7 +19,7 @@ import {
 import { backToChart } from '../store/editor';
 import { Icon } from './icons';
 
-type Section = 'midi' | 'keys' | 'latency';
+type Section = 'midi' | 'keys' | 'latency' | 'velocity';
 
 const TARGETS: { t: LaneTarget; key: string; name: string; color: string }[] = DRUM_LANES.flatMap((l, i) => {
   const main = { t: { lane: i, alt: false }, key: l.key, name: l.mainName, color: l.color };
@@ -56,6 +56,7 @@ export function SettingsPage() {
               ['midi', '電子ドラム（MIDI）'],
               ['keys', 'キーボード'],
               ['latency', '入力の遅れの補正'],
+              ['velocity', '強さ'],
             ] as const
           ).map(([k, label]) => (
             <button key={k} className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>
@@ -67,6 +68,7 @@ export function SettingsPage() {
           {sec === 'midi' && <MidiSettings />}
           {sec === 'keys' && <KeySettings />}
           {sec === 'latency' && <LatencySettings />}
+          {sec === 'velocity' && <VelocitySettings />}
         </main>
       </div>
     </div>
@@ -284,6 +286,84 @@ function KeySettings() {
         <kbd>Shift</kbd>＋キーで HHオープン・左バスドラム。<kbd>↑</kbd>
         <kbd>↓</kbd> でカーソル移動、<kbd>[</kbd> <kbd>]</kbd> でグリッド変更、<kbd>Enter</kbd> でカーソルの小節の候補をまとめて採用、<kbd>Ctrl</kbd>＋<kbd>D</kbd> で前の小節を複製。
       </p>
+    </div>
+  );
+}
+
+function VelocitySettings() {
+  const presets = useInputSettings((s) => s.velPresets);
+  const step = useInputSettings((s) => s.velStep);
+  const curve = useInputSettings((s) => s.velCurve);
+  const setPreset = (i: number, v: string) => {
+    const n = Math.max(1, Math.min(100, Math.round(Number(v) || 0)));
+    const next = [...presets] as [number, number, number];
+    next[i] = n;
+    useInputSettings.setState({ velPresets: next });
+  };
+  return (
+    <div className="settings-col">
+      <h2>強さ</h2>
+      <p className="lbl" style={{ lineHeight: 1.7 }}>
+        DTXには音ごとの強さが無いので、強さは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav の強さ100は #WAV07、強さ35は #WAV0F）。保存した譜面はそのまま NX で遊べます。
+      </p>
+      <div className="card">
+        <div className="section-title" style={{ marginBottom: 8 }}>
+          置く強さ（操作バーの 強・中・弱、キー 1・2・3）
+        </div>
+        <div className="row" style={{ gap: 14 }}>
+          {['強', '中', '弱'].map((name, i) => (
+            <label key={name} className="row" style={{ gap: 6 }}>
+              <span>{name}</span>
+              <input className="field mono" style={{ width: 64 }} type="number" min={1} max={100} value={presets[i]} onChange={(e) => setPreset(i, e.target.value)} />
+            </label>
+          ))}
+        </div>
+        <p className="lbl" style={{ margin: '8px 0 0' }}>
+          Alt を押しながら置くと「弱」になります。初期値は 100・70・35 です。
+        </p>
+      </div>
+      <div className="card">
+        <div className="section-title" style={{ marginBottom: 8 }}>
+          強さの刻み
+        </div>
+        <div className="seg">
+          {(
+            [
+              [5, '5刻み（おすすめ）'],
+              [10, '10刻み'],
+              [1, 'まとめない'],
+            ] as const
+          ).map(([v, label]) => (
+            <button key={v} className={step === v ? 'on' : ''} onClick={() => useInputSettings.setState({ velStep: v })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
+          強さを刻みにまとめると、使う WAV 番号が少なくて済みます。WAV 番号は 01〜ZZ の 1295 個までです。
+        </p>
+      </div>
+      <div className="card">
+        <div className="section-title" style={{ marginBottom: 8 }}>
+          電子ドラムの強さの変換
+        </div>
+        <div className="seg">
+          {(
+            [
+              ['soft', 'やわらかめ'],
+              ['normal', '標準'],
+              ['hard', 'かため'],
+            ] as const
+          ).map(([v, label]) => (
+            <button key={v} className={curve === v ? 'on' : ''} onClick={() => useInputSettings.setState({ velCurve: v })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
+          叩いた強さ（0〜127）を 1〜100 にするときのカーブです。やわらかめは弱く叩いても強めに入ります。電子ドラムの設定で「強さを無視」をオンにすると、すべて 100 で入ります。
+        </p>
+      </div>
     </div>
   );
 }

@@ -2,7 +2,9 @@ import { toMeasure } from '../dtx/base36';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { setInputMode, setLoop, setSpeed, useAssist, type InputMode } from '../store/assist';
 import { tempoOf } from '../store/derived';
-import { currentBeat, openTempo, playFrom, setCursorBeat, setMix, setView, stop, togglePlay, useEditor, zoom } from '../store/editor';
+import { currentBeat, openTempo, playFrom, setCursorBeat, setView, stop, togglePlay, useEditor } from '../store/editor';
+import { useInputSettings } from '../input/settings';
+import { setPreset, toggleVelMode, useVel, VEL_PRESET_NAMES } from '../store/velocity';
 import { useMidi } from '../input/midi';
 import { chipBpmLabel, formatPosition, formatTime, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
@@ -14,9 +16,10 @@ export function Transport() {
   const playing = useEditor((s) => s.playing);
   const div = useEditor((s) => s.view.div);
   const follow = useEditor((s) => s.view.follow);
-  const px = useEditor((s) => s.view.pxPerBeat);
-  const metronome = useEditor((s) => s.mix.metronome);
   const loading = useEditor((s) => s.loading);
+  const velPreset = useVel((s) => s.preset);
+  const velMode = useVel((s) => s.mode);
+  const velPresets = useInputSettings((s) => s.velPresets);
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
   const { m } = tempo.locate(beat);
@@ -110,9 +113,9 @@ export function Transport() {
         {stretching && <span className="lbl">準備中…</span>}
       </div>
       <div className="vsep" />
-      <label className="row" title="置く位置の細かさ（[ と ] でも変えられます）">
+      <label className="row" title="置く位置の細かさ（[ と ] でも変えられます）。ズームは Ctrl+ホイール">
         <span className="lbl">グリッド</span>
-        <select className="field mono" style={{ width: 118 }} value={div} onChange={(e) => setView({ div: Number(e.target.value) })}>
+        <select className="field mono" style={{ width: 92 }} value={div} onChange={(e) => setView({ div: Number(e.target.value) })}>
           {GRID_DIVS.map((d) => (
             <option key={d} value={d}>
               {gridLabel(d)}
@@ -120,20 +123,6 @@ export function Transport() {
           ))}
         </select>
       </label>
-      <div className="row" style={{ gap: 2 }}>
-        <span className="lbl" style={{ marginRight: 6 }}>
-          ズーム
-        </span>
-        <button className="ib" onClick={() => zoom(0.8)} title="縮小（Ctrl+ホイール）">
-          {Icon.minus()}
-        </button>
-        <span className="mono lbl" style={{ width: 34, textAlign: 'center' }}>
-          {Math.round((px / 48) * 100)}%
-        </span>
-        <button className="ib" onClick={() => zoom(1.25)} title="拡大（Ctrl+ホイール）">
-          {Icon.plus()}
-        </button>
-      </div>
       <div className="vsep" />
       <div className="row" style={{ gap: 6 }}>
         <span className="lbl">入力</span>
@@ -147,11 +136,30 @@ export function Transport() {
         </div>
       </div>
       <div className="vsep" />
+      <div className="row" style={{ gap: 6 }}>
+        <span className="lbl">強さ</span>
+        <div className="seg small vel-seg" role="radiogroup" aria-label="置く強さ">
+          {VEL_PRESET_NAMES.map((name, i) => (
+            <button
+              key={name}
+              role="radio"
+              aria-checked={velPreset === i}
+              className={velPreset === i ? 'on' : ''}
+              onClick={() => setPreset(i as 0 | 1 | 2)}
+              title={`置く強さ: ${name}（${velPresets[i]}）。キー ${i + 1}。Alt を押しながら置くと「弱」`}
+            >
+              <span className="vel-mark" style={{ height: [12, 8, 5][i] }} />
+              {name}
+            </button>
+          ))}
+        </div>
+        <button className={`ib ${velMode ? 'on' : ''}`} onClick={() => toggleVelMode()} title="強さの編集（V）" aria-pressed={velMode}>
+          {Icon.bars()}
+        </button>
+      </div>
+      <div className="vsep" />
       <button className={`ib ${follow ? 'on' : ''}`} onClick={() => setView({ follow: !follow })} title="再生位置を追いかける">
         {Icon.follow()}
-      </button>
-      <button className={`ib ${metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !metronome })} title="メトロノーム">
-        {Icon.metronome()}
       </button>
       <span className="grow" />
       {loading && <span className="pill">{loading}</span>}
