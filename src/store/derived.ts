@@ -187,11 +187,40 @@ export function soundEvents(doc: DtxDoc): SoundEvent[] {
   for (const c of doc.chips) {
     const bus = soundBus(c.ch);
     if (!bus) continue;
-    ev.push({ sec: t.beatToSec(t.beatOf(c.m, c.f)), wav: c.v, bus, choke: bus === 'drum' ? chokeGroup(c.ch) : null });
+    ev.push({ sec: t.beatToSec(t.beatOf(c.m, c.f)), wav: c.v, bus, choke: bus === 'drum' ? chokeGroup(c.ch) : null, lane: drumChannel(c.ch)?.lane ?? -1 });
   }
   ev.sort((a, b) => a.sec - b.sec);
   eventCache.set(doc, ev);
   return ev;
+}
+
+/** BGM（ch01）で一番先に鳴るチップ。原曲の 0 秒が譜面の何秒かを決める */
+export interface BgmSource {
+  wav: number;
+  chipId: number;
+  beat: number;
+  sec: number;
+}
+
+const bgmCache = new WeakMap<DtxDoc, BgmSource | null>();
+
+export function bgmSource(doc: DtxDoc): BgmSource | null {
+  const hit = bgmCache.get(doc);
+  if (hit !== undefined) return hit;
+  let best: Chip | null = null;
+  let bestBeat = Infinity;
+  const t = tempoOf(doc);
+  for (const c of doc.chips) {
+    if (c.ch !== CH.BGM) continue;
+    const b = t.beatOf(c.m, c.f);
+    if (b < bestBeat) {
+      bestBeat = b;
+      best = c;
+    }
+  }
+  const r = best ? { wav: best.v, chipId: best.id, beat: bestBeat, sec: t.beatToSec(bestBeat) } : null;
+  bgmCache.set(doc, r);
+  return r;
 }
 
 /** メトロノームの拍（小節の頭は強く） */

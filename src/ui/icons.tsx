@@ -117,4 +117,34 @@ export const Icon = {
       <path d="M8 7.2v4M8 5v.1" />
     </Svg>
   ),
+  loop: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 7.5a4 4 0 0 1 4-4h6M10.5 1.5l2 2-2 2M13.5 8.5a4 4 0 0 1-4 4h-6M5.5 14.5l-2-2 2-2" />
+    </Svg>
+  ),
+  back: (s?: number) => (
+    <Svg size={s}>
+      <path d="M10 3 5 8l5 5" />
+    </Svg>
+  ),
+  gear: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" />
+    </Svg>
+  ),
+  tap: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  midi: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="6" />
+      <circle cx="5" cy="7" r=".7" fill="currentColor" />
+      <circle cx="8" cy="5.5" r=".7" fill="currentColor" />
+      <circle cx="11" cy="7" r=".7" fill="currentColor" />
+    </Svg>
+  ),
 };

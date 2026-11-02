@@ -1,0 +1,934 @@
+// テンポ合わせ画面: 原曲の波形の上で「小節の頭」を合わせて、BPMと原曲（BGMチップ）の位置を決める。
+import { useEffect, useRef } from 'react';
+import { combinedOdf } from '../audio/analysis';
+import { engine } from '../audio/engine';
+import { BGM_DIV, normalizeAnchors, type PlanResult } from '../assist/tempoPlan';
+import { toBase36x2, toMeasure } from '../dtx/base36';
+import { useAssist } from '../store/assist';
+import { bgmSource, wavPath } from '../store/derived';
+import { backToChart, useEditor } from '../store/editor';
+import {
+  applyTempo,
+  chooseBgm,
+  initTempo,
+  measureTime,
+  nudgeFirst,
+  planBgmSec,
+  planResult,
+  playAudioSec,
+  playPlan,
+  putAnchor,
+  removeAnchor,
+  resetToEstimate,
+  setPlanBpm,
+  setStart,
+  setView,
+  shiftAnchors,
+  stopPlan,
+  tap,
+  useTempo,
+} from '../store/tempoUi';
+import { chipBpmLabel, formatTime } from './format';
+import { Icon } from './icons';
+
+const COL = {
+  bg: '#0B0E13',
+  wave: '#5D7189',
+  odf: 'rgba(255,199,104,.28)',
+  measure: 'rgba(231,235,241,.5)',
+  beat: 'rgba(231,235,241,.14)',
+  anchor: '#4CC2FF',
+  cand: '#FFB547',
+  ghost: '#FF6B72',
+  text: '#A3ADBB',
+  play: '#FFB547',
+};
+
+function fmtSec(t: number): string {
+  return `${t.toFixed(3)} s`;
+}
+
+export function TempoPage() {
+  const doc = useEditor((s) => s.doc);
+  const status = useAssist((s) => s.status);
+  const progress = useAssist((s) => s.progress);
+  const data = useAssist((s) => s.data);
+  const srcName = useAssist((s) => s.src?.name);
+  const ui = useTempo();
+  const r = planResult();
+  const bgm = bgmSource(doc);
+  const anchors = normalizeAnchors(ui.plan.anchors);
+  const first = anchors[0];
+
+  useEffect(() => {
+    initTempo();
+  }, [doc, data]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const v = useTempo.getState().view;
+      const len = v.to - v.from;
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (useTempo.getState().playing) stopPlan();
+        else playPlan(v.from);
+      } else if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        tap();
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const d = (e.key === 'ArrowRight' ? 1 : -1) * len * (e.shiftKey ? 0.9 : 0.25);
+        setView({ from: v.from + d, to: v.to + d });
+      } else if (e.key === '+' || e.key === '=' || e.key === '-') {
+        e.preventDefault();
+        const f = e.key === '-' ? 1.4 : 1 / 1.4;
+        const c = (v.from + v.to) / 2;
+        setView({ from: c - (len * f) / 2, to: c + (len * f) / 2 });
+      } else if (e.key === 'Escape') {
+        if (useTempo.getState().pickStart) useTempo.setState({ pickStart: false });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      stopPlan();
+    };
+  }, []);
+
+  const wavs = Object.keys(doc.fields)
+    .filter((k) => /^WAV[0-9A-Z]{2}$/.test(k))
+    .map((k) => parseInt(k.slice(3), 36))
+    .sort((a, b) => a - b);
+  const duration = data?.duration ?? 0;
+
+  return (
+    <div className="tempo-page">
+      <header className="tempo-head">
+        <button className="btn small ghost" onClick={backToChart}>
+          {Icon.back(14)} エディタに戻る
+        </button>
+        <div className="vsep" />
+        <h1>テンポと開始位置</h1>
+        <span className="lbl ellipsis" style={{ minWidth: 0 }}>
+          {srcName ? `${srcName} · ${formatTime(duration, false)}` : '原曲なし'}
+          {status === 'loading' && ` · 解析中 ${Math.round(progress * 100)}%`}
+          {status === 'ready' && ui.beats.length > 0 && ' · 拍の位置を推定済み'}
+          {ui.fromEstimate && ' · 推定から作った案です'}
+        </span>
+        <span className="grow" />
+        <button className={`btn small ${ui.playing ? 'on-amber' : ''}`} onClick={() => (ui.playing ? stopPlan() : playPlan(ui.view.from))} disabled={!bgm} title="拡大している所からクリック付きで再生（Space）">
+          {ui.playing ? Icon.stop(14) : Icon.play(14)} {ui.playing ? '停止' : '確認再生'}
+        </button>
+        <button className="btn small" onClick={tap} title="曲に合わせて T キーを4回以上たたく">
+          {Icon.tap(14)} タップでBPMを測る（T）{ui.tapBpm ? `: ${ui.tapBpm}` : ''}
+        </button>
+        <button className="btn small" onClick={resetToEstimate} disabled={!data}>
+          推定をやり直す
+        </button>
+        <button
+          className="btn small primary"
+          onClick={() => {
+            if (applyTempo()) backToChart();
+          }}
+          disabled={!bgm || anchors.length === 0}
+        >
+          譜面に反映
+        </button>
+      </header>
+
+      {!bgm ? (
+        <div className="tempo-empty">
+          <div className="card" style={{ maxWidth: 520 }}>
+            <div className="section-title" style={{ marginBottom: 8 }}>
+              原曲（BGM）を選んでください
+            </div>
+            <p className="lbl" style={{ lineHeight: 1.7, margin: '0 0 10px' }}>
+              この譜面には原曲を鳴らすチップ（ch01）がありません。WAVリストの中から原曲を選ぶと、波形を解析してBPMと曲の始まりを合わせられます。
+            </p>
+            {wavs.length ? (
+              <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                {wavs.map((n) => (
+                  <button key={n} className="btn small" onClick={() => chooseBgm(n)}>
+                    {toBase36x2(n)} {wavPath(doc, n)}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="notice info">WAVが登録されていません。曲フォルダを開くか、左の「WAV」タブで原曲のファイルを登録してください。</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="tempo-body">
+          <main className="tempo-main scroll">
+            <section className="tempo-card">
+              <div className="row" style={{ marginBottom: 8 }}>
+                <h2>曲全体のテンポマップ</h2>
+                <span className="grow" />
+                <span className="legend">
+                  <i className="dia" style={{ background: COL.anchor }} />
+                  確定アンカー
+                </span>
+                <span className="legend">
+                  <i className="dia" style={{ border: `1.5px solid ${COL.cand}` }} />
+                  推定の候補（クリックで確定）
+                </span>
+              </div>
+              <Overview r={r} />
+            </section>
+            <section className="tempo-card">
+              <div className="row" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
+                <h2>
+                  拡大 <span className="mono lbl">{zoomLabel(r, ui.view)}</span>
+                </h2>
+                <span className="grow" />
+                <label className="row lbl" style={{ gap: 6 }}>
+                  <input type="checkbox" checked={ui.ghostGrid} onChange={(e) => useTempo.setState({ ghostGrid: e.target.checked })} />
+                  アンカーなしの拍線（BPM {chipBpmLabel(ui.plan.bpm)} 固定）を重ねる
+                </label>
+              </div>
+              <Zoom r={r} />
+              <ZoomStats r={r} />
+              <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
+                小節線をドラッグすると、その小節の頭を原曲に合わせます（アンカー）。アンカーが2つ以上あると、間のBPMを計算して小節の頭でBPMを変えます。右クリックでアンカーを外す。ホイールで拡大、Shift+ホイールか ← → で移動。
+              </p>
+            </section>
+          </main>
+          <aside className="tempo-side scroll">
+            <section className="card">
+              <div className="section-title" style={{ marginBottom: 8 }}>
+                開始位置（{first ? toMeasure(first.m) : '001'}小節の頭）
+              </div>
+              <div className="row" style={{ gap: 6 }}>
+                {[-0.01, -0.001].map((d) => (
+                  <button key={d} className="btn small" onClick={() => nudgeFirst(d)} disabled={!first}>
+                    {d * 1000}
+                  </button>
+                ))}
+                <span className="mono grow" style={{ textAlign: 'center', fontSize: 22, fontWeight: 700 }}>
+                  {first ? fmtSec(first.t) : '—'}
+                </span>
+                {[0.001, 0.01].map((d) => (
+                  <button key={d} className="btn small" onClick={() => nudgeFirst(d)} disabled={!first}>
+                    ＋{d * 1000}
+                  </button>
+                ))}
+              </div>
+              <div className="tempo-note">
+                {r.bgm ? (
+                  <>
+                    DTXへの書き出し: BGMチップ（ch01）を <span className="mono">{toMeasure(r.bgm.m)}</span>小節の{' '}
+                    <span className="mono">
+                      {r.bgm.n}/{BGM_DIV}
+                    </span>{' '}
+                    に置く
+                    <br />
+                    <span className="lbl">
+                      誤差 <span className="mono">{r.bgm.errMs.toFixed(1)} ms</span>
+                      {first && first.m > 0 && ` · ${first.m === 1 ? toMeasure(0) : `${toMeasure(0)}〜${toMeasure(first.m - 1)}`}小節は前奏・空き`}
+                    </span>
+                  </>
+                ) : first ? (
+                  <>
+                    <span style={{ color: 'var(--amber)' }}>原曲の始まりから遠すぎて、BGMチップを置けません。</span>
+                    <button className="btn small" style={{ marginTop: 6 }} onClick={() => shiftAnchors(r.shift)}>
+                      小節番号を {r.shift} 個うしろにする
+                    </button>
+                  </>
+                ) : (
+                  '拡大した波形の上で、1小節目の頭をクリックしてください。'
+                )}
+              </div>
+              <button className={`btn small ${ui.pickStart ? 'primary' : ''}`} style={{ justifyContent: 'center' }} onClick={() => useTempo.setState({ pickStart: !ui.pickStart })}>
+                {ui.pickStart ? '波形をクリック…（Escでやめる）' : '波形上で1小節目の頭をクリックして指定'}
+              </button>
+            </section>
+            <BpmCard />
+            <section className="card">
+              <div className="section-title" style={{ marginBottom: 8 }}>
+                変化点とDTXへの書き出し
+              </div>
+              <div className="map-table">
+                {r.segs.map((s, i) => (
+                  <div key={s.m} className="map-row">
+                    <span className="mono lbl">{toMeasure(s.m)}</span>
+                    <span className="mono" style={{ fontWeight: 600, color: i === 0 ? 'var(--text)' : 'var(--amber)' }}>
+                      {chipBpmLabel(s.bpm)}
+                    </span>
+                    <span className="col">
+                      <span className="mono">{i === 0 ? `#BPM ${chipBpmLabel(s.bpm)}` : `#BPMzz ${chipBpmLabel(s.bpm)} · #${toMeasure(s.m)}08`}</span>
+                      <span className="lbl">{s.src === 'base' ? '選んだBPM' : i === 0 ? '曲頭（最初のアンカーの区間から計算）' : 'アンカーから計算'}</span>
+                    </span>
+                  </div>
+                ))}
+                {r.bgm && (
+                  <div className="map-row">
+                    <span className="mono lbl">{toMeasure(r.bgm.m)}</span>
+                    <span className="mono" style={{ color: 'var(--ok)' }}>
+                      BGM
+                    </span>
+                    <span className="col">
+                      <span className="mono">
+                        #{toMeasure(r.bgm.m)}01 · {r.bgm.n}/{BGM_DIV}
+                      </span>
+                      <span className="lbl">原曲を鳴らし始める位置</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
+                反映すると、今のBPM変化チップは置き直します（Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。
+              </p>
+            </section>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function zoomLabel(r: PlanResult, v: { from: number; to: number }): string {
+  const off = planBgmSec(r);
+  const a = r.tempo.locate(Math.max(0, r.tempo.secToBeat(v.from + off))).m;
+  const b = r.tempo.locate(Math.max(0, r.tempo.secToBeat(v.to + off))).m;
+  return `${toMeasure(a)}–${toMeasure(b)}`;
+}
+
+function BpmCard() {
+  const data = useAssist((s) => s.data);
+  const plan = useTempo((s) => s.plan);
+  const tapBpm = useTempo((s) => s.tapBpm);
+  const multi = normalizeAnchors(plan.anchors).length >= 2;
+  const cands = data?.tempo ?? [];
+  const best = cands[0]?.score || 1;
+  const rows: { bpm: number; note: string; conf: string; good: boolean }[] = cands.slice(0, 4).map((c) => ({
+    bpm: Math.round(c.bpm * 100) / 100,
+    note: c.kind === 'best' ? 'いちばん合う' : c.kind === 'half' ? '半分' : c.kind === 'double' ? '倍' : 'ほかの候補',
+    conf: c.score / best > 0.85 ? '高' : c.score / best > 0.6 ? '中' : '低',
+    good: c.score / best > 0.85,
+  }));
+  if (tapBpm) rows.push({ bpm: tapBpm, note: 'タップで測った値', conf: '', good: false });
+  return (
+    <section className="card">
+      <div className="section-title" style={{ marginBottom: 8 }}>
+        BPMの推定結果
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {rows.map((c, i) => {
+          const on = Math.abs(plan.bpm - c.bpm) < 0.005;
+          return (
+            <button key={i} className={`cand-row ${on ? 'on' : ''}`} onClick={() => setPlanBpm(c.bpm)}>
+              <span className="radio" />
+              <span className="mono" style={{ fontSize: 15, fontWeight: 700, width: 70 }}>
+                {chipBpmLabel(c.bpm)}
+              </span>
+              <span className="lbl grow">{c.note}</span>
+              <span className="lbl" style={{ color: c.good ? 'var(--ok)' : undefined }}>
+                {c.conf && `確からしさ ${c.conf}`}
+              </span>
+            </button>
+          );
+        })}
+        {rows.length === 0 && <div className="lbl">原曲の解析が終わると候補が出ます。</div>}
+        <label className="row">
+          <span className="lbl">BPMを入力</span>
+          <input
+            className="field mono"
+            style={{ height: 28, width: 100 }}
+            type="number"
+            step="0.01"
+            min={20}
+            max={999}
+            key={plan.bpm}
+            defaultValue={plan.bpm}
+            onBlur={(e) => setPlanBpm(Number(e.target.value))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') setPlanBpm(Number((e.target as HTMLInputElement).value));
+            }}
+          />
+        </label>
+      </div>
+      <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
+        倍・半分の取り違えは自動では決めきれないので、確認再生して耳で選んでください。
+        {multi && ' アンカーが2つ以上あるときは、アンカーの間から計算したBPMを使います（ここで選んだ値は拍線の重ね表示と推定に使います）。'}
+      </p>
+    </section>
+  );
+}
+
+// ---- 曲全体 ---------------------------------------------------------------------
+
+const LABEL_W = 64;
+const OV = { ruler: 16, bpm: 56, anch: 22, wave: 44, gap: 6 };
+
+function useCanvas(draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void, deps: unknown[], animate = false) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const drawRef = useRef(draw);
+  drawRef.current = draw;
+  useEffect(() => {
+    const c = ref.current!;
+    let raf = 0;
+    const paint = () => {
+      const rect = c.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(rect.width));
+      const h = Math.max(1, Math.floor(rect.height));
+      if (c.width !== Math.floor(w * dpr) || c.height !== Math.floor(h * dpr)) {
+        c.width = Math.floor(w * dpr);
+        c.height = Math.floor(h * dpr);
+      }
+      const ctx = c.getContext('2d')!;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawRef.current(ctx, w, h);
+    };
+    paint();
+    const ro = new ResizeObserver(paint);
+    ro.observe(c);
+    if (animate) {
+      const loop = () => {
+        raf = requestAnimationFrame(loop);
+        paint();
+      };
+      raf = requestAnimationFrame(loop);
+    }
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return ref;
+}
+
+function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, fill: string | null, stroke: string | null) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - s);
+  ctx.lineTo(x + s, y);
+  ctx.lineTo(x, y + s);
+  ctx.lineTo(x - s, y);
+  ctx.closePath();
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+/** 推定の候補: 8小節ごとの小節の頭の近くにある強拍で、案から 10ms 以上ずれているもの */
+function candidates(r: PlanResult, downbeats: number[], from: number, to: number, every: number): { m: number; t: number; diff: number }[] {
+  if (!downbeats.length) return [];
+  const anchors = new Set(useTempo.getState().plan.anchors.map((a) => a.m));
+  const out: { m: number; t: number; diff: number }[] = [];
+  const off = planBgmSec(r);
+  const m0 = Math.max(0, r.tempo.locate(Math.max(0, r.tempo.secToBeat(from + off))).m);
+  const m1 = r.tempo.locate(Math.max(0, r.tempo.secToBeat(to + off))).m + 1;
+  let j = 0;
+  for (let m = m0; m <= m1; m++) {
+    if (every > 1 && m % every !== 1) continue;
+    if (anchors.has(m)) continue;
+    const t = measureTime(m, r);
+    const beat = 60 / Math.max(30, r.tempo.bpmAt(r.tempo.measureStart(m)));
+    while (j < downbeats.length && downbeats[j] < t - beat * 0.5) j++;
+    if (j >= downbeats.length) break;
+    const d = downbeats[j];
+    if (Math.abs(d - t) <= beat * 0.4 && Math.abs(d - t) > 0.01) out.push({ m, t: d, diff: d - t });
+  }
+  return out;
+}
+
+function Overview({ r }: { r: PlanResult }) {
+  const data = useAssist((s) => s.data);
+  const ui = useTempo();
+  const dragging = useRef(false);
+  const bgmWav = bgmSource(useEditor.getState().doc)?.wav;
+  const total = Math.max(data?.duration ?? (bgmWav !== undefined ? engine.duration(bgmWav) : 0), 30);
+  const H = OV.ruler + OV.bpm + OV.anch + OV.wave + OV.gap * 3;
+  const ref = useCanvas(
+    (ctx, w) => {
+      const W = w - LABEL_W;
+      const X = (t: number) => LABEL_W + (t / total) * W;
+      ctx.clearRect(0, 0, w, H);
+      ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = COL.text;
+      ctx.textAlign = 'left';
+      const rows = [
+        ['小節', 0, OV.ruler],
+        ['BPM', OV.ruler + OV.gap, OV.bpm],
+        ['アンカー', OV.ruler + OV.bpm + OV.gap * 2, OV.anch],
+        ['波形', OV.ruler + OV.bpm + OV.anch + OV.gap * 3, OV.wave],
+      ] as const;
+      ctx.font = '11px system-ui, sans-serif';
+      for (const [label, y, h] of rows) ctx.fillText(label, 0, y + h / 2);
+      ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
+      // 小節の目盛り
+      const lastM = r.tempo.locate(Math.max(0, r.tempo.secToBeat(total + planBgmSec(r)))).m;
+      const step = lastM > 160 ? 32 : lastM > 64 ? 16 : 8;
+      for (let m = 0; m <= lastM; m += step) {
+        const x = X(measureTime(m, r));
+        if (x < LABEL_W) continue;
+        ctx.fillStyle = COL.text;
+        ctx.fillText(toMeasure(m), x + 2, OV.ruler / 2);
+        ctx.fillStyle = '#1C222B';
+        ctx.fillRect(x, OV.ruler, 1, H - OV.ruler);
+      }
+      // BPM
+      const by = OV.ruler + OV.gap;
+      ctx.fillStyle = COL.bg;
+      ctx.fillRect(LABEL_W, by, W, OV.bpm);
+      const bpms = r.segs.map((s) => s.bpm);
+      const lo = Math.min(...bpms) - 8;
+      const hi = Math.max(...bpms) + 8;
+      const Y = (b: number) => by + OV.bpm - 6 - ((b - lo) / (hi - lo)) * (OV.bpm - 12);
+      ctx.strokeStyle = '#FFC768';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      r.segs.forEach((s, i) => {
+        const x0 = Math.max(LABEL_W, X(i === 0 ? 0 : measureTime(s.m, r)));
+        const x1 = i + 1 < r.segs.length ? X(measureTime(r.segs[i + 1].m, r)) : LABEL_W + W;
+        if (i === 0) ctx.moveTo(x0, Y(s.bpm));
+        else ctx.lineTo(x0, Y(s.bpm));
+        ctx.lineTo(x1, Y(s.bpm));
+      });
+      ctx.stroke();
+      r.segs.forEach((s, i) => {
+        const x = Math.max(LABEL_W + 2, X(i === 0 ? 0 : measureTime(s.m, r)) + 2);
+        const label = chipBpmLabel(s.bpm);
+        const tw = ctx.measureText(label).width + 8;
+        ctx.fillStyle = '#1E1A12';
+        ctx.fillRect(x, Y(s.bpm) - 15, tw, 13);
+        ctx.fillStyle = '#FFC768';
+        ctx.fillText(label, x + 4, Y(s.bpm) - 8);
+      });
+      // アンカーと候補
+      const ay = OV.ruler + OV.bpm + OV.gap * 2 + OV.anch / 2;
+      for (const c of candidates(r, ui.downbeats, 0, total, 8)) diamond(ctx, X(c.t), ay, 5, null, COL.cand);
+      for (const a of normalizeAnchors(ui.plan.anchors)) diamond(ctx, X(a.t), ay, 6, COL.anchor, null);
+      // 波形
+      const wy = OV.ruler + OV.bpm + OV.anch + OV.gap * 3;
+      ctx.fillStyle = COL.bg;
+      ctx.fillRect(LABEL_W, wy, W, OV.wave);
+      if (data) {
+        ctx.fillStyle = COL.wave;
+        const pr = data.peakRate;
+        for (let x = 0; x < W; x++) {
+          const i0 = Math.floor((x / W) * total * pr);
+          const i1 = Math.min(data.peaks.length - 1, Math.floor(((x + 1) / W) * total * pr));
+          let m = 0;
+          for (let i = i0; i <= i1; i++) if (data.peaks[i] > m) m = data.peaks[i];
+          const hh = Math.max(0.5, m * (OV.wave / 2 - 2));
+          ctx.fillRect(LABEL_W + x, wy + OV.wave / 2 - hh, 1, hh * 2);
+        }
+      }
+      // 拡大している範囲
+      const vx0 = X(ui.view.from);
+      const vx1 = X(ui.view.to);
+      ctx.fillStyle = 'rgba(76,194,255,.12)';
+      ctx.fillRect(vx0, wy, Math.max(3, vx1 - vx0), OV.wave);
+      ctx.strokeStyle = COL.anchor;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(vx0 + 0.75, wy + 0.75, Math.max(3, vx1 - vx0) - 1.5, OV.wave - 1.5);
+      const p = playAudioSec();
+      if (p !== null) {
+        ctx.fillStyle = COL.play;
+        ctx.fillRect(X(p), OV.ruler, 2, H - OV.ruler);
+      }
+    },
+    [r, ui, data, total],
+    ui.playing,
+  );
+
+  const seek = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left - LABEL_W;
+    const W = rect.width - LABEL_W;
+    if (x < 0) return;
+    const t = (x / W) * total;
+    const v = useTempo.getState().view;
+    const len = v.to - v.from;
+    setView({ from: t - len / 2, to: t + len / 2 });
+  };
+
+  return (
+    <canvas
+      ref={ref}
+      style={{ width: '100%', height: H, display: 'block', cursor: 'pointer' }}
+      onPointerDown={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const ay = OV.ruler + OV.bpm + OV.gap * 2;
+        if (y >= ay && y < ay + OV.anch) {
+          // 候補をクリックで確定
+          const W = rect.width - LABEL_W;
+          const x = e.clientX - rect.left;
+          const hit = candidates(r, useTempo.getState().downbeats, 0, total, 8).find((c) => Math.abs(LABEL_W + (c.t / total) * W - x) < 7);
+          if (hit) {
+            putAnchor(hit.m, hit.t);
+            return;
+          }
+        }
+        dragging.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        seek(e);
+      }}
+      onPointerMove={(e) => dragging.current && seek(e)}
+      onPointerUp={() => {
+        dragging.current = false;
+      }}
+      aria-label="曲全体のテンポマップ"
+    />
+  );
+}
+
+// ---- 拡大 -----------------------------------------------------------------------
+
+const ZH = 220;
+const Z_TOP = 30;
+
+type ZDrag = { kind: 'anchor'; m: number; t: number; moved: boolean; x0: number } | { kind: 'pan'; x0: number; from: number; to: number } | null;
+
+function Zoom({ r }: { r: PlanResult }) {
+  const data = useAssist((s) => s.data);
+  const ui = useTempo();
+  const drag = useRef<ZDrag>(null);
+  const hover = useRef<{ x: number; m: number | null } | null>(null);
+  const odfRef = useRef<{ data: unknown; odf: Float32Array } | null>(null);
+  if (data && odfRef.current?.data !== data) odfRef.current = { data, odf: combinedOdf(data.odf) };
+
+  const geo = (w: number) => {
+    const v = useTempo.getState().view;
+    const W = w;
+    const X = (t: number) => ((t - v.from) / (v.to - v.from)) * W;
+    const T = (x: number) => v.from + (x / W) * (v.to - v.from);
+    return { v, W, X, T };
+  };
+
+  /** 見えている小節の頭（原曲の秒） */
+  const measuresIn = (from: number, to: number) => {
+    const off = planBgmSec(r);
+    const m0 = Math.max(0, r.tempo.locate(Math.max(0, r.tempo.secToBeat(from + off))).m);
+    const m1 = r.tempo.locate(Math.max(0, r.tempo.secToBeat(to + off))).m + 1;
+    const out: { m: number; t: number }[] = [];
+    for (let m = m0; m <= m1; m++) out.push({ m, t: measureTime(m, r) });
+    return out;
+  };
+
+  const ref = useCanvas(
+    (ctx, w) => {
+      const { v, W, X } = geo(w);
+      ctx.clearRect(0, 0, w, ZH);
+      ctx.fillStyle = COL.bg;
+      ctx.fillRect(0, 0, W, ZH);
+      const mid = Z_TOP + (ZH - Z_TOP) / 2;
+      // 波形と打点の強さ
+      if (data) {
+        const pr = data.peakRate;
+        ctx.fillStyle = COL.wave;
+        for (let x = 0; x < W; x++) {
+          const t0 = v.from + (x / W) * (v.to - v.from);
+          const t1 = v.from + ((x + 1) / W) * (v.to - v.from);
+          let i0 = Math.floor(t0 * pr);
+          let i1 = Math.ceil(t1 * pr);
+          if (i1 < 0 || i0 >= data.peaks.length) continue;
+          i0 = Math.max(0, i0);
+          i1 = Math.min(data.peaks.length - 1, Math.max(i0, i1));
+          let m = 0;
+          for (let i = i0; i <= i1; i++) if (data.peaks[i] > m) m = data.peaks[i];
+          const hh = Math.max(0.5, m * ((ZH - Z_TOP) / 2 - 6));
+          ctx.fillRect(x, mid - hh, 1, hh * 2);
+        }
+        const odf = odfRef.current!.odf;
+        const fr = data.frameRate;
+        ctx.fillStyle = COL.odf;
+        for (let x = 0; x < W; x++) {
+          const t0 = v.from + (x / W) * (v.to - v.from);
+          const t1 = v.from + ((x + 1) / W) * (v.to - v.from);
+          let i0 = Math.floor(t0 * fr);
+          let i1 = Math.ceil(t1 * fr);
+          if (i1 < 0 || i0 >= odf.length) continue;
+          i0 = Math.max(0, i0);
+          i1 = Math.min(odf.length - 1, Math.max(i0, i1));
+          let m = 0;
+          for (let i = i0; i <= i1; i++) if (odf[i] > m) m = odf[i];
+          const hh = Math.min(1, m / 1.6) * 60;
+          ctx.fillRect(x, ZH - hh, 1, hh);
+        }
+      }
+      // 推定の拍（下の小さな印）
+      ctx.fillStyle = 'rgba(255,181,71,.7)';
+      for (const b of ui.beats) {
+        if (b < v.from || b > v.to) continue;
+        ctx.fillRect(X(b) - 0.5, ZH - 8, 1, 8);
+      }
+      // アンカーなしの拍線（BPM 固定）
+      const anchors = normalizeAnchors(ui.plan.anchors);
+      if (ui.ghostGrid && anchors.length) {
+        const beat = 60 / ui.plan.bpm;
+        const a0 = anchors[0].t;
+        ctx.strokeStyle = 'rgba(255,107,114,.65)';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        const k0 = Math.ceil((v.from - a0) / beat);
+        const k1 = Math.floor((v.to - a0) / beat);
+        if (k1 - k0 < 400) {
+          for (let k = k0; k <= k1; k++) {
+            const x = Math.round(X(a0 + k * beat)) + 0.5;
+            ctx.beginPath();
+            ctx.moveTo(x, Z_TOP + (k % 4 === 0 ? 0 : 20));
+            ctx.lineTo(x, ZH);
+            ctx.stroke();
+          }
+        }
+        ctx.setLineDash([]);
+      }
+      // 案の小節線と拍線
+      const ms = measuresIn(v.from, v.to);
+      ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      for (let i = 0; i < ms.length; i++) {
+        const { m, t } = ms[i];
+        const beats = r.tempo.measureBeats(m);
+        const tNext = measureTime(m + 1, r);
+        for (let b = 1; b < beats - 1e-9; b++) {
+          const x = Math.round(X(t + ((tNext - t) * b) / beats)) + 0.5;
+          if (x < 0 || x > W) continue;
+          ctx.fillStyle = COL.beat;
+          ctx.fillRect(x, Z_TOP + 20, 1, ZH - Z_TOP - 20);
+        }
+        const x = Math.round(X(t));
+        if (x < -20 || x > W + 20) continue;
+        const isAnchor = anchors.some((a) => a.m === m);
+        const hov = hover.current?.m === m;
+        ctx.fillStyle = isAnchor ? COL.anchor : hov ? '#FFFFFF' : COL.measure;
+        ctx.fillRect(x - 1, Z_TOP, 2, ZH - Z_TOP);
+        ctx.fillStyle = COL.text;
+        ctx.fillText(toMeasure(m), x + 4, 10);
+        if (isAnchor) {
+          diamond(ctx, x, Z_TOP + 2, 7, COL.anchor, null);
+        }
+      }
+      // 推定の候補（強拍）
+      for (const c of candidates(r, ui.downbeats, v.from, v.to, 1)) {
+        const x = X(c.t);
+        diamond(ctx, x, Z_TOP + 2, 5, null, COL.cand);
+      }
+      // 区間のBPM
+      ctx.textAlign = 'center';
+      r.segs.forEach((s, i) => {
+        const a = i === 0 ? -Infinity : measureTime(s.m, r);
+        const b = i + 1 < r.segs.length ? measureTime(r.segs[i + 1].m, r) : Infinity;
+        const xa = Math.max(0, X(a));
+        const xb = Math.min(W, X(b));
+        if (xb - xa < 60) return;
+        ctx.fillStyle = s.src === 'anchor' && r.segs.length > 1 ? '#FFC768' : '#C9D1DC';
+        ctx.fillText(`BPM ${chipBpmLabel(s.bpm)}${s.src === 'anchor' ? '（アンカーから計算）' : ''}`, (xa + xb) / 2, 22);
+      });
+      // 再生位置
+      const p = playAudioSec();
+      if (p !== null) {
+        ctx.fillStyle = COL.play;
+        ctx.fillRect(X(p) - 1, 0, 2, ZH);
+        if (p > v.to) setView({ from: p - (v.to - v.from) * 0.1, to: p + (v.to - v.from) * 0.9 });
+      }
+      if (ui.pickStart && hover.current) {
+        ctx.fillStyle = COL.anchor;
+        ctx.fillRect(hover.current.x - 1, 0, 2, ZH);
+      }
+    },
+    [r, ui, data],
+    ui.playing,
+  );
+
+  const nearestMeasure = (x: number, w: number): number | null => {
+    const { v, X } = geo(w);
+    let best: number | null = null;
+    let bd = 7;
+    for (const { m, t } of measuresIn(v.from, v.to)) {
+      const d = Math.abs(X(t) - x);
+      if (d < bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    return best;
+  };
+
+  /** 打点の山に吸いつける（±25ms） */
+  const snapTime = (t: number, alt: boolean): number => {
+    if (alt || !data || !odfRef.current) return t;
+    const odf = odfRef.current.odf;
+    const fr = data.frameRate;
+    const c = Math.round(t * fr);
+    const rad = Math.round(0.025 * fr);
+    let bi = -1;
+    let bv = 0;
+    for (let i = Math.max(1, c - rad); i <= Math.min(odf.length - 2, c + rad); i++) {
+      if (odf[i] > bv && odf[i] >= odf[i - 1] && odf[i] >= odf[i + 1]) {
+        bv = odf[i];
+        bi = i;
+      }
+    }
+    return bi >= 0 && bv > 0.15 ? bi / fr : t;
+  };
+
+  const redraw = () => useTempo.setState({});
+
+  return (
+    <canvas
+      ref={ref}
+      style={{ width: '100%', height: ZH, display: 'block', borderRadius: 8 }}
+      onWheel={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const { v, T } = geo(rect.width);
+        const len = v.to - v.from;
+        if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+          const d = ((e.shiftKey ? e.deltaY : e.deltaX) / rect.width) * len;
+          setView({ from: v.from + d, to: v.to + d });
+          return;
+        }
+        const at = T(e.clientX - rect.left);
+        const f = Math.exp(e.deltaY * 0.0015);
+        setView({ from: at - (at - v.from) * f, to: at + (v.to - at) * f });
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const m = nearestMeasure(e.clientX - rect.left, rect.width);
+        if (m !== null) removeAnchor(m);
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const { v, T, X } = geo(rect.width);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        if (useTempo.getState().pickStart) {
+          setStart(snapTime(T(x), e.altKey));
+          return;
+        }
+        // 候補の強拍をクリックで確定
+        if (y < Z_TOP + 14) {
+          const hit = candidates(r, useTempo.getState().downbeats, v.from, v.to, 1).find((c) => Math.abs(X(c.t) - x) < 7);
+          if (hit) {
+            putAnchor(hit.m, hit.t);
+            return;
+          }
+        }
+        const m = nearestMeasure(x, rect.width);
+        if (m !== null) {
+          drag.current = { kind: 'anchor', m, t: measureTime(m, r), moved: false, x0: x };
+          return;
+        }
+        drag.current = { kind: 'pan', x0: x, from: v.from, to: v.to };
+      }}
+      onPointerMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const d = drag.current;
+        if (!d) {
+          const m = useTempo.getState().pickStart ? null : nearestMeasure(x, rect.width);
+          hover.current = { x, m };
+          e.currentTarget.style.cursor = useTempo.getState().pickStart ? 'crosshair' : m !== null ? 'ew-resize' : 'grab';
+          redraw();
+          return;
+        }
+        if (d.kind === 'pan') {
+          const dt = ((d.x0 - x) / rect.width) * (d.to - d.from);
+          setView({ from: d.from + dt, to: d.to + dt });
+          return;
+        }
+        if (Math.abs(x - d.x0) > 2) d.moved = true;
+        if (!d.moved) return;
+        const { T } = geo(rect.width);
+        putAnchor(d.m, snapTime(T(x), e.altKey));
+      }}
+      onPointerUp={(e) => {
+        const d = drag.current;
+        drag.current = null;
+        if (d?.kind === 'anchor' && !d.moved) {
+          // クリックだけなら今の位置でアンカーを確定
+          const rect = e.currentTarget.getBoundingClientRect();
+          const { T } = geo(rect.width);
+          putAnchor(d.m, snapTime(T(e.clientX - rect.left), e.altKey));
+        }
+      }}
+      onPointerLeave={() => {
+        hover.current = null;
+        redraw();
+      }}
+      aria-label="拡大した原曲の波形と小節線"
+    />
+  );
+}
+
+function ZoomStats({ r }: { r: PlanResult }) {
+  const ui = useTempo();
+  const v = ui.view;
+  const anchors = normalizeAnchors(ui.plan.anchors);
+  // 案の拍と推定の拍の最大のずれ（見えている範囲）
+  let maxDiff: number | null = null;
+  if (ui.beats.length) {
+    const off = planBgmSec(r);
+    const b0 = Math.ceil(r.tempo.secToBeat(Math.max(0, v.from + off)));
+    const b1 = Math.floor(r.tempo.secToBeat(Math.max(0, v.to + off)));
+    let j = 0;
+    for (let b = b0; b <= b1 && b - b0 < 400; b++) {
+      const t = r.tempo.beatToSec(b) - off;
+      while (j + 1 < ui.beats.length && ui.beats[j + 1] <= t) j++;
+      const near = [ui.beats[j], ui.beats[j + 1]].filter((x) => x !== undefined) as number[];
+      const d = Math.min(...near.map((x) => Math.abs(x - t)));
+      const beatLen = 60 / r.tempo.bpmAt(b);
+      if (d < beatLen * 0.3) maxDiff = Math.max(maxDiff ?? 0, d);
+    }
+  }
+  let drift: number | null = null;
+  let driftM = 0;
+  if (anchors.length) {
+    const off = planBgmSec(r);
+    const m = r.tempo.locate(Math.max(0, r.tempo.secToBeat(v.to + off))).m;
+    const t = measureTime(m, r);
+    const beatsFromA0 = r.tempo.measureStart(m) - r.tempo.measureStart(anchors[0].m);
+    const ghost = anchors[0].t + (beatsFromA0 * 60) / ui.plan.bpm;
+    drift = (ghost - t) * 1000;
+    driftM = m;
+  }
+  return (
+    <div className="row lbl" style={{ marginTop: 8, gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+      {maxDiff !== null && (
+        <span>
+          推定の拍との最大のずれ{' '}
+          <span className="mono" style={{ color: maxDiff < 0.015 ? 'var(--ok)' : 'var(--amber)' }}>
+            {Math.round(maxDiff * 1000)} ms
+          </span>
+        </span>
+      )}
+      {ui.ghostGrid && drift !== null && Math.abs(drift) >= 5 && (
+        <span>
+          BPM固定だと {toMeasure(driftM)} の頭で{' '}
+          <span className="mono" style={{ color: '#FF8A8F' }}>
+            {drift > 0 ? '+' : ''}
+            {Math.round(drift)} ms
+          </span>{' '}
+          ずれる（赤の点線）
+        </span>
+      )}
+      <span>
+        アンカー <span className="mono">{anchors.length}</span> 個
+      </span>
+      <span className="grow" />
+      <span>
+        <kbd>Space</kbd> 確認再生 <kbd>T</kbd> タップ <kbd>←</kbd>
+        <kbd>→</kbd> 移動
+      </span>
+    </div>
+  );
+}

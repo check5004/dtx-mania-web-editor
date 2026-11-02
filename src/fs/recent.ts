@@ -11,6 +11,8 @@ export interface RecentEntry {
   dir?: FileSystemDirectoryHandle;
   /** 最後に自動保存した DTX の本文 */
   text: string;
+  /** 作業ファイル（.dtxe.json）の中身 */
+  sidecar?: string;
   /** フォルダに保存済みの内容と同じか */
   saved: boolean;
   updatedAt: number;

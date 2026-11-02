@@ -1,11 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { openDroppedFiles, openFolderFromInput, openFolderPicker, save } from '../app/fileActions';
 import { frac } from '../dtx/fraction';
-import { GRID_DIVS, gridStep } from '../edit/ops';
+import { GRID_DIVS, gridStep, snapToGrid } from '../edit/ops';
+import { autoEnableMidi } from '../input/midi';
+import { adoptGhostsInRange, useAssist } from '../store/assist';
+import { tempoOf } from '../store/derived';
+import { keyHit } from '../store/hits';
 import {
   copySelection,
   cutSelection,
   deleteSelection,
+  duplicatePrevMeasure,
   moveSelection,
   paste,
   playFrom,
@@ -23,6 +28,8 @@ import { ChartCanvas } from './ChartCanvas';
 import { Footer } from './Footer';
 import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
+import { SettingsPage } from './SettingsPage';
+import { TempoPage } from './TempoPage';
 import { TopBar } from './TopBar';
 import { Transport } from './Transport';
 
@@ -51,8 +58,15 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     return;
   }
   if (isTyping(e)) return;
+  if (s.page !== 'chart') return;
   if (mod) {
     switch (k.toLowerCase()) {
+      case 'd': {
+        e.preventDefault();
+        const { m } = tempoOf(s.doc).locate(Math.max(0, s.cursorBeat));
+        duplicatePrevMeasure(m);
+        return;
+      }
       case 'z':
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -95,11 +109,25 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     }
     return;
   }
+  // ドラムのキー（試し打ち・キー入力・録音）
+  if (!e.altKey && keyHit(e)) {
+    e.preventDefault();
+    return;
+  }
+  const keyMode = useAssist.getState().inputMode === 'key';
   switch (k) {
     case ' ':
       e.preventDefault();
       togglePlay();
       return;
+    case 'Enter': {
+      // カーソルの小節の候補をまとめて採用
+      e.preventDefault();
+      const tempo = tempoOf(s.doc);
+      const { m } = tempo.locate(Math.max(0, s.cursorBeat));
+      adoptGhostsInRange(tempo.measureStart(m), tempo.measureStart(m + 1));
+      return;
+    }
     case 'Delete':
     case 'Backspace':
       e.preventDefault();
@@ -113,10 +141,12 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       e.preventDefault();
       const sign = k === 'ArrowUp' ? 1 : -1;
       const step = e.shiftKey ? frac(4) : gridStep(s.view.div);
-      if (s.selection.length > 0) {
+      if (s.selection.length > 0 && !keyMode) {
         moveSelection(frac(sign * step.n, step.d), 0);
       } else {
-        const nb = Math.max(0, s.cursorBeat + (sign * step.n) / step.d);
+        const tempo = tempoOf(s.doc);
+        const p = snapToGrid(tempo, Math.max(0, s.cursorBeat), s.view.div);
+        const nb = Math.max(0, tempo.beatOf(p.m, p.f) + (sign * step.n) / step.d);
         setCursorBeat(nb);
         const viewBeats = 6;
         if (nb > s.view.scrollBeat + viewBeats * 2 || nb < s.view.scrollBeat) setView({ scrollBeat: nb - 2 });
@@ -146,6 +176,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
 
 export function Editor() {
   const folderInput = useRef<HTMLInputElement>(null);
+  const page = useEditor((s) => s.page);
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -154,6 +185,7 @@ export function Editor() {
       if (s.doc !== s.savedDoc) e.preventDefault();
     };
     window.addEventListener('beforeunload', beforeUnload);
+    void autoEnableMidi();
     return () => {
       window.removeEventListener('keydown', h);
       window.removeEventListener('beforeunload', beforeUnload);
@@ -169,16 +201,24 @@ export function Editor() {
         void openDroppedFiles([...e.dataTransfer.files]);
       }}
     >
-      <TopBar folderInput={folderInput} />
-      <Transport />
-      <div className="main">
-        <LeftPanel />
-        <section className="chart-area">
-          <ChartCanvas />
-        </section>
-        <RightPanel />
-      </div>
-      <Footer />
+      {page === 'tempo' ? (
+        <TempoPage />
+      ) : page === 'settings' ? (
+        <SettingsPage />
+      ) : (
+        <>
+          <TopBar folderInput={folderInput} />
+          <Transport />
+          <div className="main">
+            <LeftPanel />
+            <section className="chart-area">
+              <ChartCanvas />
+            </section>
+            <RightPanel />
+          </div>
+          <Footer />
+        </>
+      )}
       <FolderInput inputRef={folderInput} />
     </div>
   );

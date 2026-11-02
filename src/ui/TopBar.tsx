@@ -6,8 +6,11 @@ import {
   copySelection,
   cutSelection,
   deleteSelection,
+  duplicatePrevMeasure,
   goHome,
   isDirty,
+  openSettings,
+  openTempo,
   paste,
   playFrom,
   redo,
@@ -18,6 +21,7 @@ import {
   useEditor,
   zoom,
 } from '../store/editor';
+import { tempoOf } from '../store/derived';
 import { songLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 import { formatLevel, formatTime } from './format';
@@ -143,6 +147,15 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: `再生位置を追いかける${s().view.follow ? '  ✓' : ''}`, run: () => setView({ follow: !s().view.follow }) },
           ]}
         />
+        <Menu
+          label="ツール"
+          items={() => [
+            { label: 'テンポと開始位置を合わせる…', run: openTempo },
+            { label: '前の小節をカーソルの小節に複製', key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
+            '-',
+            { label: '設定（電子ドラム・キー・遅延補正）…', run: openSettings },
+          ]}
+        />
       </nav>
       <div className="song-head grow">
         <div className="song-art">{art ? <img src={art} alt="" /> : '♪'}</div>
@@ -170,6 +183,9 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       </button>
       <button className="ib" onClick={redo} disabled={!canRedo} title={redoLabel ? `やり直す: ${redoLabel}（Ctrl+Y）` : 'やり直す（Ctrl+Y）'}>
         {Icon.redo()}
+      </button>
+      <button className="ib" onClick={openSettings} title="設定（電子ドラム・キーボード・遅延補正）">
+        {Icon.gear()}
       </button>
       <button className="btn primary" onClick={() => void save()} title={folder?.dir ? `${folder.name}/${meta.fileName} に保存（Ctrl+S）` : '保存（Ctrl+S）'}>
         {Icon.save(15)}

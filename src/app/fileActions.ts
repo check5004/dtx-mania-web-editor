@@ -23,6 +23,7 @@ import {
 } from '../fs/folder';
 import { listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
 import { createDoc, isDirty, openDocument, toast, useEditor, type DocMeta } from '../store/editor';
+import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 
 const get = useEditor.getState;
@@ -54,7 +55,22 @@ function siblingsOf(folder: SongFolder, labels: Map<string, string>) {
   return dtxFiles(folder).map((f) => ({ file: f.name, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, '') }));
 }
 
-async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<string, string>, recentText?: string) {
+/** 作業ファイル（.dtxe.json）を読む。フォルダに無ければ自動保存の控えを使う */
+async function loadSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string) {
+  const f = folder ? findFile(folder, sidecarName(fileName)) : undefined;
+  let data = null;
+  if (f) {
+    try {
+      data = parseSidecar(await (await f.getFile()).text());
+    } catch {
+      data = null;
+    }
+  }
+  if (!data && recentSidecar) data = parseSidecar(recentSidecar);
+  loadSidecar(data);
+}
+
+async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<string, string>, recentText?: string, recentSidecar?: string) {
   const bytes = new Uint8Array(await (await file.getFile()).arrayBuffer());
   const decoded = decodeDtx(bytes);
   let parsed = parseDtx(decoded.text);
@@ -71,6 +87,7 @@ async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<st
     recentId: recentIdFor(folder, file.name),
   };
   openDocument(parsed.doc, meta, folder, { dirty: useRecent || decoded.encoding === 'utf-8' });
+  await loadSidecarFor(folder, file.name, recentSidecar);
   if (useRecent) toast('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', 'warn', 6000);
 }
 
@@ -211,6 +228,13 @@ function encodeForSave(doc: DtxDoc) {
   return encodeDtx(serializeDtx(doc), 'shift_jis');
 }
 
+/** 作業ファイルの中身（空で、フォルダにも無ければ書かない） */
+function sidecarBytes(folder: SongFolder | null, fileName: string): Uint8Array | null {
+  const d = sidecarData();
+  if (sidecarIsEmpty(d) && !(folder && findFile(folder, sidecarName(fileName)))) return null;
+  return new TextEncoder().encode(serializeSidecar(d));
+}
+
 function markSaved(doc: DtxDoc, patch: Partial<ReturnType<typeof get>> = {}) {
   useEditor.setState((s) => ({ ...patch, savedDoc: doc, savedAt: Date.now(), meta: { ...s.meta, ...(patch.meta ?? {}), encoding: 'shift_jis', encodingNote: undefined } }));
   void autosaveNow(true);
@@ -249,6 +273,9 @@ export async function save(opts: { as?: boolean } = {}) {
       }
       for (const k of kit) await writeFile(folder, k.path, k.bytes);
       await writeFile(folder, fileName, bytes);
+      const side = sidecarBytes(folder, fileName);
+      if (side) await writeFile(folder, sidecarName(fileName), side);
+      markSidecarSaved();
       markSaved(doc, { meta: { ...get().meta, fileName, recentId: recentIdFor(folder, fileName) } });
       toast(`保存しました: ${folder.name}/${fileName}${kit.length ? `（内蔵キットの音 ${kit.length} 個も保存）` : ''}`, 'ok');
       return;
@@ -275,6 +302,9 @@ export async function save(opts: { as?: boolean } = {}) {
       }
       for (const k of kit) await writeFile(target, k.path, k.bytes);
       await writeFile(target, fileName, bytes);
+      const side = sidecarBytes(null, fileName);
+      if (side) await writeFile(target, sidecarName(fileName), side);
+      markSidecarSaved();
       folder = target;
       const labels = await readSetDefLabels(folder);
       markSaved(doc, { folder, meta: { ...get().meta, fileName, siblings: siblingsOf(folder, labels), recentId: recentIdFor(folder, fileName) } });
@@ -283,6 +313,9 @@ export async function save(opts: { as?: boolean } = {}) {
     }
     // フォルダに直接書けないブラウザ：ダウンロード
     downloadSong(fileName, bytes, kit, folder);
+    const side = sidecarBytes(null, fileName);
+    if (side && useSidecar.getState().dirty) downloadBytes(sidecarName(fileName), side, 'application/json');
+    markSidecarSaved();
     markSaved(doc, { meta: { ...get().meta, fileName } });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -337,6 +370,7 @@ export async function autosaveNow(saved = false) {
     folderName: s.folder?.name ?? '',
     dir: s.folder?.dir,
     text: serializeDtx(s.doc),
+    sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()),
     saved: !isDirty(s),
     updatedAt: Date.now(),
   };
@@ -345,11 +379,23 @@ export async function autosaveNow(saved = false) {
 }
 
 export function startAutosave() {
-  return useEditor.subscribe((s, prev) => {
+  const later = () => {
+    window.clearTimeout(autosaveTimer);
+    autosaveTimer = window.setTimeout(() => void autosaveNow(true), 1500);
+  };
+  const a = useEditor.subscribe((s, prev) => {
     if (s.doc === prev.doc || s.screen !== 'editor') return;
     window.clearTimeout(autosaveTimer);
     autosaveTimer = window.setTimeout(() => void autosaveNow(), 1500);
   });
+  // セクションやアンカーだけを変えたときも控えを残す
+  const b = useSidecar.subscribe((s, prev) => {
+    if (s.dirty && s !== prev && useEditor.getState().screen === 'editor') later();
+  });
+  return () => {
+    a();
+    b();
+  };
 }
 
 export { listRecent };
@@ -363,11 +409,12 @@ export async function openRecent(e: RecentEntry) {
         const folder = await folderFromHandle(e.dir);
         const f = findFile(folder, e.fileName);
         if (f) {
-          await openDtxFile(folder, f, undefined, e.saved ? undefined : e.text);
+          await openDtxFile(folder, f, undefined, e.saved ? undefined : e.text, e.sidecar);
           return;
         }
         const parsed = parseDtx(e.text);
         openDocument(parsed.doc, { ...newMeta(e.fileName, folder), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, folder, { dirty: true });
+        await loadSidecarFor(folder, e.fileName, e.sidecar);
         return;
       }
     } catch {
@@ -376,5 +423,6 @@ export async function openRecent(e: RecentEntry) {
   }
   const parsed = parseDtx(e.text);
   openDocument(parsed.doc, { ...newMeta(e.fileName, null), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, null, { dirty: !e.saved });
+  await loadSidecarFor(null, e.fileName, e.sidecar);
   toast('自動保存した譜面だけを開きました。音を鳴らすには曲フォルダを開いてください', 'info', 6000);
 }

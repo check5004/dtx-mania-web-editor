@@ -1,15 +1,37 @@
+import { sameMeasures } from '../assist/similar';
+import { GHOST_LANE_INDEX } from '../assist/ghosts';
+import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
 import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import {
+  adoptGhosts,
+  applySimilar,
+  clearMuteSolo,
+  clearSimilarPin,
+  currentGhosts,
+  ghostsInRange,
+  GHOST_LANES,
+  restoreGhosts,
+  setBandFilter,
+  setGhostLane,
+  toggleMute,
+  toggleSolo,
+  useAssist,
+} from '../store/assist';
 import { docStats, tempoOf, wavPath } from '../store/derived';
 import { deleteSelection, setMeasureLength, setKind, setMix, setSelectionWav, useEditor } from '../store/editor';
 import { chipBpmLabel, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
+import { visibleBeats } from './ChartCanvas';
 import { Icon } from './icons';
+import { ReferenceCard } from './ReferenceCard';
 
 export function RightPanel() {
   return (
     <aside className="right-panel scroll">
+      <ReferenceCard />
+      <AssistCard />
       <SelectionCard />
       <MeasureCard />
       <MixCard />
@@ -177,9 +199,157 @@ function MeasureCard() {
   );
 }
 
+const BANDS: [BgmFilter, string, string][] = [
+  ['all', '全体', '原曲をそのまま'],
+  ['low', '低域', 'キックが聴きやすい（〜160Hz）'],
+  ['mid', '中域', 'スネア・タムが聴きやすい（200〜3500Hz）'],
+  ['high', '高域', 'ハイハット・シンバルが聴きやすい（5000Hz〜）'],
+];
+
+function measureRange(from: number, to: number, tempo: ReturnType<typeof tempoOf>): string {
+  const a = tempo.locate(from).m;
+  const b = tempo.locate(Math.max(from, to - 1e-6)).m;
+  return a === b ? toMeasure(a) : `${toMeasure(a)}–${toMeasure(b)}`;
+}
+
+function AssistCard() {
+  const doc = useEditor((s) => s.doc);
+  useEditor((s) => s.view.scrollBeat);
+  useEditor((s) => s.view.pxPerBeat);
+  const cursor = useEditor((s) => s.cursorBeat);
+  usePlayBeat();
+  const a = useAssist();
+  const tempo = tempoOf(doc);
+  const vis = visibleBeats();
+  const inView = a.data && a.ghostsOn ? ghostsInRange(vis.from, vis.to) : [];
+  const total = a.data && a.ghostsOn ? currentGhosts().length : 0;
+  const cm = tempo.locate(Math.max(0, cursor)).m;
+  const same = sameMeasures(doc, cm);
+  const pin = a.similarPin;
+
+  return (
+    <div className="card">
+      <div className="row" style={{ marginBottom: 10 }}>
+        <span style={{ fontWeight: 700 }}>耳コピアシスト</span>
+        <span className="grow" />
+        <span className="lbl mono">{measureRange(vis.from, vis.to, tempo)} を表示中</span>
+      </div>
+      {a.status === 'loading' && (
+        <div style={{ marginBottom: 10 }}>
+          <div className="lbl" style={{ marginBottom: 4 }}>
+            原曲を解析中… {Math.round(a.progress * 100)}%（{a.src?.name}）
+          </div>
+          <div className="progress">
+            <div style={{ width: `${Math.round(a.progress * 100)}%` }} />
+          </div>
+        </div>
+      )}
+      {(a.status === 'nosource' || a.status === 'none') && (
+        <div className="notice info" style={{ marginBottom: 10 }}>
+          <span style={{ flex: 'none', marginTop: 1 }}>{Icon.info(14)}</span>
+          <span>原曲（BGMチップ ch01）が鳴らせないため、波形と候補チップは出ません。曲フォルダを開くか、テンポ合わせ画面で原曲を選んでください。</span>
+        </div>
+      )}
+      {a.status === 'error' && (
+        <div className="notice" style={{ marginBottom: 10 }}>
+          <span style={{ flex: 'none', marginTop: 1 }}>{Icon.warn(14)}</span>
+          <span>原曲を解析できませんでした: {a.error}</span>
+        </div>
+      )}
+      <div className="ghost-box">
+        <div className="row">
+          <label className="row" style={{ gap: 6, fontSize: 12 }}>
+            <input type="checkbox" checked={a.ghostsOn} onChange={(e) => useAssist.setState({ ghostsOn: e.target.checked })} />
+            候補チップ
+          </label>
+          <span className="mono" style={{ fontWeight: 700, color: 'var(--accent)' }}>
+            {inView.length}
+          </span>
+          <span className="lbl">件（全体 {total}）</span>
+          <span className="grow" />
+        </div>
+        <div className="lbl">クリックで1つずつ採用、右クリックで捨てる。Enter でカーソルの小節をまとめて採用。</div>
+        <div className="row">
+          <button className="btn small primary grow" style={{ justifyContent: 'center' }} disabled={inView.length === 0} onClick={() => adoptGhosts(inView)}>
+            表示中をすべて採用
+          </button>
+          <button className="btn small grow" style={{ justifyContent: 'center' }} disabled={a.dismissed.size === 0} onClick={restoreGhosts} title="捨てた候補を戻す">
+            候補を戻す
+          </button>
+        </div>
+        <label className="slider-row" title="上げると弱い音も拾います（誤検出も増えます）">
+          <span className="lbl">検出の感度</span>
+          <input type="range" min={0} max={1} step={0.05} value={a.sensitivity} onChange={(e) => useAssist.setState({ sensitivity: Number(e.target.value) })} />
+          <span className="mono lbl">{Math.round(a.sensitivity * 100)}</span>
+        </label>
+        <div className="lane-toggles">
+          {GHOST_LANES.map((g) => (
+            <button
+              key={g}
+              className={`lane-toggle ${a.ghostLanes[g] ? 'on' : ''}`}
+              style={{ ['--c' as string]: DRUM_LANES[GHOST_LANE_INDEX[g]].color }}
+              onClick={() => setGhostLane(g, !a.ghostLanes[g])}
+              title={`${DRUM_LANES[GHOST_LANE_INDEX[g]].name}の候補を${a.ghostLanes[g] ? '出さない' : '出す'}`}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <div className="lbl" style={{ marginBottom: 6 }}>
+          原曲を聴く帯域
+        </div>
+        <div className="seg" style={{ display: 'flex' }}>
+          {BANDS.map(([k, label, tip]) => (
+            <button key={k} className={a.bandFilter === k ? 'on' : ''} style={{ flex: 1 }} title={tip} onClick={() => setBandFilter(k)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {pin ? (
+        <div className="similar-box pinned">
+          <span style={{ fontSize: 12 }}>
+            小節 <b className="mono">{toMeasure(pin.base)}</b> を直しました。直す前に同じだった小節:
+          </span>
+          <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>
+            {pin.targets.map(toMeasure).join(' · ')}
+          </span>
+          <div className="row">
+            <button className="btn small primary" onClick={() => applySimilar()}>
+              {pin.targets.length} 小節にまとめて反映
+            </button>
+            <button className="btn small ghost" onClick={clearSimilarPin}>
+              やめる
+            </button>
+          </div>
+        </div>
+      ) : same.length > 0 ? (
+        <div className="similar-box">
+          <span style={{ fontSize: 12 }}>
+            <b className="mono">{toMeasure(cm)}</b> と同じパターンの小節（{same.length}）
+          </span>
+          <span className="mono" style={{ fontSize: 12, color: 'var(--accent)' }}>
+            {same.slice(0, 16).map(toMeasure).join(' · ')}
+            {same.length > 16 ? ' …' : ''}
+          </span>
+          <span className="lbl">この小節を直すと、ほかの小節にもまとめて反映できます。</span>
+        </div>
+      ) : null}
+      <label className="row lbl" style={{ marginTop: 10 }}>
+        <input type="checkbox" checked={a.audioCols} onChange={(e) => useAssist.setState({ audioCols: e.target.checked })} />
+        譜面の右に原曲の打点と波形を出す
+      </label>
+    </div>
+  );
+}
+
 function MixCard() {
   const mix = useEditor((s) => s.mix);
   const previewOnPlace = useEditor((s) => s.previewOnPlace);
+  const mute = useAssist((s) => s.mute);
+  const solo = useAssist((s) => s.solo);
   return (
     <div className="card">
       <div className="section-title" style={{ marginBottom: 8 }}>
@@ -196,6 +366,32 @@ function MixCard() {
           <input type="range" min={0} max={1} step={0.01} value={mix.drums} onChange={(e) => setMix({ drums: Number(e.target.value) })} />
           <span className="mono lbl">{Math.round(mix.drums * 100)}</span>
         </label>
+        <div className="row" style={{ marginTop: 6 }}>
+          <span className="lbl">レーンごとに消す（M）・それだけ鳴らす（S）</span>
+          <span className="grow" />
+          {(mute.length > 0 || solo.length > 0) && (
+            <button className="btn small ghost" style={{ height: 22 }} onClick={clearMuteSolo}>
+              解除
+            </button>
+          )}
+        </div>
+        <div className="ms-grid">
+          {DRUM_LANES.map((l, i) => (
+            <div key={l.key} className="ms-cell">
+              <span className="k" style={{ color: l.color }}>
+                {l.key}
+              </span>
+              <span className="bs">
+                <button className={`m ${mute.includes(i) ? 'on' : ''}`} onClick={() => toggleMute(i)} title={`${l.name}を消す`}>
+                  M
+                </button>
+                <button className={`s ${solo.includes(i) ? 'on' : ''}`} onClick={() => toggleSolo(i)} title={`${l.name}だけ鳴らす`}>
+                  S
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
         <label className="row lbl" style={{ marginTop: 4 }}>
           <input type="checkbox" checked={mix.metronome} onChange={(e) => setMix({ metronome: e.target.checked })} />
           再生中にメトロノームを鳴らす

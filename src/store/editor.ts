@@ -22,7 +22,9 @@ import {
   type Pos,
 } from '../edit/ops';
 import type { SongFolder } from '../fs/folder';
-import { chipViews, clickTimes, soundEvents, tempoOf, wavSources } from './derived';
+import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
+import { bgmSource, chipViews, clickTimes, soundEvents, tempoOf, wavSources } from './derived';
+import { loadSidecar } from './sidecar';
 
 enablePatches();
 
@@ -44,6 +46,8 @@ interface HistoryEntry {
   label: string;
   redo: Patch[];
   undo: Patch[];
+  /** 同じ group の続けての編集は1つにまとめる（録音など） */
+  group?: string;
 }
 
 export interface Toast {
@@ -65,6 +69,8 @@ export interface ViewState {
 
 export interface EditorState {
   screen: 'home' | 'editor';
+  /** エディタの中の画面（譜面・テンポ合わせ・設定） */
+  page: 'chart' | 'tempo' | 'settings';
   doc: DtxDoc;
   meta: DocMeta;
   folder: SongFolder | null;
@@ -93,6 +99,7 @@ const initialMeta: DocMeta = { fileName: 'new.dtx', encoding: 'shift_jis', warni
 
 export const useEditor = create<EditorState>(() => ({
   screen: 'home',
+  page: 'chart',
   doc: emptyDoc(),
   meta: initialMeta,
   folder: null,
@@ -142,6 +149,7 @@ export function openDocument(doc: DtxDoc, meta: DocMeta, folder: SongFolder | nu
   const startBeat = firstDrum ? Math.max(0, Math.floor(firstDrum.beat) - 4) : 0;
   set({
     screen: 'editor',
+    page: 'chart',
     doc,
     meta,
     folder,
@@ -156,24 +164,32 @@ export function openDocument(doc: DtxDoc, meta: DocMeta, folder: SongFolder | nu
     playing: false,
     missingWavs: [],
   });
+  resetAssistForDoc();
+  loadSidecar(null);
   void prepareSounds();
 }
 
 export function goHome() {
   engine.stop();
-  set({ screen: 'home', playing: false });
+  set({ screen: 'home', page: 'chart', playing: false });
 }
 
 // ---- 編集と Undo ---------------------------------------------------------------
 
 const MAX_HISTORY = 300;
 
-/** 譜面を書き換える。変化が無ければ履歴に積まない */
-export function edit(label: string, recipe: (d: Draft<DtxDoc>) => void): boolean {
+/** 譜面を書き換える。変化が無ければ履歴に積まない。group が同じなら直前の履歴にまとめる */
+export function edit(label: string, recipe: (d: Draft<DtxDoc>) => void, opts: { group?: string } = {}): boolean {
   const s = get();
   const [next, redo, undo] = produceWithPatches(s.doc, recipe);
   if (redo.length === 0) return false;
-  const past = [...s.past, { label, redo, undo }];
+  const last = s.past[s.past.length - 1];
+  let past: HistoryEntry[];
+  if (opts.group && last?.group === opts.group && s.future.length === 0) {
+    past = [...s.past.slice(0, -1), { label, group: opts.group, redo: [...last.redo, ...redo], undo: [...undo, ...last.undo] }];
+  } else {
+    past = [...s.past, { label, redo, undo, group: opts.group }];
+  }
   if (past.length > MAX_HISTORY) past.shift();
   set({ doc: next, past, future: [] });
   return true;
@@ -232,18 +248,93 @@ function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
 }
 
 export function placeChip(lane: number, alt: boolean, pos: Pos) {
+  placeChips([{ lane, alt, pos }], { select: true, preview: get().previewOnPlace });
+}
+
+export interface PlaceItem {
+  lane: number;
+  alt: boolean;
+  pos: Pos;
+}
+
+/**
+ * まとめてチップを置く（候補の採用・録音・キー入力）。
+ * group を渡すと、同じ group の続けての操作は Undo 1回で戻せる。
+ */
+export function placeChips(items: readonly PlaceItem[], opts: { label?: string; group?: string; select?: boolean; preview?: boolean } = {}): number[] {
+  if (items.length === 0) return [];
+  const ids: number[] = [];
+  let firstV = 0;
+  const hadKit = Object.keys(get().doc.fields).length;
+  const one = items[0];
+  const def = DRUM_LANES[one.lane];
+  const label = opts.label ?? (items.length === 1 ? `${one.alt && def.altName ? def.altName : def.mainName}を置く` : `${items.length}個のチップを置く`);
+  edit(
+    label,
+    (d) => {
+      for (const it of items) {
+        const lane = DRUM_LANES[it.lane];
+        const ch = it.alt && lane.alt !== undefined ? lane.alt : lane.main;
+        const v = wavForChannel(d, ch);
+        if (!firstV) firstV = v;
+        ids.push(opPlace(d, ch, it.pos, v));
+      }
+    },
+    { group: opts.group },
+  );
+  if (opts.select && ids.length) set({ selection: ids });
+  if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
+  if (opts.preview && firstV) previewWav(firstV);
+  return ids;
+}
+
+/** レーンのチップに使う WAV 番号（試し打ち用。譜面は変えない） */
+export function wavForLane(lane: number, alt: boolean): number | null {
+  const s = get();
   const def = DRUM_LANES[lane];
   const ch = alt && def.alt !== undefined ? def.alt : def.main;
-  let id = 0;
-  let v = 0;
-  const hadKit = Object.keys(get().doc.fields).length;
-  edit(`${alt && def.altName ? def.altName : def.mainName}を置く`, (d) => {
-    v = wavForChannel(d, ch);
-    id = opPlace(d, ch, pos, v);
+  const assigned = s.laneWav[ch];
+  if (assigned !== undefined && s.doc.fields['WAV' + toBase36x2(assigned)] !== undefined) return assigned;
+  const kit = kitByChannel.get(ch);
+  if (!kit) return null;
+  for (const [k, v] of Object.entries(s.doc.fields)) {
+    if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === kit.file.toLowerCase()) return parseInt(k.slice(3), 36);
+  }
+  return null;
+}
+
+/** 前の小節のドラムをこの小節に写す（Ctrl+D） */
+export function duplicatePrevMeasure(m: number) {
+  if (m <= 0) return;
+  edit(`小節 ${toMeasure(m - 1)} を ${toMeasure(m)} に複製`, (d) => {
+    const src = d.chips.filter((c) => c.m === m - 1 && drumChannel(c.ch)).map((c) => ({ ch: c.ch, f: { ...c.f }, v: c.v }));
+    for (let i = d.chips.length - 1; i >= 0; i--) if (d.chips[i].m === m && drumChannel(d.chips[i].ch)) d.chips.splice(i, 1);
+    for (const c of src) d.chips.push({ id: d.nextId++, ch: c.ch, m, f: c.f, v: c.v });
   });
-  if (id) set({ selection: [id] });
-  if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
-  if (get().previewOnPlace && v) previewWav(v);
+}
+
+/** 指定位置・レーンのチップ（通常チップ）を探す */
+export function chipAt(lane: number, alt: boolean, pos: Pos): number | null {
+  const def = DRUM_LANES[lane];
+  const ch = alt && def.alt !== undefined ? def.alt : def.main;
+  for (const c of get().doc.chips) {
+    if (c.ch === ch && c.m === pos.m && cmp(c.f, pos.f) === 0) return c.id;
+  }
+  return null;
+}
+
+export function openTempo() {
+  stop();
+  set({ page: 'tempo' });
+}
+
+export function openSettings() {
+  set({ page: 'settings' });
+}
+
+export function backToChart() {
+  stop();
+  set({ page: 'chart' });
 }
 
 export function deleteChips(ids: readonly number[]) {
@@ -417,6 +508,7 @@ export async function prepareSounds(): Promise<void> {
       if (preparedSig === sig) set({ missingWavs: failed });
     } finally {
       set((st) => ({ loading: null, soundsVersion: st.soundsVersion + 1 }));
+      syncAnalysis();
     }
   })();
   preparing = p;
@@ -438,28 +530,81 @@ export function songEndSec(doc: DtxDoc): number {
   return end;
 }
 
-export async function playFrom(beat: number) {
-  const s = get();
-  engine.ensure();
-  stop();
-  await prepareSounds();
-  const doc = get().doc;
-  const tempo = tempoOf(doc);
-  const startSec = tempo.beatToSec(Math.max(0, beat));
-  const endSec = Math.max(songEndSec(doc), startSec + 1);
-  engine.play({
-    events: soundEvents(doc),
-    clicks: clickTimes(doc, startSec, endSec),
-    startSec,
-    endSec,
-    onEnd: () => set({ playing: false }),
-  });
-  set({ playing: true, view: { ...s.view, follow: true } });
+type PlaybackEvent = { type: 'play'; startSec: number; rate: number } | { type: 'stop' } | { type: 'loop'; startSec: number };
+const playbackListeners = new Set<(e: PlaybackEvent) => void>();
+
+/** 再生の開始・停止・ループを知らせる（YouTube の同期に使う） */
+export function onPlayback(cb: (e: PlaybackEvent) => void): () => void {
+  playbackListeners.add(cb);
+  return () => playbackListeners.delete(cb);
 }
 
+function emit(e: PlaybackEvent) {
+  for (const cb of playbackListeners) cb(e);
+}
+
+let playToken = 0;
+
+export async function playFrom(beat: number) {
+  engine.ensure();
+  stop();
+  const token = ++playToken;
+  await prepareSounds();
+  if (token !== playToken) return;
+  const doc = get().doc;
+  const tempo = tempoOf(doc);
+  const a = useAssist.getState();
+  const loop = loopSec(doc, a.loop);
+  let startSec = tempo.beatToSec(Math.max(0, beat));
+  // ループ中は範囲の外から始めない
+  if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
+  const endSec = Math.max(songEndSec(doc), startSec + 1);
+  const rate = a.speed;
+  const bgm = bgmSource(doc);
+  if (rate < 0.999 && bgm) {
+    set({ loading: 'スロー再生の準備中…' });
+    try {
+      await prepareStretch(bgm.wav, rate, [startSec - bgm.sec, ...(loop ? [loop.from - bgm.sec] : [])]);
+    } catch (e) {
+      toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
+    } finally {
+      set({ loading: null });
+    }
+    if (token !== playToken) return;
+  }
+  engine.play({
+    events: soundEvents(doc),
+    clicks: clickTimes(doc, 0, endSec + 2),
+    startSec,
+    endSec,
+    rate,
+    loop,
+    onEnd: () => {
+      set({ playing: false });
+      emit({ type: 'stop' });
+    },
+    onLoop: () => emit({ type: 'loop', startSec: loop?.from ?? 0 }),
+  });
+  set({ playing: true, view: { ...get().view, follow: true } });
+  emit({ type: 'play', startSec, rate });
+}
+
+// 再生中に譜面が変わったら、まだ鳴らしていない所から新しい譜面で鳴らす
+useEditor.subscribe((s, prev) => {
+  if (s.doc === prev.doc) return;
+  trackSimilar(s.doc, prev.doc, s.meta !== prev.meta);
+  if (!engine.playing) return;
+  const end = songEndSec(s.doc);
+  engine.replaceEvents(soundEvents(s.doc), clickTimes(s.doc, 0, end + 2));
+  if (s.doc.barLengths !== prev.doc.barLengths || s.doc.fields !== prev.doc.fields) applyLoopToEngine();
+});
+
 export function stop() {
+  playToken++;
+  const was = engine.playing;
   engine.stop();
   set({ playing: false });
+  if (was) emit({ type: 'stop' });
 }
 
 export function togglePlay() {
