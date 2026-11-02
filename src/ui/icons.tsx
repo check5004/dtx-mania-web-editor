@@ -1,0 +1,120 @@
+// 小さな線画アイコン（外部ライブラリを使わない）
+import type { ReactNode } from 'react';
+
+function Svg({ children, size = 16 }: { children: ReactNode; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+export const Icon = {
+  play: (s?: number) => (
+    <Svg size={s}>
+      <path d="M5 3.2v9.6L12.8 8z" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  pause: (s?: number) => (
+    <Svg size={s}>
+      <rect x="4" y="3" width="2.8" height="10" rx=".6" fill="currentColor" stroke="none" />
+      <rect x="9.2" y="3" width="2.8" height="10" rx=".6" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  stop: (s?: number) => (
+    <Svg size={s}>
+      <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  toStart: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4 3.5v9" />
+      <path d="M12.5 3.8v8.4L6.5 8z" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  cursorPlay: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 8h3" strokeDasharray="1.5 1.5" />
+      <path d="M7 3.5v9L13.5 8z" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  undo: (s?: number) => (
+    <Svg size={s}>
+      <path d="M5.5 4 2.5 7l3 3" />
+      <path d="M2.8 7h6.7a3.5 3.5 0 0 1 0 7H7" />
+    </Svg>
+  ),
+  redo: (s?: number) => (
+    <Svg size={s}>
+      <path d="m10.5 4 3 3-3 3" />
+      <path d="M13.2 7H6.5a3.5 3.5 0 0 0 0 7H9" />
+    </Svg>
+  ),
+  save: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 2.5v7.5M4.8 7 8 10.2 11.2 7" />
+      <path d="M2.8 11.5v1.7h10.4v-1.7" />
+    </Svg>
+  ),
+  folder: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
+    </Svg>
+  ),
+  metronome: (s?: number) => (
+    <Svg size={s}>
+      <path d="M6 2.5h4l2.5 11h-9z" />
+      <path d="M8 11 11.5 4.5" />
+    </Svg>
+  ),
+  plus: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 3v10M3 8h10" />
+    </Svg>
+  ),
+  minus: (s?: number) => (
+    <Svg size={s}>
+      <path d="M3 8h10" />
+    </Svg>
+  ),
+  follow: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 13V3M4.5 6.5 8 3l3.5 3.5" />
+      <path d="M3 13h10" />
+    </Svg>
+  ),
+  speaker: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" />
+      <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
+    </Svg>
+  ),
+  trash: (s?: number) => (
+    <Svg size={s}>
+      <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" />
+    </Svg>
+  ),
+  file: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4 2h5l3 3v9H4z" />
+      <path d="M9 2v3h3" />
+    </Svg>
+  ),
+  home: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 7.5 8 3l5.5 4.5V13h-11z" />
+    </Svg>
+  ),
+  warn: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 2.5 14 13H2z" />
+      <path d="M8 6.5v3M8 11.2v.1" />
+    </Svg>
+  ),
+  info: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="5.8" />
+      <path d="M8 7.2v4M8 5v.1" />
+    </Svg>
+  ),
+};
