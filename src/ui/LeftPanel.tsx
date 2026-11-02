@@ -300,7 +300,7 @@ function WavTab() {
 }
 
 /** フォーカスを外したか Enter で確定する入力欄 */
-function CommitInput({ value, onCommit, className, placeholder }: { value: string; onCommit: (v: string) => void; className?: string; placeholder?: string }) {
+export function CommitInput({ value, onCommit, className, placeholder }: { value: string; onCommit: (v: string) => void; className?: string; placeholder?: string }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   return (
@@ -338,7 +338,13 @@ function InfoTab() {
   const folder = useEditor((s) => s.folder);
   return (
     <>
-      <div className="section-title">曲情報</div>
+      <div className="section-title">
+        曲情報
+        <span className="grow" />
+        <button className="btn small" onClick={() => openPage('songinfo')} title="ヘッダの全項目、AIで調べる、サムネイルの切り取り">
+          {Icon.sparkle(12)} 全項目・AI取得
+        </button>
+      </div>
       <div className="form-grid">
         {INFO_FIELDS.map((f) => {
           const options = f.files && folder ? [...folder.files.values()].filter((x) => f.files!.test(x.name)) : null;

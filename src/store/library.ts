@@ -1,6 +1,7 @@
 // 音源ライブラリ：既存曲からの取り込み、楽器の自動判定、重複のまとめ、曲名キット、似た音、バックアップ。
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { create } from 'zustand';
+import { scanCharts } from './guideline';
 import { engine } from '../audio/engine';
 import { BUILTIN_KITS, KIT_LANES, decodeBytes, loadBuiltin, registerVirtual, unregisterVirtual, builtinFile } from '../audio/sounds';
 import { decodeDtx } from '../dtx/encoding';
@@ -490,6 +491,8 @@ export async function importFolder(folder: SongFolder, refFolderId?: string) {
     songs.push(title);
     lset({ importing: { label: `${title} を取り込みました`, done: ++done, total: groups.length } });
   }
+  // 難易度ガイドラインの集計にも加える（音は使わず譜面だけ）
+  void scanCharts(folder, { quiet: true }).catch(() => undefined);
   const allKits = [...lget().kits.filter((k) => !kits.some((n) => n.id === k.id)), ...kits];
   lset({
     samples: [...existing.values()].sort((a, b) => b.addedAt - a.addedAt),

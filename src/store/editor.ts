@@ -105,6 +105,10 @@ export interface EditorState {
   soundsVersion: number;
   /** 参照映像（YouTube）の長さ（秒）。分からなければ 0 */
   refVideoSec: number;
+  /** 設定画面を開いたときに出す項目 */
+  settingsSection?: string;
+  /** 画面を閉じたときに戻る先（ガイドライン → AI難易度生成 など） */
+  returnPage?: EditorPage;
 }
 
 const initialMeta: DocMeta = { fileName: 'new.dtx', encoding: 'shift_jis', warnings: [], hasRandom: false, siblings: [] };
@@ -448,8 +452,8 @@ export function openTempo() {
   set({ page: 'tempo' });
 }
 
-export function openSettings() {
-  set({ page: 'settings' });
+export function openSettings(section?: string) {
+  set({ page: 'settings', settingsSection: typeof section === 'string' ? section : undefined, returnPage: get().page === 'settings' ? get().returnPage : get().page });
 }
 
 export function backToChart() {
@@ -459,11 +463,22 @@ export function backToChart() {
   set({ page: 'chart' });
 }
 
-/** 譜面以外の画面を開く（ステム・ライブラリ・曲情報・AI など） */
+/** 譜面以外の画面を開く（ステム・ライブラリ・曲情報・AI など）。戻るボタンは開いた元の画面へ戻る */
 export function openPage(page: EditorPage) {
   if (page === 'tempo') return openTempo();
   if (page !== 'stems' && page !== 'chart') stop();
-  set({ page });
+  const from = get().page;
+  set({ page, returnPage: from === 'chart' || from === page ? undefined : from });
+}
+
+/** 開いた元の画面へ戻る（譜面から開いたなら譜面へ） */
+export function goBack() {
+  const r = get().returnPage;
+  if (r && r !== get().page && r !== 'chart') {
+    set({ page: r, returnPage: undefined });
+    return;
+  }
+  backToChart();
 }
 
 export function deleteChips(ids: readonly number[]) {

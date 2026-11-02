@@ -20,7 +20,11 @@ import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
 import { useInputSettings } from '../input/settings';
 import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
 import { useState } from 'react';
-import { deleteMeasures, deleteSelection, insertMeasures, setMeasureLength, setKind, setSelectionWav, toast, useEditor } from '../store/editor';
+import { deleteMeasures, deleteSelection, insertMeasures, openPage, setMeasureLength, setKind, setSelectionWav, toast, useEditor } from '../store/editor';
+import { judgeCurrent, useAiLevel } from '../store/aiLevel';
+import { makeCandidates, openPhrase } from '../store/phrase';
+import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { formatUsd } from '../ai/tasks';
 import { chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
 import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
 import { promptDialog } from './dialogs';
@@ -284,8 +288,22 @@ function MeasureCard() {
           この小節を削除
         </button>
       </div>
+      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+        <span className="ai-spark">{Icon.sparkle(12)}</span>
+        <button className="btn small grow" onClick={() => phraseNow('fill')} title="選んだ範囲（なければカーソルの小節）にフィルの候補を3つ点線で出します">
+          フィルの候補
+        </button>
+        <button className="btn small grow" onClick={() => phraseNow('rhythm')} title="選んだ範囲（なければカーソルの小節）にリズムの候補を3つ点線で出します">
+          リズムの候補
+        </button>
+      </div>
     </div>
   );
+}
+
+function phraseNow(kind: 'fill' | 'rhythm') {
+  openPhrase();
+  void makeCandidates(kind);
 }
 
 const BANDS: [BgmFilter, string, string][] = [
@@ -472,6 +490,7 @@ function CheckCard() {
       ) : (
         <div className="check-facts lbl">チップが8個以上になると出します。</div>
       )}
+      <AiLevelRow mech={lv?.level ?? null} />
       <div className="row" style={{ marginTop: 10, gap: 8 }}>
         <b style={{ fontSize: 12.5 }}>無理な配置</b>
         {issues.length === 0 ? (
@@ -506,6 +525,69 @@ function CheckCard() {
             </button>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function AiLevelRow({ mech }: { mech: number | null }) {
+  const doc = useEditor((s) => s.doc);
+  const st = useAiLevel();
+  const hasKey = useHasAiKey();
+  const cost = useAi(() => taskCostEstimate('level'));
+  const r = st.result;
+  const stale = r && st.doc !== doc;
+  return (
+    <div className="ai-level">
+      <div className="row" style={{ gap: 8 }}>
+        <span className="ai-spark">{Icon.sparkle(13)}</span>
+        <b style={{ fontSize: 12.5 }}>AIのレベル判定</b>
+        <span className="grow" />
+        {r && <span className={`ai-conf ${r.confidence}`}>{r.confidence === 'high' ? '自信度 高' : r.confidence === 'medium' ? '自信度 中' : '自信度 低'}</span>}
+        <button
+          className="btn small"
+          disabled={!hasKey || st.loading || !mech}
+          onClick={() => void judgeCurrent()}
+          title={hasKey ? `ガイドラインと似た譜面を物差しに判定します（1回 約 ${formatUsd(cost)}）` : NO_KEY_TITLE}
+        >
+          {st.loading ? '判定中…' : r ? '判定し直す' : 'AIで判定'}
+        </button>
+      </div>
+      {!hasKey && (
+        <div className="lbl" style={{ marginTop: 4 }}>
+          {NO_KEY_TITLE}。いまは機械的な推定だけ出しています。
+        </div>
+      )}
+      {st.error && <div className="ai-err">{st.error}</div>}
+      {r && (
+        <div style={{ marginTop: 6, opacity: stale ? 0.6 : 1 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+            <span className="check-lv mono" style={{ fontSize: 20 }}>
+              {r.level.toFixed(2)}
+            </span>
+            {mech !== null && <span className="lbl">計算 {mech.toFixed(2)}</span>}
+            <span className="grow" />
+            <button className="link-btn" onClick={() => adoptLevel(r.level)} title="#DLEVEL に書きます（Ctrl+Z で戻せます）">
+              これにする
+            </button>
+          </div>
+          <ul className="ai-reasons">
+            {r.reasons.map((x, i) => (
+              <li key={i}>{x}</li>
+            ))}
+            {r.hardest && <li>難所: {r.hardest}</li>}
+            {r.gap && <li>計算との違い: {r.gap}</li>}
+          </ul>
+          <div className="lbl">
+            {stale ? '判定のあとに譜面が変わりました · ' : ''}似た譜面 {r.nearCount} 曲で比較 · {formatUsd(r.cost)}
+            {r.nearCount === 0 && (
+              <>
+                {' '}
+                · <button className="link-btn" onClick={() => openPage('guideline')}>手元の曲を集計すると精度が上がります</button>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

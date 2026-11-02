@@ -7,7 +7,7 @@ import type { Ghost } from '../assist/ghosts';
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
-import { bgaChannel, CH, DRUM_LANES } from '../dtx/model';
+import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import { bandOnsets, currentGhosts, dismissGhosts, ghostsInRange, setLoop, setWaveMode, useAssist, type AssistState } from '../store/assist';
@@ -27,6 +27,7 @@ import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
 import { useFind } from '../store/find';
+import { usePhrase } from '../store/phrase';
 import { issuesOf, useCheck } from '../store/check';
 import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
 import { thumb, useThumbs } from './thumbs';
@@ -216,6 +217,9 @@ export function ChartCanvas() {
         l.dirty = true;
       }),
       useThumbs.subscribe(() => {
+        l.dirty = true;
+      }),
+      usePhrase.subscribe(() => {
         l.dirty = true;
       }),
     ];
@@ -1238,10 +1242,55 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.globalAlpha = 1;
   };
 
+  // フレーズ候補：範囲の今のチップは薄く、候補は点線で
+  const ph = usePhrase.getState();
+  const phCand = ph.open ? (ph.cands[ph.index] ?? null) : null;
   for (const v of visible) {
     if (erasing?.has(v.c.id)) continue;
     const selected = sel.has(v.c.id);
-    drawChip(v, v.beat, v.col, moving && selected ? 0.25 : 1, selected && !moving);
+    const replaced = phCand && v.col >= 0 && v.kind === 'normal' && v.c.m >= ph.from && v.c.m <= ph.to;
+    drawChip(v, v.beat, v.col, replaced ? 0.22 : moving && selected ? 0.25 : 1, selected && !moving);
+  }
+  if (ph.open) {
+    const tm = tempoOf(doc);
+    const y0 = g.beatToY(tm.measureStart(ph.from));
+    const y1 = g.beatToY(tm.measureStart(ph.to + 1));
+    const top = Math.min(y0, y1);
+    const bottom = Math.max(y0, y1);
+    ctx.fillStyle = 'rgba(160,140,240,.06)';
+    ctx.fillRect(ox + GEO.laneX, top, GEO.laneW * DRUM_LANES.length, bottom - top);
+    ctx.strokeStyle = 'rgba(160,140,240,.55)';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ox + GEO.laneX + 0.5, top + 0.5, GEO.laneW * DRUM_LANES.length - 1, bottom - top - 1);
+    ctx.setLineDash([]);
+  }
+  if (phCand) {
+    const tm = tempoOf(doc);
+    for (const n of phCand.notes) {
+      const info = drumChannel(n.ch);
+      if (!info) continue;
+      const lane = DRUM_LANES[info.lane];
+      const beat = tm.beatOf(n.m, n.f);
+      if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) continue;
+      const y = g.beatToY(beat);
+      const cx = ox + laneCX(info.lane);
+      const color = info.alt && lane.altColor ? lane.altColor : lane.color;
+      roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
+      ctx.fillStyle = color + '40';
+      ctx.fill();
+      ctx.setLineDash([3, 2]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (info.alt) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx, y, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   // 無理な配置の印（小節番号の列）

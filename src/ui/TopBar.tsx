@@ -35,6 +35,7 @@ import { HistoryButton } from './HistoryButton';
 import { togglePreview, usePreview } from '../store/preview';
 import { bgaVisible, hasBga, useBga } from '../store/bga';
 import { promptDialog } from './dialogs';
+import { openPhrase } from '../store/phrase';
 import { toMeasure } from '../dtx/base36';
 
 interface MenuItem {
@@ -210,7 +211,13 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: '音源ライブラリ…', run: () => openPage('library') },
             { label: '前の小節をカーソルの小節に複製', key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
             '-',
-            { label: '設定（電子ドラム・キー・遅延補正）…', run: openSettings },
+            { label: '曲情報（AI取得・サムネイル）…', run: () => openPage('songinfo') },
+            { label: 'フレーズ候補（フィル・リズム）…', run: openPhrase },
+            { label: 'AI難易度生成（BASIC〜EXTREME）…', run: () => openPage('ai') },
+            { label: '難易度ガイドライン…', run: () => openPage('guideline') },
+            '-',
+            { label: '設定（電子ドラム・キー・遅延補正）…', run: () => openSettings() },
+            { label: 'AIの設定（OpenRouter）…', run: () => openSettings('ai') },
           ]}
         />
       </nav>
@@ -245,7 +252,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         {Icon.screen()}
       </button>
       <HistoryButton />
-      <button className="ib" onClick={openSettings} title="設定（電子ドラム・キーボード・遅延補正）">
+      <button className="ib" onClick={() => openSettings()} title="設定（電子ドラム・キーボード・遅延補正）">
         {Icon.gear()}
       </button>
       <button className="btn primary" onClick={() => void save()} title={folder?.dir ? `${folder.name}/${meta.fileName} に保存（Ctrl+S）` : '保存（Ctrl+S）'}>

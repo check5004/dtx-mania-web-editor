@@ -18,10 +18,11 @@ import {
   useInputSettings,
   type LaneTarget,
 } from '../input/settings';
-import { backToChart } from '../store/editor';
+import { goBack, openPage, useEditor } from '../store/editor';
+import { AiSettings } from './AiSettings';
 import { Icon } from './icons';
 
-type Section = 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity';
+type Section = 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai';
 
 const TARGETS: { t: LaneTarget; key: string; name: string; color: string }[] = DRUM_LANES.flatMap((l, i) => {
   const main = { t: { lane: i, alt: false }, key: l.key, name: l.mainName, color: l.color };
@@ -30,10 +31,10 @@ const TARGETS: { t: LaneTarget; key: string; name: string; color: string }[] = D
 });
 
 export function SettingsPage() {
-  const [sec, setSec] = useState<Section>('midi');
+  const [sec, setSec] = useState<Section>(() => (useEditor.getState().settingsSection as Section | undefined) ?? 'midi');
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.querySelector('.capturing')) backToChart();
+      if (e.key === 'Escape' && !document.querySelector('.capturing')) goBack();
     };
     window.addEventListener('keydown', onKey);
     return () => {
@@ -44,8 +45,8 @@ export function SettingsPage() {
   return (
     <div className="tempo-page">
       <header className="tempo-head">
-        <button className="btn small ghost" onClick={backToChart}>
-          {Icon.back(14)} エディタに戻る
+        <button className="btn small ghost" onClick={goBack}>
+          {Icon.back(14)} {useEditor.getState().returnPage && useEditor.getState().returnPage !== 'chart' ? '戻る' : 'エディタに戻る'}
         </button>
         <div className="vsep" />
         <h1>設定</h1>
@@ -60,12 +61,16 @@ export function SettingsPage() {
               ['lanes', 'レーンの並び'],
               ['latency', '入力の遅れの補正'],
               ['velocity', '強さ'],
+              ['ai', 'AI（OpenRouter）'],
             ] as const
           ).map(([k, label]) => (
             <button key={k} className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>
               {label}
             </button>
           ))}
+          <button className="sub" onClick={() => openPage('guideline')} title="手元の曲から作る、レベルの基準">
+            難易度ガイドライン
+          </button>
         </nav>
         <main className="settings-main scroll">
           {sec === 'midi' && <MidiSettings />}
@@ -73,6 +78,7 @@ export function SettingsPage() {
           {sec === 'lanes' && <LaneOrderSettings />}
           {sec === 'latency' && <LatencySettings />}
           {sec === 'velocity' && <VelocitySettings />}
+          {sec === 'ai' && <AiSettings />}
         </main>
       </div>
     </div>

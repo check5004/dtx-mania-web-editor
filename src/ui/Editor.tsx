@@ -35,6 +35,11 @@ import { nudgeSelection, setPreset, toggleVelMode, useVel } from '../store/veloc
 import { TempoPage } from './TempoPage';
 import { StemsPage } from './StemsPage';
 import { LibraryPage } from './LibraryPage';
+import { SongInfoPage } from './SongInfoPage';
+import { GuidelinePage } from './GuidelinePage';
+import { AiGenPage } from './AiGenPage';
+import { PhrasePanel } from './PhrasePanel';
+import { usePhrase } from '../store/phrase';
 import { FindPanel } from './FindPanel';
 import { NxPreview } from './NxPreview';
 import { togglePreview, usePreview } from '../store/preview';
@@ -248,6 +253,7 @@ export function Editor() {
   const velMode = useVel((s) => s.mode);
   const findOpen = useFind((s) => s.open);
   const previewMode = usePreview((s) => s.mode);
+  const phraseOpen = usePhrase((s) => s.open);
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -280,6 +286,12 @@ export function Editor() {
         <StemsPage />
       ) : page === 'library' ? (
         <LibraryPage />
+      ) : page === 'songinfo' ? (
+        <SongInfoPage />
+      ) : page === 'guideline' ? (
+        <GuidelinePage />
+      ) : page === 'ai' ? (
+        <AiGenPage />
       ) : (
         <>
           <TopBar folderInput={folderInput} />
@@ -289,6 +301,7 @@ export function Editor() {
             <section className="chart-area">
               <ChartCanvas />
               {findOpen && <FindPanel />}
+              {phraseOpen && !findOpen && <PhrasePanel />}
             </section>
             {velMode ? <VelocityPanel /> : previewMode === 'side' ? <NxPreview /> : <RightPanel />}
           </div>

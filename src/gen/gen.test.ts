@@ -1,0 +1,132 @@
+import { describe, expect, it } from 'vitest';
+import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
+import { buildTempoMap } from '../dtx/timing';
+import { chartFeatures, drumNotes } from './features';
+import { DEFAULT_KEEP, detectFills, generateToTarget, simplify, type SectionPlan } from './simplify';
+
+const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
+
+/** 16ビート：HH 16分、BD 1・3拍と16分の裏、SD 2・4拍とゴースト、4小節目ごとにタムのフィル、頭にクラッシュ */
+function song(measures = 8, bpm = 150): DtxDoc {
+  const chips = [];
+  let id = 1;
+  for (let m = 0; m < measures; m++) {
+    const fill = m % 4 === 3;
+    for (let k = 0; k < 16; k++) {
+      const inFill = fill && k >= 8;
+      if (!inFill) {
+        if (!(k === 0 && m % 4 === 0)) chips.push(chip(id++, CH.HHC, m, k, 16));
+        if (k === 0 || k === 8 || k === 11) chips.push(chip(id++, CH.BD, m, k, 16));
+        if (k === 4 || k === 12) chips.push(chip(id++, CH.SD, m, k, 16));
+        if (k === 7 || k === 14) chips.push(chip(id++, CH.SD, m, k, 16)); // ゴースト
+      } else {
+        const tom = k < 10 ? CH.SD : k < 12 ? CH.HT : k < 14 ? CH.LT : CH.FT;
+        chips.push(chip(id++, tom, m, k, 16));
+        if (k % 4 === 0) chips.push(chip(id++, CH.BD, m, k, 16));
+      }
+    }
+    if (m % 4 === 0) chips.push(chip(id++, CH.CY, m, 0, 1));
+  }
+  return { ...emptyDoc(), fields: { BPM: String(bpm) }, chips, nextId: id };
+}
+
+const sections: SectionPlan[] = [
+  { name: 'A', from: 0, to: 3, shift: 0 },
+  { name: 'B', from: 4, to: 7, shift: 0 },
+];
+
+function at(doc: DtxDoc, m: number, ch: number): number[] {
+  const t = buildTempoMap(doc);
+  return drumNotes(doc, t)
+    .filter((n) => n.m === m && n.ch === ch)
+    .map((n) => n.inBeat);
+}
+
+describe('特徴', () => {
+  it('16ビートとタム回しを見つける', () => {
+    const f = chartFeatures(song());
+    expect(f.has.hh16).toBe(true);
+    expect(f.has.tom16).toBe(true);
+    expect(f.has.leftPedal).toBe(false);
+    expect(f.feel).toBe('16');
+    expect(f.bpm).toBe(150);
+  });
+  it('フィルは小節の後半から', () => {
+    const d = song();
+    const fills = detectFills(drumNotes(d));
+    expect([...fills.keys()].sort()).toEqual([3, 7]);
+    expect(fills.get(3)).toBe(2);
+  });
+});
+
+describe('簡略化', () => {
+  it('段0はそのまま', () => {
+    const d = song();
+    const r = simplify({ doc: d, rung: 0, sections, keep: DEFAULT_KEEP });
+    expect(r.notesAfter).toBe(r.notesBefore);
+  });
+  it('ADVANCED相当：HHは8分、ゴーストは消える、バックビートと1拍目は残る', () => {
+    const r = simplify({ doc: song(), rung: 4, sections, keep: DEFAULT_KEEP });
+    expect(at(r.doc, 1, CH.HHC)).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5]);
+    expect(at(r.doc, 1, CH.SD)).toEqual([1, 3, 3.5]);
+    expect(at(r.doc, 1, CH.BD)).toEqual([0, 2]);
+    // フィルは8分に
+    const fillToms = drumNotes(r.doc).filter((n) => n.m === 3 && n.inBeat >= 2 && n.ch !== CH.BD);
+    expect(fillToms.map((n) => n.inBeat)).toEqual([2, 2.5, 3, 3.5]);
+    // セクション頭のクラッシュ
+    expect(at(r.doc, 4, CH.CY)).toEqual([0]);
+  });
+  it('BASIC相当：HHは4分、スネアは2・4拍', () => {
+    const r = simplify({ doc: song(), rung: 6, sections, keep: DEFAULT_KEEP });
+    expect(at(r.doc, 1, CH.HHC)).toEqual([0, 1, 2, 3]);
+    expect(at(r.doc, 1, CH.SD)).toEqual([1, 3]);
+    // 同時は2つまで（守るものは別）
+    const t = buildTempoMap(r.doc);
+    const ns = drumNotes(r.doc, t);
+    const counts = new Map<number, number>();
+    for (const n of ns) counts.set(Math.round(n.beat * 96), (counts.get(Math.round(n.beat * 96)) ?? 0) + 1);
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(3);
+  });
+  it('同じ中身の小節は同じ結果', () => {
+    const r = simplify({ doc: song(), rung: 5, sections, keep: DEFAULT_KEEP });
+    const pat = (m: number) =>
+      drumNotes(r.doc)
+        .filter((n) => n.m === m)
+        .map((n) => `${n.ch}@${n.inBeat}`)
+        .join(',');
+    expect(pat(1)).toBe(pat(5));
+    expect(pat(2)).toBe(pat(6));
+  });
+  it('左バスドラムは右へ寄せる（同じ時刻なら1つ）', () => {
+    const d: DtxDoc = { ...emptyDoc(), fields: { BPM: '120' }, chips: [chip(1, CH.LBD, 0, 1, 4), chip(2, CH.BD, 0, 0, 4), chip(3, CH.LBD, 0, 0, 4)], nextId: 9 };
+    const r = simplify({ doc: d, rung: 4, sections: [], keep: DEFAULT_KEEP });
+    expect(r.fate.get(1)).toEqual({ kind: 'moved', ch: CH.BD });
+    expect(r.fate.get(3)?.kind).toBe('removed');
+    expect(r.doc.chips.map((c) => c.ch).sort()).toEqual([CH.BD, CH.BD]);
+  });
+  it('手で直したものはそのとおり', () => {
+    const d = song();
+    const ghost = d.chips.find((c) => c.ch === CH.SD && c.m === 1 && c.f.n === 7)!;
+    const r = simplify({ doc: d, rung: 6, sections, keep: DEFAULT_KEEP, overrides: new Map([[ghost.id, 'keep']]) });
+    expect(r.fate.get(ghost.id)?.kind).toBe('kept');
+  });
+  it('目標のレベル帯まで段を動かす', () => {
+    const d = song(16, 170);
+    const g = generateToTarget({ doc: d, sections, keep: DEFAULT_KEEP }, 0, { min: 2, max: 3.2 });
+    expect(g.level).toBeLessThanOrEqual(3.2);
+    expect(g.tries.length).toBeGreaterThan(1);
+    expect(g.rung).toBeGreaterThan(0);
+  });
+  it('段のあいだに目標があるときは4小節のうち何小節かだけ次の段にする', () => {
+    const d = song(16, 170);
+    // 段ごとのレベルを測って、差の大きい隣り合う段のあいだを狙う
+    const lv = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((r) => generateToTarget({ doc: d, sections, keep: DEFAULT_KEEP }, r, { min: 0, max: 99 }, 1).level);
+    let r = 0;
+    for (let i = 1; i < 8; i++) if (lv[i] - lv[i + 1] > lv[r] - lv[r + 1]) r = i;
+    const mid = (lv[r] + lv[r + 1]) / 2;
+    const g = generateToTarget({ doc: d, sections, keep: DEFAULT_KEEP }, r, { min: mid - 0.05, max: mid + 0.05 });
+    expect(g.rung).toBe(r);
+    expect(g.ease).toBeGreaterThan(0);
+    expect(Math.abs(g.level - mid)).toBeLessThan(Math.min(lv[r] - mid, mid - lv[r + 1]));
+  });
+});

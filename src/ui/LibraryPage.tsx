@@ -6,7 +6,7 @@ import { CH } from '../dtx/model';
 import { freeWavNumber, setField } from '../edit/ops';
 import { INSTS, instInfo } from '../library/analyze';
 import type { Inst, LibraryKit } from '../library/db';
-import { backToChart, edit, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
+import { backToChart, edit, openPage, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
 import { kitFile, setKit, useKit } from '../store/kit';
 import {
   allItems,
@@ -135,6 +135,9 @@ export function LibraryPage() {
           <input value={st.q} onChange={(e) => useLibrary.setState({ q: e.target.value })} placeholder="名前・曲名・タグで検索" />
         </label>
         <span className="grow" />
+        <button className="btn small ghost" onClick={() => openPage('guideline')} title="手元の曲のレベル帯ごとの集計と基準文">
+          難易度ガイドライン
+        </button>
         <button className="btn small" onClick={() => void exportZip()} disabled={st.samples.length === 0} title="ライブラリ全体を ZIP に書き出します">
           ZIPでバックアップ
         </button>

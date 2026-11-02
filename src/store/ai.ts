@@ -1,0 +1,301 @@
+// AI（OpenRouter）の設定と呼び出し。キー・処理ごとのモデル・使いすぎ防止・使った額の記録。
+// キーは暗号化されないので、「保存しない」を選ぶとタブを閉じたら消える（sessionStorage）。
+import { create } from 'zustand';
+import { AiError, chat, estimateTokens, fetchKeyInfo, fetchModels, parseJsonLoose, type ChatResult, type Effort, type KeyInfo, type OrModel } from '../ai/openrouter';
+import { estimateCost, modelInfo, taskDef, TASKS, type AiTask } from '../ai/tasks';
+import { confirmDialog } from '../ui/dialogs';
+
+export interface TaskConfig {
+  model: string;
+  effort: Effort;
+  fallback: string | null;
+}
+
+export interface SpendLog {
+  at: number;
+  task: AiTask;
+  model: string;
+  cost: number;
+}
+
+export interface Spend {
+  month: string;
+  monthTotal: number;
+  day: string;
+  dayTotal: number;
+  log: SpendLog[];
+}
+
+export interface AiState {
+  key: string;
+  remember: boolean;
+  tasks: Record<AiTask, TaskConfig>;
+  models: OrModel[];
+  modelsAt: number;
+  modelsStatus: 'idle' | 'loading' | 'error';
+  modelsError: string | null;
+  keyInfo: KeyInfo | null;
+  keyStatus: 'none' | 'checking' | 'ok' | 'error';
+  keyError: string | null;
+  /** 1回の目安がこれを超えたら確認する（ドル） */
+  confirmOver: number;
+  /** このアプリで使う月の上限（ドル） */
+  monthlyCap: number;
+  spend: Spend;
+  /** 実行中の処理 */
+  running: Partial<Record<AiTask, number>>;
+}
+
+const K_SETTINGS = 'dtxe.ai.v1';
+const K_KEY = 'dtxe.ai.key';
+const K_MODELS = 'dtxe.ai.models.v1';
+const K_SPEND = 'dtxe.ai.spend.v1';
+
+export const defaultTasks = (): Record<AiTask, TaskConfig> =>
+  Object.fromEntries(TASKS.map((t) => [t.id, { model: t.model, effort: t.effort, fallback: null }])) as Record<AiTask, TaskConfig>;
+
+function readJson<T>(store: Storage | undefined, k: string): T | null {
+  try {
+    const raw = store?.getItem(k);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(store: Storage | undefined, k: string, v: unknown) {
+  try {
+    store?.setItem(k, JSON.stringify(v));
+  } catch {
+    // 保存できなくても動く
+  }
+}
+
+const ls = typeof localStorage !== 'undefined' ? localStorage : undefined;
+const ss = typeof sessionStorage !== 'undefined' ? sessionStorage : undefined;
+
+const today = () => new Date().toISOString().slice(0, 10);
+const thisMonth = () => today().slice(0, 7);
+
+function freshSpend(s: Spend | null): Spend {
+  const base: Spend = s ?? { month: thisMonth(), monthTotal: 0, day: today(), dayTotal: 0, log: [] };
+  const out = { ...base };
+  if (out.month !== thisMonth()) Object.assign(out, { month: thisMonth(), monthTotal: 0 });
+  if (out.day !== today()) Object.assign(out, { day: today(), dayTotal: 0 });
+  return out;
+}
+
+function initial(): AiState {
+  const saved = readJson<{ remember?: boolean; tasks?: Partial<Record<AiTask, TaskConfig>>; confirmOver?: number; monthlyCap?: number }>(ls, K_SETTINGS) ?? {};
+  const remember = saved.remember ?? true;
+  let key = '';
+  try {
+    key = (remember ? ls?.getItem(K_KEY) : ss?.getItem(K_KEY)) ?? ss?.getItem(K_KEY) ?? '';
+  } catch {
+    key = '';
+  }
+  const cache = readJson<{ at: number; models: OrModel[] }>(ls, K_MODELS);
+  const tasks = defaultTasks();
+  for (const t of TASKS) if (saved.tasks?.[t.id]) tasks[t.id] = { ...tasks[t.id], ...saved.tasks[t.id] };
+  return {
+    key,
+    remember,
+    tasks,
+    models: cache?.models ?? [],
+    modelsAt: cache?.at ?? 0,
+    modelsStatus: 'idle',
+    modelsError: null,
+    keyInfo: null,
+    keyStatus: key ? 'checking' : 'none',
+    keyError: null,
+    confirmOver: saved.confirmOver ?? 0.3,
+    monthlyCap: saved.monthlyCap ?? 5,
+    spend: freshSpend(readJson<Spend>(ls, K_SPEND)),
+    running: {},
+  };
+}
+
+export const useAi = create<AiState>(initial);
+const get = useAi.getState;
+const set = useAi.setState;
+
+function persistSettings() {
+  const s = get();
+  writeJson(ls, K_SETTINGS, { remember: s.remember, tasks: s.tasks, confirmOver: s.confirmOver, monthlyCap: s.monthlyCap });
+}
+
+export const hasAiKey = (s: AiState = get()) => s.key.trim().length > 0;
+export const useHasAiKey = () => useAi((s) => s.key.trim().length > 0);
+
+/** キーを持たないときに AI のボタンへ出す説明 */
+export const NO_KEY_TITLE = 'キーを設定すると使えます（設定 › AI）';
+
+export function setKey(key: string) {
+  const k = key.trim();
+  set({ key: k, keyInfo: null, keyStatus: k ? 'checking' : 'none', keyError: null });
+  try {
+    if (get().remember) {
+      if (k) ls?.setItem(K_KEY, k);
+      else ls?.removeItem(K_KEY);
+      ss?.removeItem(K_KEY);
+    } else {
+      ls?.removeItem(K_KEY);
+      if (k) ss?.setItem(K_KEY, k);
+      else ss?.removeItem(K_KEY);
+    }
+  } catch {
+    // 保存できなくてもこのタブでは使える
+  }
+  if (k) void checkKey();
+}
+
+export function setRemember(remember: boolean) {
+  set({ remember });
+  persistSettings();
+  setKey(get().key);
+}
+
+let keyAbort: AbortController | null = null;
+
+/** キーの確認と使用額の取得（/api/v1/key） */
+export async function checkKey(): Promise<boolean> {
+  const k = get().key;
+  if (!k) return false;
+  keyAbort?.abort();
+  const ac = (keyAbort = new AbortController());
+  set({ keyStatus: 'checking', keyError: null });
+  try {
+    const info = await fetchKeyInfo(k, ac.signal);
+    if (ac.signal.aborted) return false;
+    set({ keyInfo: info, keyStatus: 'ok' });
+    return true;
+  } catch (e) {
+    if (ac.signal.aborted) return false;
+    set({ keyStatus: 'error', keyError: (e as Error).message });
+    return false;
+  }
+}
+
+/** モデル一覧（キー不要）。1日たったら取り直す */
+export async function refreshModels(force = false): Promise<void> {
+  const s = get();
+  if (s.modelsStatus === 'loading') return;
+  if (!force && s.models.length > 0 && Date.now() - s.modelsAt < 24 * 3600 * 1000) return;
+  set({ modelsStatus: 'loading', modelsError: null });
+  try {
+    const models = await fetchModels();
+    const at = Date.now();
+    set({ models, modelsAt: at, modelsStatus: 'idle' });
+    writeJson(ls, K_MODELS, { at, models });
+  } catch (e) {
+    set({ modelsStatus: 'error', modelsError: (e as Error).message });
+  }
+}
+
+export function setTaskConfig(task: AiTask, patch: Partial<TaskConfig>) {
+  set((s) => ({ tasks: { ...s.tasks, [task]: { ...s.tasks[task], ...patch } } }));
+  persistSettings();
+}
+
+export function resetTasks() {
+  set({ tasks: defaultTasks() });
+  persistSettings();
+}
+
+export function setLimits(patch: { confirmOver?: number; monthlyCap?: number }) {
+  set(patch);
+  persistSettings();
+}
+
+/** 処理ごとの1回の目安（ドル） */
+export function taskCostEstimate(task: AiTask, s: AiState = get(), tokens?: { in: number; out: number }): number | null {
+  const def = taskDef(task);
+  const cfg = s.tasks[task];
+  return estimateCost(modelInfo(cfg.model, s.models), tokens ?? def.est, cfg.effort, !!def.needs.web);
+}
+
+function recordSpend(task: AiTask, model: string, cost: number) {
+  const sp = freshSpend(get().spend);
+  const next: Spend = {
+    ...sp,
+    monthTotal: sp.monthTotal + cost,
+    dayTotal: sp.dayTotal + cost,
+    log: [{ at: Date.now(), task, model, cost }, ...sp.log].slice(0, 200),
+  };
+  set({ spend: next });
+  writeJson(ls, K_SPEND, next);
+}
+
+export interface RunOptions {
+  system: string;
+  user: string;
+  schema?: { name: string; schema: object };
+  /** 出力の上限（トークン） */
+  maxTokens?: number;
+  signal?: AbortSignal;
+  /** 確認ダイアログを出さない（再調整ループの2回目以降など） */
+  quiet?: boolean;
+}
+
+export interface RunResult<T> extends ChatResult {
+  data: T;
+  costUsed: number;
+}
+
+/**
+ * AI を呼ぶ。キーの有無・月の上限・1回の目安の確認を通してから送り、使った額を記録する。
+ * 断られたら null を返す。
+ */
+export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T> | null> {
+  const s = get();
+  if (!hasAiKey(s)) throw new AiError(NO_KEY_TITLE);
+  const def = taskDef(task);
+  const cfg = s.tasks[task];
+  const info = modelInfo(cfg.model, s.models);
+  const tokensIn = estimateTokens(o.system + o.user) + 50;
+  const est = estimateCost(info, { in: tokensIn, out: o.maxTokens ? Math.min(o.maxTokens, def.est.out * 1.5) : def.est.out }, cfg.effort, !!def.needs.web) ?? 0;
+  const spend = freshSpend(s.spend);
+  if (spend.monthTotal + est > s.monthlyCap) {
+    throw new AiError(`今月の上限（$${s.monthlyCap.toFixed(2)}）に届くため止めました。設定 › AI で上限を変えられます`);
+  }
+  if (!o.quiet && est > s.confirmOver) {
+    const ok = await confirmDialog({
+      title: `${def.label}をAIに頼みますか？`,
+      body: `1回の目安は約 $${est.toFixed(3)} です（設定の「確認する額」$${s.confirmOver.toFixed(2)} を超えています）。\nモデル: ${info?.name ?? cfg.model}`,
+      ok: '頼む',
+    });
+    if (!ok) return null;
+  }
+  set((st) => ({ running: { ...st.running, [task]: (st.running[task] ?? 0) + 1 } }));
+  try {
+    const r = await chat({
+      key: s.key,
+      model: cfg.model,
+      fallback: cfg.fallback,
+      messages: [
+        { role: 'system', content: o.system },
+        { role: 'user', content: o.user },
+      ],
+      effort: cfg.effort,
+      reasoning: info ? info.reasoning : undefined,
+      schema: o.schema,
+      structured: info?.structured ?? false,
+      json: info ? info.json : true,
+      web: !!def.needs.web,
+      maxTokens: o.maxTokens,
+      signal: o.signal,
+    });
+    const used = r.model ? modelInfo(r.model, s.models) : info;
+    const cost = r.cost ?? estimateCost(used, { in: r.promptTokens, out: r.completionTokens }, 'none', false) ?? est;
+    recordSpend(task, r.model, cost);
+    const data = o.schema ? parseJsonLoose<T>(r.text) : (r.text as unknown as T);
+    return { ...r, data, costUsed: cost };
+  } finally {
+    set((st) => ({ running: { ...st.running, [task]: Math.max(0, (st.running[task] ?? 1) - 1) } }));
+  }
+}
+
+/** 起動時：キーがあれば確かめる */
+export function initAi() {
+  if (get().key) void checkKey();
+}
