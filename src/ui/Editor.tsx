@@ -34,6 +34,7 @@ import { VelocityPanel } from './VelocityPanel';
 import { nudgeSelection, setPreset, toggleVelMode, useVel } from '../store/velocity';
 import { TempoPage } from './TempoPage';
 import { StemsPage } from './StemsPage';
+import { LibraryPage } from './LibraryPage';
 import { toggleBgmMute, toggleDrumMute } from '../store/stems';
 import { TopBar } from './TopBar';
 import { Transport } from './Transport';
@@ -252,6 +253,8 @@ export function Editor() {
         <SettingsPage />
       ) : page === 'stems' ? (
         <StemsPage />
+      ) : page === 'library' ? (
+        <LibraryPage />
       ) : (
         <>
           <TopBar folderInput={folderInput} />
@@ -272,7 +275,13 @@ export function Editor() {
 }
 
 /** フォルダ選択の代わり（File System Access API が無いブラウザ用） */
-export function FolderInput({ inputRef }: { inputRef: React.RefObject<HTMLInputElement | null> }) {
+export function FolderInput({
+  inputRef,
+  onFiles,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onFiles?: (list: FileList | null) => void;
+}) {
   return (
     <input
       ref={(el) => {
@@ -283,7 +292,8 @@ export function FolderInput({ inputRef }: { inputRef: React.RefObject<HTMLInputE
       multiple
       hidden
       onChange={(e) => {
-        void openFolderFromInput(e.target.files);
+        if (onFiles) onFiles(e.target.files);
+        else void openFolderFromInput(e.target.files);
         e.target.value = '';
       }}
     />

@@ -1,6 +1,6 @@
 // ファイルを開く・保存する流れ。
 import { zipSync } from 'fflate';
-import { encodeWav, kitByFile, loadKit } from '../audio/kit';
+import { virtualSound } from '../audio/sounds';
 import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
 import { decodeDtx, encodeDtx } from '../dtx/encoding';
@@ -226,25 +226,33 @@ export async function newEmptySong() {
 
 // ---- 保存 ---------------------------------------------------------------------
 
-/** 内蔵キットの音で、曲フォルダにまだ無いもの */
-async function kitFilesNeeded(doc: DtxDoc, folder: SongFolder | null): Promise<{ path: string; bytes: Uint8Array }[]> {
-  const out: { path: string; bytes: Uint8Array }[] = [];
+/** 曲フォルダにまだ無い、エディタが用意した音（標準キット・ライブラリ）。出典も返す */
+async function kitFilesNeeded(doc: DtxDoc, folder: SongFolder | null): Promise<{ path: string; bytes: Uint8Array; origin: string; library: boolean }[]> {
+  const out: { path: string; bytes: Uint8Array; origin: string; library: boolean }[] = [];
   const pathWav = doc.fields['PATH_WAV'] ?? '';
   const names = new Set<string>();
+  const used = new Set(doc.chips.map((c) => c.v));
   for (const [k, v] of Object.entries(doc.fields)) {
     if (!/^WAV[0-9A-Z]{2}$/.test(k)) continue;
-    const kit = kitByFile.get(v.toLowerCase());
-    if (!kit || names.has(kit.file)) continue;
-    if (findFile(folder, v, pathWav)) continue;
-    names.add(kit.file);
-  }
-  if (names.size === 0) return out;
-  const bufs = await loadKit();
-  for (const n of names) {
-    const b = bufs.get(n.toLowerCase());
-    if (b) out.push({ path: pathWav ? `${pathWav.replace(/\\/g, '/').replace(/\/+$/, '')}/${n}` : n, bytes: encodeWav(b) });
+    if (!used.has(parseInt(k.slice(3), 36))) continue;
+    if (names.has(v.toLowerCase()) || findFile(folder, v, pathWav)) continue;
+    const vs = virtualSound(v);
+    if (!vs) continue;
+    names.add(v.toLowerCase());
+    const bytes = await vs.bytes();
+    if (!bytes) continue;
+    const name = v.replace(/\\/g, '/').split('/').pop()!;
+    out.push({ path: pathWav ? `${pathWav.replace(/\\/g, '/').replace(/\/+$/, '')}/${name}` : name, bytes, origin: vs.origin, library: !!vs.sampleId });
   }
   return out;
+}
+
+/** 他の曲から取り込んだ音を使っているときは、出典を知らせる */
+function creditNote(kit: { path: string; origin: string; library: boolean }[]): string {
+  const lib = kit.filter((k) => k.library);
+  if (!lib.length) return '';
+  const songs = [...new Set(lib.map((k) => k.origin))];
+  return `。他の曲から取り込んだ音を使っています（出典: ${songs.slice(0, 3).join('、')}${songs.length > 3 ? ' ほか' : ''}）。個人の曲づくりの範囲で使ってください`;
 }
 
 function encodeForSave(doc: DtxDoc) {
@@ -302,7 +310,7 @@ export async function save(opts: { as?: boolean } = {}) {
       if (side) await writeFile(folder, sidecarName(fileName), side);
       markSidecarSaved();
       markSaved(doc, { meta: { ...get().meta, fileName, recentId: recentIdFor(folder, fileName) } });
-      toast(`保存しました: ${folder.name}/${fileName}${kit.length ? `（内蔵キットの音 ${kit.length} 個も保存）` : ''}`, 'ok');
+      toast(`保存しました: ${folder.name}/${fileName}${kit.length ? `（キットの音 ${kit.length} 個も保存）` : ''}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
       return;
     }
     if (supportsDirectWrite()) {
@@ -333,7 +341,7 @@ export async function save(opts: { as?: boolean } = {}) {
       folder = target;
       const labels = await readSetDefLabels(folder);
       markSaved(doc, { folder, meta: { ...get().meta, fileName, siblings: siblingsOf(folder, labels), recentId: recentIdFor(folder, fileName) } });
-      toast(`保存しました: ${folder.name}/${fileName}`, 'ok');
+      toast(`保存しました: ${folder.name}/${fileName}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
       return;
     }
     // フォルダに直接書けないブラウザ：ダウンロード
@@ -348,7 +356,7 @@ export async function save(opts: { as?: boolean } = {}) {
   }
 }
 
-function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; bytes: Uint8Array }[], folder: SongFolder | null, side: Uint8Array | null = null) {
+function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; bytes: Uint8Array; origin: string; library: boolean }[], folder: SongFolder | null, side: Uint8Array | null = null) {
   const memoryOnly = folder && !folder.dir && !findFile(folder, fileName) ? [...folder.files.values()].filter((f) => !/\.dtx$/i.test(f.name)) : [];
   // ステムや書き出した音（メモリにだけあるもの）も一緒に入れる
   for (const f of pendingFiles(folder)) if (!memoryOnly.includes(f)) memoryOnly.push(f);
@@ -366,7 +374,7 @@ function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; 
     const zip = zipSync(files, { level: 0 });
     const name = `${(get().doc.fields['TITLE'] || 'song').replace(/[\\/:*?"<>|]/g, '_')}.zip`;
     downloadBytes(name, zip, 'application/zip');
-    toast(`${name} をダウンロードしました。展開したファイルを曲フォルダに入れてください`, 'ok', 7000);
+    toast(`${name} をダウンロードしました。展開したファイルを曲フォルダに入れてください${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 10000 : 7000);
   })();
 }
 

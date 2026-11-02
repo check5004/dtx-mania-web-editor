@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { startAutosave } from './app/fileActions';
 import { useEditor } from './store/editor';
 import './store/stems';
+import './store/kit';
+import { loadLibrary } from './store/library';
 import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
@@ -22,6 +24,7 @@ function Toasts() {
 export function App() {
   const screen = useEditor((s) => s.screen);
   useEffect(() => startAutosave(), []);
+  useEffect(() => void loadLibrary(), []);
   return (
     <>
       {screen === 'home' ? <Home /> : <Editor />}

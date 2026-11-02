@@ -111,7 +111,7 @@ export function wavVariant(d: Draft<DtxDoc>, base: number, vel: number): number 
 }
 
 /** チップが使っている WAV 番号（ヘッダの生の行に書かれたチップ＝#IF の中なども含める） */
-function usedWavs(d: Pick<DtxDoc, 'chips' | 'header'>): Set<number> {
+export function usedWavs(d: Pick<DtxDoc, 'chips' | 'header'>): Set<number> {
   const used = new Set<number>();
   for (const c of d.chips) if (c.ch !== CH.BPM && c.ch !== CH.BPM_EX) used.add(c.v);
   for (const h of d.header as readonly HeaderLine[]) {
@@ -143,6 +143,21 @@ export function pruneVariants(d: Draft<DtxDoc>): number {
     const key = soundKeyOf(fields, no);
     const others = wavNumbers(fields).some((o) => o !== no && soundKeyOf(fields, o) === key);
     if (!others) continue;
+    for (const k of ['WAV', 'VOLUME', 'WAVVOL', 'PAN', 'WAVPAN']) if (fields[k + z] !== undefined) setField(d, k + z, undefined);
+    n++;
+  }
+  return n;
+}
+
+/** エディタが足した WAV 定義（読み込んだファイルに無かった行）で、どのチップも使っていないものを消す */
+export function pruneUnusedCreated(d: Draft<DtxDoc>): number {
+  const fields = d.fields as Fields;
+  const used = usedWavs(d as DtxDoc);
+  let n = 0;
+  for (const h of [...(d.header as HeaderLine[])]) {
+    if (h.kind !== 'field' || h.orig || !/^WAV[0-9A-Z]{2}$/.test(h.key)) continue;
+    const z = h.key.slice(3);
+    if (used.has(parseInt(z, 36))) continue;
     for (const k of ['WAV', 'VOLUME', 'WAVVOL', 'PAN', 'WAVPAN']) if (fields[k + z] !== undefined) setField(d, k + z, undefined);
     n++;
   }

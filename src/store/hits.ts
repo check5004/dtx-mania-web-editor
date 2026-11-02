@@ -1,7 +1,7 @@
 // 叩いた（キー・電子ドラム）ときの処理。マウス入力では試し打ち、キー入力ではカーソル位置に置く、
 // 録音では再生中の位置に置く（グリッドに吸着、ループ毎に重ね録り）。
 import { engine } from '../audio/engine';
-import { kitByChannel, loadKit } from '../audio/kit';
+import { virtualSound } from '../audio/sounds';
 import { DRUM_LANES } from '../dtx/model';
 import { snapToGrid } from '../edit/ops';
 import { emitHit, setHitHandler } from '../input/midi';
@@ -9,7 +9,7 @@ import { midiToVel } from '../edit/velocity';
 import { useInputSettings } from '../input/settings';
 import { loopSec, useAssist } from './assist';
 import { tempoOf } from './derived';
-import { chipAt, deleteChips, onPlayback, placeChips, useEditor, wavForLane } from './editor';
+import { chipAt, currentKitFile, deleteChips, onPlayback, placeChips, useEditor, wavForLane } from './editor';
 import { placeVel } from './velocity';
 
 let take = 0;
@@ -31,10 +31,10 @@ export function previewLane(lane: number, alt: boolean, gain = 1) {
   }
   const def = DRUM_LANES[lane];
   const ch = alt && def.alt !== undefined ? def.alt : def.main;
-  const kit = kitByChannel.get(ch);
-  if (!kit) return;
-  void loadKit().then((m) => {
-    const buf = m.get(kit.file.toLowerCase());
+  const file = currentKitFile(ch);
+  const v = file ? virtualSound(file) : null;
+  if (!v) return;
+  void v.load().then((buf) => {
     if (buf) engine.previewBuffer(buf, gain);
   });
 }

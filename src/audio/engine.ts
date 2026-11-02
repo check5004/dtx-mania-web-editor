@@ -1,13 +1,12 @@
 // 再生エンジン。Web Audio の先読みスケジューラで BGM とチップ音を鳴らす。
 // スロー再生（音程そのまま）・区間ループ・再生中の譜面の書き換え・レーンのミュートに対応する。
-import { loadKit } from './kit';
 
 export interface WavSource {
   no: number;
   /** キャッシュのキー（同じ音を二度読まない） */
   key: string;
-  /** 内蔵キットのファイル名（小文字）。曲フォルダに無いとき使う */
-  kitFile?: string;
+  /** 曲フォルダに無いとき、エディタが用意する音（標準キット・ライブラリ） */
+  fallback?: () => Promise<AudioBuffer | null>;
   load?: () => Promise<ArrayBuffer>;
   volume: number;
   pan: number;
@@ -308,10 +307,10 @@ class AudioEngine {
           try {
             return await ctx.decodeAudioData(await src.load());
           } catch {
-            if (!src.kitFile) return null;
+            if (!src.fallback) return null;
           }
         }
-        if (src.kitFile) return (await loadKit()).get(src.kitFile) ?? null;
+        if (src.fallback) return await src.fallback();
         return null;
       })();
       this.cache.set(src.key, p);

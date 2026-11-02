@@ -722,9 +722,9 @@ kbd {
 
 .kit-row {
   display: grid;
-  grid-template-columns: 8px 78px minmax(0, 1fr) 26px;
+  grid-template-columns: 8px 64px minmax(0, 1fr) 38px 26px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 8px;
   border-radius: 8px;
   background: var(--card);
@@ -2502,5 +2502,434 @@ button.ms.s.on {
   }
   .stems-grid {
     grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+
+/* ---- キット ---- */
+
+.kit-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line3);
+  background: var(--card);
+}
+
+.kit-pick .field {
+  height: 30px;
+  font-weight: 600;
+}
+
+.kit-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  background: #13212c;
+  color: var(--accent);
+}
+
+.kit-row .kit-badge {
+  text-align: center;
+  padding: 1px 2px;
+}
+
+.kit-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--raise);
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.kit-badge.lib {
+  background: #2a2414;
+  color: var(--amber);
+}
+
+.kit-badge.own {
+  background: #14222b;
+  color: var(--accent);
+}
+
+/* ---- 音源ライブラリ ---- */
+
+.lib-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lib-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line3);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--mute);
+  width: min(320px, 40vw);
+}
+
+.lib-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.lib-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+}
+
+.lib-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  min-height: 0;
+}
+
+.lib-h {
+  margin: 14px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mute);
+  letter-spacing: 0.04em;
+}
+
+.lib-side-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-side-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.lib-side-row:hover {
+  background: var(--raise);
+}
+
+.lib-side-row.on {
+  background: #14222b;
+  color: var(--text);
+}
+
+.lib-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lib-tags button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line3);
+  border-radius: 11px;
+  background: none;
+  color: var(--text3);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lib-tags button.on {
+  border-color: var(--accent);
+  background: #14222b;
+  color: var(--accent);
+}
+
+.lib-store {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--mute);
+  line-height: 1.7;
+}
+
+.lib-main {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 16px 24px;
+}
+
+.lib-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line3);
+  background: var(--card);
+  font-size: 12.5px;
+}
+
+.lib-banner.ok {
+  border-color: #24513b;
+  background: #0f1d16;
+}
+
+.lib-banner.busy {
+  border-color: #1f4357;
+  background: #0f1a22;
+}
+
+.spin {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--line3);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ok-ic {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ok);
+  color: #06140d;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.lib-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.lib-tr {
+  display: grid;
+  grid-template-columns: 28px 128px minmax(120px, 1.4fr) minmax(120px, 1fr) minmax(90px, 1fr) 70px 44px;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.lib-tr:hover {
+  background: #121821;
+}
+
+.lib-tr.on {
+  background: #13202a;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.lib-tr.head {
+  min-height: 30px;
+  font-size: 11px;
+  color: var(--mute);
+  cursor: default;
+  background: none;
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.lib-tr .nm {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lib-tr .nm .lbl {
+  font-size: 10.5px;
+}
+
+.play-mini {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line3);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text2);
+  cursor: pointer;
+}
+
+.play-mini:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.lib-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text3);
+  line-height: 1.8;
+}
+
+.lib-detail {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  padding: 14px;
+  min-height: 0;
+}
+
+.lib-detail-in {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.big-wave {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
+.kvs {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+
+.kvs .field {
+  height: 28px;
+}
+
+.sims {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sims button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text2);
+  font: inherit;
+  font-size: 11.5px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.sims button:hover {
+  background: var(--raise);
+}
+
+.lib-assign {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.lib-assign .field {
+  height: 30px;
+}
+
+.kits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kit-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.kit-card > .row {
+  gap: 10px;
+}
+
+.kit-card.on {
+  border-color: #1f4357;
+  background: #101b23;
+}
+
+.kit-lanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 14px;
+  margin-top: 10px;
+}
+
+.kit-lane {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.kit-lane .field {
+  height: 26px;
+}
+
+@media (max-width: 1100px) {
+  .lib-body {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .lib-detail {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    max-height: 40vh;
   }
 }

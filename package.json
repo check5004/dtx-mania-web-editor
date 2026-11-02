@@ -1,7 +1,7 @@
 {
   "name": "dtx-mania-web-editor",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "DTXManiaNX向けのWebドラム譜面エディタ",
   "license": "MIT",
@@ -26,6 +26,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
+    "spessasynth_core": "^4.4.4",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"

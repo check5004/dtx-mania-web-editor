@@ -155,6 +155,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: '曲に合わせてクリックでBPMを測る', key: 'T', run: () => openTap(true) },
             { label: 'テンポと開始位置を合わせる…', run: openTempo },
             { label: 'ステムとミックス…', run: () => openPage('stems') },
+            { label: '音源ライブラリ…', run: () => openPage('library') },
             { label: '前の小節をカーソルの小節に複製', key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
             '-',
             { label: '設定（電子ドラム・キー・遅延補正）…', run: openSettings },

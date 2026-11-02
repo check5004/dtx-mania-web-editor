@@ -2,7 +2,7 @@
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer';
 import { create } from 'zustand';
 import { engine, type Mix } from '../audio/engine';
-import { kitByChannel } from '../audio/kit';
+import { builtinFile } from '../audio/sounds';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
@@ -233,24 +233,44 @@ function afterSoundChange(label: string) {
 
 // ---- チップの配置 ---------------------------------------------------------------
 
-/** 置くチップの WAV 番号。レーンで使っている音、無ければ内蔵キットを登録する */
+/** 今のキットのそのチャンネルの音（ファイル名）。キットの選択は store/kit が受け持つ（循環を避けるため関数で受け取る） */
+let kitFileProvider: (ch: number) => string | null = (ch) => builtinFile('std', ch);
+/** 今のキットのそのチャンネルの音（試し打ち用） */
+export function currentKitFile(ch: number): string | null {
+  return kitFileProvider(ch);
+}
+
+export function setKitFileProvider(fn: (ch: number) => string | null) {
+  kitFileProvider = fn;
+}
+
+function findWavByPath(fields: Record<string, string>, file: string): number | null {
+  let hit: number | null = null;
+  for (const [k, v] of Object.entries(fields)) {
+    if (!/^WAV[0-9A-Z]{2}$/.test(k) || v.toLowerCase() !== file.toLowerCase()) continue;
+    const no = parseInt(k.slice(3), 36);
+    // 強さ違い（#VOLUME 付き）より、そのままの音を選ぶ
+    if (hit === null || (fields['VOLUME' + k.slice(3)] === undefined && fields['VOLUME' + toBase36x2(hit)] !== undefined)) hit = no;
+  }
+  return hit;
+}
+
+/** 置くチップの WAV 番号。レーンで使っている音、無ければ今のキットの音を登録する */
 function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
   const info = drumChannel(ch);
   const base = info ? info.base : ch;
   const assigned = get().laneWav[base];
   if (assigned !== undefined && d.fields['WAV' + toBase36x2(assigned)] !== undefined) return assigned;
-  const kit = kitByChannel.get(base);
-  if (!kit) return assigned ?? 1;
+  const file = kitFileProvider(base);
+  if (!file) return assigned ?? 1;
   // 同じキットの音がもう登録されていれば使う
-  for (const [k, v] of Object.entries(d.fields)) {
-    if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === kit.file.toLowerCase()) {
-      const no = parseInt(k.slice(3), 36);
-      set((s) => ({ laneWav: { ...s.laneWav, [base]: no } }));
-      return no;
-    }
+  const had = findWavByPath(d.fields, file);
+  if (had !== null) {
+    set((s) => ({ laneWav: { ...s.laneWav, [base]: had } }));
+    return had;
   }
   const no = freeWavNumber(d as DtxDoc) ?? 1;
-  setField(d, 'WAV' + toBase36x2(no), kit.file);
+  setField(d, 'WAV' + toBase36x2(no), file);
   set((s) => ({ laneWav: { ...s.laneWav, [base]: no } }));
   return no;
 }
@@ -314,12 +334,8 @@ export function wavForLane(lane: number, alt: boolean): number | null {
   const ch = alt && def.alt !== undefined ? def.alt : def.main;
   const assigned = s.laneWav[ch];
   if (assigned !== undefined && s.doc.fields['WAV' + toBase36x2(assigned)] !== undefined) return assigned;
-  const kit = kitByChannel.get(ch);
-  if (!kit) return null;
-  for (const [k, v] of Object.entries(s.doc.fields)) {
-    if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === kit.file.toLowerCase()) return parseInt(k.slice(3), 36);
-  }
-  return null;
+  const file = kitFileProvider(ch);
+  return file ? findWavByPath(s.doc.fields, file) : null;
 }
 
 /** 前の小節のドラムをこの小節に写す（Ctrl+D） */

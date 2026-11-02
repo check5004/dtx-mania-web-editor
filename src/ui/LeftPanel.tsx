@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { KIT_SOUNDS, kitByChannel } from '../audio/kit';
+import { laneByCh, virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
 import { DRUM_LANES } from '../dtx/model';
 import { serializeHeader } from '../dtx/serialize';
 import { freeWavNumber, setField } from '../edit/ops';
 import { audioFiles, findFile } from '../fs/folder';
 import { wavPan, wavVolume } from '../store/derived';
-import { edit, prepareSounds, previewWav, setFieldValue, setLaneWav, useEditor, type LeftTab } from '../store/editor';
+import { edit, openPage, prepareSounds, previewWav, setFieldValue, setLaneWav, toast, useEditor, type LeftTab } from '../store/editor';
+import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
+import { useLibrary } from '../store/library';
 import { chooseDialog } from './dialogs';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -46,46 +48,92 @@ function wavList(fields: Record<string, string>): { no: number; path: string }[]
     .sort((a, b) => a.no - b.no);
 }
 
-/** 内蔵キットの音を WAV に登録して、そのレーンの音にする */
+/** 今のキットの音を WAV に登録して、そのレーンの音にする */
 function useKitSound(ch: number) {
-  const kit = kitByChannel.get(ch);
-  if (!kit) return;
+  const file = kitFile(ch);
+  if (!file) return;
   let no = -1;
-  edit(`${kit.label}に内蔵キットの音を使う`, (d) => {
+  const label = laneByCh.get(ch)?.label ?? 'レーン';
+  edit(`${label}にキットの音を使う`, (d) => {
     for (const [k, v] of Object.entries(d.fields)) {
-      if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === kit.file.toLowerCase()) no = parseInt(k.slice(3), 36);
+      if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === file.toLowerCase() && d.fields['VOLUME' + k.slice(3)] === undefined) no = parseInt(k.slice(3), 36);
     }
     if (no < 0) {
       no = freeWavNumber(d) ?? 1;
-      setField(d, 'WAV' + toBase36x2(no), kit.file);
+      setField(d, 'WAV' + toBase36x2(no), file);
     }
   });
   if (no < 0) {
-    // 変化が無かった（すでに登録済み）
-    const f = Object.entries(useEditor.getState().doc.fields).find(([k, v]) => /^WAV/.test(k) && v.toLowerCase() === kit.file.toLowerCase());
+    const f = Object.entries(useEditor.getState().doc.fields).find(([k, v]) => /^WAV/.test(k) && v.toLowerCase() === file.toLowerCase());
     if (f) no = parseInt(f[0].slice(3), 36);
   }
   if (no > 0) setLaneWav(ch, no);
-  void prepareSounds();
+  void prepareSounds().then(() => no > 0 && previewWav(no));
 }
 
 function KitTab() {
   const fields = useEditor((s) => s.doc.fields);
   const laneWav = useEditor((s) => s.laneWav);
+  const folder = useEditor((s) => s.folder);
+  const kitId = useKit((s) => s.kitId);
+  useLibrary((s) => s.kits);
+  useLibrary((s) => s.samples);
+  const choices = kitChoices();
+  const cur = choices.find((k) => k.id === kitId) ?? choices[0];
   const wavs = wavList(fields);
   const rows = DRUM_LANES.flatMap((l) => [
     { ch: l.main, name: l.mainName, color: l.color, key: l.key },
     ...(l.alt !== undefined ? [{ ch: l.alt, name: l.altName!, color: l.altColor ?? l.color, key: `${l.key}*` }] : []),
   ]);
+  const groups = ['標準キット', '曲から', '自分のキット'] as const;
   return (
     <>
-      <div className="section-title">レーンに置く音</div>
-      <p className="lbl" style={{ margin: 0 }}>
-        譜面をクリックして置くチップの音です。曲フォルダに音が無いレーンは、内蔵キットの音を使い、保存するときにWAVファイルとして曲フォルダに書き出します。
+      <div className="section-title">使用中のキット</div>
+      <div className="kit-pick">
+        <span className="kit-ic">{Icon.drum(16)}</span>
+        <select className="field" value={cur?.id} onChange={(e) => setKit(e.target.value)} aria-label="使うキット">
+          {groups.map((g) => {
+            const list = choices.filter((c) => c.group === g);
+            return list.length ? (
+              <optgroup key={g} label={g}>
+                {list.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null;
+          })}
+        </select>
+      </div>
+      <p className="lbl" style={{ margin: 0, lineHeight: 1.6 }}>
+        {cur?.desc}。これから置くチップに使い、保存するときに使った音だけを曲フォルダへ書き出します。
       </p>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <button
+          className="btn small"
+          onClick={() => {
+            const n = applyKitToChips();
+            toast(n ? `置いてあるチップ ${n} 個の音を「${cur?.name}」にしました（Ctrl+Z で戻せます）` : '替えるチップはありませんでした', n ? 'ok' : 'info');
+          }}
+          title="置いてあるチップの音も、このキットの音に替えます（強さは保ちます）"
+        >
+          置いてあるチップも替える
+        </button>
+        <button className="btn small ghost" onClick={() => openPage('library')}>
+          {Icon.library(14)} ライブラリ
+        </button>
+      </div>
+      <div className="section-title" style={{ marginTop: 6 }}>
+        レーンの音
+      </div>
       {rows.map((r) => {
         const no = laneWav[r.ch];
         const valid = no !== undefined && fields['WAV' + toBase36x2(no)] !== undefined;
+        const path = valid ? fields['WAV' + toBase36x2(no!)] : kitFile(r.ch);
+        const own = valid && !!findFile(folder, path ?? '', fields['PATH_WAV'] ?? '');
+        const vs = !own && path ? virtualSound(path) : null;
+        const badge = own ? '曲' : vs?.sampleId ? '曲から' : '標準';
         return (
           <div key={r.ch} className="kit-row">
             <span className="dot" style={{ background: r.color }} />
@@ -96,18 +144,23 @@ function KitTab() {
               className="field mono"
               style={{ height: 26, fontSize: 11.5 }}
               value={valid ? String(no) : 'kit'}
+              title={vs ? `${path}（${vs.origin}）` : (path ?? '')}
               onChange={(e) => {
                 if (e.target.value === 'kit') useKitSound(r.ch);
                 else setLaneWav(r.ch, Number(e.target.value));
               }}
             >
-              <option value="kit">内蔵キット</option>
+              <option value="kit">キット: {kitFile(r.ch)?.replace(/^dtxweb_|^lib_/, '')}</option>
               {wavs.map((w) => (
                 <option key={w.no} value={w.no}>
                   {toBase36x2(w.no)} {w.path}
+                  {fields['VOLUME' + toBase36x2(w.no)] ? `（強さ ${fields['VOLUME' + toBase36x2(w.no)]}）` : ''}
                 </option>
               ))}
             </select>
+            <span className={`kit-badge ${badge === '曲' ? 'own' : badge === '曲から' ? 'lib' : ''}`} title={vs?.origin ?? (own ? '曲フォルダの音' : '')}>
+              {badge}
+            </span>
             <button
               className="ib"
               style={{ width: 26, height: 26 }}
@@ -329,8 +382,8 @@ function HeaderTab() {
         <span>{meta.encoding === 'shift_jis' ? 'Shift_JIS' : meta.encoding === 'utf-8-bom' ? 'UTF-8（BOM付き）' : 'UTF-8（BOMなし）'}</span>
         <span className="lbl">保存</span>
         <span>Shift_JIS・CRLF</span>
-        <span className="lbl">内蔵キット</span>
-        <span className="lbl">{KIT_SOUNDS.length} 音（dtxweb_kit_*.wav）</span>
+        <span className="lbl">キットの音</span>
+        <span className="lbl">曲フォルダに無い音は、保存するときに書き出します（dtxweb_*.wav・lib_*.wav）</span>
       </div>
     </>
   );
