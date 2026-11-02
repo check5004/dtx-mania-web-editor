@@ -1,0 +1,32 @@
+{
+  "name": "dtx-mania-web-editor",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "DTXManiaNX向けのWebドラム譜面エディタ",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "deploy": "bash scripts/deploy-pages.sh"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "immer": "^11.2.9",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
+  }
+}
