@@ -5,6 +5,9 @@ import { findFile } from '../fs/folder';
 import {
   copySelection,
   cutSelection,
+  deleteMeasures,
+  insertMeasures,
+  toast,
   deleteSelection,
   duplicatePrevMeasure,
   goHome,
@@ -27,6 +30,12 @@ import { useSongLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 import { formatLevel, formatTime } from './format';
 import { openTap } from '../store/tapTempo';
+import { mirrorSelection, openFind } from '../store/find';
+import { HistoryButton } from './HistoryButton';
+import { togglePreview, usePreview } from '../store/preview';
+import { bgaVisible, hasBga, useBga } from '../store/bga';
+import { promptDialog } from './dialogs';
+import { toMeasure } from '../dtx/base36';
 
 interface MenuItem {
   label: string;
@@ -79,6 +88,35 @@ function Menu({ label, items }: { label: string; items: () => MenuEntry[] }) {
   );
 }
 
+const cursorM = () => {
+  const s = useEditor.getState();
+  return tempoOf(s.doc).locate(Math.max(0, s.cursorBeat)).m;
+};
+
+function deleteCursorMeasure() {
+  const m = cursorM();
+  const r = deleteMeasures(m, 1);
+  toast(`小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個${r.kept ? `、BPM変化・BGMの開始 ${r.kept} 個は次の小節の頭へ移動` : ''}）。Ctrl+Z で戻せます`, 'ok', 6000);
+}
+
+async function bulkMeasures() {
+  const m = cursorM();
+  const v = await promptDialog({
+    title: `小節 ${toMeasure(m)} から挿入・削除`,
+    body: '増やすなら正の数（カーソルの小節の前に空の小節を入れる）、減らすなら負の数（カーソルの小節から消して詰める）を入れてください。',
+    value: '1',
+    ok: '実行',
+  });
+  const n = Math.trunc(Number(v));
+  if (!v || !Number.isFinite(n) || n === 0) return;
+  if (n > 0) {
+    if (insertMeasures(m, n)) toast(`${n} 小節を挿入しました`, 'ok');
+  } else {
+    const r = deleteMeasures(m, -n);
+    toast(`${-n} 小節を削除しました（チップ ${r.removed} 個）`, 'ok');
+  }
+}
+
 export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInputElement | null> }) {
   const doc = useEditor((s) => s.doc);
   const meta = useEditor((s) => s.meta);
@@ -89,6 +127,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   const undoLabel = useEditor((s) => s.past[s.past.length - 1]?.label);
   const redoLabel = useEditor((s) => s.future[s.future.length - 1]?.label);
   const art = usePreimage();
+  const previewMode = usePreview((st) => st.mode);
   useSoundsVersion();
 
   const f = doc.fields;
@@ -128,6 +167,13 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             '-',
             { label: 'ドラムのチップをすべて選択', key: 'Ctrl+A', run: selectAll },
             { label: '選択を解除', key: 'Esc', run: () => useEditor.setState({ selection: [] }) },
+            '-',
+            { label: '検索と置換・レーンの入れ替え…', key: 'Ctrl+F', run: openFind },
+            { label: '選んだチップを左右反転', run: mirrorSelection, disabled: s().selection.length === 0 },
+            '-',
+            { label: 'カーソルの小節の前に小節を挿入', run: () => insertMeasures(cursorM()) },
+            { label: 'カーソルの小節を削除して詰める', run: () => deleteCursorMeasure() },
+            { label: '小節をまとめて挿入・削除…', run: () => void bulkMeasures() },
           ]}
         />
         <Menu
@@ -137,6 +183,12 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: '縮小', run: () => zoom(0.8) },
             '-',
             ...GRID_DIVS.map((d) => ({ label: `グリッド ${gridLabel(d)}${s().view.div === d ? '  ✓' : ''}`, run: () => setView({ div: d }) })),
+            '-',
+            { label: `BGA・動画の列を出す${bgaVisible() ? '  ✓' : ''}`, run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) },
+            { label: `BGA の列を広げてサムネイルを出す${useBga.getState().wide ? '  ✓' : ''}`, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
+            '-',
+            { label: `NX風プレビュー（右のパネル）${usePreview.getState().mode === 'side' ? '  ✓' : ''}`, key: 'P', run: () => togglePreview('side') },
+            { label: 'NX風プレビュー（全画面）', key: 'Shift+P', run: () => togglePreview('full') },
           ]}
         />
         <Menu
@@ -189,6 +241,10 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       <button className="ib" onClick={redo} disabled={!canRedo} title={redoLabel ? `やり直す: ${redoLabel}（Ctrl+Y）` : 'やり直す（Ctrl+Y）'}>
         {Icon.redo()}
       </button>
+      <button className={`ib ${previewMode !== 'off' ? 'on' : ''}`} onClick={() => togglePreview('side')} title="NX風プレビュー（P、Shift+P で全画面）">
+        {Icon.screen()}
+      </button>
+      <HistoryButton />
       <button className="ib" onClick={openSettings} title="設定（電子ドラム・キーボード・遅延補正）">
         {Icon.gear()}
       </button>

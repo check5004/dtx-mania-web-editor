@@ -7,11 +7,11 @@ import type { Ghost } from '../assist/ghosts';
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
-import { DRUM_LANES } from '../dtx/model';
+import { bgaChannel, CH, DRUM_LANES } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import { bandOnsets, currentGhosts, dismissGhosts, ghostsInRange, setLoop, setWaveMode, useAssist, type AssistState } from '../store/assist';
-import { bgmSource, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
+import { bgmSource, COL_BGA, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
 import {
   deleteChips,
   moveSelection,
@@ -25,6 +25,11 @@ import {
 } from '../store/editor';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
+import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
+import { useFind } from '../store/find';
+import { issuesOf, useCheck } from '../store/check';
+import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
+import { thumb, useThumbs } from './thumbs';
 import { promptDialog } from './dialogs';
 import { songLength } from './hooks';
 import { chipBpmLabel, meterLabel } from './format';
@@ -77,7 +82,7 @@ const C = {
 };
 
 type Drag =
-  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean }
+  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean }
   | { type: 'rubber'; x0: number; y0: number; x1: number; y1: number; additive: boolean; base: number[] }
   | { type: 'velPencil'; idx: number; group: string; lastY: number }
   | { type: 'velLine'; idx: number; y0: number; v0: number; y1: number; v1: number }
@@ -110,7 +115,7 @@ interface Local {
 }
 
 /** 右のパネルから「表示中の範囲」を知るための値 */
-const viewport = { h: 600, follow: null as number | null };
+const viewport = { h: 600, w: 1000, follow: null as number | null };
 
 /** 譜面で見えている拍の範囲 */
 export function visibleBeats(): { from: number; to: number } {
@@ -119,8 +124,22 @@ export function visibleBeats(): { from: number; to: number } {
   return { from: Math.max(0, scroll), to: Math.max(0, scroll + (viewport.h - GEO.head - GEO.bottom) / s.view.pxPerBeat) };
 }
 
-function baseWidth(): number {
+/** BGA 列の左端（譜面の左端から）。原曲の列の右に置く */
+const BGA_GAP = 6;
+function coreWidth(): number {
   return useAssist.getState().audioCols ? FULL_W : BASE_W;
+}
+function bgaW(): number {
+  return useBga.getState().wide ? 92 : 46;
+}
+/** 幅が足りないときは、原曲の波形の列の右側に重ねて出す */
+function bgaX(): number {
+  const room = viewport.w - GEO.miniW - 16 - bgaW();
+  return Math.max(BASE_W + BGA_GAP, Math.min(coreWidth() + BGA_GAP, room));
+}
+
+function baseWidth(): number {
+  return bgaVisible() ? Math.max(coreWidth(), bgaX() + bgaW()) : coreWidth();
 }
 
 function chartWidth(): number {
@@ -166,6 +185,7 @@ export function ChartCanvas() {
       canvas.style.width = `${l.w}px`;
       canvas.style.height = `${l.h}px`;
       viewport.h = l.h;
+      viewport.w = l.w;
       l.mini = null;
       l.dirty = true;
     };
@@ -180,6 +200,22 @@ export function ChartCanvas() {
         l.dirty = true;
       }),
       useSidecar.subscribe(() => {
+        l.dirty = true;
+      }),
+      useInputSettings.subscribe(() => {
+        l.dirty = true;
+        l.mini = null;
+      }),
+      useFind.subscribe(() => {
+        l.dirty = true;
+      }),
+      useBga.subscribe(() => {
+        l.dirty = true;
+      }),
+      useCheck.subscribe(() => {
+        l.dirty = true;
+      }),
+      useThumbs.subscribe(() => {
         l.dirty = true;
       }),
     ];
@@ -353,10 +389,10 @@ export function ChartCanvas() {
       };
       return;
     }
-    if (h.kind === 'lane' || h.kind === 'bgm' || h.kind === 'bpm') {
+    if (h.kind === 'lane' || h.kind === 'bgm' || h.kind === 'bpm' || h.kind === 'bga') {
       const beat = Math.max(0, g.yToBeat(y));
       const pos = snapToGrid(tempoOf(s.doc), beat, s.view.div);
-      l.drag = { type: 'pending', x0: x, y0: y, lane: h.kind === 'lane' ? h.lane : -1, alt: e.shiftKey, pos, weak: e.altKey };
+      l.drag = { type: 'pending', x0: x, y0: y, lane: h.kind === 'lane' ? h.lane : -1, alt: e.shiftKey, pos, weak: e.altKey, bga: h.kind === 'bga' };
     }
   };
 
@@ -462,6 +498,7 @@ export function ChartCanvas() {
     const s = useEditor.getState();
     if (d.type === 'pending') {
       if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos, d.weak ? weakVel() : undefined);
+      else if (d.bga) placeBga(d.pos);
       else useEditor.setState({ selection: [] });
       return;
     }
@@ -651,6 +688,7 @@ type Hit =
   | { kind: 'section'; m: number }
   | { kind: 'bpm' }
   | { kind: 'bgm' }
+  | { kind: 'bga' }
   | { kind: 'audio' }
   | { kind: 'header' }
   | { kind: 'mini' }
@@ -662,8 +700,9 @@ function colAt(g: Geom, x: number): number | 'gutter' | 'audio' | null {
   if (rx < 0) return null;
   if (rx < GEO.bpmX) return 'gutter';
   if (rx < GEO.laneX) return COL_BPM;
-  if (rx < GEO.laneX + GEO.laneW * 10) return Math.floor((rx - GEO.laneX) / GEO.laneW);
+  if (rx < GEO.laneX + GEO.laneW * 10) return laneAt(Math.floor((rx - GEO.laneX) / GEO.laneW)) ?? null;
   if (rx >= GEO.bgmX - 2 && rx < GEO.bgmX + GEO.bgmW) return COL_BGM;
+  if (bgaVisible() && rx >= bgaX() && rx < bgaX() + bgaW()) return COL_BGA;
   if (useAssist.getState().audioCols && rx >= GEO.hitsX && rx < FULL_W) return 'audio';
   return null;
 }
@@ -741,6 +780,7 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   }
   if (col === COL_BPM) return { kind: 'bpm' };
   if (col === COL_BGM) return { kind: 'bgm' };
+  if (col === COL_BGA) return { kind: 'bga' };
   return { kind: 'lane', lane: col };
 }
 
@@ -785,9 +825,15 @@ function pencilApply(l: Local, g: Geom, idx: number, yA: number, yB: number, x: 
   void l;
 }
 
+/** レーンの中心の x（譜面の左端から。レーンの並びの設定に従う） */
+function laneCX(lane: number): number {
+  return GEO.laneX + slotOf(lane) * GEO.laneW + GEO.laneW / 2;
+}
+
 function colCenter(col: number): number {
-  if (col >= 0) return GEO.laneX + col * GEO.laneW + GEO.laneW / 2;
+  if (col >= 0) return laneCX(col);
   if (col === COL_BPM) return GEO.bpmX + GEO.bpmW / 2;
+  if (col === COL_BGA) return bgaX() + bgaW() / 2;
   return GEO.bgmX + GEO.bgmW / 2;
 }
 
@@ -1009,6 +1055,22 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
 
   // 原曲の打点と波形
   if (a.audioCols) drawAudioCols(ctx, l, g, tempo, a, H);
+  // BGA・動画の列
+  if (bgaVisible()) {
+    const bx = ox + bgaX();
+    const bw = bgaW();
+    ctx.fillStyle = '#0D1116';
+    ctx.fillRect(bx, GEO.head, bw, H);
+    ctx.fillStyle = C.sep;
+    ctx.fillRect(bx - 0.5, GEO.head, 1, H);
+    ctx.fillRect(bx + bw - 0.5, GEO.head, 1, H);
+    for (let m = firstM; m <= lastM + 1 && m < 3600; m++) {
+      const y = Math.round(g.beatToY(tempo.measureStart(m)));
+      if (y < GEO.head || y > H) continue;
+      ctx.fillStyle = C.measure;
+      ctx.fillRect(bx, y - 1, bw, 2);
+    }
+  }
 
   const sel = new Set(s.selection);
   const d = l.drag;
@@ -1024,7 +1086,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       if (erasingGhosts?.has(gh.key)) continue;
       const lane = DRUM_LANES[gh.lane];
       const y = g.beatToY(gh.beat);
-      const cx = ox + GEO.laneX + gh.lane * GEO.laneW + GEO.laneW / 2;
+      const cx = ox + laneCX(gh.lane);
       ctx.globalAlpha = hv === gh.key ? 1 : 0.45 + 0.45 * gh.s;
       roundRect(ctx, cx - 16, y - 5, 32, 10, 3);
       ctx.fillStyle = hv === gh.key ? lane.color + '55' : 'rgba(255,255,255,.04)';
@@ -1039,12 +1101,23 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   }
 
   const velMode = useVel.getState().mode;
+  const issueOn = useCheck.getState().showIssues;
+  const issueIds = new Map<number, 'error' | 'warn'>();
+  if (issueOn) {
+    for (const is of issuesOf(doc)) {
+      if (is.beat > g.maxBeat + 1 || is.beat < g.minBeat - 4) continue;
+      for (const id of is.ids) if (issueIds.get(id) !== 'error') issueIds.set(id, is.level);
+    }
+  }
+  const fs = useFind.getState();
+  const found = fs.open && fs.results.length ? new Set(fs.results) : null;
+  const current = fs.open && fs.index >= 0 ? fs.results[fs.index] : null;
   const drawChip = (v: ChipView, beat: number, col: number, alpha: number, selected: boolean) => {
     const y = g.beatToY(beat);
     if (col >= 0) {
       const lane = DRUM_LANES[col];
       const color = v.alt && lane.altColor ? lane.altColor : lane.color;
-      const cx = ox + GEO.laneX + col * GEO.laneW + GEO.laneW / 2;
+      const cx = ox + laneCX(col);
       ctx.globalAlpha = alpha;
       roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
       if (v.kind === 'normal') {
@@ -1084,15 +1157,68 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
         ctx.strokeStyle = '#FFFFFF';
         ctx.lineWidth = 1.6;
         ctx.stroke();
+      } else if (issueIds.has(v.c.id)) {
+        // 無理な配置
+        roundRect(ctx, cx - 19, y - 7, 38, 14, 4);
+        ctx.setLineDash([3, 2]);
+        ctx.strokeStyle = issueIds.get(v.c.id) === 'error' ? '#FF5A61' : '#FFB547';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (!selected && found?.has(v.c.id)) {
+        // 検索で見つかったチップ
+        roundRect(ctx, cx - 19, y - 7, 38, 14, 4);
+        ctx.strokeStyle = C.amber;
+        ctx.lineWidth = current === v.c.id ? 2.4 : 1.4;
+        ctx.stroke();
       }
       ctx.globalAlpha = 1;
       return;
     }
     const cx = ox + colCenter(col);
     ctx.globalAlpha = alpha;
+    if (col === COL_BGA) {
+      const w = bgaW() - 6;
+      const info = bgaChannel(v.c.ch);
+      const color = info?.movie ? '#B39DDB' : '#4DD0C0';
+      const left = cx - w / 2;
+      roundRect(ctx, left, y - 6, w, 12, 3);
+      ctx.fillStyle = info?.swap ? color + '55' : color;
+      ctx.fill();
+      if (info?.swap) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.fillStyle = info?.swap ? '#E7EBF1' : '#0B0E13';
+      ctx.font = '600 9px "JetBrains Mono", ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(bgaChipLabel(v.c.ch, v.c.v), left + 4, y + 0.5);
+      if (useBga.getState().wide && !info?.movie) {
+        const mat = materials(doc).find((m2) => m2.kind === 'bmp' && m2.no === v.c.v);
+        const img = mat ? thumb(mat.path) : null;
+        if (img) {
+          const th = 26;
+          const tw = Math.min(46, (img.width / Math.max(1, img.height)) * th);
+          ctx.drawImage(img, left + w - tw - 2, y - th - 7, tw, th);
+          ctx.strokeStyle = 'rgba(255,255,255,.25)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(left + w - tw - 2 + 0.5, y - th - 7 + 0.5, tw - 1, th - 1);
+        }
+      }
+      if (selected) {
+        roundRect(ctx, left - 2, y - 8, w + 4, 16, 4);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
     if (col === COL_BGM) {
       roundRect(ctx, cx - 11, y - 4, 22, 8, 2);
-      ctx.fillStyle = v.c.ch === 1 ? C.bgm : C.se;
+      ctx.fillStyle = v.c.ch === 1 ? C.bgm : v.c.ch === CH.FILLIN ? C.amber : v.c.ch === CH.FILLIN_SOUND ? '#F48FB1' : C.se;
       ctx.fill();
     } else {
       ctx.beginPath();
@@ -1118,13 +1244,36 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     drawChip(v, v.beat, v.col, moving && selected ? 0.25 : 1, selected && !moving);
   }
 
+  // 無理な配置の印（小節番号の列）
+  if (issueOn) {
+    ctx.font = '700 10px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    let lastY = Infinity;
+    for (const is of issuesOf(doc)) {
+      if (is.beat < g.minBeat - 0.5 || is.beat > g.maxBeat + 0.5) continue;
+      const y = g.beatToY(is.beat);
+      if (Math.abs(y - lastY) < 12) continue;
+      lastY = y;
+      const color = is.level === 'error' ? '#FF5A61' : '#FFB547';
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(ox + 14, y - 6);
+      ctx.lineTo(ox + 21, y + 5);
+      ctx.lineTo(ox + 7, y + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#0B0E13';
+      ctx.fillText('!', ox + 14, y + 1.5);
+    }
+  }
+
   // 移動中のプレビュー
   if (moving) {
     const dB = moving.dBeat!.n / moving.dBeat!.d;
     for (const v of views) {
       if (!sel.has(v.c.id)) continue;
-      const col = v.col >= 0 ? v.col + moving.dLane : v.col;
-      if (v.col >= 0 && (col < 0 || col > 9)) continue;
+      const col = v.col >= 0 ? (shiftLane(v.col, moving.dLane) ?? -99) : v.col;
+      if (col === -99) continue;
       drawChip(v, v.beat + dB, col, 0.9, true);
     }
   }
@@ -1139,7 +1288,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     const lane = DRUM_LANES[hv.lane];
     const b = tempo.beatOf(hv.pos.m, hv.pos.f);
     const y = g.beatToY(b);
-    const cx = ox + GEO.laneX + hv.lane * GEO.laneW + GEO.laneW / 2;
+    const cx = ox + laneCX(hv.lane);
     ctx.globalAlpha = 0.38;
     roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
     ctx.fillStyle = hv.alt && lane.altColor ? lane.altColor : lane.color;
@@ -1210,7 +1359,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   const ms = new Set(a.mute);
   const ss = new Set(a.solo);
   DRUM_LANES.forEach((lane, i) => {
-    const cx = ox + GEO.laneX + i * GEO.laneW + GEO.laneW / 2;
+    const cx = ox + laneCX(i);
     const silent = ss.size > 0 ? !ss.has(i) : ms.has(i);
     ctx.fillStyle = lane.color;
     ctx.globalAlpha = silent ? 0.3 : 1;
@@ -1225,6 +1374,11 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   ctx.fillStyle = C.text;
   ctx.fillText('BGM', ox + GEO.bgmX + GEO.bgmW / 2, GEO.head / 2 - 5);
   ctx.fillText('SE', ox + GEO.bgmX + GEO.bgmW / 2, GEO.head / 2 + 5);
+  if (bgaVisible()) {
+    ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = '#4DD0C0';
+    ctx.fillText('BGA', ox + bgaX() + bgaW() / 2, GEO.head / 2);
+  }
   if (a.audioCols) {
     ctx.font = '9px system-ui, sans-serif';
     ctx.fillStyle = '#A3ADBB';
@@ -1354,7 +1508,7 @@ function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>,
   const y = g.beatToY(v.beat);
   if (y < GEO.head + 8 || y > H - 8) return;
   const vel = wavVel(doc, v.c.v);
-  const x = g.ox + GEO.laneX + v.col * GEO.laneW + GEO.laneW / 2 + 22;
+  const x = g.ox + laneCX(v.col) + 22;
   ctx.font = '10px system-ui, sans-serif';
   const label = '強さ';
   const hint = 'Alt+ホイール';
@@ -1617,14 +1771,14 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
       m.globalAlpha = 0.35;
       for (const gh of ghosts) {
         m.fillStyle = DRUM_LANES[gh.lane].color;
-        m.fillRect(6 + gh.lane * 6, Math.round(yOf(gh.beat)), 5, 1);
+        m.fillRect(6 + slotOf(gh.lane) * 6, Math.round(yOf(gh.beat)), 5, 1);
       }
       m.globalAlpha = 1;
     }
     for (const v of chipViews(doc)) {
       if (v.col < 0) continue;
       m.fillStyle = DRUM_LANES[v.col].color;
-      m.fillRect(6 + v.col * 6, Math.round(yOf(v.beat)), 5, 1);
+      m.fillRect(6 + slotOf(v.col) * 6, Math.round(yOf(v.beat)), 5, 1);
     }
     // BPM の変化
     m.fillStyle = C.amber;

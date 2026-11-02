@@ -3,19 +3,25 @@ import { laneByCh, virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
 import { DRUM_LANES } from '../dtx/model';
 import { serializeHeader } from '../dtx/serialize';
-import { freeWavNumber, setField } from '../edit/ops';
+import { parseDtx } from '../dtx/parse';
+import { freeWavNumber, setField, setFieldComment } from '../edit/ops';
+import type { HeaderLine } from '../dtx/model';
+import { addMaterials, hasBga, IMAGE_EXT, materialFile, materials, MOVIE_EXT, pickMaterial, removeMaterial, setMaterialPath, useBga, type Material, type MaterialKind } from '../store/bga';
+import { BGA_CHANNELS } from '../dtx/model';
+import { thumb, useThumbs } from './thumbs';
 import { audioFiles, findFile } from '../fs/folder';
 import { wavPan, wavVolume } from '../store/derived';
 import { edit, openPage, prepareSounds, previewWav, setFieldValue, setLaneWav, toast, useEditor, type LeftTab } from '../store/editor';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
-import { chooseDialog } from './dialogs';
+import { chooseDialog, confirmDialog } from './dialogs';
 import { formatLevel } from './format';
 import { Icon } from './icons';
 
 const TABS: [LeftTab, string][] = [
   ['kit', 'キット'],
   ['wav', 'WAV'],
+  ['bga', '画像'],
   ['info', '曲情報'],
   ['header', 'ヘッダ'],
 ];
@@ -34,6 +40,7 @@ export function LeftPanel() {
       <div className="panel-body scroll">
         {tab === 'kit' && <KitTab />}
         {tab === 'wav' && <WavTab />}
+        {tab === 'bga' && <BgaTab />}
         {tab === 'info' && <InfoTab />}
         {tab === 'header' && <HeaderTab />}
       </div>
@@ -192,6 +199,25 @@ function WavTab() {
   const usage = new Map<number, number>();
   for (const c of doc.chips) if (c.ch !== 3 && c.ch !== 8) usage.set(c.v, (usage.get(c.v) ?? 0) + 1);
 
+  const unused = wavs.filter((w) => !usage.get(w.no));
+  const cleanup = async () => {
+    const ok = await confirmDialog({
+      title: `使っていない WAV を ${unused.length} 個消しますか？`,
+      body: `どのチップも使っていない #WAV（${unused
+        .slice(0, 8)
+        .map((w) => toBase36x2(w.no))
+        .join(' ')}${unused.length > 8 ? ' …' : ''}）と、その #VOLUME・#PAN を消します。曲フォルダのファイルは消えません。Ctrl+Z で戻せます。`,
+      ok: '消す',
+    });
+    if (!ok) return;
+    edit(`使っていない WAV を ${unused.length} 個消す`, (d) => {
+      for (const w of unused) {
+        const z = toBase36x2(w.no);
+        for (const k of ['WAV', 'VOLUME', 'WAVVOL', 'PAN', 'WAVPAN', 'SIZE']) if (d.fields[k + z] !== undefined) setField(d, k + z, undefined);
+      }
+    });
+  };
+
   const addWav = async () => {
     if (!folder) return;
     const files = audioFiles(folder);
@@ -216,6 +242,14 @@ function WavTab() {
           {Icon.plus(12)} 追加
         </button>
       </div>
+      {unused.length > 0 && (
+        <div className="row" style={{ gap: 6, margin: '-4px 0 8px' }}>
+          <span className="lbl">使っていない WAV が {unused.length} 個あります</span>
+          <button className="link-btn" onClick={() => void cleanup()}>
+            整理する
+          </button>
+        </div>
+      )}
       <table className="wav-table">
         <thead>
           <tr>
@@ -232,9 +266,13 @@ function WavTab() {
             const isMissing = missSet.has(w.no) || (!findFile(folder, w.path, pathWav) && !/^dtxweb_kit_/i.test(w.path) && !!folder);
             return (
               <tr key={w.no} className={isMissing ? 'missing' : ''} title={`${usage.get(w.no) ?? 0} 個のチップで使用${isMissing ? '・ファイルが見つかりません' : ''}`}>
-                <td className="mono">{z}</td>
+                <td className="mono">
+                  {z}
+                  <span className="wav-uses">{usage.get(w.no) ?? 0}</span>
+                </td>
                 <td>
                   <CommitInput value={w.path} onCommit={(v) => setFieldValue('WAV' + z, v || undefined)} />
+                  <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder="ラベル" onCommit={(v) => setComment('WAV' + z, v)} />
                 </td>
                 <td>
                   <CommitInput
@@ -350,30 +388,69 @@ function HeaderTab() {
   const doc = useEditor((s) => s.doc);
   const meta = useEditor((s) => s.meta);
   const lines = serializeHeader(doc);
+  const [draft, setDraft] = useState<string | null>(null);
+  const apply = () => {
+    if (draft === null) return;
+    const { doc: parsed } = parseDtx(draft);
+    if (parsed.chips.length > 0 || Object.keys(parsed.barLengths).length > 0) {
+      toast('チップの行（#00111: など）はヘッダには書けません。譜面で置いてください', 'error', 6000);
+      return;
+    }
+    edit('ヘッダを書き換え', (d) => {
+      d.header = parsed.header;
+      d.fields = parsed.fields;
+    });
+    void prepareSounds();
+    setDraft(null);
+    toast('ヘッダを反映しました（Ctrl+Z で戻せます）', 'ok');
+  };
   return (
     <>
-      <div className="section-title">ヘッダ</div>
+      <div className="section-title">
+        ヘッダ
+        <span className="grow" />
+        {draft === null ? (
+          <button className="btn small" onClick={() => setDraft(lines.join('\n'))} title="DTXのヘッダを直接書き換えます（旧Creatorの自由入力）">
+            直接編集
+          </button>
+        ) : (
+          <>
+            <button className="btn small ghost" onClick={() => setDraft(null)}>
+              やめる
+            </button>
+            <button className="btn small primary" onClick={apply}>
+              反映
+            </button>
+          </>
+        )}
+      </div>
       <p className="lbl" style={{ margin: 0 }}>
-        エディタが解釈しない行（#RANDOM や BGA、ギター・ベースのチップなど）も、そのまま保存します。
+        {draft === null
+          ? 'エディタが解釈しない行（#RANDOM やギター・ベースのチップなど）も、そのまま保存します。「直接編集」で好きなコマンドを書き足せます。'
+          : '1行に1つのコマンド（#TITLE: 曲名 など）。「;」から後ろはコメントです。チップの行はここには書けません。'}
       </p>
-      <div className="raw-header scroll">
-        {lines.map((t, i) => {
-          if (t.startsWith('#')) {
-            const m = /^(#\S+)(.*)$/.exec(t)!;
+      {draft === null ? (
+        <div className="raw-header scroll">
+          {lines.map((t, i) => {
+            if (t.startsWith('#')) {
+              const m = /^(#\S+)(.*)$/.exec(t)!;
+              return (
+                <div key={i}>
+                  <span className="k">{m[1]}</span>
+                  {m[2]}
+                </div>
+              );
+            }
             return (
-              <div key={i}>
-                <span className="k">{m[1]}</span>
-                {m[2]}
+              <div key={i} className="c">
+                {t || ' '}
               </div>
             );
-          }
-          return (
-            <div key={i} className="c">
-              {t || ' '}
-            </div>
-          );
-        })}
-      </div>
+          })}
+        </div>
+      ) : (
+        <textarea className="raw-edit" value={draft} spellCheck={false} onChange={(e) => setDraft(e.target.value)} aria-label="ヘッダ" />
+      )}
       <div className="section-title">ファイル</div>
       <div className="form-grid">
         <span className="lbl">ファイル名</span>
@@ -386,5 +463,136 @@ function HeaderTab() {
         <span className="lbl">曲フォルダに無い音は、保存するときに書き出します（dtxweb_*.wav・lib_*.wav）</span>
       </div>
     </>
+  );
+}
+
+/** ヘッダの行のコメント（WAV のラベル） */
+function commentOf(doc: { header: readonly HeaderLine[] }, key: string): string {
+  for (const h of doc.header) if (h.kind === 'field' && h.key === key) return h.comment?.trim() ?? '';
+  return '';
+}
+
+function setComment(key: string, text: string) {
+  edit(`#${key} のラベルを変更`, (d) => setFieldComment(d, key, text));
+}
+
+// ---- 画像（BMP）・動画（AVI） ----------------------------------------------------
+
+function BgaTab() {
+  const doc = useEditor((s) => s.doc);
+  const folder = useEditor((s) => s.folder);
+  const st = useBga();
+  useThumbs((s) => s.ver);
+  const mats = materials(doc);
+  const bmps = mats.filter((m) => m.kind === 'bmp');
+  const avis = mats.filter((m) => m.kind === 'avi');
+  const files = folder ? [...folder.files.values()] : [];
+  const images = files.filter((f) => IMAGE_EXT.test(f.name));
+  const movies = files.filter((f) => MOVIE_EXT.test(f.name));
+  const registered = new Set(mats.map((m) => m.path.toLowerCase()));
+  const add = async (kind: MaterialKind) => {
+    const list = (kind === 'avi' ? movies : images).filter((f) => !registered.has(f.path.toLowerCase()));
+    if (!list.length) {
+      toast(kind === 'avi' ? '曲フォルダに、まだ登録していない動画がありません' : '曲フォルダに、まだ登録していない画像がありません', 'info');
+      return;
+    }
+    const picked = await chooseDialog({
+      title: kind === 'avi' ? '動画を登録' : '画像を登録',
+      body: '曲フォルダのファイルから選びます。',
+      options: [
+        { label: `まとめて全部（${list.length} 個）`, sub: '番号は空いているところから順に付けます', value: '*' },
+        ...list.slice(0, 200).map((f) => ({ label: f.path, sub: `${(f.size / 1024).toFixed(0)} KB`, value: f.path })),
+      ],
+    });
+    if (!picked) return;
+    const n = addMaterials(kind, picked === '*' ? list.map((f) => f.path) : [picked]);
+    if (n) toast(`${n} 個を #${kind === 'avi' ? 'AVI' : 'BMP'} に登録しました`, 'ok');
+  };
+  return (
+    <>
+      <div className="section-title">置くとき</div>
+      <div className="form-grid" style={{ marginBottom: 8 }}>
+        <span className="lbl">画像のレイヤー</span>
+        <select className="field" value={st.layer} onChange={(e) => useBga.setState({ layer: Number(e.target.value) })}>
+          {BGA_CHANNELS.filter((b) => !b.movie).map((b) => (
+            <option key={b.ch} value={b.ch}>
+              {b.name}（{b.ch.toString(16).toUpperCase().padStart(2, '0')}）
+            </option>
+          ))}
+        </select>
+        <span className="lbl">動画</span>
+        <select className="field" value={st.movieCh} onChange={(e) => useBga.setState({ movieCh: Number(e.target.value) })}>
+          {BGA_CHANNELS.filter((b) => b.movie).map((b) => (
+            <option key={b.ch} value={b.ch}>
+              {b.name}（{b.ch.toString(16).toUpperCase().padStart(2, '0')}）
+            </option>
+          ))}
+        </select>
+      </div>
+      <label className="row lbl" style={{ gap: 6 }}>
+        <input type="checkbox" checked={st.show || hasBga(doc)} disabled={hasBga(doc)} onChange={(e) => useBga.setState({ show: e.target.checked })} />
+        譜面の右に BGA の列を出す
+      </label>
+      <label className="row lbl" style={{ gap: 6, marginBottom: 6 }}>
+        <input type="checkbox" checked={st.wide} onChange={(e) => useBga.setState({ wide: e.target.checked, show: true })} />
+        列を広げて画像のサムネイルを出す
+      </label>
+      <p className="lbl" style={{ margin: '0 0 10px', lineHeight: 1.6 }}>
+        下の一覧で素材を選び、譜面の BGA 列をクリックすると置けます。右クリックで消す、ドラッグで動かすのはドラムと同じです。
+      </p>
+
+      <div className="section-title">
+        画像（#BMP）
+        <span className="lbl mono">{bmps.length}</span>
+        <span className="grow" />
+        <button className="btn small" onClick={() => void add('bmp')} disabled={!folder}>
+          {Icon.plus(12)} 登録
+        </button>
+      </div>
+      <MaterialList list={bmps} />
+      <div className="section-title" style={{ marginTop: 14 }}>
+        動画（#AVI）
+        <span className="lbl mono">{avis.length}</span>
+        <span className="grow" />
+        <button className="btn small" onClick={() => void add('avi')} disabled={!folder}>
+          {Icon.plus(12)} 登録
+        </button>
+      </div>
+      <MaterialList list={avis} />
+    </>
+  );
+}
+
+function MaterialList({ list }: { list: Material[] }) {
+  const st = useBga();
+  if (!list.length) return <p className="lbl">まだありません。</p>;
+  return (
+    <div className="mat-list">
+      {list.map((m) => {
+        const on = st.kind === m.kind && st.no === m.no;
+        const missing = !materialFile(m.path);
+        const img = m.kind === 'bmp' ? thumb(m.path) : null;
+        return (
+          <div key={m.key} className={`mat-row ${on ? 'on' : ''} ${missing ? 'missing' : ''}`} onClick={() => pickMaterial(m.kind, m.no)} title={missing ? 'ファイルが見つかりません' : `${m.uses} 個のチップで使用`}>
+            <span className="mat-thumb">{img ? <img src={img.src} alt="" /> : m.kind === 'avi' ? '🎬' : '🖼'}</span>
+            <span className="mono">{m.key.replace(/^(BMP|BMPTEX|AVI)/, (k) => (k === 'BMPTEX' ? 'TEX' : ''))}</span>
+            <span className="grow" style={{ minWidth: 0 }}>
+              <CommitInput className="mat-path" value={m.path} onCommit={(v) => setMaterialPath(m.key, v)} />
+            </span>
+            <span className="mono lbl">{m.uses}</span>
+            <button
+              className="ib tiny"
+              title="登録を消す"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeMaterial(m.key);
+              }}
+            >
+              {Icon.trash(12)}
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }

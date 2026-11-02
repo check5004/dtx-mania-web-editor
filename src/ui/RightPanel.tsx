@@ -3,7 +3,7 @@ import { GHOST_LANE_INDEX } from '../assist/ghosts';
 import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
-import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
 import {
   adoptGhosts,
   applySimilar,
@@ -20,8 +20,10 @@ import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
 import { useInputSettings } from '../input/settings';
 import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
 import { useState } from 'react';
-import { deleteSelection, setMeasureLength, setKind, setSelectionWav, useEditor } from '../store/editor';
-import { chipBpmLabel, meterLabel } from './format';
+import { deleteMeasures, deleteSelection, insertMeasures, setMeasureLength, setKind, setSelectionWav, toast, useEditor } from '../store/editor';
+import { chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
+import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
+import { promptDialog } from './dialogs';
 import { usePlayBeat } from './hooks';
 import { visibleBeats } from './ChartCanvas';
 import { Icon } from './icons';
@@ -34,6 +36,7 @@ export function RightPanel() {
       <AssistCard />
       <SelectionCard />
       <MeasureCard />
+      <CheckCard />
       <StatsCard />
       <NoticeCard />
     </aside>
@@ -45,6 +48,10 @@ function channelName(ch: number): string {
   if (d) return d.name;
   if (ch === CH.BGM) return 'BGM';
   if (ch === CH.BPM || ch === CH.BPM_EX) return 'BPM変化';
+  if (ch === CH.FILLIN) return 'フィルイン区間';
+  if (ch === CH.FILLIN_SOUND) return 'フィルインの音';
+  const b = bgaChannel(ch);
+  if (b) return b.name;
   return `SE（ch ${ch.toString(16).toUpperCase()}）`;
 }
 
@@ -227,16 +234,34 @@ function MeasureCard() {
       </div>
       <div className="form-grid">
         <span className="lbl">拍子</span>
-        <select className="field mono" style={{ height: 28 }} value={METERS.find(([, v]) => v === cur)?.[0] ?? 'other'} onChange={(e) => {
-          const hit = METERS.find(([k]) => k === e.target.value);
-          if (hit) apply(hit[1]);
-        }}>
+        <select
+          className="field mono"
+          style={{ height: 28 }}
+          value={METERS.find(([, v]) => v === cur)?.[0] ?? 'other'}
+          onChange={async (e) => {
+            if (e.target.value === 'custom') {
+              const v = await promptDialog({
+                title: `小節 ${toMeasure(m)} の拍子`,
+                body: '「7/8」「13/16」のような拍子か、4/4 を 1 とした長さ（0.875 など）を入れてください。',
+                value: meterLabel(cur),
+                ok: '変える',
+              });
+              const len = v ? parseMeter(v) : null;
+              if (len) apply(len);
+              else if (v) toast('拍子として読めませんでした', 'error');
+              return;
+            }
+            const hit = METERS.find(([k]) => k === e.target.value);
+            if (hit) apply(hit[1]);
+          }}
+        >
           {!METERS.some(([, v]) => v === cur) && <option value="other">{meterLabel(cur)}</option>}
           {METERS.map(([k]) => (
             <option key={k} value={k}>
               {k}
             </option>
           ))}
+          <option value="custom">ほかの拍子…</option>
         </select>
         <span className="lbl">BPM</span>
         <span className="mono">{chipBpmLabel(tempo.bpmAt(tempo.measureStart(m)))}</span>
@@ -244,6 +269,21 @@ function MeasureCard() {
       <p className="lbl" style={{ margin: '8px 0 0' }}>
         {own !== undefined ? `この小節で長さを ${own} に変えています（#${toMeasure(m)}02）。` : '拍子を変えると、この小節だけが変わります（次の小節は元に戻します）。'}
       </p>
+      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+        <button className="btn small ghost" onClick={() => insertMeasures(m)} title="この小節の前に空の小節を1つ入れます（後ろはずれます）">
+          {Icon.plus(12)} 前に1小節挿入
+        </button>
+        <button
+          className="btn small ghost"
+          onClick={() => {
+            const r = deleteMeasures(m);
+            toast(`小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個）。Ctrl+Z で戻せます`, 'ok');
+          }}
+          title="この小節を消して後ろを詰めます"
+        >
+          この小節を削除
+        </button>
+      </div>
     </div>
   );
 }
@@ -390,6 +430,83 @@ function AssistCard() {
         <input type="checkbox" checked={a.audioCols} onChange={(e) => useAssist.setState({ audioCols: e.target.checked })} />
         譜面の右に原曲の打点と波形を出す
       </label>
+    </div>
+  );
+}
+
+function CheckCard() {
+  const doc = useEditor((s) => s.doc);
+  const show = useCheck((s) => s.showIssues);
+  const [open, setOpen] = useState(false);
+  const issues = issuesOf(doc);
+  const lv = levelOf(doc);
+  const errors = issues.filter((i) => i.level === 'error').length;
+  const warns = issues.length - errors;
+  const cur = doc.fields['DLEVEL'];
+  return (
+    <div className="card">
+      <div className="section-title" style={{ marginBottom: 8 }}>
+        確かめる
+      </div>
+      <div className="check-level">
+        <div>
+          <div className="lbl">推定レベル（機械的な目安）</div>
+          <div className="check-lv mono">{lv ? lv.level.toFixed(2) : '—'}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="lbl">曲情報のLv</div>
+          <div className="mono" style={{ fontSize: 15 }}>
+            {formatLevel(cur)}
+          </div>
+          {lv && (
+            <button className="link-btn" onClick={() => adoptLevel(lv.level)} title="#DLEVEL に書きます（Ctrl+Z で戻せます）">
+              これにする
+            </button>
+          )}
+        </div>
+      </div>
+      {lv ? (
+        <div className="check-facts lbl">
+          平均 {lv.avgNps.toFixed(1)} 打/秒 · 最も密な2秒 {lv.peakNps.toFixed(1)} 打/秒 · 最大同時 {lv.maxChord} · 速い連打 {Math.round(lv.fastRatio * 100)}%
+        </div>
+      ) : (
+        <div className="check-facts lbl">チップが8個以上になると出します。</div>
+      )}
+      <div className="row" style={{ marginTop: 10, gap: 8 }}>
+        <b style={{ fontSize: 12.5 }}>無理な配置</b>
+        {issues.length === 0 ? (
+          <span className="lbl" style={{ color: 'var(--ok)' }}>
+            見つかりません
+          </span>
+        ) : (
+          <>
+            {errors > 0 && <span className="issue-badge error">叩けない {errors}</span>}
+            {warns > 0 && <span className="issue-badge warn">難しい {warns}</span>}
+          </>
+        )}
+        <span className="grow" />
+        <label className="row lbl" style={{ gap: 4 }} title="譜面の左端と、かかわるチップに印を出します">
+          <input type="checkbox" checked={show} onChange={(e) => setShowIssues(e.target.checked)} />
+          譜面に印
+        </label>
+      </div>
+      {issues.length > 0 && (
+        <>
+          <div className="issue-list">
+            {(open ? issues : issues.slice(0, 4)).map((is, i) => (
+              <button key={i} className={`issue-row ${is.level}`} onClick={() => gotoIssue(is)}>
+                <span className="mono">{toMeasure(is.m)}</span>
+                <span>{is.message}</span>
+              </button>
+            ))}
+          </div>
+          {issues.length > 4 && (
+            <button className="link-btn" onClick={() => setOpen(!open)}>
+              {open ? '閉じる' : `ほか ${issues.length - 4} 件を見る`}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

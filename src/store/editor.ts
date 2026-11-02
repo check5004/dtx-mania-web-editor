@@ -23,14 +23,15 @@ import {
 } from '../edit/ops';
 import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import type { SongFolder } from '../fs/folder';
-import { useInputSettings } from '../input/settings';
+import { shiftLane, useInputSettings } from '../input/settings';
 import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavSources } from './derived';
-import { loadSidecar, useSidecar } from './sidecar';
+import { loadSidecar, useSidecar, type SectionMark, type TempoAnchor } from './sidecar';
+import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
 enablePatches();
 
-export type LeftTab = 'kit' | 'wav' | 'info' | 'header';
+export type LeftTab = 'kit' | 'wav' | 'bga' | 'info' | 'header';
 
 export interface DocMeta {
   fileName: string;
@@ -44,10 +45,14 @@ export interface DocMeta {
   recentId?: string;
 }
 
-interface HistoryEntry {
+export interface HistoryEntry {
   label: string;
   redo: Patch[];
   undo: Patch[];
+  /** 譜面の外（作業ファイルのセクションなど）も一緒に戻す・やり直す */
+  side?: { undo: () => void; redo: () => void };
+  /** 履歴に積んだ時刻 */
+  at?: number;
   /** 同じ group の続けての編集は1つにまとめる（録音など） */
   group?: string;
 }
@@ -184,23 +189,54 @@ export function goHome() {
 
 // ---- 編集と Undo ---------------------------------------------------------------
 
-const MAX_HISTORY = 300;
-
-/** 譜面を書き換える。変化が無ければ履歴に積まない。group が同じなら直前の履歴にまとめる */
-export function edit(label: string, recipe: (d: Draft<DtxDoc>) => void, opts: { group?: string } = {}): boolean {
+/**
+ * 譜面を書き換える。変化が無ければ履歴に積まない。group が同じなら直前の履歴にまとめる。
+ * 履歴は無制限（差分だけを持つので軽い）。side は譜面の外の変更を一緒に戻すためのもの。
+ */
+export function edit(
+  label: string,
+  recipe: (d: Draft<DtxDoc>) => void,
+  opts: { group?: string; side?: HistoryEntry['side'] } = {},
+): boolean {
   const s = get();
   const [next, redo, undo] = produceWithPatches(s.doc, recipe);
   if (redo.length === 0) return false;
   const last = s.past[s.past.length - 1];
   let past: HistoryEntry[];
-  if (opts.group && last?.group === opts.group && s.future.length === 0) {
-    past = [...s.past.slice(0, -1), { label, group: opts.group, redo: [...last.redo, ...redo], undo: [...undo, ...last.undo] }];
+  const at = Date.now();
+  if (opts.group && last?.group === opts.group && s.future.length === 0 && !opts.side && !last.side) {
+    past = [...s.past.slice(0, -1), { label, group: opts.group, redo: [...last.redo, ...redo], undo: [...undo, ...last.undo], at }];
   } else {
-    past = [...s.past, { label, redo, undo, group: opts.group }];
+    past = [...s.past, { label, redo, undo, group: opts.group, side: opts.side, at }];
   }
-  if (past.length > MAX_HISTORY) past.shift();
   set({ doc: next, past, future: [] });
   return true;
+}
+
+/** 履歴の好きな時点へ戻る・進む（n = その時点までに残す履歴の数） */
+export function jumpHistory(n: number) {
+  const s = get();
+  if (n < 0 || n > s.past.length + s.future.length || n === s.past.length) return;
+  let doc = s.doc;
+  const past = [...s.past];
+  const future = [...s.future];
+  const labels: string[] = [];
+  while (past.length > n) {
+    const h = past.pop()!;
+    doc = applyPatches(doc, h.undo);
+    h.side?.undo();
+    future.push(h);
+    labels.push(h.label);
+  }
+  while (past.length < n && future.length) {
+    const h = future.pop()!;
+    doc = applyPatches(doc, h.redo);
+    h.side?.redo();
+    past.push(h);
+    labels.push(h.label);
+  }
+  set({ doc, past, future, selection: keepSelection(doc, s.selection) });
+  if (labels.some((l) => /WAV|キット|音/.test(l))) void prepareSounds();
 }
 
 function keepSelection(doc: DtxDoc, sel: number[]): number[] {
@@ -214,6 +250,7 @@ export function undo() {
   const h = s.past[s.past.length - 1];
   if (!h) return;
   const doc = applyPatches(s.doc, h.undo);
+  h.side?.undo();
   set({ doc, past: s.past.slice(0, -1), future: [...s.future, h], selection: keepSelection(doc, s.selection) });
   afterSoundChange(h.label);
 }
@@ -223,6 +260,7 @@ export function redo() {
   const h = s.future[s.future.length - 1];
   if (!h) return;
   const doc = applyPatches(s.doc, h.redo);
+  h.side?.redo();
   set({ doc, future: s.future.slice(0, -1), past: [...s.past, h], selection: keepSelection(doc, s.selection) });
   afterSoundChange(h.label);
 }
@@ -256,7 +294,7 @@ function findWavByPath(fields: Record<string, string>, file: string): number | n
 }
 
 /** 置くチップの WAV 番号。レーンで使っている音、無ければ今のキットの音を登録する */
-function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
+export function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
   const info = drumChannel(ch);
   const base = info ? info.base : ch;
   const assigned = get().laneWav[base];
@@ -348,6 +386,53 @@ export function duplicatePrevMeasure(m: number) {
   });
 }
 
+/** m 小節目の前に n 小節の空の小節を入れる（セクションとテンポのアンカーもずらす） */
+export function insertMeasures(m: number, n = 1): boolean {
+  const before = useSidecar.getState();
+  const sections = before.sections.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
+  const anchors = before.anchors.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
+  let ok = false;
+  const side = sideForMeasures(before.sections, before.anchors, sections, anchors);
+  edit(`小節 ${toMeasure(m)} の前に ${n} 小節を挿入`, (d) => {
+    ok = opInsertMeasures(d, m, n);
+  }, { side });
+  if (ok) side.redo();
+  else toast('これ以上小節を増やせません（Z99 まで）', 'error');
+  return ok;
+}
+
+/** m 小節目から n 小節を消して詰める */
+export function deleteMeasures(m: number, n = 1): DeleteResult {
+  const before = useSidecar.getState();
+  const sections = before.sections.flatMap((x) => {
+    const to = shiftMeasure(x.m, m, n, 'delete');
+    return to === null ? [] : [{ ...x, m: to }];
+  });
+  const anchors = before.anchors.flatMap((x) => {
+    const to = shiftMeasure(x.m, m, n, 'delete');
+    return to === null ? [] : [{ ...x, m: to }];
+  });
+  let res: DeleteResult = { removed: 0, kept: 0 };
+  const side = sideForMeasures(before.sections, before.anchors, sections, anchors);
+  const changed = edit(`小節 ${toMeasure(m)}${n > 1 ? `〜${toMeasure(m + n - 1)}` : ''} を削除`, (d) => {
+    res = opDeleteMeasures(d, m, n);
+  }, { side });
+  if (changed) side.redo();
+  return res;
+}
+
+function sideForMeasures(s0: SectionMark[], a0: TempoAnchor[], s1: SectionMark[], a1: TempoAnchor[]): NonNullable<HistoryEntry['side']> {
+  const same = JSON.stringify([s0, a0]) === JSON.stringify([s1, a1]);
+  return {
+    undo: () => {
+      if (!same) useSidecar.setState({ sections: s0, anchors: a0, dirty: true });
+    },
+    redo: () => {
+      if (!same) useSidecar.setState({ sections: s1, anchors: a1, dirty: true });
+    },
+  };
+}
+
 /** 指定位置・レーンのチップ（通常チップ）を探す */
 export function chipAt(lane: number, alt: boolean, pos: Pos): number | null {
   const def = DRUM_LANES[lane];
@@ -400,7 +485,7 @@ export function moveSelection(dBeat: Frac, dLane: number): boolean {
   const tempo = tempoOf(s.doc);
   let ok = false;
   edit('チップを動かす', (d) => {
-    ok = opMove(d, new Set(s.selection), tempo, dBeat, dLane);
+    ok = opMove(d, new Set(s.selection), tempo, dBeat, dLane, shiftLane);
   });
   return ok;
 }

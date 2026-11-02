@@ -33,6 +33,15 @@ export function formatLevel(raw: string | undefined): string {
   return (n / 10).toFixed(2);
 }
 
+/** 「7/8」「3/4」や「0.875」を小節長（4/4 = 1）にする */
+export function parseMeter(text: string): number | null {
+  const t = text.trim().replace(/[／]/g, '/');
+  const m = /^(\d+)\s*\/\s*(\d+)$/.exec(t);
+  const v = m ? Number(m[1]) / Number(m[2]) : Number(t);
+  if (!Number.isFinite(v) || v <= 0 || v > 64) return null;
+  return Math.round(v * 1e6) / 1e6;
+}
+
 /** 小節長を拍子として表示（0.75 → 3/4） */
 export function meterLabel(len: number): string {
   const q = len * 4;

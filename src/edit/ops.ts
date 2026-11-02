@@ -5,11 +5,20 @@ import { add, cmp, frac, sub, ZERO, type Frac } from '../dtx/fraction';
 import { CH, DRUM_LANES, channelFor, drumChannel, type Chip, type DtxDoc, type HeaderLine } from '../dtx/model';
 import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
 
-/** グリッドの細かさ（全音符をいくつに分けるか）。12・24・48 は3連 */
-export const GRID_DIVS = [4, 8, 12, 16, 24, 32, 48, 64] as const;
+/** グリッドの細かさ（全音符をいくつに分けるか）。12・24・48 は3連、20・40 は5連、28 は7連 */
+export const GRID_DIVS = [4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 64, 96, 192] as const;
 
 export function gridLabel(div: number): string {
-  return div % 3 === 0 ? `1/${div}（3連）` : `1/${div}`;
+  if (div % 7 === 0) return `1/${div}（7連）`;
+  if (div % 5 === 0) return `1/${div}（5連）`;
+  if (div % 3 === 0) return `1/${div}（3連）`;
+  return `1/${div}`;
+}
+
+/** [ と ] でグリッドを1段階変える（一覧に無い細かさからは近い段へ） */
+export function stepGrid(div: number, dir: 1 | -1): number {
+  if (dir > 0) return GRID_DIVS.find((d) => d > div) ?? GRID_DIVS[GRID_DIVS.length - 1];
+  return [...GRID_DIVS].reverse().find((d) => d < div) ?? GRID_DIVS[0];
 }
 
 /** グリッド1つ分の拍数（4分音符=1拍） */
@@ -89,7 +98,14 @@ export function channelInLane(ch: number, lane: number): number | null {
  * 選んだチップを動かす。拍のずれ（分数）とレーンのずれを受け取る。
  * 曲頭より前や範囲外にはみ出す場合は何もしないで false を返す。
  */
-export function opMove(d: Draft<DtxDoc>, ids: ReadonlySet<number>, tempo: TempoMap, dBeat: Frac, dLane: number): boolean {
+export function opMove(
+  d: Draft<DtxDoc>,
+  ids: ReadonlySet<number>,
+  tempo: TempoMap,
+  dBeat: Frac,
+  dLane: number,
+  shift: (lane: number, d: number) => number | null = (l, n) => l + n,
+): boolean {
   const moves: { index: number; ch: number; p: Pos }[] = [];
   for (let i = 0; i < d.chips.length; i++) {
     const c = d.chips[i];
@@ -102,7 +118,8 @@ export function opMove(d: Draft<DtxDoc>, ids: ReadonlySet<number>, tempo: TempoM
     if (dLane !== 0) {
       const info = drumChannel(c.ch);
       if (info) {
-        ch = channelInLane(c.ch, info.lane + dLane);
+        const to = shift(info.lane, dLane);
+        ch = to === null ? null : channelInLane(c.ch, to);
         if (ch === null) return false;
       }
     }
@@ -222,6 +239,18 @@ export function setField(d: Draft<DtxDoc>, key: string, value: string | undefine
     d.header.splice(idx, 0, { kind: 'field', key: k, name: k, sep: ': ', comment: null });
   }
   d.fields[k] = value;
+}
+
+/** ヘッダの行のコメント（「;」のあと）を変える。WAV のラベルに使う */
+export function setFieldComment(d: Draft<DtxDoc>, key: string, comment: string) {
+  const k = key.toUpperCase();
+  for (const h of d.header) {
+    if (h.kind !== 'field' || h.key !== k) continue;
+    const next = comment.trim() ? ` ${comment.trim()}` : null;
+    if ((h.comment ?? null) === next || (h.comment?.trim() ?? '') === comment.trim()) return;
+    h.comment = next;
+    delete h.orig;
+  }
 }
 
 /** 空いている WAV 番号（01〜ZZ）を探す */

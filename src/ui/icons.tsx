@@ -228,6 +228,23 @@ export const Icon = {
       <path d="m4.5 6.5 3.5 3.5 3.5-3.5" />
     </Svg>
   ),
+  chevronUp: (s?: number) => (
+    <Svg size={s}>
+      <path d="m4.5 9.5 3.5-3.5 3.5 3.5" />
+    </Svg>
+  ),
+  screen: (s?: number) => (
+    <Svg size={s}>
+      <rect x="3.5" y="1.8" width="9" height="12.4" rx="1.4" />
+      <path d="M6 5.5h1.6M9.2 8h1.6M6 10.5h1.6M3.5 12h9" />
+    </Svg>
+  ),
+  history: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9" />
+      <path d="M2.5 2.5v2.6h2.6M8 5v3.2l2 1.3" />
+    </Svg>
+  ),
   chevronRight: (s?: number) => (
     <Svg size={s}>
       <path d="m6.5 4.5 3.5 3.5-3.5 3.5" />

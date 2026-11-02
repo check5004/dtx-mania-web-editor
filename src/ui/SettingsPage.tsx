@@ -10,7 +10,9 @@ import {
   keyLabel,
   noteName,
   removeProfile,
+  DEFAULT_LANE_ORDER,
   setKey,
+  setLaneOrder,
   setNote,
   updateProfile,
   useInputSettings,
@@ -19,7 +21,7 @@ import {
 import { backToChart } from '../store/editor';
 import { Icon } from './icons';
 
-type Section = 'midi' | 'keys' | 'latency' | 'velocity';
+type Section = 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity';
 
 const TARGETS: { t: LaneTarget; key: string; name: string; color: string }[] = DRUM_LANES.flatMap((l, i) => {
   const main = { t: { lane: i, alt: false }, key: l.key, name: l.mainName, color: l.color };
@@ -55,6 +57,7 @@ export function SettingsPage() {
             [
               ['midi', '電子ドラム（MIDI）'],
               ['keys', 'キーボード'],
+              ['lanes', 'レーンの並び'],
               ['latency', '入力の遅れの補正'],
               ['velocity', '強さ'],
             ] as const
@@ -67,6 +70,7 @@ export function SettingsPage() {
         <main className="settings-main scroll">
           {sec === 'midi' && <MidiSettings />}
           {sec === 'keys' && <KeySettings />}
+          {sec === 'lanes' && <LaneOrderSettings />}
           {sec === 'latency' && <LatencySettings />}
           {sec === 'velocity' && <VelocitySettings />}
         </main>
@@ -286,6 +290,83 @@ function KeySettings() {
         <kbd>Shift</kbd>＋キーで HHオープン・左バスドラム。<kbd>↑</kbd>
         <kbd>↓</kbd> でカーソル移動、<kbd>[</kbd> <kbd>]</kbd> でグリッド変更、<kbd>Enter</kbd> でカーソルの小節の候補をまとめて採用、<kbd>Ctrl</kbd>＋<kbd>D</kbd> で前の小節を複製。
       </p>
+    </div>
+  );
+}
+
+const LANE_PRESETS: { name: string; order: number[] }[] = [
+  { name: 'NXの標準（LC HH LP SD HT BD LT FT CY RD）', order: DEFAULT_LANE_ORDER },
+  { name: 'ライドを右シンバルの左に（… FT RD CY）', order: [0, 1, 2, 3, 4, 5, 6, 7, 9, 8] },
+  { name: '左ペダルをスネアの右に（LC HH SD LP …）', order: [0, 1, 3, 2, 4, 5, 6, 7, 8, 9] },
+  { name: '左右反転', order: [...DEFAULT_LANE_ORDER].reverse() },
+];
+
+function LaneOrderSettings() {
+  const order = useInputSettings((s) => s.laneOrder);
+  const [pick, setPick] = useState<number | null>(null);
+  const move = (slot: number, d: number) => {
+    const to = slot + d;
+    if (to < 0 || to > 9) return;
+    const next = [...order];
+    [next[slot], next[to]] = [next[to], next[slot]];
+    setLaneOrder(next);
+  };
+  return (
+    <div className="settings-col">
+      <h2>レーンの並び</h2>
+      <p className="lbl">譜面のレーンを左からどの順に並べるかです。NXのレーンの表示設定に合わせると、ゲームと同じ見た目で書けます。DTXの中身（チャンネル）は変わりません。</p>
+      <div className="card">
+        <div className="lane-order">
+          {order.map((lane, slot) => {
+            const l = DRUM_LANES[lane];
+            return (
+              <div key={l.key} className={`lane-slot ${pick === slot ? 'on' : ''}`}>
+                <button
+                  className="lane-slot-name mono"
+                  style={{ color: l.color }}
+                  title="クリックで選び、もう一つのレーンをクリックすると入れ替えます"
+                  onClick={() => {
+                    if (pick === null) return setPick(slot);
+                    if (pick !== slot) {
+                      const next = [...order];
+                      [next[slot], next[pick]] = [next[pick], next[slot]];
+                      setLaneOrder(next);
+                    }
+                    setPick(null);
+                  }}
+                >
+                  {l.key}
+                </button>
+                <span className="lbl">{l.name}</span>
+                <div className="row" style={{ gap: 2 }}>
+                  <button className="ib tiny" onClick={() => move(slot, -1)} disabled={slot === 0} aria-label={`${l.name}を左へ`}>
+                    ‹
+                  </button>
+                  <button className="ib tiny" onClick={() => move(slot, 1)} disabled={slot === 9} aria-label={`${l.name}を右へ`}>
+                    ›
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="lbl" style={{ margin: '10px 0 0' }}>レーン名をクリックして、もう一つのレーン名をクリックすると入れ替わります。‹ › で一つずつ動かせます。</p>
+      </div>
+      <div className="card">
+        <b style={{ fontSize: 13 }}>よく使う並び</b>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {LANE_PRESETS.map((p) => {
+            const on = p.order.every((v, i) => order[i] === v);
+            return (
+              <button key={p.name} className={`btn small ${on ? 'primary' : ''}`} style={{ justifyContent: 'flex-start' }} onClick={() => setLaneOrder(p.order)}>
+                {on ? '✓ ' : ''}
+                {p.name}
+              </button>
+            );
+          })}
+        </div>
+        <p className="lbl" style={{ margin: '10px 0 0' }}>NXの設定画面の並びと違うときは、上で並べ替えてください。</p>
+      </div>
     </div>
   );
 }

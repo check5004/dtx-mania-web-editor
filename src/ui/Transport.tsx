@@ -9,6 +9,7 @@ import { useMidi } from '../input/midi';
 import { chipBpmLabel, formatPosition, formatTime, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
 import { Icon } from './icons';
+import { promptDialog } from './dialogs';
 import { TapTempoButton } from './TapTempoPanel';
 
 export function Transport() {
@@ -115,12 +116,24 @@ export function Transport() {
       <div className="vsep" />
       <label className="row" title="置く位置の細かさ（[ と ] でも変えられます）。ズームは Ctrl+ホイール">
         <span className="lbl">グリッド</span>
-        <select className="field mono" style={{ width: 92 }} value={div} onChange={(e) => setView({ div: Number(e.target.value) })}>
+        <select
+          className="field mono"
+          style={{ width: 92 }}
+          value={div}
+          onChange={async (e) => {
+            if (e.target.value !== 'custom') return setView({ div: Number(e.target.value) });
+            const v = await promptDialog({ title: 'グリッドの細かさ', body: '全音符をいくつに分けるか（1〜192）。5連の16分なら 20、7連なら 28、6連なら 24。', value: String(div), ok: '決定' });
+            const n = Math.round(Number(v));
+            if (v && n >= 1 && n <= 192) setView({ div: n });
+          }}
+        >
+          {(GRID_DIVS as readonly number[]).includes(div) ? null : <option value={div}>{gridLabel(div)}</option>}
           {GRID_DIVS.map((d) => (
             <option key={d} value={d}>
               {gridLabel(d)}
             </option>
           ))}
+          <option value="custom">任意の分割…</option>
         </select>
       </label>
       <div className="vsep" />

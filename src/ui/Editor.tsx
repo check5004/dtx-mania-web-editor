@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { openDroppedFiles, openFolderFromInput, openFolderPicker, save } from '../app/fileActions';
 import { frac } from '../dtx/fraction';
-import { GRID_DIVS, gridStep, snapToGrid } from '../edit/ops';
+import { gridStep, snapToGrid, stepGrid } from '../edit/ops';
 import { autoEnableMidi } from '../input/midi';
 import { adoptGhostsInRange, useAssist } from '../store/assist';
 import { tempoOf } from '../store/derived';
@@ -35,6 +35,10 @@ import { nudgeSelection, setPreset, toggleVelMode, useVel } from '../store/veloc
 import { TempoPage } from './TempoPage';
 import { StemsPage } from './StemsPage';
 import { LibraryPage } from './LibraryPage';
+import { FindPanel } from './FindPanel';
+import { NxPreview } from './NxPreview';
+import { togglePreview, usePreview } from '../store/preview';
+import { gotoResult, openFind, useFind } from '../store/find';
 import { toggleBgmMute, toggleDrumMute } from '../store/stems';
 import { TopBar } from './TopBar';
 import { Transport } from './Transport';
@@ -77,8 +81,19 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     return;
   }
   if (s.page !== 'chart') return;
+  if (k === 'F3') {
+    e.preventDefault();
+    if (!useFind.getState().open) openFind();
+    else gotoResult(useFind.getState().index + (e.shiftKey ? -1 : 1));
+    return;
+  }
   if (mod) {
     switch (k.toLowerCase()) {
+      case 'f':
+      case 'h':
+        e.preventDefault();
+        openFind();
+        return;
       case 'd': {
         e.preventDefault();
         const { m } = tempoOf(s.doc).locate(Math.max(0, s.cursorBeat));
@@ -144,6 +159,12 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     setPreset((Number(e.code.slice(5)) - 1) as 0 | 1 | 2);
     return;
   }
+  // P：NX風プレビュー（Shift+P で全画面）
+  if (!e.altKey && e.code === 'KeyP') {
+    e.preventDefault();
+    togglePreview(e.shiftKey ? 'full' : 'side');
+    return;
+  }
   // V：強さの編集モード
   if (!e.altKey && e.code === 'KeyV') {
     e.preventDefault();
@@ -175,6 +196,10 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       deleteSelection();
       return;
     case 'Escape':
+      if (usePreview.getState().mode === 'full') {
+        usePreview.setState({ mode: 'side' });
+        return;
+      }
       if (useVel.getState().mode) {
         toggleVelMode(false);
         return;
@@ -207,9 +232,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       return;
     case '[':
     case ']': {
-      const i = GRID_DIVS.indexOf(s.view.div as (typeof GRID_DIVS)[number]);
-      const ni = Math.max(0, Math.min(GRID_DIVS.length - 1, i + (k === ']' ? 1 : -1)));
-      setView({ div: GRID_DIVS[ni] });
+      setView({ div: stepGrid(s.view.div, k === ']' ? 1 : -1) });
       return;
     }
     case 'Home':
@@ -223,6 +246,8 @@ export function Editor() {
   const folderInput = useRef<HTMLInputElement>(null);
   const page = useEditor((s) => s.page);
   const velMode = useVel((s) => s.mode);
+  const findOpen = useFind((s) => s.open);
+  const previewMode = usePreview((s) => s.mode);
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -263,10 +288,16 @@ export function Editor() {
             {!velMode && <LeftPanel />}
             <section className="chart-area">
               <ChartCanvas />
+              {findOpen && <FindPanel />}
             </section>
-            {velMode ? <VelocityPanel /> : <RightPanel />}
+            {velMode ? <VelocityPanel /> : previewMode === 'side' ? <NxPreview /> : <RightPanel />}
           </div>
           <Footer />
+          {previewMode === 'full' && (
+            <div className="nx-overlay">
+              <NxPreview full />
+            </div>
+          )}
         </>
       )}
       <FolderInput inputRef={folderInput} />

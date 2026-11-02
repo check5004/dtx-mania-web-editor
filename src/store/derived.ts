@@ -2,7 +2,7 @@
 import type { SoundEvent, WavSource } from '../audio/engine';
 import { virtualSound } from '../audio/sounds';
 import { parseNxNumber, toBase36x2 } from '../dtx/base36';
-import { CH, drumChannel, isSeChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
+import { bgaChannel, CH, drumChannel, isSeChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { findFile, type SongFolder } from '../fs/folder';
 
@@ -32,6 +32,8 @@ export function tempoOf(doc: DtxDoc): TempoMap {
 /** 譜面上の列。0〜9 はドラムのレーン */
 export const COL_BPM = -1;
 export const COL_BGM = -2;
+/** BGA・動画の列 */
+export const COL_BGA = -3;
 
 export interface ChipView {
   c: Chip;
@@ -53,7 +55,8 @@ export function chipViews(doc: DtxDoc): ChipView[] {
     let col: number;
     if (d) col = d.lane;
     else if (c.ch === CH.BPM || c.ch === CH.BPM_EX) col = COL_BPM;
-    else if (c.ch === CH.BGM || isSeChannel(c.ch)) col = COL_BGM;
+    else if (c.ch === CH.BGM || isSeChannel(c.ch) || c.ch === CH.FILLIN || c.ch === CH.FILLIN_SOUND) col = COL_BGM;
+    else if (bgaChannel(c.ch)) col = COL_BGA;
     else continue;
     v.push({ c, beat: t.beatOf(c.m, c.f), col, kind: d?.kind ?? 'normal', alt: d?.alt ?? false });
   }

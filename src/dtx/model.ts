@@ -149,3 +149,42 @@ export function isSoundChannel(ch: number): boolean {
 export function chipKey(c: { ch: number; m: number; f: Frac }): string {
   return `${c.ch}:${c.m}:${c.f.n}/${c.f.d}`;
 }
+
+// ---- BGA・動画 -------------------------------------------------------------------
+
+export interface BgaChannelDef {
+  ch: number;
+  name: string;
+  /** 動画（#AVI を指す）か。そうでなければ画像（#BMP・#BMPTEX・#BGA を指す） */
+  movie: boolean;
+  /** 差し替え（レイヤーの画像を置き換える） */
+  swap: boolean;
+}
+
+/** BGA のレイヤー 1〜8 と差し替え、動画のチャンネル */
+export const BGA_CHANNELS: readonly BgaChannelDef[] = [
+  { ch: 0x04, name: 'BGA レイヤー1', movie: false, swap: false },
+  { ch: 0x07, name: 'BGA レイヤー2', movie: false, swap: false },
+  { ch: 0x55, name: 'BGA レイヤー3', movie: false, swap: false },
+  { ch: 0x56, name: 'BGA レイヤー4', movie: false, swap: false },
+  { ch: 0x57, name: 'BGA レイヤー5', movie: false, swap: false },
+  { ch: 0x58, name: 'BGA レイヤー6', movie: false, swap: false },
+  { ch: 0x59, name: 'BGA レイヤー7', movie: false, swap: false },
+  { ch: 0x60, name: 'BGA レイヤー8', movie: false, swap: false },
+  { ch: 0xc4, name: 'レイヤー1の差し替え', movie: false, swap: true },
+  { ch: 0xc7, name: 'レイヤー2の差し替え', movie: false, swap: true },
+  { ch: 0xd5, name: 'レイヤー3の差し替え', movie: false, swap: true },
+  { ch: 0xd6, name: 'レイヤー4の差し替え', movie: false, swap: true },
+  { ch: 0xd7, name: 'レイヤー5の差し替え', movie: false, swap: true },
+  { ch: 0xd8, name: 'レイヤー6の差し替え', movie: false, swap: true },
+  { ch: 0xd9, name: 'レイヤー7の差し替え', movie: false, swap: true },
+  { ch: 0xe0, name: 'レイヤー8の差し替え', movie: false, swap: true },
+  { ch: 0x54, name: '動画', movie: true, swap: false },
+  { ch: 0x5a, name: '動画（全画面）', movie: true, swap: false },
+];
+
+const bgaInfo = new Map(BGA_CHANNELS.map((b) => [b.ch, b]));
+
+export function bgaChannel(ch: number): BgaChannelDef | undefined {
+  return bgaInfo.get(ch);
+}

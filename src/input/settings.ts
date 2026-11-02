@@ -35,7 +35,14 @@ export interface InputSettings {
   velStep: number;
   /** 電子ドラムの強さの変換カーブ */
   velCurve: 'soft' | 'normal' | 'hard';
+  /** 譜面のレーンの並び（左から、DRUM_LANES の番号） */
+  laneOrder: number[];
 }
+
+export const DEFAULT_LANE_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+const isLaneOrder = (a: unknown): a is number[] =>
+  Array.isArray(a) && a.length === 10 && [...a].sort((x, y) => x - y).every((v, i) => v === i);
 
 /** レーン順（LC HH LP SD HT BD LT FT CY RD）のキー */
 export const DEFAULT_KEYS: Record<string, number> = {
@@ -90,7 +97,7 @@ export function newProfile(name: string): MidiProfile {
 const KEY = 'dtxe.input.v1';
 
 function load(): InputSettings {
-  const base: InputSettings = { keys: { ...DEFAULT_KEYS }, profiles: [], profileId: '', latencyMs: 0, velPresets: [100, 70, 35], velStep: 5, velCurve: 'normal' };
+  const base: InputSettings = { keys: { ...DEFAULT_KEYS }, profiles: [], profileId: '', latencyMs: 0, velPresets: [100, 70, 35], velStep: 5, velCurve: 'normal', laneOrder: [...DEFAULT_LANE_ORDER] };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -102,6 +109,7 @@ function load(): InputSettings {
       if (Array.isArray(j.velPresets) && j.velPresets.length === 3 && j.velPresets.every((v) => Number.isFinite(v))) base.velPresets = j.velPresets as [number, number, number];
       if (j.velStep === 1 || j.velStep === 5 || j.velStep === 10) base.velStep = j.velStep;
       if (j.velCurve === 'soft' || j.velCurve === 'normal' || j.velCurve === 'hard') base.velCurve = j.velCurve;
+      if (isLaneOrder(j.laneOrder)) base.laneOrder = j.laneOrder;
     }
   } catch {
     // 読めなければ初期値
@@ -117,7 +125,7 @@ useInputSettings.subscribe((s) => {
   try {
     localStorage.setItem(
       KEY,
-      JSON.stringify({ keys: s.keys, profiles: s.profiles, profileId: s.profileId, latencyMs: s.latencyMs, velPresets: s.velPresets, velStep: s.velStep, velCurve: s.velCurve }),
+      JSON.stringify({ keys: s.keys, profiles: s.profiles, profileId: s.profileId, latencyMs: s.latencyMs, velPresets: s.velPresets, velStep: s.velStep, velCurve: s.velCurve, laneOrder: s.laneOrder }),
     );
   } catch {
     // 保存できなくても使える
@@ -181,4 +189,26 @@ export function keyLabel(code: string): string {
 export function noteName(n: number): string {
   const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   return `${names[n % 12]}${Math.floor(n / 12) - 1}`;
+}
+
+// ---- レーンの並び -----------------------------------------------------------------
+
+/** レーン（DRUM_LANES の番号）が左から何番目に出るか */
+export function slotOf(lane: number): number {
+  const i = useInputSettings.getState().laneOrder.indexOf(lane);
+  return i < 0 ? lane : i;
+}
+
+/** 左から slot 番目のレーン */
+export function laneAt(slot: number): number | undefined {
+  return useInputSettings.getState().laneOrder[slot];
+}
+
+/** 画面の並びで d 個となりのレーン（はみ出たら null） */
+export function shiftLane(lane: number, d: number): number | null {
+  return laneAt(slotOf(lane) + d) ?? null;
+}
+
+export function setLaneOrder(order: number[]) {
+  if (isLaneOrder(order)) useInputSettings.setState({ laneOrder: [...order] });
 }
