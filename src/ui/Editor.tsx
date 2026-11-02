@@ -33,6 +33,8 @@ import { tapKey } from './TapTempoPanel';
 import { VelocityPanel } from './VelocityPanel';
 import { nudgeSelection, setPreset, toggleVelMode, useVel } from '../store/velocity';
 import { TempoPage } from './TempoPage';
+import { StemsPage } from './StemsPage';
+import { toggleBgmMute, toggleDrumMute } from '../store/stems';
 import { TopBar } from './TopBar';
 import { Transport } from './Transport';
 
@@ -61,6 +63,18 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     return;
   }
   if (isTyping(e)) return;
+  // 原曲・譜面の音のミュート（ステム画面でも効く）
+  if (e.altKey && !mod && (e.code === 'Digit1' || e.code === 'Digit2')) {
+    e.preventDefault();
+    if (e.code === 'Digit1') toggleBgmMute();
+    else toggleDrumMute();
+    return;
+  }
+  if (s.page === 'stems' && k === ' ') {
+    e.preventDefault();
+    togglePlay();
+    return;
+  }
   if (s.page !== 'chart') return;
   if (mod) {
     switch (k.toLowerCase()) {
@@ -236,6 +250,8 @@ export function Editor() {
         <TempoPage />
       ) : page === 'settings' ? (
         <SettingsPage />
+      ) : page === 'stems' ? (
+        <StemsPage />
       ) : (
         <>
           <TopBar folderInput={folderInput} />

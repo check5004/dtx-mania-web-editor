@@ -63,8 +63,8 @@ export async function loadAudio(key: string, buf: AudioBuffer): Promise<void> {
   for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) channels.push(buf.getChannelData(c).slice());
   await call({ type: 'load', key, channels, sr: buf.sampleRate }, channels.map((c) => c.buffer));
   loaded.add(key);
-  // ワーカーは2曲まで持つ
-  while (loaded.size > 2) loaded.delete(loaded.values().next().value!);
+  // ワーカーは7曲まで持つ（ステムをスロー再生するとき全部を伸ばすため）
+  while (loaded.size > 7) loaded.delete(loaded.values().next().value!);
 }
 
 export function analyze(key: string, progress?: (p: number) => void): Promise<AnalysisData> {

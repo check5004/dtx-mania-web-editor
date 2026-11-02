@@ -19,7 +19,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       // 古い曲は捨てる（2曲まで持つ）
       store.delete(req.key);
       store.set(req.key, { channels: req.channels, sr: req.sr });
-      while (store.size > 2) store.delete(store.keys().next().value!);
+      while (store.size > 7) store.delete(store.keys().next().value!);
       post({ id: req.id, ok: true });
       return;
     }

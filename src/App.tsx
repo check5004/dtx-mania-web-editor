@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { startAutosave } from './app/fileActions';
 import { useEditor } from './store/editor';
+import './store/stems';
 import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';

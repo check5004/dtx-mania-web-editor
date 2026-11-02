@@ -15,6 +15,38 @@ export interface TempoAnchor {
   t: number;
 }
 
+export type StemKind = 'drums' | 'bass' | 'vocals' | 'guitar' | 'piano' | 'other';
+
+/** ステム（原曲を楽器ごとに分けた音）。ファイルは曲フォルダの stems/ に置く */
+export interface StemTrack {
+  /** 曲フォルダからの相対パス（stems/drums.wav など）。トラックの id も兼ねる */
+  file: string;
+  name: string;
+  kind: StemKind;
+  /** 音量（1 = そのまま） */
+  gain: number;
+  /** パン（-1 左 〜 1 右） */
+  pan: number;
+  mute: boolean;
+  solo: boolean;
+  /** 頭のずれ（ミリ秒）。正なら遅らせる */
+  offsetMs: number;
+}
+
+export type ListenPreset = 'all' | 'game' | 'drums' | 'compare' | 'custom';
+
+/** 聴くための音量（DTX や書き出しには影響しない） */
+export interface SavedMix {
+  bgm: number;
+  drums: number;
+  bgmMute: boolean;
+  drumMute: boolean;
+  metronome: boolean;
+  click: number;
+  clickBarOnly: boolean;
+  listen: ListenPreset;
+}
+
 export interface SidecarData {
   sections: SectionMark[];
   /** セクション名 → 色（同じ名前は同じ色） */
@@ -22,16 +54,22 @@ export interface SidecarData {
   youtube: { url: string; offset: number } | null;
   /** テンポ合わせ画面の拍アンカー */
   anchors: TempoAnchor[];
+  stems: StemTrack[];
+  /** 解析（波形・原曲の打点・候補チップ・BPM推定）に使うステム。null なら原曲（BGM） */
+  analysisStem: string | null;
+  mix: SavedMix | null;
 }
 
 export interface SidecarState extends SidecarData {
   /** 保存していない変更があるか */
   dirty: boolean;
+  /** 読み込み直すたびに増える（曲ごとの設定を当て直す合図） */
+  loadSeq: number;
 }
 
-export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [] });
+export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null });
 
-export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false }));
+export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, loadSeq: 0 }));
 
 export const SECTION_PRESETS: { name: string; color: string }[] = [
   { name: 'イントロ', color: '#8B95A4' },
@@ -77,7 +115,7 @@ function touch(p: Partial<SidecarData>) {
 }
 
 export function loadSidecar(d: SidecarData | null) {
-  set({ ...emptySidecar(), ...(d ?? {}), dirty: false });
+  set({ ...emptySidecar(), ...(d ?? {}), dirty: false, loadSeq: get().loadSeq + 1 });
 }
 
 export function markSidecarSaved() {
@@ -86,11 +124,27 @@ export function markSidecarSaved() {
 
 export function sidecarData(): SidecarData {
   const s = get();
-  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors };
+  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix };
 }
 
+/** 書く中身が無いか（聴く音量だけなら、作業ファイルを新しく作るほどではない） */
 export function sidecarIsEmpty(d: SidecarData = sidecarData()): boolean {
-  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0;
+  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0;
+}
+
+/** ステムを書き換える（音量・パン・ずれは保存する変更、ミュート・ソロは聴くためだけなので quiet） */
+export function setStems(stems: StemTrack[], opts: { quiet?: boolean } = {}) {
+  if (opts.quiet) set({ stems });
+  else touch({ stems });
+}
+
+export function setAnalysisStem(file: string | null) {
+  touch({ analysisStem: file });
+}
+
+/** 聴く音量を覚える（保存するまで書かないが、未保存の変更とは数えない） */
+export function rememberMix(mix: SavedMix) {
+  set({ mix });
 }
 
 export function setSection(m: number, name: string | null) {
@@ -141,6 +195,38 @@ export function parseSidecar(text: string): SidecarData | null {
     }
     if (j.youtube && typeof j.youtube.url === 'string') out.youtube = { url: j.youtube.url, offset: Number(j.youtube.offset) || 0 };
     if (Array.isArray(j.anchors)) out.anchors = j.anchors.filter((a) => a && Number.isFinite(a.m) && Number.isFinite(a.t)).map((a) => ({ m: Math.trunc(a.m), t: a.t }));
+    if (Array.isArray(j.stems)) {
+      const kinds: StemKind[] = ['drums', 'bass', 'vocals', 'guitar', 'piano', 'other'];
+      const n = (v: unknown, def: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def);
+      out.stems = j.stems
+        .filter((t) => t && typeof t.file === 'string' && t.file)
+        .map((t) => ({
+          file: t.file,
+          name: typeof t.name === 'string' ? t.name : t.file.split('/').pop()!,
+          kind: kinds.includes(t.kind) ? t.kind : 'other',
+          gain: n(t.gain, 1, 0, 2),
+          pan: n(t.pan, 0, -1, 1),
+          mute: !!t.mute,
+          solo: !!t.solo,
+          offsetMs: n(t.offsetMs, 0, -60000, 60000),
+        }));
+    }
+    if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
+    if (j.mix && typeof j.mix === 'object') {
+      const m = j.mix as Partial<SavedMix>;
+      const v = (x: unknown, def: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(1.5, x)) : def);
+      const listens: ListenPreset[] = ['all', 'game', 'drums', 'compare', 'custom'];
+      out.mix = {
+        bgm: v(m.bgm, 0.8),
+        drums: v(m.drums, 0.9),
+        bgmMute: !!m.bgmMute,
+        drumMute: !!m.drumMute,
+        metronome: !!m.metronome,
+        click: v(m.click, 0.5),
+        clickBarOnly: !!m.clickBarOnly,
+        listen: listens.includes(m.listen as ListenPreset) ? (m.listen as ListenPreset) : 'all',
+      };
+    }
     return out;
   } catch {
     return null;

@@ -61,6 +61,8 @@ export interface Mix {
   clickBarOnly: boolean;
   /** 譜面の音のパン（聴き比べで右に振る） */
   drumPan: number;
+  /** 原曲のパン（ステムが無いときの聴き比べで左に振る） */
+  bgmPan: number;
 }
 
 /** ステムのトラックの鳴らし方 */
@@ -138,11 +140,12 @@ class AudioEngine {
   private buses!: Record<'bgm' | 'drum' | 'se' | 'click', GainNode>;
   private bgmOut!: GainNode;
   private drumPanNode: StereoPannerNode | null = null;
+  private bgmPanNode: StereoPannerNode | null = null;
   private strips = new Map<number, { gain: GainNode; pan: StereoPannerNode | null; def: StemStrip }>();
   private filters!: Record<Exclude<BgmFilter, 'all'>, { input: AudioNode; output: AudioNode }>;
   private cache = new Map<string, Promise<AudioBuffer | null>>();
   private table = new Map<number, { buf: AudioBuffer | null; volume: number; pan: number; key: string }>();
-  mix: Mix = { master: 0.9, bgm: 0.8, drums: 0.9, metronome: false, bgmMute: false, drumMute: false, click: 0.5, clickBarOnly: false, drumPan: 0 };
+  mix: Mix = { master: 0.9, bgm: 0.8, drums: 0.9, metronome: false, bgmMute: false, drumMute: false, click: 0.5, clickBarOnly: false, drumPan: 0, bgmPan: 0 };
   bgmFilter: BgmFilter = 'all';
   /** BGM を鳴らさない（YouTube の音で聴くとき） */
   bgmMuted = false;
@@ -171,7 +174,13 @@ class AudioEngine {
         this.drumPanNode.connect(this.master);
         drumOut = this.drumPanNode;
       }
-      this.buses = { bgm: bus(this.bgmOut), drum: bus(drumOut), se: bus(), click: bus() };
+      let bgmIn: AudioNode = this.bgmOut;
+      if (ctx.createStereoPanner) {
+        this.bgmPanNode = ctx.createStereoPanner();
+        this.bgmPanNode.connect(this.bgmOut);
+        bgmIn = this.bgmPanNode;
+      }
+      this.buses = { bgm: bus(bgmIn), drum: bus(drumOut), se: bus(), click: bus() };
       const chain = (...nodes: BiquadFilterNode[]) => {
         for (let i = 0; i + 1 < nodes.length; i++) nodes[i].connect(nodes[i + 1]);
         nodes[nodes.length - 1].connect(this.master);
@@ -215,6 +224,7 @@ class AudioEngine {
     this.buses.drum.gain.value = m.drumMute ? 0 : m.drums;
     this.buses.click.gain.value = m.metronome || this.forceClick ? Math.max(0.05, m.click) : 0;
     if (this.drumPanNode) this.drumPanNode.pan.value = Math.max(-1, Math.min(1, m.drumPan));
+    if (this.bgmPanNode) this.bgmPanNode.pan.value = Math.max(-1, Math.min(1, m.bgmPan));
     for (const st of this.strips.values()) this.applyStrip(st);
   }
 

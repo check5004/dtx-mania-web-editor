@@ -7,6 +7,7 @@ import { toBase36x2, toMeasure } from '../dtx/base36';
 import { useAssist } from '../store/assist';
 import { bgmSource, wavPath } from '../store/derived';
 import { backToChart, useEditor } from '../store/editor';
+import { useCanvas } from './hooks';
 import {
   applyTempo,
   chooseBgm,
@@ -363,45 +364,6 @@ function BpmCard() {
 
 const LABEL_W = 64;
 const OV = { ruler: 16, bpm: 56, anch: 22, wave: 44, gap: 6 };
-
-function useCanvas(draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void, deps: unknown[], animate = false) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const drawRef = useRef(draw);
-  drawRef.current = draw;
-  useEffect(() => {
-    const c = ref.current!;
-    let raf = 0;
-    const paint = () => {
-      const rect = c.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.floor(rect.width));
-      const h = Math.max(1, Math.floor(rect.height));
-      if (c.width !== Math.floor(w * dpr) || c.height !== Math.floor(h * dpr)) {
-        c.width = Math.floor(w * dpr);
-        c.height = Math.floor(h * dpr);
-      }
-      const ctx = c.getContext('2d')!;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawRef.current(ctx, w, h);
-    };
-    paint();
-    const ro = new ResizeObserver(paint);
-    ro.observe(c);
-    if (animate) {
-      const loop = () => {
-        raf = requestAnimationFrame(loop);
-        paint();
-      };
-      raf = requestAnimationFrame(loop);
-    }
-    return () => {
-      ro.disconnect();
-      cancelAnimationFrame(raf);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  return ref;
-}
 
 function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, fill: string | null, stroke: string | null) {
   ctx.beginPath();

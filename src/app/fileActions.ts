@@ -1,6 +1,8 @@
 // ファイルを開く・保存する流れ。
 import { zipSync } from 'fflate';
 import { encodeWav, kitByFile, loadKit } from '../audio/kit';
+import { detectStemKind } from '../audio/stems';
+import { importStems } from '../store/stems';
 import { decodeDtx, encodeDtx } from '../dtx/encoding';
 import type { DtxDoc } from '../dtx/model';
 import { parseDtx } from '../dtx/parse';
@@ -15,6 +17,7 @@ import {
   folderFromFiles,
   folderFromHandle,
   parseSetDef,
+  pendingFiles,
   pickFolder,
   supportsDirectWrite,
   writeFile,
@@ -185,6 +188,26 @@ export async function openDroppedFiles(files: File[]) {
     toast('DTXか音声ファイル（WAV・OGG・MP3）を選んでください', 'warn');
     return;
   }
+  // ステム分離ソフトで分けたファイル（drums・bass…）をまとめて落としたら、ステムとして読み込む
+  const kinds = new Set(audio.map((f) => detectStemKind(f.name)));
+  if (audio.length >= 2 && kinds.size >= 2) {
+    const asStems = await chooseDialog({
+      title: `音声ファイルが ${audio.length} 個あります`,
+      body: 'ステム（楽器ごとに分けた音）として読み込むと、楽器ごとに鳴らし分け、ドラム抜きのBGMを書き出せます。',
+      options: [
+        { label: 'ステムとして読み込む（おすすめ）', sub: audio.map((f) => f.name).join('、'), value: true },
+        { label: '1つを原曲にする', sub: 'ほかのファイルは曲フォルダに置くだけにします', value: false },
+      ],
+    });
+    if (asStems === null || asStems === undefined) return;
+    if (asStems) {
+      const info = await newSongDialog({ title: '新しい譜面をつくる（ステムから）', audioFiles: [], defaults: { title: audio[0].name.replace(/\s*[([].*$/, '').replace(/\.[^.]+$/, '') } });
+      if (!info) return;
+      openDocument(createDoc(info), newMeta('mstr.dtx', null), folderFromFiles([], info.title || '新しい曲'), { dirty: true });
+      await importStems(audio);
+      return;
+    }
+  }
   const info = await newSongDialog({
     title: '新しい譜面をつくる',
     audioFiles: audio.map((f) => f.name),
@@ -272,6 +295,8 @@ export async function save(opts: { as?: boolean } = {}) {
         if (!ok) return;
       }
       for (const k of kit) await writeFile(folder, k.path, k.bytes);
+      // ステムや書き出した音で、まだフォルダに書けていなかったもの
+      for (const f of pendingFiles(folder)) await writeFile(folder, f.path, new Uint8Array(await (await f.getFile()).arrayBuffer()));
       await writeFile(folder, fileName, bytes);
       const side = sidecarBytes(folder, fileName);
       if (side) await writeFile(folder, sidecarName(fileName), side);
@@ -312,9 +337,9 @@ export async function save(opts: { as?: boolean } = {}) {
       return;
     }
     // フォルダに直接書けないブラウザ：ダウンロード
-    downloadSong(fileName, bytes, kit, folder);
     const side = sidecarBytes(null, fileName);
-    if (side && useSidecar.getState().dirty) downloadBytes(sidecarName(fileName), side, 'application/json');
+    downloadSong(fileName, bytes, kit, folder, side);
+    if (side && useSidecar.getState().dirty && pendingFiles(folder).length === 0 && kit.length === 0) downloadBytes(sidecarName(fileName), side, 'application/json');
     markSidecarSaved();
     markSaved(doc, { meta: { ...get().meta, fileName } });
   } catch (e) {
@@ -323,8 +348,10 @@ export async function save(opts: { as?: boolean } = {}) {
   }
 }
 
-function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; bytes: Uint8Array }[], folder: SongFolder | null) {
+function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; bytes: Uint8Array }[], folder: SongFolder | null, side: Uint8Array | null = null) {
   const memoryOnly = folder && !folder.dir && !findFile(folder, fileName) ? [...folder.files.values()].filter((f) => !/\.dtx$/i.test(f.name)) : [];
+  // ステムや書き出した音（メモリにだけあるもの）も一緒に入れる
+  for (const f of pendingFiles(folder)) if (!memoryOnly.includes(f)) memoryOnly.push(f);
   if (kit.length === 0 && memoryOnly.length === 0) {
     downloadBytes(fileName, bytes);
     toast(`${fileName} をダウンロードしました。曲フォルダの同じ名前のファイルと置き換えてください`, 'ok', 7000);
@@ -335,6 +362,7 @@ function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; 
     for (const f of memoryOnly) files[f.path] = new Uint8Array(await (await f.getFile()).arrayBuffer());
     for (const k of kit) files[k.path] = k.bytes;
     files[fileName] = bytes;
+    if (side) files[sidecarName(fileName)] = side;
     const zip = zipSync(files, { level: 0 });
     const name = `${(get().doc.fields['TITLE'] || 'song').replace(/[\\/:*?"<>|]/g, '_')}.zip`;
     downloadBytes(name, zip, 'application/zip');

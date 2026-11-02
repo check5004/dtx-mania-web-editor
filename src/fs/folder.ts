@@ -17,6 +17,10 @@ export interface FolderFile {
   name: string;
   size: number;
   getFile: () => Promise<File>;
+  /** 書き換えた回数（同じ名前で書き直したとき、読み込み直すため） */
+  ver?: number;
+  /** フォルダにまだ書けていない（メモリにだけある）ファイル。保存やダウンロードで一緒に書き出す */
+  pending?: boolean;
 }
 
 export interface SongFolder {
@@ -148,7 +152,36 @@ export async function writeFile(folder: SongFolder, path: string, bytes: Uint8Ar
   await w.write(bytes as Uint8Array<ArrayBuffer>);
   await w.close();
   const rel = [...parts, name].join('/');
-  folder.files.set(normPath(rel), { path: rel, name, size: bytes.length, getFile: () => fh.getFile() });
+  folder.files.set(normPath(rel), { path: rel, name, size: bytes.length, getFile: () => fh.getFile(), ver: ++fileVer });
+}
+
+let fileVer = 0;
+
+/**
+ * 曲フォルダにファイルを置く。直接書けるフォルダなら書き、書けなければメモリに持っておき、
+ * 保存（フォルダを選ぶ・ZIPでダウンロード）のときに一緒に書き出す。
+ */
+export async function putFile(folder: SongFolder, path: string, data: Uint8Array | File): Promise<'written' | 'memory'> {
+  const rel = path.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (folder.dir) {
+    try {
+      if (await ensureWritable(folder)) {
+        await writeFile(folder, rel, data instanceof File ? new Uint8Array(await data.arrayBuffer()) : data);
+        return 'written';
+      }
+    } catch {
+      // 書けなければメモリに持つ
+    }
+  }
+  const name = rel.split('/').pop()!;
+  const file = data instanceof File ? data : new File([data as Uint8Array<ArrayBuffer>], name);
+  folder.files.set(normPath(rel), { path: rel, name, size: file.size, getFile: async () => file, ver: ++fileVer, pending: true });
+  return 'memory';
+}
+
+/** まだフォルダに書けていないファイル */
+export function pendingFiles(folder: SongFolder | null): FolderFile[] {
+  return folder ? [...folder.files.values()].filter((f) => f.pending) : [];
 }
 
 export function downloadBytes(name: string, bytes: Uint8Array, type = 'application/octet-stream') {

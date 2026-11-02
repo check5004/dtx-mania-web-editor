@@ -218,4 +218,31 @@ export const Icon = {
       <circle cx="8" cy="8" r="2" />
     </Svg>
   ),
+  close: (s?: number) => (
+    <Svg size={s}>
+      <path d="m4 4 8 8M12 4l-8 8" />
+    </Svg>
+  ),
+  chevronDown: (s?: number) => (
+    <Svg size={s}>
+      <path d="m4.5 6.5 3.5 3.5 3.5-3.5" />
+    </Svg>
+  ),
+  chevronRight: (s?: number) => (
+    <Svg size={s}>
+      <path d="m6.5 4.5 3.5 3.5-3.5 3.5" />
+    </Svg>
+  ),
+  layers: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 2.5 14 5.5 8 8.5 2 5.5z" />
+      <path d="m2 8.3 6 3 6-3M2 11 8 14l6-3" />
+    </Svg>
+  ),
+  drum: (s?: number) => (
+    <Svg size={s}>
+      <ellipse cx="8" cy="5.5" rx="5.5" ry="2.2" />
+      <path d="M2.5 5.5v5c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2v-5" />
+    </Svg>
+  ),
 };

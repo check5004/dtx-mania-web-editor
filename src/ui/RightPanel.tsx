@@ -7,7 +7,6 @@ import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
 import {
   adoptGhosts,
   applySimilar,
-  clearMuteSolo,
   clearSimilarPin,
   currentGhosts,
   ghostsInRange,
@@ -15,15 +14,13 @@ import {
   restoreGhosts,
   setBandFilter,
   setGhostLane,
-  toggleMute,
-  toggleSolo,
   useAssist,
 } from '../store/assist';
 import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
 import { useInputSettings } from '../input/settings';
 import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
 import { useState } from 'react';
-import { deleteSelection, setMeasureLength, setKind, setMix, setSelectionWav, useEditor } from '../store/editor';
+import { deleteSelection, setMeasureLength, setKind, setSelectionWav, useEditor } from '../store/editor';
 import { chipBpmLabel, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
 import { visibleBeats } from './ChartCanvas';
@@ -37,7 +34,6 @@ export function RightPanel() {
       <AssistCard />
       <SelectionCard />
       <MeasureCard />
-      <MixCard />
       <StatsCard />
       <NoticeCard />
     </aside>
@@ -394,66 +390,6 @@ function AssistCard() {
         <input type="checkbox" checked={a.audioCols} onChange={(e) => useAssist.setState({ audioCols: e.target.checked })} />
         譜面の右に原曲の打点と波形を出す
       </label>
-    </div>
-  );
-}
-
-function MixCard() {
-  const mix = useEditor((s) => s.mix);
-  const previewOnPlace = useEditor((s) => s.previewOnPlace);
-  const mute = useAssist((s) => s.mute);
-  const solo = useAssist((s) => s.solo);
-  return (
-    <div className="card">
-      <div className="section-title" style={{ marginBottom: 8 }}>
-        ミックス
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <label className="slider-row">
-          <span className="lbl">原曲</span>
-          <input type="range" min={0} max={1} step={0.01} value={mix.bgm} onChange={(e) => setMix({ bgm: Number(e.target.value) })} />
-          <span className="mono lbl">{Math.round(mix.bgm * 100)}</span>
-        </label>
-        <label className="slider-row">
-          <span className="lbl">ドラム</span>
-          <input type="range" min={0} max={1} step={0.01} value={mix.drums} onChange={(e) => setMix({ drums: Number(e.target.value) })} />
-          <span className="mono lbl">{Math.round(mix.drums * 100)}</span>
-        </label>
-        <div className="row" style={{ marginTop: 6 }}>
-          <span className="lbl">レーンごとに消す（M）・それだけ鳴らす（S）</span>
-          <span className="grow" />
-          {(mute.length > 0 || solo.length > 0) && (
-            <button className="btn small ghost" style={{ height: 22 }} onClick={clearMuteSolo}>
-              解除
-            </button>
-          )}
-        </div>
-        <div className="ms-grid">
-          {DRUM_LANES.map((l, i) => (
-            <div key={l.key} className="ms-cell">
-              <span className="k" style={{ color: l.color }}>
-                {l.key}
-              </span>
-              <span className="bs">
-                <button className={`m ${mute.includes(i) ? 'on' : ''}`} onClick={() => toggleMute(i)} title={`${l.name}を消す`}>
-                  M
-                </button>
-                <button className={`s ${solo.includes(i) ? 'on' : ''}`} onClick={() => toggleSolo(i)} title={`${l.name}だけ鳴らす`}>
-                  S
-                </button>
-              </span>
-            </div>
-          ))}
-        </div>
-        <label className="row lbl" style={{ marginTop: 4 }}>
-          <input type="checkbox" checked={mix.metronome} onChange={(e) => setMix({ metronome: e.target.checked })} />
-          再生中にメトロノームを鳴らす
-        </label>
-        <label className="row lbl">
-          <input type="checkbox" checked={previewOnPlace} onChange={(e) => useEditor.setState({ previewOnPlace: e.target.checked })} />
-          チップを置いたときに音を鳴らす
-        </label>
-      </div>
     </div>
   );
 }

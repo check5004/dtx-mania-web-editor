@@ -151,7 +151,7 @@ export function wavSources(doc: DtxDoc, folder: SongFolder | null): WavSource[] 
     }
     out.push({
       no,
-      key: f ? `${folder?.name}|${f.path}|${f.size}` : `kit:${kit!.file}`,
+      key: f ? `${folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : `kit:${kit!.file}`,
       load: f ? async () => (await f.getFile()).arrayBuffer() : undefined,
       kitFile: kit ? kit.file.toLowerCase() : undefined,
       volume: wavVolume(doc, no),
@@ -191,6 +191,28 @@ export function soundEvents(doc: DtxDoc): SoundEvent[] {
   }
   ev.sort((a, b) => a.sec - b.sec);
   eventCache.set(doc, ev);
+  return ev;
+}
+
+/**
+ * 再生で鳴らす音。譜面のチップに、ステム（原曲を楽器ごとに分けた音）などを足したもの。
+ * 足すものは store/stems が登録する（循環を避けるため関数で受け取る）。
+ */
+let playbackTransform: { ver: number; fn: (doc: DtxDoc, ev: SoundEvent[]) => SoundEvent[] } | null = null;
+const playbackCache = new WeakMap<DtxDoc, { ver: number; ev: SoundEvent[] }>();
+
+export function setPlaybackTransform(fn: ((doc: DtxDoc, ev: SoundEvent[]) => SoundEvent[]) | null) {
+  playbackTransform = fn ? { ver: (playbackTransform?.ver ?? 0) + 1, fn } : null;
+}
+
+export function playbackEvents(doc: DtxDoc): SoundEvent[] {
+  const base = soundEvents(doc);
+  const tr = playbackTransform;
+  if (!tr) return base;
+  const hit = playbackCache.get(doc);
+  if (hit && hit.ver === tr.ver) return hit.ev;
+  const ev = tr.fn(doc, base).slice().sort((a, b) => a.sec - b.sec);
+  playbackCache.set(doc, { ver: tr.ver, ev });
   return ev;
 }
 

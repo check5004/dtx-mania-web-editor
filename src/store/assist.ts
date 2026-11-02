@@ -76,6 +76,18 @@ const aset = useAssist.setState;
 
 let running = '';
 
+/** 解析に使う音（ステムを解析元にしたとき）。無ければ原曲（BGM）を使う */
+export interface AnalysisSource {
+  key: string;
+  buf: AudioBuffer;
+  name: string;
+}
+let analysisProvider: (() => AnalysisSource | null) | null = null;
+
+export function setAnalysisProvider(fn: (() => AnalysisSource | null) | null) {
+  analysisProvider = fn;
+}
+
 /** 譜面の BGM が読み込めたら解析する（同じ音はやり直さない） */
 export function syncAnalysis() {
   const s = useEditor.getState();
@@ -85,7 +97,8 @@ export function syncAnalysis() {
     if (aget().status !== 'nosource') aset({ src: null, status: 'nosource', data: null, spectro: null, spectroStatus: 'none' });
     return;
   }
-  const got = engine.buffer(bgm.wav);
+  const stem = analysisProvider?.() ?? null;
+  const got = stem ?? engine.buffer(bgm.wav);
   if (!got) {
     if (!s.loading && aget().status !== 'loading') aset({ src: null, status: 'nosource', data: null, spectro: null, spectroStatus: 'none' });
     return;
@@ -97,7 +110,7 @@ export function syncAnalysis() {
   }
   if (running === got.key) return;
   running = got.key;
-  const name = (wavPath(s.doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '';
+  const name = stem ? stem.name : ((wavPath(s.doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '');
   aset({ src: { wav: bgm.wav, key: got.key, name }, status: 'loading', progress: 0, error: null, data: null, spectro: null, spectroStatus: 'none', dismissed: new Set() });
   void (async () => {
     try {

@@ -6,6 +6,8 @@ import { bgmSource, docStats, tempoOf } from '../store/derived';
 import { sectionColor, useSidecar } from '../store/sidecar';
 import { isDirty, playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
 import { formatTime } from './format';
+import { FooterMixer } from './MixPanel';
+import { stemsActive, useStems } from '../store/stems';
 import { usePlayBeat, useSongLength, useSoundsVersion } from './hooks';
 
 /** 曲全体のシークバー（ノーツの密度つき）と状態の表示 */
@@ -15,8 +17,12 @@ export function Footer() {
   const folder = useEditor((s) => s.folder);
   const dirty = useEditor(isDirty);
   const savedAt = useEditor((s) => s.savedAt);
-  const missing = useEditor((s) => s.missingWavs);
+  const missingAll = useEditor((s) => s.missingWavs);
+  useStems((s) => s.version);
   useSoundsVersion();
+  // ステムを鳴らしているときは、書き出す予定の BGM が無いのは問題にしない
+  const anchor = stemsActive() ? bgmSource(doc)?.wav : undefined;
+  const missing = missingAll.filter((n) => n !== anchor);
   const stats = docStats(doc);
   const length = useSongLength(doc);
 
@@ -30,6 +36,14 @@ export function Footer() {
     <footer className="footer">
       <SeekBar length={length} />
       <div className="status">
+        <span className="legend hide-narrow">
+          <i style={{ background: '#5D7189' }} />
+          原曲の波形
+        </span>
+        <span className="legend hide-narrow">
+          <i style={{ background: '#4CC2FF' }} />
+          譜面の密度
+        </span>
         <span>
           ノーツ <b>{stats.notes.toLocaleString()}</b>
         </span>
@@ -242,16 +256,7 @@ function SeekBar({ length }: { length: number }) {
           aria-label="シークバー（セクション・原曲の波形・譜面の密度）"
         />
       </div>
-      <div className="seek-legend hide-narrow">
-        <span>
-          <i style={{ background: '#5D7189' }} />
-          原曲の波形
-        </span>
-        <span>
-          <i style={{ background: '#4CC2FF' }} />
-          譜面の密度
-        </span>
-      </div>
+      <FooterMixer />
     </div>
   );
 }

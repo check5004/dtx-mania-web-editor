@@ -7,7 +7,7 @@ import { fitTaps } from '../assist/tapTempo';
 import { anchorsFromDoc, applyPlan, evaluatePlan, normalizeAnchors, type PlanResult, type TempoAnchor, type TempoPlan } from '../assist/tempoPlan';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import { useAssist } from './assist';
-import { bgmSource, clickTimes, soundEvents, tempoOf } from './derived';
+import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
 import { edit, playEndSec, songEndSec, stop as stopChart, toast, useEditor } from './editor';
 import { setAnchors, useSidecar } from './sidecar';
 
@@ -281,7 +281,7 @@ export function playPlan(fromAudioSec: number) {
   const off = bgm?.sec ?? 0;
   const startSec = Math.max(0, fromAudioSec + off);
   const end = playEndSec(doc, startSec);
-  const events = soundEvents(doc).filter((e) => e.bus === 'bgm');
+  const events = playbackEvents(doc).filter((e) => e.bus === 'bgm' || e.bus === 'stem');
   engine.setForceClick(true);
   engine.play({
     events,

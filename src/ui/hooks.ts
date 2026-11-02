@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DtxDoc } from '../dtx/model';
 import { useAssist } from '../store/assist';
 import { currentBeat, songEndSec, useEditor } from '../store/editor';
@@ -53,4 +53,44 @@ export function useSongLength(doc: DtxDoc): number {
 /** 音の読み込みが終わったら再描画するためのフック */
 export function useSoundsVersion() {
   return useEditor((s) => s.soundsVersion);
+}
+
+/** canvas に描く（大きさが変わったら描き直す。animate なら毎フレーム） */
+export function useCanvas(draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void, deps: unknown[], animate = false) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const drawRef = useRef(draw);
+  drawRef.current = draw;
+  useEffect(() => {
+    const c = ref.current!;
+    let raf = 0;
+    const paint = () => {
+      const rect = c.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(rect.width));
+      const h = Math.max(1, Math.floor(rect.height));
+      if (c.width !== Math.floor(w * dpr) || c.height !== Math.floor(h * dpr)) {
+        c.width = Math.floor(w * dpr);
+        c.height = Math.floor(h * dpr);
+      }
+      const ctx = c.getContext('2d')!;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawRef.current(ctx, w, h);
+    };
+    paint();
+    const ro = new ResizeObserver(paint);
+    ro.observe(c);
+    if (animate) {
+      const loop = () => {
+        raf = requestAnimationFrame(loop);
+        paint();
+      };
+      raf = requestAnimationFrame(loop);
+    }
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return ref;
 }

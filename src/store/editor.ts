@@ -25,7 +25,7 @@ import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import type { SongFolder } from '../fs/folder';
 import { useInputSettings } from '../input/settings';
 import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
-import { bgmSource, chipViews, clickTimes, soundEvents, tempoOf, wavSources } from './derived';
+import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavSources } from './derived';
 import { loadSidecar, useSidecar } from './sidecar';
 
 enablePatches();
@@ -69,10 +69,13 @@ export interface ViewState {
   follow: boolean;
 }
 
+/** エディタの中の画面 */
+export type EditorPage = 'chart' | 'tempo' | 'settings' | 'stems' | 'library' | 'songinfo' | 'ai' | 'guideline';
+
 export interface EditorState {
   screen: 'home' | 'editor';
   /** エディタの中の画面（譜面・テンポ合わせ・設定） */
-  page: 'chart' | 'tempo' | 'settings';
+  page: EditorPage;
   doc: DtxDoc;
   meta: DocMeta;
   folder: SongFolder | null;
@@ -349,8 +352,17 @@ export function openSettings() {
 }
 
 export function backToChart() {
-  stop();
+  const from = get().page;
+  // ステム画面は再生を共有するので止めない
+  if (from !== 'stems') stop();
   set({ page: 'chart' });
+}
+
+/** 譜面以外の画面を開く（ステム・ライブラリ・曲情報・AI など） */
+export function openPage(page: EditorPage) {
+  if (page === 'tempo') return openTempo();
+  if (page !== 'stems' && page !== 'chart') stop();
+  set({ page });
 }
 
 export function deleteChips(ids: readonly number[]) {
@@ -552,9 +564,9 @@ export function previewWav(no: number) {
  * 譜面が空でも、原曲や映像の長さぶんは曲があるものとして扱う。
  */
 export function songEndSec(doc: DtxDoc): number {
-  const ev = soundEvents(doc);
+  const ev = playbackEvents(doc);
   let end = 0;
-  for (const e of ev) end = Math.max(end, e.sec + (e.bus === 'bgm' ? engine.duration(e.wav) : 0.5));
+  for (const e of ev) end = Math.max(end, e.sec + (e.bus === 'bgm' || e.bus === 'stem' ? engine.duration(e.wav) : 0.5));
   const t = tempoOf(doc);
   const views = chipViews(doc);
   if (views.length) end = Math.max(end, t.beatToSec(views[views.length - 1].beat) + 1);
@@ -607,11 +619,13 @@ export async function playFrom(beat: number) {
   if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
   const endSec = playEndSec(doc, startSec);
   const rate = a.speed;
-  const bgm = bgmSource(doc);
-  if (rate < 0.999 && bgm) {
+  const events = playbackEvents(doc);
+  const longs = new Map<number, number>();
+  for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
+  if (rate < 0.999 && longs.size > 0) {
     set({ loading: 'スロー再生の準備中…' });
     try {
-      await prepareStretch(bgm.wav, rate, [startSec - bgm.sec, ...(loop ? [loop.from - bgm.sec] : [])]);
+      await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
     } catch (e) {
       toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
     } finally {
@@ -620,7 +634,7 @@ export async function playFrom(beat: number) {
     if (token !== playToken) return;
   }
   engine.play({
-    events: soundEvents(doc),
+    events,
     clicks: clickTimes(doc, 0, endSec + 2),
     startSec,
     endSec,
@@ -642,7 +656,7 @@ useEditor.subscribe((s, prev) => {
   trackSimilar(s.doc, prev.doc, s.meta !== prev.meta);
   if (!engine.playing) return;
   const end = Math.max(songEndSec(s.doc), engine.currentSec() ?? 0);
-  engine.replaceEvents(soundEvents(s.doc), clickTimes(s.doc, 0, end + OPEN_END_SEC));
+  engine.replaceEvents(playbackEvents(s.doc), clickTimes(s.doc, 0, end + OPEN_END_SEC));
   if (s.doc.barLengths !== prev.doc.barLengths || s.doc.fields !== prev.doc.fields) applyLoopToEngine();
 });
 
@@ -670,6 +684,12 @@ export function currentBeat(): number {
 export function setMix(m: Partial<Mix>) {
   engine.setMix(m);
   set({ mix: engine.mix });
+}
+
+/** 鳴らす音（ステムなど）が変わったとき、再生中なら今の位置から鳴らし直す */
+export function restartIfPlaying() {
+  if (!get().playing) return;
+  void playFrom(currentBeat());
 }
 
 // ---- 新規 ---------------------------------------------------------------------
