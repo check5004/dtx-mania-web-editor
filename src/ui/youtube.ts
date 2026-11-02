@@ -120,6 +120,7 @@ export async function mountPlayer(el: HTMLElement, videoId: string): Promise<voi
           if (!player) return;
           applyListen();
           useYt.setState({ ready: true });
+          noteDuration();
           cueToCursor();
         },
         onError: (e) => {
@@ -145,14 +146,30 @@ export function destroyPlayer() {
   engine.setBgmMuted(false);
 }
 
+/** 映像の長さを曲の長さに入れる（譜面が空でも映像の終わりまで再生できるように） */
+function noteDuration() {
+  let dur = 0;
+  try {
+    dur = player?.getDuration() ?? 0;
+  } catch {
+    // 準備中
+  }
+  if (dur > 0 && Math.abs(dur - useEditor.getState().refVideoSec) > 0.01) useEditor.setState({ refVideoSec: dur });
+}
+
 /** 聴く音を切り替える（YouTube のときは原曲ファイルを消す） */
 export function setListen(listen: 'file' | 'youtube') {
   useYt.setState({ listen });
   applyListen();
 }
 
+/** 原曲ファイルが無い譜面では YouTube の音を聴く */
+export function listensYoutube(): boolean {
+  return useYt.getState().listen === 'youtube' || !bgmSource(useEditor.getState().doc);
+}
+
 function applyListen() {
-  const yt = useYt.getState().listen === 'youtube' && player !== null;
+  const yt = listensYoutube() && player !== null;
   engine.setBgmMuted(yt);
   if (!player) return;
   if (yt) player.unMute();
@@ -191,6 +208,7 @@ function startSync(rate: number) {
       return;
     }
     const dur = player.getDuration();
+    noteDuration();
     if (dur > 0 && want > dur) return;
     const have = player.getCurrentTime();
     if (state !== 1 && state !== 3) {
@@ -235,4 +253,11 @@ useEditor.subscribe((s, prev) => {
 
 useSidecar.subscribe((s, prev) => {
   if (s.youtube?.offset !== prev.youtube?.offset) cueToCursor();
+  // 映像を外した・替えたら長さは分からなくなる（隠しただけなら覚えておく）
+  if (s.youtube?.url !== prev.youtube?.url && useEditor.getState().refVideoSec !== 0) useEditor.setState({ refVideoSec: 0 });
+});
+
+// 原曲（BGM）を置いた・外したら、聴く音を切り替え直す
+useEditor.subscribe((s, prev) => {
+  if (s.doc !== prev.doc && !bgmSource(s.doc) !== !bgmSource(prev.doc)) applyListen();
 });

@@ -6,7 +6,7 @@ import { bgmSource, docStats, tempoOf } from '../store/derived';
 import { sectionColor, useSidecar } from '../store/sidecar';
 import { isDirty, playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
 import { formatTime } from './format';
-import { songLength, usePlayBeat, useSoundsVersion } from './hooks';
+import { usePlayBeat, useSongLength, useSoundsVersion } from './hooks';
 
 /** 曲全体のシークバー（ノーツの密度つき）と状態の表示 */
 export function Footer() {
@@ -18,7 +18,7 @@ export function Footer() {
   const missing = useEditor((s) => s.missingWavs);
   useSoundsVersion();
   const stats = docStats(doc);
-  const length = songLength(doc);
+  const length = useSongLength(doc);
 
   const where = folder?.dir
     ? `${folder.name}/${meta.fileName}（曲フォルダに直接保存）`
@@ -55,6 +55,9 @@ export function Footer() {
   );
 }
 
+/** 曲の長さが分からない空の譜面でも、シークバーで動けるように2分ぶん取っておく */
+const seekLength = (length: number) => (length > 0.5 ? length : 120);
+
 const SEC_H = 15;
 const WAVE_H = 30;
 const DENS_H = 9;
@@ -84,7 +87,7 @@ function SeekBar({ length }: { length: number }) {
       const W = r.width;
       const H = r.height;
       const tempo = tempoOf(doc);
-      const len = Math.max(length, 1);
+      const len = seekLength(length);
       const bgm = bgmSource(doc);
       const key = [doc, W, H, len, data, bgm?.sec, sections, colors, dpr];
       // 動かない部分（波形・密度・セクション）は覚えておく
@@ -205,7 +208,7 @@ function SeekBar({ length }: { length: number }) {
   const seek = (clientX: number, commit: boolean) => {
     const c = ref.current!;
     const r = c.getBoundingClientRect();
-    const sec = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * Math.max(length, 1);
+    const sec = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * seekLength(length);
     const s = useEditor.getState();
     const tempo = tempoOf(s.doc);
     const b = tempo.secToBeat(sec);

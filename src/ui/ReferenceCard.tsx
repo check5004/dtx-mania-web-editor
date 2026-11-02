@@ -1,6 +1,8 @@
 // 参照映像（YouTube）。譜面の再生に合わせて動く。音は原曲ファイルを鳴らすのが基本。
 import { useEffect, useRef, useState } from 'react';
 import { useAssist } from '../store/assist';
+import { bgmSource } from '../store/derived';
+import { useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { Icon } from './icons';
 import { destroyPlayer, mountPlayer, setListen, useYt, youtubeId } from './youtube';
@@ -9,6 +11,7 @@ export function ReferenceCard() {
   const yt = useSidecar((s) => s.youtube);
   const st = useYt();
   const srcName = useAssist((s) => s.src?.name);
+  const hasBgm = useEditor((s) => bgmSource(s.doc) !== null);
   const [url, setUrl] = useState('');
   const box = useRef<HTMLDivElement>(null);
   const id = yt ? youtubeId(yt.url) : null;
@@ -88,10 +91,15 @@ export function ReferenceCard() {
           <span className="lbl">聴く音源</span>
           <span className="grow" />
           <div className="seg small">
-            <button className={st.listen === 'file' ? 'on' : ''} onClick={() => setListen('file')}>
+            <button
+              className={st.listen === 'file' && hasBgm ? 'on' : ''}
+              onClick={() => setListen('file')}
+              disabled={!hasBgm}
+              title={hasBgm ? undefined : '原曲の音声ファイルが無いので、YouTubeの音を聴きます'}
+            >
               音声ファイル
             </button>
-            <button className={st.listen === 'youtube' ? 'on' : ''} onClick={() => setListen('youtube')} disabled={!st.ready}>
+            <button className={st.listen === 'youtube' || !hasBgm ? 'on' : ''} onClick={() => setListen('youtube')} disabled={!st.ready}>
               YouTube
             </button>
           </div>

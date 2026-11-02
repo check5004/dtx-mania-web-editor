@@ -402,12 +402,21 @@ kbd {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 0 14px;
   background: var(--bar);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.transport .lbl,
+.transport label {
+  white-space: nowrap;
+}
+
+.transport > * {
+  flex: none;
 }
 
 .play-btn {
@@ -1678,4 +1687,104 @@ input[type='range'] {
   background: var(--raise);
   font-family: var(--mono);
   font-weight: 700;
+}
+
+/* ---- BPMタップ ---------------------------------------------------------------- */
+.tap-btn {
+  height: 40px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 9px;
+  line-height: 1.1;
+}
+
+.tap-btn.on,
+.btn.ghost.on {
+  background: #101b24;
+  border-color: #23435a;
+  color: var(--accent);
+}
+
+.tap-pad {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 10px;
+  border: 1px dashed var(--line3);
+  background: #0b0f15;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.tap-pad:hover {
+  border-color: var(--accent);
+}
+
+.tap-pad-main {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tap-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: radial-gradient(circle, rgba(76, 194, 255, 0.38), transparent 70%);
+  animation: tap-flash 0.35s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes tap-flash {
+  from {
+    opacity: 1;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
+.tap-result {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 40px;
+  margin: 10px 0 6px;
+}
+
+.tap-bpm {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.tap-first {
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tap-hint {
+  display: block;
+  line-height: 1.7;
+}
+
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
 }

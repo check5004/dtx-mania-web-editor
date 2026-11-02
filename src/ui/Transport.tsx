@@ -7,6 +7,7 @@ import { useMidi } from '../input/midi';
 import { chipBpmLabel, formatPosition, formatTime, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
 import { Icon } from './icons';
+import { TapTempoButton } from './TapTempoPanel';
 
 export function Transport() {
   const doc = useEditor((s) => s.doc);
@@ -69,15 +70,18 @@ export function Transport() {
         <span className="pos-sub">{formatTime(tempo.beatToSec(Math.max(0, beat)))}</span>
       </div>
       <div className="vsep" />
-      <button className="tbox tempo-link" title="原曲に合わせてBPMと曲の始まりを決める画面を開く" onClick={openTempo}>
-        <span className="lbl">BPM · 拍子</span>
-        <span className="row" style={{ gap: 8 }}>
-          <span className="v">
-            {chipBpmLabel(tempo.bpmAt(Math.max(0, beat)))} · {meterLabel(tempo.barLen(m))}
+      <div className="row" style={{ gap: 4 }}>
+        <button className="tbox tempo-link" title="原曲に合わせてBPMと曲の始まりを決める画面を開く" onClick={openTempo}>
+          <span className="lbl">BPM · 拍子</span>
+          <span className="row" style={{ gap: 8 }}>
+            <span className="v">
+              {chipBpmLabel(tempo.bpmAt(Math.max(0, beat)))} · {meterLabel(tempo.barLen(m))}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--accent)' }}>テンポ合わせ</span>
           </span>
-          <span style={{ fontSize: 11, color: 'var(--accent)' }}>テンポ合わせ</span>
-        </span>
-      </button>
+        </button>
+        <TapTempoButton />
+      </div>
       <div className="vsep" />
       <div className="row" style={{ gap: 2 }}>
         <button

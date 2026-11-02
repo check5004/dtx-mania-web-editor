@@ -29,6 +29,7 @@ import { Footer } from './Footer';
 import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
 import { SettingsPage } from './SettingsPage';
+import { tapKey } from './TapTempoPanel';
 import { TempoPage } from './TempoPage';
 import { TopBar } from './TopBar';
 import { Transport } from './Transport';
@@ -111,6 +112,11 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
   }
   // ドラムのキー（試し打ち・キー入力・録音）
   if (!e.altKey && keyHit(e)) {
+    e.preventDefault();
+    return;
+  }
+  // T: 曲に合わせて叩いてBPMを測る
+  if (tapKey(e)) {
     e.preventDefault();
     return;
   }

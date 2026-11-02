@@ -3,11 +3,12 @@ import { produce } from 'immer';
 import { create } from 'zustand';
 import { combinedOdf, downbeatPhase, trackBeats } from '../audio/analysis';
 import { engine } from '../audio/engine';
+import { fitTaps } from '../assist/tapTempo';
 import { anchorsFromDoc, applyPlan, evaluatePlan, normalizeAnchors, type PlanResult, type TempoAnchor, type TempoPlan } from '../assist/tempoPlan';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import { useAssist } from './assist';
 import { bgmSource, clickTimes, soundEvents, tempoOf } from './derived';
-import { edit, songEndSec, stop as stopChart, toast, useEditor } from './editor';
+import { edit, playEndSec, songEndSec, stop as stopChart, toast, useEditor } from './editor';
 import { setAnchors, useSidecar } from './sidecar';
 
 export interface TempoUiState {
@@ -257,17 +258,10 @@ export function setView(v: { from: number; to: number }) {
 export function tap() {
   const now = performance.now();
   let taps = get().taps;
-  if (taps.length && now - taps[taps.length - 1] > 2000) taps = [];
-  taps = [...taps, now].slice(-12);
-  let tapBpm: number | null = null;
-  if (taps.length >= 4) {
-    const iv: number[] = [];
-    for (let i = 1; i < taps.length; i++) iv.push(taps[i] - taps[i - 1]);
-    iv.sort((a, b) => a - b);
-    const med = iv[Math.floor(iv.length / 2)];
-    tapBpm = Math.round((60000 / med) * 10) / 10;
-  }
-  set({ taps, tapBpm });
+  if (taps.length && now - taps[taps.length - 1] > 2500) taps = [];
+  taps = [...taps, now].slice(-32);
+  const fit = fitTaps(taps.map((t) => t / 1000));
+  set({ taps, tapBpm: fit ? Math.round(fit.bpm * 10) / 10 : null });
 }
 
 // ---- 再生 ------------------------------------------------------------------------
@@ -286,14 +280,14 @@ export function playPlan(fromAudioSec: number) {
   const bgm = bgmSource(doc);
   const off = bgm?.sec ?? 0;
   const startSec = Math.max(0, fromAudioSec + off);
-  const end = songEndSec(doc);
+  const end = playEndSec(doc, startSec);
   const events = soundEvents(doc).filter((e) => e.bus === 'bgm');
   engine.setForceClick(true);
   engine.play({
     events,
     clicks: clickTimes(doc, 0, end + 2),
     startSec,
-    endSec: Math.max(end, startSec + 1),
+    endSec: end,
     onEnd: () => {
       engine.setForceClick(false);
       set({ playing: false });

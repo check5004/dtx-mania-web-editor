@@ -22,9 +22,10 @@ import {
   zoom,
 } from '../store/editor';
 import { tempoOf } from '../store/derived';
-import { songLength, useSoundsVersion } from './hooks';
+import { useSongLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 import { formatLevel, formatTime } from './format';
+import { openTap } from '../store/tapTempo';
 
 interface MenuItem {
   label: string;
@@ -90,7 +91,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   useSoundsVersion();
 
   const f = doc.fields;
-  const length = songLength(doc);
+  const length = useSongLength(doc);
   const s = () => useEditor.getState();
 
   return (
@@ -150,6 +151,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         <Menu
           label="ツール"
           items={() => [
+            { label: '曲に合わせてクリックでBPMを測る', key: 'T', run: () => openTap(true) },
             { label: 'テンポと開始位置を合わせる…', run: openTempo },
             { label: '前の小節をカーソルの小節に複製', key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
             '-',

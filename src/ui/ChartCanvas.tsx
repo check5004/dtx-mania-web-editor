@@ -25,6 +25,7 @@ import {
 } from '../store/editor';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { promptDialog } from './dialogs';
+import { songLength } from './hooks';
 import { chipBpmLabel, meterLabel } from './format';
 import { SectionPopover } from './SectionPopover';
 
@@ -637,9 +638,9 @@ function colCenter(col: number): number {
 function miniEnd(): number {
   const s = useEditor.getState();
   let end = Math.max(docStats(s.doc).lastBeat + 16, 64);
-  const a = useAssist.getState();
-  const bgm = bgmSource(s.doc);
-  if (a.data && bgm) end = Math.max(end, tempoOf(s.doc).secToBeat(bgm.sec + a.data.duration) + 4);
+  // 譜面が空でも、原曲・映像の長さぶんは見せる
+  const len = songLength(s.doc);
+  if (len > 0) end = Math.max(end, tempoOf(s.doc).secToBeat(len) + 4);
   return end;
 }
 

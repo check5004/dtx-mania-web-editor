@@ -24,7 +24,7 @@ import {
 import type { SongFolder } from '../fs/folder';
 import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, soundEvents, tempoOf, wavSources } from './derived';
-import { loadSidecar } from './sidecar';
+import { loadSidecar, useSidecar } from './sidecar';
 
 enablePatches();
 
@@ -93,6 +93,8 @@ export interface EditorState {
   previewOnPlace: boolean;
   /** 音の読み込みが終わるたびに増える（曲の長さの再計算用） */
   soundsVersion: number;
+  /** 参照映像（YouTube）の長さ（秒）。分からなければ 0 */
+  refVideoSec: number;
 }
 
 const initialMeta: DocMeta = { fileName: 'new.dtx', encoding: 'shift_jis', warnings: [], hasRandom: false, siblings: [] };
@@ -120,6 +122,7 @@ export const useEditor = create<EditorState>(() => ({
   mix: engine.mix,
   previewOnPlace: true,
   soundsVersion: 0,
+  refVideoSec: 0,
 }));
 
 const get = useEditor.getState;
@@ -415,8 +418,8 @@ export function setLaneWav(base: number, no: number) {
 }
 
 /** BPM を変える（#BPM ヘッダ。曲頭に ch08/ch03 のBPMチップがあればそれも合わせる） */
-export function setInitialBpm(bpm: number) {
-  edit('BPMを変更', (d) => {
+export function setInitialBpm(bpm: number, label = 'BPMを変更') {
+  edit(label, (d) => {
     setField(d, 'BPM', String(bpm));
   });
 }
@@ -520,6 +523,10 @@ export function previewWav(no: number) {
   engine.preview(no);
 }
 
+/**
+ * 曲の終わり（秒）。チップ・原曲（BGM）・参照映像のうち一番遅いもの。
+ * 譜面が空でも、原曲や映像の長さぶんは曲があるものとして扱う。
+ */
 export function songEndSec(doc: DtxDoc): number {
   const ev = soundEvents(doc);
   let end = 0;
@@ -527,7 +534,23 @@ export function songEndSec(doc: DtxDoc): number {
   const t = tempoOf(doc);
   const views = chipViews(doc);
   if (views.length) end = Math.max(end, t.beatToSec(views[views.length - 1].beat) + 1);
+  const bgm = bgmSource(doc);
+  // 音を読み込む前でも、解析が済んでいれば原曲の長さが分かる
+  const a = useAssist.getState();
+  if (bgm && a.data && a.src?.wav === bgm.wav) end = Math.max(end, bgm.sec + a.data.duration);
+  const video = get().refVideoSec;
+  if (video > 0) end = Math.max(end, (bgm?.sec ?? 0) + video - (useSidecar.getState().youtube?.offset ?? 0));
   return end;
+}
+
+/** 曲の長さが何も分からない（チップも原曲も映像も無い）ときに流し続ける長さ */
+export const OPEN_END_SEC = 600;
+
+/** 再生を止める位置。何も無い譜面でも、止めるまで流し続ける（BPM合わせや曲の頭を探すため） */
+export function playEndSec(doc: DtxDoc, startSec: number): number {
+  const end = songEndSec(doc);
+  if (end <= 0) return startSec + OPEN_END_SEC;
+  return Math.max(end, startSec + 1);
 }
 
 type PlaybackEvent = { type: 'play'; startSec: number; rate: number } | { type: 'stop' } | { type: 'loop'; startSec: number };
@@ -558,7 +581,7 @@ export async function playFrom(beat: number) {
   let startSec = tempo.beatToSec(Math.max(0, beat));
   // ループ中は範囲の外から始めない
   if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
-  const endSec = Math.max(songEndSec(doc), startSec + 1);
+  const endSec = playEndSec(doc, startSec);
   const rate = a.speed;
   const bgm = bgmSource(doc);
   if (rate < 0.999 && bgm) {
@@ -594,8 +617,8 @@ useEditor.subscribe((s, prev) => {
   if (s.doc === prev.doc) return;
   trackSimilar(s.doc, prev.doc, s.meta !== prev.meta);
   if (!engine.playing) return;
-  const end = songEndSec(s.doc);
-  engine.replaceEvents(soundEvents(s.doc), clickTimes(s.doc, 0, end + 2));
+  const end = Math.max(songEndSec(s.doc), engine.currentSec() ?? 0);
+  engine.replaceEvents(soundEvents(s.doc), clickTimes(s.doc, 0, end + OPEN_END_SEC));
   if (s.doc.barLengths !== prev.doc.barLengths || s.doc.fields !== prev.doc.fields) applyLoopToEngine();
 });
 
