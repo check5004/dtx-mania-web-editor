@@ -1,6 +1,6 @@
-// 強さ（ベロシティ）。DTXには音ごとの強さが無く、音量は WAV 番号ごと（#VOLUMEzz）にしか持てない。
-// そこで「チップの強さ = そのチップの WAV の #VOLUME」とし、強さを変えるときは
-// 同じファイルで #VOLUME だけ違う WAV 番号（強さ違い）に付け替える。譜面はいつでもそのまま NX で遊べる。
+// ベロシティ（ベロシティ）。DTXには音ごとのベロシティが無く、音量は WAV 番号ごと（#VOLUMEzz）にしか持てない。
+// そこで「チップのベロシティ = そのチップの WAV の #VOLUME」とし、ベロシティを変えるときは
+// 同じファイルで #VOLUME だけ違う WAV 番号（ベロシティ違い）に付け替える。譜面はいつでもそのまま NX で遊べる。
 import type { Draft } from 'immer';
 import { parseNxNumber, toBase36x2 } from '../dtx/base36';
 import { CH, drumChannel, type Chip, type DtxDoc, type HeaderLine } from '../dtx/model';
@@ -38,7 +38,7 @@ function normFile(p: string): string {
   return p.trim().replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
 }
 
-/** 「同じ音」の見分け方：ファイルとパンが同じなら、#VOLUME だけ違っても同じ音の強さ違い */
+/** 「同じ音」の見分け方：ファイルとパンが同じなら、#VOLUME だけ違っても同じ音のベロシティ違い */
 export function soundKeyOf(fields: Fields, no: number): string | null {
   const path = fields['WAV' + toBase36x2(no)];
   if (path === undefined) return null;
@@ -49,19 +49,19 @@ export function clampVel(v: number): number {
   return Math.max(VEL_MIN, Math.min(VEL_MAX, Math.round(v)));
 }
 
-/** 強さを刻みにまとめる（5刻みなら 5,10,…,100。1 ならまとめない） */
+/** ベロシティを刻みにまとめる（5刻みなら 5,10,…,100。1 ならまとめない） */
 export function quantizeVel(v: number, step: number): number {
   if (step <= 1) return clampVel(v);
   const q = Math.round(v / step) * step;
   return Math.max(step, Math.min(VEL_MAX, q));
 }
 
-/** WAV 番号の強さ（1〜100） */
+/** WAV 番号のベロシティ（1〜100） */
 export function velOfWav(fields: Fields, no: number): number {
   return clampVel(wavVolumeOf(fields, no));
 }
 
-/** ドラムのチップの強さ。ドラム以外は null */
+/** ドラムのチップのベロシティ。ドラム以外は null */
 export function chipVel(doc: Pick<DtxDoc, 'fields'>, c: Pick<Chip, 'ch' | 'v'>): number | null {
   if (!drumChannel(c.ch)) return null;
   return velOfWav(doc.fields, c.v);
@@ -74,7 +74,7 @@ function wavNumbers(fields: Fields): number[] {
   return out.sort((a, b) => a - b);
 }
 
-/** 同じ音の強さ違い（強さ → WAV 番号）。同じ強さが複数あれば小さい番号 */
+/** 同じ音のベロシティ違い（ベロシティ → WAV 番号）。同じベロシティが複数あれば小さい番号 */
 export function variantsOf(fields: Fields, no: number): Map<number, number> {
   const key = soundKeyOf(fields, no);
   const out = new Map<number, number>();
@@ -88,7 +88,7 @@ export function variantsOf(fields: Fields, no: number): Map<number, number> {
 }
 
 /**
- * 同じ音で強さ vel の WAV 番号を返す。無ければ新しい番号を登録する（#WAV と #VOLUME、パンもそろえる）。
+ * 同じ音でベロシティ vel の WAV 番号を返す。無ければ新しい番号を登録する（#WAV と #VOLUME、パンもそろえる）。
  * 番号が足りないときは元の番号のまま。
  */
 export function wavVariant(d: Draft<DtxDoc>, base: number, vel: number): number {
@@ -128,7 +128,7 @@ export function usedWavs(d: Pick<DtxDoc, 'chips' | 'header'>): Set<number> {
 }
 
 /**
- * 強さを変えたあと、使われなくなった強さ違いの WAV を消す。
+ * ベロシティを変えたあと、使われなくなったベロシティ違いの WAV を消す。
  * 消すのはエディタが作った定義（読み込んだファイルに無かった行）で、同じ音の別の番号が残っているものだけ。
  */
 export function pruneVariants(d: Draft<DtxDoc>): number {
@@ -165,7 +165,7 @@ export function pruneUnusedCreated(d: Draft<DtxDoc>): number {
 }
 
 /**
- * チップの強さを変える。fn は今の強さから新しい強さを返す（null なら変えない）。
+ * チップのベロシティを変える。fn は今のベロシティから新しいベロシティを返す（null なら変えない）。
  * 変わったチップの数を返す。
  */
 export function opSetVelocity(
@@ -192,11 +192,11 @@ export function opSetVelocity(
   return n;
 }
 
-/** 強さ違いをまとめた「音」の一覧（WAVリストの表示用） */
+/** ベロシティ違いをまとめた「音」の一覧（WAVリストの表示用） */
 export interface SoundGroup {
   key: string;
   path: string;
-  /** 強さの高い順 */
+  /** ベロシティの高い順 */
   variants: { no: number; vel: number }[];
 }
 
@@ -212,7 +212,7 @@ export function soundGroups(fields: Fields): SoundGroup[] {
   return [...map.values()];
 }
 
-/** 電子ドラムの強さ（0〜1）を 1〜100 にする */
+/** 電子ドラムのベロシティ（0〜1）を 1〜100 にする */
 export function midiToVel(x: number, curve: 'soft' | 'normal' | 'hard'): number {
   const k = curve === 'soft' ? 0.6 : curve === 'hard' ? 1.6 : 1;
   return clampVel(100 * Math.pow(Math.max(0, Math.min(1, x)), k));

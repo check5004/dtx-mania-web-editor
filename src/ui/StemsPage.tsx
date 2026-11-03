@@ -3,12 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { STEM_KINDS, stemKindInfo } from '../audio/stems';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { drumChannel } from '../dtx/model';
-import { setLoop, useAssist } from '../store/assist';
+import { toggleLoop, useAssist } from '../store/assist';
 import { bgmSource, tempoOf } from '../store/derived';
 import { backToChart, playFrom, setCursorBeat, setMix, stop, togglePlay, useEditor } from '../store/editor';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
   chooseAnalysisStem,
+  effectiveAnalysisStem,
   defaultExportName,
   exportRangeSec,
   exportStems,
@@ -129,7 +130,7 @@ export function StemsPage() {
               <b>ここにファイルをまとめてドロップしてステムを追加</b>
               <span className="lbl" style={{ display: 'block', marginTop: 4 }}>
                 ステム分離ソフトで作ったファイルを読み込みます。drums・bass・vocals・other などの名前から種類を自動で判定し、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/
-                にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。
+                にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。
               </span>
             </span>
           </div>
@@ -162,10 +163,10 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
       >
         {Icon.toStart()}
       </button>
-      <button className="play-btn" onClick={togglePlay} title={playing ? '停止（Space）' : '再生（Space）'}>
+      <button className="play-btn" onClick={togglePlay} title={playing ? '一時停止（Space）' : '再生（Space）'}>
         {playing ? Icon.pause(18) : Icon.play(18)}
       </button>
-      <button className="ib" onClick={stop} title="停止" disabled={!playing}>
+      <button className="ib" onClick={stop} title="停止（再生を始めた位置に戻ります）" disabled={!playing}>
         {Icon.stop()}
       </button>
       <div className="pos-box">
@@ -174,9 +175,8 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
       </div>
       <button
         className={`btn small loop-btn ${loop?.on ? 'on' : ''}`}
-        disabled={!loop}
-        onClick={() => loop && setLoop({ ...loop, on: !loop.on })}
-        title={loop ? 'ループのオン・オフ（範囲はエディタの小節番号の列で決めます）' : 'ループ範囲はエディタで決めます'}
+        onClick={toggleLoop}
+        title={loop ? 'ループのオン・オフ（範囲は譜面画面の左端・下の波形・全体図の「A・B」の帯をドラッグして決めます）' : 'ループ再生（範囲が無ければ今の小節）'}
       >
         {Icon.loop(14)} ループ {loopLabel && <span className="mono">{loopLabel}</span>}
       </button>
@@ -209,7 +209,10 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
 }
 
 function TrackHead({ t }: { t: StemTrack }) {
-  const analysis = useSidecar((s) => s.analysisStem);
+  useSidecar((s) => s.analysisStem);
+  useStems((s) => s.version);
+  const eff = effectiveAnalysisStem();
+  const analysis = eff?.file ?? null;
   const listen = useStems((s) => s.listen);
   const comparePan = listen === 'compare' && t.kind === 'drums';
   const status = useStems((s) => s.status[t.file]);
@@ -229,8 +232,12 @@ function TrackHead({ t }: { t: StemTrack }) {
         <span className="grow" />
         <button
           className={`radio-btn ${analysis === t.file ? 'on' : ''}`}
-          onClick={() => chooseAnalysisStem(analysis === t.file ? null : t.file)}
-          title="波形・原曲の打点・候補チップ・BPM推定をこのトラックから作る"
+          onClick={() => chooseAnalysisStem(analysis === t.file && !eff?.auto ? null : t.file)}
+          title={
+            analysis === t.file && eff?.auto
+              ? '原曲のファイルが無いので、このトラックから波形・原曲の打点・候補チップを作っています（クリックで固定）'
+              : '波形・原曲の打点・候補チップ・BPM推定をこのトラックから作る'
+          }
           aria-label={`${t.name}を解析に使う`}
           aria-pressed={analysis === t.file}
         />
@@ -358,8 +365,9 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
   const stems = useSidecar((s) => s.stems);
   const sections = useSidecar((s) => s.sections);
   const colors = useSidecar((s) => s.sectionColors);
-  const analysis = useSidecar((s) => s.analysisStem);
+  useSidecar((s) => s.analysisStem);
   const version = useStems((s) => s.version);
+  const analysis = effectiveAnalysisStem()?.file ?? null;
   const loop = useAssist((s) => s.loop);
   const playing = useEditor((s) => s.playing);
   const beat = usePlayBeat();

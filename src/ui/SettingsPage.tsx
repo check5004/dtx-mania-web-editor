@@ -60,7 +60,7 @@ export function SettingsPage() {
               ['keys', 'キーボード'],
               ['lanes', 'レーンの並び'],
               ['latency', '入力の遅れの補正'],
-              ['velocity', '強さ'],
+              ['velocity', 'ベロシティ'],
               ['ai', 'AI（OpenRouter）'],
             ] as const
           ).map(([k, label]) => (
@@ -120,7 +120,7 @@ function MidiSettings() {
       </div>
       {midi.last && (
         <div className="lbl">
-          最後に来たノート: <span className="mono">{midi.last.note}</span>（{noteName(midi.last.note)}）強さ <span className="mono">{midi.last.velocity}</span> →{' '}
+          最後に来たノート: <span className="mono">{midi.last.note}</span>（{noteName(midi.last.note)}）ベロシティ <span className="mono">{midi.last.velocity}</span> →{' '}
           {midi.last.target ? TARGETS.find((x) => x.t.lane === midi.last!.target!.lane && x.t.alt === midi.last!.target!.alt)?.name : '割り当てなし'}
         </div>
       )}
@@ -154,9 +154,9 @@ function MidiSettings() {
         <label className="row" style={{ alignItems: 'flex-start' }}>
           <input type="checkbox" checked={prof.ignoreVelocity} onChange={(e) => updateProfile(prof.id, { ignoreVelocity: e.target.checked })} style={{ marginTop: 3 }} />
           <span>
-            強さを無視して、すべて最大で入力する
+            ベロシティを無視して、すべて最大で入力する
             <br />
-            <span className="lbl">叩いた強さに関係なく、試し打ちの音を最大の音量で鳴らします（DTXのチップには強さがありません）。</span>
+            <span className="lbl">叩いたベロシティに関係なく、試し打ちの音を最大の音量で鳴らします（DTXのチップにはベロシティがありません）。</span>
           </span>
         </label>
         <label className="slider-row" style={{ gridTemplateColumns: '150px minmax(0,1fr) 36px', marginTop: 8 }}>
@@ -173,7 +173,7 @@ function MidiSettings() {
               <th>レーン</th>
               <th>名前</th>
               <th>割り当て（ノート番号）</th>
-              <th>最後の強さ</th>
+              <th>最後のベロシティ</th>
               <th />
             </tr>
           </thead>
@@ -389,13 +389,13 @@ function VelocitySettings() {
   };
   return (
     <div className="settings-col">
-      <h2>強さ</h2>
+      <h2>ベロシティ</h2>
       <p className="lbl" style={{ lineHeight: 1.7 }}>
-        DTXには音ごとの強さが無いので、強さは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav の強さ100は #WAV07、強さ35は #WAV0F）。保存した譜面はそのまま NX で遊べます。
+        DTXには音ごとのベロシティが無いので、ベロシティは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav のベロシティ100は #WAV07、ベロシティ35は #WAV0F）。保存した譜面はそのまま NX で遊べます。
       </p>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          置く強さ（操作バーの 強・中・弱、キー 1・2・3）
+          置くベロシティ（操作バーの 強・中・弱、キー 1・2・3）
         </div>
         <div className="row" style={{ gap: 14 }}>
           {['強', '中', '弱'].map((name, i) => (
@@ -411,7 +411,7 @@ function VelocitySettings() {
       </div>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          強さの刻み
+          ベロシティの刻み
         </div>
         <div className="seg">
           {(
@@ -427,12 +427,12 @@ function VelocitySettings() {
           ))}
         </div>
         <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
-          強さを刻みにまとめると、使う WAV 番号が少なくて済みます。WAV 番号は 01〜ZZ の 1295 個までです。
+          ベロシティを刻みにまとめると、使う WAV 番号が少なくて済みます。WAV 番号は 01〜ZZ の 1295 個までです。
         </p>
       </div>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          電子ドラムの強さの変換
+          電子ドラムのベロシティの変換
         </div>
         <div className="seg">
           {(
@@ -448,7 +448,7 @@ function VelocitySettings() {
           ))}
         </div>
         <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
-          叩いた強さ（0〜127）を 1〜100 にするときのカーブです。やわらかめは弱く叩いても強めに入ります。電子ドラムの設定で「強さを無視」をオンにすると、すべて 100 で入ります。
+          叩いたベロシティ（0〜127）を 1〜100 にするときのカーブです。やわらかめは弱く叩いても強めに入ります。電子ドラムの設定で「ベロシティを無視」をオンにすると、すべて 100 で入ります。
         </p>
       </div>
     </div>

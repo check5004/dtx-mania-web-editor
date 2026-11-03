@@ -1,6 +1,6 @@
 // DTXファイルの文字コード。NX は Shift_JIS（CP932）として読む。BOM付きUTF-8は .NET が自動判定して読める見込み。
 
-export type DtxEncoding = 'shift_jis' | 'utf-8-bom' | 'utf-8';
+export type DtxEncoding = 'shift_jis' | 'utf-8-bom' | 'utf-8' | 'utf-16le' | 'utf-16be';
 
 export interface DecodedText {
   text: string;
@@ -9,9 +9,18 @@ export interface DecodedText {
   note?: string;
 }
 
+const UTF16_NOTE = 'このファイルはBOM付きUTF-16です。保存するとShift_JISで書き出します（NXはどちらも読めます）。';
+
 export function decodeDtx(bytes: Uint8Array): DecodedText {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
     return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), encoding: 'utf-8-bom' };
+  }
+  // BOM付きUTF-16（DTXCreatorAL などが書く）。.NET の StreamReader は BOM で判定するので NX も読める
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), encoding: 'utf-16le', note: UTF16_NOTE };
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), encoding: 'utf-16be', note: UTF16_NOTE };
   }
   let ascii = true;
   for (let i = 0; i < bytes.length; i++) {

@@ -16,7 +16,7 @@ export interface MidiProfile {
   hhMode: 'note' | 'pedal';
   /** CC4 がこの値以上ならクローズ */
   hhClosedAt: number;
-  /** 強さを無視して、すべて最大で入力する */
+  /** ベロシティを無視して、すべて最大で入力する */
   ignoreVelocity: boolean;
   /** これより弱い入力は無視する（クロストーク対策） */
   minVelocity: number;
@@ -29,11 +29,11 @@ export interface InputSettings {
   profileId: string;
   /** 叩いてから届くまでの遅れ（ミリ秒）。録音した位置からこの分を引く */
   latencyMs: number;
-  /** 置く強さ「強・中・弱」の値 */
+  /** 置くベロシティ「強・中・弱」の値 */
   velPresets: [number, number, number];
-  /** 書き出しで強さをまとめる刻み（1 = まとめない） */
+  /** 書き出しでベロシティをまとめる刻み（1 = まとめない） */
   velStep: number;
-  /** 電子ドラムの強さの変換カーブ */
+  /** 電子ドラムのベロシティの変換カーブ */
   velCurve: 'soft' | 'normal' | 'hard';
   /** 譜面のレーンの並び（左から、DRUM_LANES の番号） */
   laneOrder: number[];

@@ -41,7 +41,7 @@ export function previewLane(lane: number, alt: boolean, gain = 1) {
 
 function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, source: 'midi' | 'key') {
   const s = useEditor.getState();
-  // キーボードは操作バーで選んだ強さ、電子ドラムは叩いた強さ（変換カーブ）
+  // キーボードは操作バーで選んだベロシティ、電子ドラムは叩いたベロシティ（変換カーブ）
   const vel = source === 'midi' ? midiToVel(velocity, useInputSettings.getState().velCurve) : placeVel();
   if (s.screen !== 'editor' || s.page !== 'chart') {
     previewLane(lane, alt, vel / 100);

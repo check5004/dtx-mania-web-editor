@@ -166,7 +166,7 @@ export function FindPanel() {
           </div>
           <label className="row" style={{ gap: 6, margin: '2px 0 8px 92px' }}>
             <input type="checkbox" checked={resound} onChange={(e) => setResound(e.target.checked)} />
-            <span className="lbl">音も移した先のレーンの音にする（強さは保つ）</span>
+            <span className="lbl">音も移した先のレーンの音にする（ベロシティは保つ）</span>
           </label>
           <div className="find-row">
             <span className="find-lbl">WAV番号</span>

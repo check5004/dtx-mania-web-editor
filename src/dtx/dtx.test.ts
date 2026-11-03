@@ -213,6 +213,17 @@ describe('文字コード', () => {
     expect(decodeDtx(bom).encoding).toBe('utf-8-bom');
     const plain = decodeDtx(body);
     expect(plain.encoding).toBe('utf-8');
+    // BOM付きUTF-16（DTXCreatorAL が書く形式）
+    const le = new Uint8Array(2 + body.length * 2);
+    le.set([0xff, 0xfe]);
+    const text16 = new TextDecoder().decode(body);
+    for (let k = 0; k < text16.length; k++) {
+      le[2 + k * 2] = text16.charCodeAt(k) & 0xff;
+      le[3 + k * 2] = text16.charCodeAt(k) >> 8;
+    }
+    const d16 = decodeDtx(le.subarray(0, 2 + text16.length * 2));
+    expect(d16.encoding).toBe('utf-16le');
+    expect(d16.text).toBe(text16);
     expect(plain.note).toBeTruthy();
     expect(plain.text).toBe('#TITLE: ドラム\r\n');
   });

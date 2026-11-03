@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import { estimateLevel, levelToField, type LevelEstimate } from '../check/level';
 import { findIssues, type Issue } from '../check/playability';
+export type { Issue };
 import type { DtxDoc } from '../dtx/model';
 import { tempoOf } from './derived';
 import { setCursorBeat, setFieldValue, setView, useEditor } from './editor';
@@ -46,6 +47,20 @@ export function levelOf(doc: DtxDoc): LevelEstimate | null {
     levelCache.set(doc, v);
   }
   return v;
+}
+
+/** 今の位置より後ろの次の警告へ（最後まで行ったら最初へ） */
+export function gotoNextIssue() {
+  const s = useEditor.getState();
+  const list = issuesOf(s.doc);
+  if (!list.length) return;
+  const next = list.find((is) => is.beat > s.cursorBeat + 1e-6) ?? list[0];
+  gotoIssue(next);
+}
+
+/** 警告の種類の名前 */
+export function issueLevelName(level: Issue['level']): string {
+  return level === 'error' ? '叩けない配置' : '難しい配置';
 }
 
 /** 警告の場所へ移って、かかわるチップを選ぶ */

@@ -1,6 +1,6 @@
 import { toMeasure } from '../dtx/base36';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
-import { setInputMode, setLoop, setSpeed, useAssist, type InputMode } from '../store/assist';
+import { setInputMode, setLoop, setLoopPoint, setSpeed, toggleLoop, useAssist, type InputMode } from '../store/assist';
 import { tempoOf } from '../store/derived';
 import { currentBeat, openTempo, playFrom, setCursorBeat, setView, stop, togglePlay, useEditor } from '../store/editor';
 import { useInputSettings } from '../input/settings';
@@ -31,19 +31,12 @@ export function Transport() {
   const midi = useMidi((s) => s.status);
   const midiName = useMidi((s) => s.inputs[0]?.name ?? '');
 
-  const loopLabel = (() => {
-    if (!loop) return null;
-    const ma = tempo.locate(loop.a).m;
-    const mb = tempo.locate(Math.max(loop.a, loop.b - 1e-6)).m;
-    return ma === mb ? toMeasure(ma) : `${toMeasure(ma)}–${toMeasure(mb)}`;
-  })();
-  const toggleLoop = () => {
-    if (loop) {
-      setLoop({ ...loop, on: !loop.on });
-      return;
-    }
-    const at = tempo.locate(Math.max(0, currentBeat())).m;
-    setLoop({ on: true, a: tempo.measureStart(at), b: tempo.measureStart(at + 1) });
+  const short = (b: number) => {
+    const { m } = tempo.locate(Math.max(0, b));
+    const rel = Math.max(0, b - tempo.measureStart(m));
+    const beatNo = Math.floor(rel + 1e-6) + 1;
+    const frac = rel - Math.floor(rel + 1e-6);
+    return `${toMeasure(m)}.${beatNo}${frac > 1e-3 ? '+' : ''}`;
   };
   const changeSpeed = (v: number) => {
     setSpeed(v);
@@ -63,16 +56,30 @@ export function Transport() {
       >
         {Icon.toStart()}
       </button>
-      <button className="play-btn" onClick={togglePlay} title={playing ? '停止（Space）' : 'カーソル位置から再生（Space / F6）'}>
+      <button className="play-btn" onClick={togglePlay} title={playing ? '一時停止（Space）。止めた所から続きを再生できます' : '▶ の位置から再生（Space / F6）'}>
         {playing ? Icon.pause(18) : Icon.play(18)}
       </button>
-      <button className="ib" onClick={stop} title="停止（F7）" disabled={!playing}>
+      <button className="ib" onClick={stop} title="停止（F7）。再生を始めた位置に戻ります" disabled={!playing}>
         {Icon.stop()}
       </button>
-      <div className="pos-box">
+      <button
+        className="pos-box"
+        title="再生を始める位置（▶）。クリックで小節番号を入れて移動。譜面の小節番号の列・波形・下のシークバーをクリックしても置けます"
+        onClick={async () => {
+          const v = await promptDialog({ title: '再生を始める位置', body: '小節番号を入れてください（例: 012）。', value: toMeasure(tempo.locate(Math.max(0, beat)).m), ok: '移動' });
+          if (!v) return;
+          const t = v.trim().toUpperCase();
+          const m = /^[0-9A-Z]{3}$/.test(t) && /[A-Z]/.test(t) ? parseInt(t[0], 36) * 100 + parseInt(t.slice(1), 10) : parseInt(t, 10);
+          if (!Number.isFinite(m) || m < 0 || m >= 3600) return;
+          const b = tempo.measureStart(m);
+          setCursorBeat(b);
+          setView({ scrollBeat: Math.max(-0.5, b - 2), follow: true });
+          if (playing) void playFrom(b);
+        }}
+      >
         <span className="pos-main">{formatPosition(tempo, beat)}</span>
         <span className="pos-sub">{formatTime(tempo.beatToSec(Math.max(0, beat)))}</span>
-      </div>
+      </button>
       <div className="vsep" />
       <div className="row" style={{ gap: 4 }}>
         <button className="tbox tempo-link" title="原曲に合わせてBPMと曲の始まりを決める画面を開く" onClick={openTempo}>
@@ -87,35 +94,49 @@ export function Transport() {
         <TapTempoButton />
       </div>
       <div className="vsep" />
-      <div className="row" style={{ gap: 2 }}>
+      <div className="loop-ctl" role="group" aria-label="ループ再生">
         <button
-          className={`btn small loop-btn ${loop?.on ? 'on' : ''}`}
+          className={`loop-toggle ${loop?.on ? 'on' : ''}`}
           onClick={toggleLoop}
-          title={loop ? 'ループのオン・オフ（範囲は小節番号の列を Shift+ドラッグで変えられます）' : 'カーソルの小節をループする（小節番号の列を Shift+ドラッグで範囲指定）'}
+          aria-pressed={!!loop?.on}
+          title={
+            loop
+              ? 'ループ再生のオン・オフ（/）。範囲は譜面の左端・下の波形・右の全体図の「A・B」の帯をドラッグして変えられます'
+              : 'ループ再生（/）。範囲が無いときは今の小節（チップを選んでいればその小節）をループします。譜面の左端の帯をドラッグしても作れます'
+          }
         >
           {Icon.loop(14)}
-          ループ {loopLabel && <span className="mono">{loopLabel}</span>}
+          ループ
+        </button>
+        <button className="ab-btn" onClick={() => setLoopPoint('a')} title="今の位置を A（ループの始まり）にする（I）">
+          A
+        </button>
+        <span className={`ab-range mono ${loop?.on ? 'on' : ''}`} title={loop ? 'ループの範囲（A–B）' : 'ループの範囲はまだありません'}>
+          {loop ? `${short(loop.a)}–${short(loop.b)}` : '—'}
+        </span>
+        <button className="ab-btn" onClick={() => setLoopPoint('b')} title="今の位置を B（ループの終わり）にする（O）">
+          B
         </button>
         {loop && (
-          <button className="ib" style={{ width: 22, height: 26 }} onClick={() => setLoop(null)} title="ループを解除" aria-label="ループを解除">
+          <button className="ib" style={{ width: 20, height: 24 }} onClick={() => setLoop(null)} title="ループの範囲を消す" aria-label="ループの範囲を消す">
             ✕
           </button>
         )}
       </div>
-      <div className="row" style={{ gap: 6 }} title="原曲の音程を変えずに遅くする">
-        <span className="lbl">速度</span>
-        <div className="seg small">
-          {[0.25, 0.5, 0.75, 1].map((v) => (
-            <button key={v} className={`mono ${speed === v ? 'on' : ''}`} onClick={() => changeSpeed(v)}>
+      <label className="row" style={{ gap: 6 }} title="再生の速さ。原曲は音程を変えずに遅くします">
+        <span className="lbl tlabel">速度</span>
+        <select className={`field mono ${speed < 1 ? 'speed-slow' : ''}`} style={{ width: 74 }} value={speed} onChange={(e) => changeSpeed(Number(e.target.value))}>
+          {[1, 0.75, 0.5, 0.25].map((v) => (
+            <option key={v} value={v}>
               {v * 100}%
-            </button>
+            </option>
           ))}
-        </div>
+        </select>
         {stretching && <span className="lbl">準備中…</span>}
-      </div>
+      </label>
       <div className="vsep" />
       <label className="row" title="置く位置の細かさ（[ と ] でも変えられます）。ズームは Ctrl+ホイール">
-        <span className="lbl">グリッド</span>
+        <span className="lbl tlabel">グリッド</span>
         <select
           className="field mono"
           style={{ width: 92 }}
@@ -138,7 +159,7 @@ export function Transport() {
       </label>
       <div className="vsep" />
       <div className="row" style={{ gap: 6 }}>
-        <span className="lbl">入力</span>
+        <span className="lbl tlabel">入力</span>
         <div className="seg small" role="radiogroup" aria-label="入力方法">
           {INPUT_MODES.map(([k, label, color, tip]) => (
             <button key={k} role="radio" aria-checked={inputMode === k} className={inputMode === k ? 'on' : ''} onClick={() => setInputMode(k)} title={tip}>
@@ -150,8 +171,8 @@ export function Transport() {
       </div>
       <div className="vsep" />
       <div className="row" style={{ gap: 6 }}>
-        <span className="lbl">強さ</span>
-        <div className="seg small vel-seg" role="radiogroup" aria-label="置く強さ">
+        <span className="lbl">ベロシティ</span>
+        <div className="seg small vel-seg" role="radiogroup" aria-label="置くベロシティ">
           {VEL_PRESET_NAMES.map((name, i) => (
             <button
               key={name}
@@ -159,14 +180,14 @@ export function Transport() {
               aria-checked={velPreset === i}
               className={velPreset === i ? 'on' : ''}
               onClick={() => setPreset(i as 0 | 1 | 2)}
-              title={`置く強さ: ${name}（${velPresets[i]}）。キー ${i + 1}。Alt を押しながら置くと「弱」`}
+              title={`置くベロシティ: ${name}（${velPresets[i]}）。キー ${i + 1}。Alt を押しながら置くと「弱」`}
             >
               <span className="vel-mark" style={{ height: [12, 8, 5][i] }} />
               {name}
             </button>
           ))}
         </div>
-        <button className={`ib ${velMode ? 'on' : ''}`} onClick={() => toggleVelMode()} title="強さの編集（V）" aria-pressed={velMode}>
+        <button className={`ib ${velMode ? 'on' : ''}`} onClick={() => toggleVelMode()} title="ベロシティの編集（V）" aria-pressed={velMode}>
           {Icon.bars()}
         </button>
       </div>

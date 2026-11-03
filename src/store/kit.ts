@@ -87,7 +87,7 @@ export function setKit(id: string) {
   useEditor.setState({ laneWav });
 }
 
-/** 置いてあるチップの音も、今のキットの音に替える（強さは保つ。Ctrl+Z で戻せる） */
+/** 置いてあるチップの音も、今のキットの音に替える（ベロシティは保つ。Ctrl+Z で戻せる） */
 export function applyKitToChips(kitId = useKit.getState().kitId): number {
   let n = 0;
   const name = kitChoices().find((k) => k.id === kitId)?.name ?? kitId;

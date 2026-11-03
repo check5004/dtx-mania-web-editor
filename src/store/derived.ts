@@ -268,11 +268,11 @@ export function clickTimes(doc: DtxDoc, fromSec: number, toSec: number): { sec: 
   return out;
 }
 
-// ---- 強さ -----------------------------------------------------------------------
+// ---- ベロシティ -----------------------------------------------------------------------
 
 const velCache = new WeakMap<Record<string, string>, Map<number, number>>();
 
-/** WAV 番号の強さ（#VOLUME、1〜100）。ヘッダが変わるまで覚えておく */
+/** WAV 番号のベロシティ（#VOLUME、1〜100）。ヘッダが変わるまで覚えておく */
 export function wavVel(doc: DtxDoc, no: number): number {
   let m = velCache.get(doc.fields);
   if (!m) velCache.set(doc.fields, (m = new Map()));

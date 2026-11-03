@@ -186,12 +186,25 @@ function applyStrips() {
   engine.setStemStrips(strips);
 }
 
-/** 解析に使うステム（初期値はドラム） */
+/**
+ * 解析（波形・原曲の打点・候補チップ・BPM推定）に使うステム。選んだものが無く、原曲のファイルも
+ * 鳴らせないときは、ドラム、無ければ最初のステムを使う（ステムだけ読み込んでも波形が出るように）。
+ */
+export function effectiveAnalysisStem(): { file: string; auto: boolean } | null {
+  const chosen = useSidecar.getState().analysisStem;
+  if (chosen && loaded.has(chosen) && tracks().some((t) => t.file === chosen)) return { file: chosen, auto: false };
+  const bgm = bgmSource(useEditor.getState().doc);
+  if (bgm && engine.buffer(bgm.wav)) return null;
+  const ready = readyStems();
+  const t = ready.find((x) => x.kind === 'drums') ?? ready[0];
+  return t ? { file: t.file, auto: true } : null;
+}
+
 setAnalysisProvider(() => {
-  const file = useSidecar.getState().analysisStem;
-  if (!file) return null;
-  const l = loaded.get(file);
-  const t = tracks().find((x) => x.file === file);
+  const eff = effectiveAnalysisStem();
+  if (!eff) return null;
+  const l = loaded.get(eff.file);
+  const t = tracks().find((x) => x.file === eff.file);
   if (!l || !t) return null;
   return { key: `stem:${l.key}:${t.offsetMs}`, buf: l.buf, name: `${t.name}（${t.file.split('/').pop()}）` };
 });

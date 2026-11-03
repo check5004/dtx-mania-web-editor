@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
-import { openDroppedFiles, openFolderFromInput, openFolderPicker, save } from '../app/fileActions';
+import { useEffect, useRef, useState } from 'react';
+import { dropAudioInEditor, openDroppedFiles, openFolderFromInput, openFolderPicker, save } from '../app/fileActions';
 import { frac } from '../dtx/fraction';
 import { gridStep, snapToGrid, stepGrid } from '../edit/ops';
 import { autoEnableMidi } from '../input/midi';
-import { adoptGhostsInRange, useAssist } from '../store/assist';
+import { adoptGhostsInRange, setLoopPoint, toggleLoop, useAssist } from '../store/assist';
 import { tempoOf } from '../store/derived';
 import { keyHit } from '../store/hits';
 import {
@@ -46,6 +46,8 @@ import { togglePreview, usePreview } from '../store/preview';
 import { gotoResult, openFind, useFind } from '../store/find';
 import { toggleBgmMute, toggleDrumMute } from '../store/stems';
 import { TopBar } from './TopBar';
+import { effectiveColumns, useLayout } from '../store/layout';
+import { PanelRail, VSplitter } from './Splitter';
 import { Transport } from './Transport';
 
 function isTyping(e: KeyboardEvent): boolean {
@@ -147,7 +149,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     }
     return;
   }
-  // 強さ：Alt+↑↓ で選んだチップの強さ（Shift で1ずつ）
+  // ベロシティ：Alt+↑↓ で選んだチップのベロシティ（Shift で1ずつ）
   if (e.altKey && (k === 'ArrowUp' || k === 'ArrowDown')) {
     e.preventDefault();
     nudgeSelection((k === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 1 : 5));
@@ -158,7 +160,18 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     e.preventDefault();
     return;
   }
-  // 1・2・3：置く強さ（強・中・弱）
+  // I・O：今の位置をループの A・B に。/：ループのオン・オフ
+  if (!e.altKey && !e.shiftKey && (e.code === 'KeyI' || e.code === 'KeyO')) {
+    e.preventDefault();
+    setLoopPoint(e.code === 'KeyI' ? 'a' : 'b');
+    return;
+  }
+  if (!e.altKey && (k === '/' || e.code === 'Slash' || e.code === 'NumpadDivide')) {
+    e.preventDefault();
+    toggleLoop();
+    return;
+  }
+  // 1・2・3：置くベロシティ（強・中・弱）
   if (!e.altKey && !e.shiftKey && (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3')) {
     e.preventDefault();
     setPreset((Number(e.code.slice(5)) - 1) as 0 | 1 | 2);
@@ -170,7 +183,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     togglePreview(e.shiftKey ? 'full' : 'side');
     return;
   }
-  // V：強さの編集モード
+  // V：ベロシティの編集モード
   if (!e.altKey && e.code === 'KeyV') {
     e.preventDefault();
     toggleVelMode();
@@ -254,6 +267,16 @@ export function Editor() {
   const findOpen = useFind((s) => s.open);
   const previewMode = usePreview((s) => s.mode);
   const phraseOpen = usePhrase((s) => s.open);
+  const layout = useLayout();
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const hasLeft = !velMode;
+  const cols = effectiveColumns(layout, width, hasLeft);
+  const rightLabel = velMode ? 'ベロシティの道具' : previewMode === 'side' ? 'NX風プレビュー' : '原曲・耳コピアシスト・確かめる';
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -275,7 +298,11 @@ export function Editor() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
-        void openDroppedFiles([...e.dataTransfer.files]);
+        const files = [...e.dataTransfer.files];
+        if (files.length === 0) return;
+        // DTX なら開く。音声だけなら、今の譜面の原曲・ステムにするか新しい譜面にするかを選ぶ
+        if (files.some((f) => /\.dtx$/i.test(f.name))) void openDroppedFiles(files);
+        else void dropAudioInEditor(files);
       }}
     >
       {page === 'tempo' ? (
@@ -296,14 +323,31 @@ export function Editor() {
         <>
           <TopBar folderInput={folderInput} />
           <Transport />
-          <div className={`main ${velMode ? 'vel-mode' : ''}`}>
-            {!velMode && <LeftPanel />}
+          <div
+            className={`main ${velMode ? 'vel-mode' : ''}`}
+            style={{
+              gridTemplateColumns: hasLeft
+                ? `${cols.left}px 0px minmax(0, 1fr) 0px ${cols.right}px`
+                : `minmax(0, 1fr) 0px ${cols.right}px`,
+            }}
+          >
+            {hasLeft && (cols.leftOpen ? <LeftPanel /> : <PanelRail side="left" label="キット・WAV・曲情報" />)}
+            {hasLeft && <VSplitter side="left" open={cols.leftOpen} />}
             <section className="chart-area">
               <ChartCanvas />
               {findOpen && <FindPanel />}
               {phraseOpen && !findOpen && <PhrasePanel />}
             </section>
-            {velMode ? <VelocityPanel /> : previewMode === 'side' ? <NxPreview /> : <RightPanel />}
+            <VSplitter side="right" open={cols.rightOpen} />
+            {!cols.rightOpen ? (
+              <PanelRail side="right" label={rightLabel} />
+            ) : velMode ? (
+              <VelocityPanel />
+            ) : previewMode === 'side' ? (
+              <NxPreview />
+            ) : (
+              <RightPanel />
+            )}
           </div>
           <Footer />
           {previewMode === 'full' && (

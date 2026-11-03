@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { downloadDtx, newEmptySong, openFolderPicker, save, switchDifficulty } from '../app/fileActions';
+import { downloadDtx, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
 import {
@@ -25,7 +25,7 @@ import {
   useEditor,
   zoom,
 } from '../store/editor';
-import { tempoOf } from '../store/derived';
+import { bgmSource, tempoOf } from '../store/derived';
 import { useSongLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 import { formatLevel, formatTime } from './format';
@@ -37,6 +37,7 @@ import { bgaVisible, hasBga, useBga } from '../store/bga';
 import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
 import { toMeasure } from '../dtx/base36';
+import { togglePanel, useLayout } from '../store/layout';
 
 interface MenuItem {
   label: string;
@@ -147,6 +148,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
           items={() => [
             { label: '曲フォルダを開く…', key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
             { label: '新しい譜面…', run: () => void newEmptySong() },
+            { label: bgmSource(s().doc) ? '原曲を差し替える…' : '原曲（音声ファイル）を読み込む…', run: pickBgmFile },
             '-',
             { label: '保存', key: 'Ctrl+S', run: () => void save() },
             { label: '名前を付けて保存…', key: 'Ctrl+Shift+S', run: () => void save({ as: true }) },
@@ -180,6 +182,10 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         <Menu
           label="表示"
           items={() => [
+            { label: `左のパネル（キット・WAV・曲情報）${useLayout.getState().leftOpen ? '  ✓' : ''}`, run: () => togglePanel('left') },
+            { label: `右のパネル（原曲・耳コピアシスト・確かめる）${useLayout.getState().rightOpen ? '  ✓' : ''}`, run: () => togglePanel('right') },
+            { label: `下の波形${useLayout.getState().seekOpen ? '  ✓' : ''}`, run: () => togglePanel('seek') },
+            '-',
             { label: '拡大', key: 'Ctrl+ホイール', run: () => zoom(1.25) },
             { label: '縮小', run: () => zoom(0.8) },
             '-',

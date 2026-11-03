@@ -32,10 +32,12 @@ import { usePlayBeat } from './hooks';
 import { visibleBeats } from './ChartCanvas';
 import { Icon } from './icons';
 import { ReferenceCard } from './ReferenceCard';
+import { SourceCard } from './SourceCard';
 
 export function RightPanel() {
   return (
     <aside className="right-panel scroll">
+      <SourceCard />
       <ReferenceCard />
       <AssistCard />
       <SelectionCard />
@@ -87,7 +89,11 @@ function SelectionCard() {
           <div>
             <kbd>Ctrl</kbd>+<kbd>C</kbd>／<kbd>V</kbd> … コピー／カーソル位置に貼り付け
           </div>
-          <div>左端の小節番号をクリック … カーソルを置く</div>
+          <div>小節番号の列・波形をクリック … 再生を始める位置（▶）</div>
+          <div>左端の A・B の帯をドラッグ … ループの範囲</div>
+          <div>
+            <kbd>I</kbd> <kbd>O</kbd> … 今の位置を A・B に、<kbd>/</kbd> … ループのオン・オフ
+          </div>
           <div>
             <kbd>Ctrl</kbd>+ホイール … ズーム、<kbd>[</kbd> <kbd>]</kbd> … グリッド
           </div>
@@ -162,7 +168,7 @@ function SelectionCard() {
   );
 }
 
-/** 選んだチップの強さ（スライダーと強・中・弱） */
+/** 選んだチップのベロシティ（スライダーと強・中・弱） */
 function VelRow({ chips }: { chips: { v: number }[] }) {
   const doc = useEditor((s) => s.doc);
   const presets = useInputSettings((s) => s.velPresets);
@@ -173,7 +179,7 @@ function VelRow({ chips }: { chips: { v: number }[] }) {
   const shown = drag ?? avg;
   return (
     <>
-      <span className="lbl">強さ</span>
+      <span className="lbl">ベロシティ</span>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div className="vel-row">
           <span className="mono" style={{ fontSize: 12 }}>
@@ -193,9 +199,9 @@ function VelRow({ chips }: { chips: { v: number }[] }) {
               if (drag !== null) setSelectionVel(drag);
               setDrag(null);
             }}
-            aria-label="選んだチップの強さ"
+            aria-label="選んだチップのベロシティ"
           />
-          <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(true)} title="強さの編集（V）" aria-label="強さの編集">
+          <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(true)} title="ベロシティの編集（V）" aria-label="ベロシティの編集">
             {Icon.bars(14)}
           </button>
         </div>

@@ -1,4 +1,4 @@
-// 強さの編集モードの右パネル（道具）。対象の範囲とレーン、分布、まとめて変える、原曲の打点から決める、拍の位置で強弱。
+// ベロシティの編集モードの右パネル（道具）。対象の範囲とレーン、分布、まとめて変える、原曲の打点から決める、拍の位置で強弱。
 import { useState } from 'react';
 import { toMeasure } from '../dtx/base36';
 import { DRUM_LANES } from '../dtx/model';
@@ -31,9 +31,9 @@ const SCOPES: [VelScope, string][] = [
 ];
 
 const TOOLS: [VelTool, string, string][] = [
-  ['select', '選択', '強さの列でクリックかドラッグしてチップを選びます。Alt+ホイールか Alt+↑↓ で選んだチップを5ずつ（Shift で1ずつ）変えます。'],
-  ['pencil', '鉛筆', '強さの列をなぞると、なぞった位置の強さになります。'],
-  ['line', '直線', '強さの列で始点から終点へドラッグすると、間のチップがなめらかに変わります（クレッシェンドなど）。'],
+  ['select', '選択', 'ベロシティの列でクリックかドラッグしてチップを選びます。Alt+ホイールか Alt+↑↓ で選んだチップを5ずつ（Shift で1ずつ）変えます。'],
+  ['pencil', '鉛筆', 'ベロシティの列をなぞると、なぞった位置のベロシティになります。'],
+  ['line', '直線', 'ベロシティの列で始点から終点へドラッグすると、間のチップがなめらかに変わります（クレッシェンドなど）。'],
 ];
 
 const ACCENT_PRESETS: [string, [number, number, number, number]][] = [
@@ -95,17 +95,17 @@ export function VelocityPanel() {
     const vals = chips.map((c) => wavVel(doc, c.v));
     const mn = Math.min(...vals);
     const mx = Math.max(...vals);
-    run(`強さの幅を ${a}〜${b} に詰める`, (cur) => (mx === mn ? (a + b) / 2 : a + ((cur - mn) / (mx - mn)) * (b - a)));
+    run(`ベロシティの幅を ${a}〜${b} に詰める`, (cur) => (mx === mn ? (a + b) / 2 : a + ((cur - mn) / (mx - mn)) * (b - a)));
   };
 
   return (
     <aside className="right-panel scroll vel-panel">
       <div className="row" style={{ padding: '2px 2px 0' }}>
         <span style={{ color: 'var(--accent)' }}>{Icon.bars(15)}</span>
-        <b style={{ fontSize: 14 }}>強さの編集</b>
+        <b style={{ fontSize: 14 }}>ベロシティの編集</b>
         <span className="grow" />
         <span className="lbl">V か Esc で閉じる</span>
-        <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(false)} aria-label="強さの編集を閉じる">
+        <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(false)} aria-label="ベロシティの編集を閉じる">
           ✕
         </button>
       </div>
@@ -125,7 +125,7 @@ export function VelocityPanel() {
             </button>
           ))}
         </div>
-        <div className="vel-lanes" role="group" aria-label="強さのレーンに出すレーン（3つまで）">
+        <div className="vel-lanes" role="group" aria-label="ベロシティのレーンに出すレーン（3つまで）">
           {DRUM_LANES.map((l, i) => {
             const on = v.lanes.includes(i);
             return (
@@ -134,14 +134,14 @@ export function VelocityPanel() {
                 className={on ? 'on' : ''}
                 style={on ? { borderColor: l.color, color: l.color } : undefined}
                 onClick={() => toggleVelLane(i)}
-                title={`${l.name}の強さを出す（3つまで）`}
+                title={`${l.name}のベロシティを出す（3つまで）`}
               >
                 {l.key}
               </button>
             );
           })}
         </div>
-        <div className="vel-hist" aria-label="強さの分布">
+        <div className="vel-hist" aria-label="ベロシティの分布">
           {hist.bins.map((n, i) => (
             <span key={i} style={{ height: `${Math.max(n ? 6 : 2, (n / maxBin) * 100)}%`, background: n ? (i >= 7 ? 'var(--accent)' : i >= 4 ? '#5D7189' : '#3A4656') : '#1C222B' }} title={`${i * 10 + 1}〜${(i + 1) * 10}: ${n}個`} />
           ))}
@@ -156,10 +156,10 @@ export function VelocityPanel() {
             <b className="mono">{chips.length}</b> 個 · 平均 <span className="mono">{chips.length ? Math.round(hist.avg) : '-'}</span>
           </span>
           <span className="grow" />
-          <button className="btn small" disabled={!chips.length} onClick={() => pick((x) => x <= 50)} title="強さ50以下のチップだけを選ぶ">
+          <button className="btn small" disabled={!chips.length} onClick={() => pick((x) => x <= 50)} title="ベロシティ50以下のチップだけを選ぶ">
             弱だけ選ぶ
           </button>
-          <button className="btn small" disabled={!chips.length} onClick={() => pick((x) => x >= 80)} title="強さ80以上のチップだけを選ぶ">
+          <button className="btn small" disabled={!chips.length} onClick={() => pick((x) => x >= 80)} title="ベロシティ80以上のチップだけを選ぶ">
             強だけ選ぶ
           </button>
         </div>
@@ -182,10 +182,10 @@ export function VelocityPanel() {
         <div className="row" style={{ marginBottom: 8 }}>
           <b style={{ fontSize: 13 }}>まとめて変える</b>
           <span className="grow" />
-          <button className="btn small" disabled={!ids.length} onClick={() => run('強さを -5', (c) => c - 5)}>
+          <button className="btn small" disabled={!ids.length} onClick={() => run('ベロシティを -5', (c) => c - 5)}>
             -5
           </button>
-          <button className="btn small" disabled={!ids.length} onClick={() => run('強さを +5', (c) => c + 5)}>
+          <button className="btn small" disabled={!ids.length} onClick={() => run('ベロシティを +5', (c) => c + 5)}>
             +5
           </button>
         </div>
@@ -194,7 +194,7 @@ export function VelocityPanel() {
             <span className="lbl">そろえる</span>
             <span className="row" style={{ gap: 6 }}>
               <input className="field mono" value={setTo} onChange={(e) => setSetTo(e.target.value)} inputMode="numeric" />
-              <button className="btn small" disabled={!ids.length} onClick={() => run(`強さを ${num(setTo, 100)} にそろえる`, () => num(setTo, 100))}>
+              <button className="btn small" disabled={!ids.length} onClick={() => run(`ベロシティを ${num(setTo, 100)} にそろえる`, () => num(setTo, 100))}>
                 適用
               </button>
             </span>
@@ -203,7 +203,7 @@ export function VelocityPanel() {
             <span className="lbl">倍率（%）</span>
             <span className="row" style={{ gap: 6 }}>
               <input className="field mono" value={scale} onChange={(e) => setScale(e.target.value)} inputMode="numeric" />
-              <button className="btn small" disabled={!ids.length} onClick={() => run(`強さを ${num(scale, 100)}% にする`, (c) => (c * num(scale, 100)) / 100)}>
+              <button className="btn small" disabled={!ids.length} onClick={() => run(`ベロシティを ${num(scale, 100)}% にする`, (c) => (c * num(scale, 100)) / 100)}>
                 適用
               </button>
             </span>
@@ -228,7 +228,7 @@ export function VelocityPanel() {
                 disabled={!ids.length}
                 onClick={() => {
                   const j = Math.abs(num(jitter, 3));
-                  run(`強さに ±${j} のゆらぎ`, (c) => c + Math.round((Math.random() * 2 - 1) * j));
+                  run(`ベロシティに ±${j} のゆらぎ`, (c) => c + Math.round((Math.random() * 2 - 1) * j));
                 }}
               >
                 適用
@@ -249,10 +249,10 @@ export function VelocityPanel() {
           {hasAudio && <span className="pill" title="波形・打点の解析に使っている音">解析元: {srcName || '原曲'}</span>}
         </div>
         <p className="lbl" style={{ margin: '0 0 8px', lineHeight: 1.6 }}>
-          同じ位置で鳴った原曲の音の強さを、指定した幅の強さに割り振ります。ゴーストノートの見分けに向いています。ドラムのステムを解析元にすると正確になります。
+          同じ位置で鳴った原曲の音の強さを、指定した幅のベロシティに割り振ります。ゴーストノートの見分けに向いています。ドラムのステムを解析元にすると正確になります。
         </p>
         <div className="row" style={{ gap: 6 }}>
-          <span className="lbl">強さの幅</span>
+          <span className="lbl">ベロシティの幅</span>
           <input
             className="field mono"
             style={{ width: 56 }}

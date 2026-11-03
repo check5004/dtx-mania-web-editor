@@ -1,4 +1,4 @@
-// 強さ（ベロシティ）の操作：置く強さ（強・中・弱）、選んだチップの強さ、強さの編集モードの道具。
+// ベロシティ（ベロシティ）の操作：置くベロシティ（強・中・弱）、選んだチップのベロシティ、ベロシティの編集モードの道具。
 import { create } from 'zustand';
 import { sameMeasures } from '../assist/similar';
 import { drumChannel, DRUM_LANES, type Chip, type DtxDoc } from '../dtx/model';
@@ -13,21 +13,21 @@ export type VelTool = 'select' | 'pencil' | 'line';
 export type VelScope = 'selection' | 'visible' | 'section' | 'song';
 
 export interface VelState {
-  /** 置く強さ（0=強 1=中 2=弱） */
+  /** 置くベロシティ（0=強 1=中 2=弱） */
   preset: 0 | 1 | 2;
-  /** 強さの編集モード */
+  /** ベロシティの編集モード */
   mode: boolean;
   tool: VelTool;
-  /** 強さのレーンに出す・まとめて変えるレーン（3つまで） */
+  /** ベロシティのレーンに出す・まとめて変えるレーン（3つまで） */
   lanes: number[];
   scope: VelScope;
   /** 同じパターンの小節にも同じ変更をする */
   alsoSimilar: boolean;
-  /** 拍の位置（表・16分の2つ目・裏・16分の4つ目）ごとの強さ */
+  /** 拍の位置（表・16分の2つ目・裏・16分の4つ目）ごとのベロシティ */
   beatAccent: [number, number, number, number];
-  /** 原曲の打点から決めるときの強さの幅 */
+  /** 原曲の打点から決めるときのベロシティの幅 */
   audioRange: [number, number];
-  /** 点線で見せている候補（チップ id → 強さ） */
+  /** 点線で見せている候補（チップ id → ベロシティ） */
   proposal: Map<number, number> | null;
 }
 
@@ -50,7 +50,7 @@ const vset = useVel.setState;
 
 export const VEL_PRESET_NAMES = ['強', '中', '弱'] as const;
 
-/** いま置く強さ */
+/** いま置くベロシティ */
 export function placeVel(): number {
   return useInputSettings.getState().velPresets[vget().preset];
 }
@@ -96,8 +96,8 @@ function similarTwins(doc: DtxDoc, chips: Chip[]): Map<number, number[]> {
 }
 
 /**
- * チップの強さを変える。fn は今の強さから新しい強さを返す。
- * 「同じパターンの小節にも」が付いていれば、その小節の同じ位置のチップも同じ強さにする。
+ * チップのベロシティを変える。fn は今のベロシティから新しいベロシティを返す。
+ * 「同じパターンの小節にも」が付いていれば、その小節の同じ位置のチップも同じベロシティにする。
  */
 export function applyVel(label: string, ids: readonly number[], fn: (cur: number, c: Chip) => number | null, opts: { group?: string; similar?: boolean } = {}): number {
   if (ids.length === 0) return 0;
@@ -105,7 +105,7 @@ export function applyVel(label: string, ids: readonly number[], fn: (cur: number
   const step = velStep();
   const idSet = new Set(ids);
   const chips = s.doc.chips.filter((c) => idSet.has(c.id) && drumChannel(c.ch));
-  // 先に新しい強さを決めておく（ゆらぎなどで双子のチップも同じ値にするため）
+  // 先に新しいベロシティを決めておく（ゆらぎなどで双子のチップも同じ値にするため）
   const next = new Map<number, number>();
   for (const c of chips) {
     const cur = velOfWav(s.doc.fields, c.v);
@@ -137,7 +137,7 @@ export function selectedDrumIds(): number[] {
   return s.doc.chips.filter((c) => sel.has(c.id) && drumChannel(c.ch)).map((c) => c.id);
 }
 
-/** 選んだチップの強さを ±delta（Alt+ホイール・Alt+↑↓） */
+/** 選んだチップのベロシティを ±delta（Alt+ホイール・Alt+↑↓） */
 export function nudgeSelection(delta: number): boolean {
   const ids = selectedDrumIds();
   if (ids.length === 0) return false;
@@ -146,7 +146,7 @@ export function nudgeSelection(delta: number): boolean {
   const s = useEditor.getState();
   const idSet = new Set(ids);
   edit(
-    `強さを ${delta > 0 ? '+' : ''}${delta}`,
+    `ベロシティを ${delta > 0 ? '+' : ''}${delta}`,
     (d) => {
       opSetVelocity(d, idSet, (cur) => cur + delta, step);
     },
@@ -157,15 +157,15 @@ export function nudgeSelection(delta: number): boolean {
 }
 
 export function setSelectionVel(v: number) {
-  applyVel(`強さを ${v} にする`, selectedDrumIds(), () => v, { similar: false });
+  applyVel(`ベロシティを ${v} にする`, selectedDrumIds(), () => v, { similar: false });
 }
 
-// ---- 強さの編集モード -------------------------------------------------------------
+// ---- ベロシティの編集モード -------------------------------------------------------------
 
 export function toggleVelMode(on?: boolean) {
   const next = on ?? !vget().mode;
   if (next && !vget().mode) {
-    // 選んでいるチップのレーンを強さのレーンに出す
+    // 選んでいるチップのレーンをベロシティのレーンに出す
     const s = useEditor.getState();
     const sel = new Set(s.selection);
     const count = new Map<number, number>();
@@ -225,7 +225,7 @@ export function targetChips(visible: { from: number; to: number }): Chip[] {
   return views.filter((x) => x.beat >= r.from - 1e-9 && x.beat < r.to - 1e-9).map((x) => x.c);
 }
 
-/** 強さの分布（10刻みの10段） */
+/** ベロシティの分布（10刻みの10段） */
 export function velHistogram(doc: DtxDoc, chips: Chip[]): { bins: number[]; avg: number } {
   const bins = new Array(10).fill(0);
   let sum = 0;
@@ -259,7 +259,7 @@ function laneBand(lane: number): 'low' | 'mid' | 'high' {
 
 /**
  * 同じ位置で鳴った原曲の音の強さを、[lo, hi] の強さに割り振る。
- * 近くに打点が無いチップは入れない。戻り値はチップ id → 強さ。
+ * 近くに打点が無いチップは入れない。戻り値はチップ id → ベロシティ。
  */
 export function velFromAudio(chips: Chip[], lo: number, hi: number): Map<number, number> {
   const out = new Map<number, number>();
@@ -284,7 +284,7 @@ export function velFromAudio(chips: Chip[], lo: number, hi: number): Map<number,
     if (m <= 0) continue;
     raw.push({ id: c.id, v: m, band });
   }
-  // 帯域ごとに強さの順位で割り振る（帯域ごとに音量の基準が違うため）
+  // 帯域ごとにベロシティの順位で割り振る（帯域ごとに音量の基準が違うため）
   const byBand = new Map<string, { id: number; v: number }[]>();
   for (const r of raw) {
     let arr = byBand.get(r.band);
@@ -295,7 +295,7 @@ export function velFromAudio(chips: Chip[], lo: number, hi: number): Map<number,
     const sorted = [...arr].sort((x, y) => x.v - y.v);
     const max = sorted[sorted.length - 1].v;
     for (const r of arr) {
-      // 強さの比（対数）でなだらかに割り振る
+      // ベロシティの比（対数）でなだらかに割り振る
       const ratio = Math.max(0, Math.min(1, 1 + Math.log10(Math.max(1e-4, r.v / max)) / 1.2));
       out.set(r.id, clampVel(lo + (hi - lo) * ratio));
     }
@@ -310,7 +310,7 @@ export function setProposal(p: Map<number, number> | null) {
 export function adoptProposal() {
   const p = vget().proposal;
   if (!p) return;
-  applyVel(`原曲の打点から強さを決める（${p.size}個）`, [...p.keys()], (_cur, c) => p.get(c.id) ?? null, { similar: false });
+  applyVel(`原曲の打点からベロシティを決める（${p.size}個）`, [...p.keys()], (_cur, c) => p.get(c.id) ?? null, { similar: false });
   vset({ proposal: null });
 }
 

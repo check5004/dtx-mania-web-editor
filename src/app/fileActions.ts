@@ -19,13 +19,19 @@ import {
   parseSetDef,
   pendingFiles,
   pickFolder,
+  putFile,
   supportsDirectWrite,
   writeFile,
   type FolderFile,
   type SongFolder,
 } from '../fs/folder';
 import { listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
-import { createDoc, isDirty, openDocument, toast, useEditor, type DocMeta } from '../store/editor';
+import { createDoc, edit, isDirty, openDocument, prepareSounds, toast, useEditor, type DocMeta } from '../store/editor';
+import { bgmSource } from '../store/derived';
+import { freeWavNumber, setField } from '../edit/ops';
+import { toBase36x2 } from '../dtx/base36';
+import { CH } from '../dtx/model';
+import { frac } from '../dtx/fraction';
 import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 
@@ -215,6 +221,94 @@ export async function openDroppedFiles(files: File[]) {
   });
   if (!info) return;
   openDocument(createDoc(info), newMeta('mstr.dtx', null), folder, { dirty: true });
+}
+
+/** 原曲の音声ファイルを選ぶダイアログ（読み込むと原曲にする） */
+export function pickBgmFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.ogg,.wav,.mp3,.m4a,.flac,.opus';
+  input.onchange = () => {
+    const f = input.files?.[0];
+    if (f) void importBgmFile(f);
+  };
+  input.click();
+}
+
+/** 同じ名前の別のファイルがあれば、名前の後ろに番号を付ける */
+function freePath(folder: SongFolder, name: string): string {
+  if (!findFile(folder, name)) return name;
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let i = 2; i < 100; i++) {
+    const p = `${base} (${i})${ext}`;
+    if (!findFile(folder, p)) return p;
+  }
+  return `${base}_${Date.now()}${ext}`;
+}
+
+/**
+ * 今の譜面に原曲（BGM）を読み込む。曲フォルダにコピーして #WAV に登録し、
+ * BGMチップ（ch01）が無ければ 001 小節の頭に置く。あれば、その音を差し替える。
+ */
+export async function importBgmFile(file: File) {
+  if (!/\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(file.name)) {
+    toast('原曲は音声ファイル（WAV・OGG・MP3）を選んでください', 'warn');
+    return;
+  }
+  const s = get();
+  let folder = s.folder;
+  if (!folder) {
+    folder = folderFromFiles([], s.doc.fields['TITLE'] || '新しい曲');
+    useEditor.setState({ folder });
+  }
+  const same = findFile(folder, file.name);
+  let path = file.name;
+  let memory = false;
+  if (!(same && same.size === file.size)) {
+    path = freePath(folder, file.name);
+    memory = (await putFile(folder, path, file)) === 'memory';
+  } else {
+    path = same.path;
+  }
+  const bgm = bgmSource(get().doc);
+  edit(bgm ? '原曲を差し替える' : '原曲を読み込む', (d) => {
+    if (bgm) {
+      setField(d, 'WAV' + toBase36x2(bgm.wav), path);
+      return;
+    }
+    const no = freeWavNumber(d) ?? 1;
+    setField(d, 'WAV' + toBase36x2(no), path);
+    if (d.fields['BGMWAV'] === undefined) setField(d, 'BGMWAV', toBase36x2(no));
+    d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: no });
+  });
+  await prepareSounds();
+  toast(
+    `原曲「${path}」を${bgm ? '差し替えました' : '読み込みました（001小節の頭から鳴らします。ずれていたら「テンポ合わせ」で合わせられます）'}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`,
+    'ok',
+    7000,
+  );
+}
+
+/** 編集中に音声ファイルを落としたとき：原曲にするか、ステムにするか、新しい譜面にするかを選ぶ */
+export async function dropAudioInEditor(files: File[]) {
+  const audio = files.filter((f) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(f.name));
+  if (!audio.length) return openDroppedFiles(files);
+  const choice = await chooseDialog({
+    title: audio.length === 1 ? `「${audio[0].name}」をどうしますか？` : `音声ファイルが ${audio.length} 個あります`,
+    body: 'いま編集中の譜面に使うか、新しい譜面を作るかを選んでください。',
+    options: [
+      ...(audio.length === 1
+        ? [{ label: bgmSource(get().doc) ? '原曲を差し替える' : '原曲にする（おすすめ）', sub: '曲フォルダにコピーしてBGM（#WAV・ch01）に登録します。波形と候補チップはこの音から作ります', value: 'bgm' as const }]
+        : []),
+      { label: 'ステムとして読み込む', sub: '楽器ごとに分けた音（ドラム・ベースなど）。DAWのように鳴らし分けられます', value: 'stems' as const },
+      { label: '新しい譜面を作る', sub: 'いまの譜面を閉じて、この音から新しい譜面を作ります', value: 'new' as const },
+    ],
+  });
+  if (choice === 'bgm') await importBgmFile(audio[0]);
+  else if (choice === 'stems') await importStems(audio);
+  else if (choice === 'new') await openDroppedFiles(files);
 }
 
 export async function newEmptySong() {

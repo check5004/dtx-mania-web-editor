@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { laneByCh, virtualSound } from '../audio/sounds';
+import { virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
 import { DRUM_LANES } from '../dtx/model';
 import { serializeHeader } from '../dtx/serialize';
@@ -11,7 +11,7 @@ import { BGA_CHANNELS } from '../dtx/model';
 import { thumb, useThumbs } from './thumbs';
 import { audioFiles, findFile } from '../fs/folder';
 import { wavPan, wavVolume } from '../store/derived';
-import { edit, openPage, prepareSounds, previewWav, setFieldValue, setLaneWav, toast, useEditor, type LeftTab } from '../store/editor';
+import { edit, openPage, prepareSounds, previewFile, previewWav, setFieldValue, setLaneWav, toast, useEditor, type LeftTab } from '../store/editor';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
 import { chooseDialog, confirmDialog } from './dialogs';
@@ -55,27 +55,11 @@ function wavList(fields: Record<string, string>): { no: number; path: string }[]
     .sort((a, b) => a.no - b.no);
 }
 
-/** 今のキットの音を WAV に登録して、そのレーンの音にする */
-function useKitSound(ch: number) {
+/** レーンの音を「キットの音」に戻す（チップを置いたときにキットの音を登録する） */
+function followKit(ch: number) {
+  setLaneWav(ch, null);
   const file = kitFile(ch);
-  if (!file) return;
-  let no = -1;
-  const label = laneByCh.get(ch)?.label ?? 'レーン';
-  edit(`${label}にキットの音を使う`, (d) => {
-    for (const [k, v] of Object.entries(d.fields)) {
-      if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === file.toLowerCase() && d.fields['VOLUME' + k.slice(3)] === undefined) no = parseInt(k.slice(3), 36);
-    }
-    if (no < 0) {
-      no = freeWavNumber(d) ?? 1;
-      setField(d, 'WAV' + toBase36x2(no), file);
-    }
-  });
-  if (no < 0) {
-    const f = Object.entries(useEditor.getState().doc.fields).find(([k, v]) => /^WAV/.test(k) && v.toLowerCase() === file.toLowerCase());
-    if (f) no = parseInt(f[0].slice(3), 36);
-  }
-  if (no > 0) setLaneWav(ch, no);
-  void prepareSounds().then(() => no > 0 && previewWav(no));
+  if (file) void previewFile(file);
 }
 
 function KitTab() {
@@ -123,7 +107,7 @@ function KitTab() {
             const n = applyKitToChips();
             toast(n ? `置いてあるチップ ${n} 個の音を「${cur?.name}」にしました（Ctrl+Z で戻せます）` : '替えるチップはありませんでした', n ? 'ok' : 'info');
           }}
-          title="置いてあるチップの音も、このキットの音に替えます（強さは保ちます）"
+          title="置いてあるチップの音も、このキットの音に替えます（ベロシティは保ちます）"
         >
           置いてあるチップも替える
         </button>
@@ -136,8 +120,12 @@ function KitTab() {
       </div>
       {rows.map((r) => {
         const no = laneWav[r.ch];
-        const valid = no !== undefined && fields['WAV' + toBase36x2(no)] !== undefined;
-        const path = valid ? fields['WAV' + toBase36x2(no!)] : kitFile(r.ch);
+        const kf = kitFile(r.ch);
+        const assignedPath = no !== undefined ? fields['WAV' + toBase36x2(no)] : undefined;
+        // キットの音をそのまま使っている（登録済みでも）なら「キット」と出す
+        const followsKit = assignedPath === undefined || (!!kf && assignedPath.toLowerCase() === kf.toLowerCase() && !fields['VOLUME' + toBase36x2(no!)]);
+        const valid = !followsKit;
+        const path = valid ? assignedPath : kf;
         const own = valid && !!findFile(folder, path ?? '', fields['PATH_WAV'] ?? '');
         const vs = !own && path ? virtualSound(path) : null;
         const badge = own ? '曲' : vs?.sampleId ? '曲から' : '標準';
@@ -153,15 +141,18 @@ function KitTab() {
               value={valid ? String(no) : 'kit'}
               title={vs ? `${path}（${vs.origin}）` : (path ?? '')}
               onChange={(e) => {
-                if (e.target.value === 'kit') useKitSound(r.ch);
-                else setLaneWav(r.ch, Number(e.target.value));
+                if (e.target.value === 'kit') followKit(r.ch);
+                else {
+                  setLaneWav(r.ch, Number(e.target.value));
+                  previewWav(Number(e.target.value));
+                }
               }}
             >
-              <option value="kit">キット: {kitFile(r.ch)?.replace(/^dtxweb_|^lib_/, '')}</option>
+              <option value="kit">キット: {kf?.replace(/^dtxweb_|^lib_/, '')}</option>
               {wavs.map((w) => (
                 <option key={w.no} value={w.no}>
                   {toBase36x2(w.no)} {w.path}
-                  {fields['VOLUME' + toBase36x2(w.no)] ? `（強さ ${fields['VOLUME' + toBase36x2(w.no)]}）` : ''}
+                  {fields['VOLUME' + toBase36x2(w.no)] ? `（ベロシティ ${fields['VOLUME' + toBase36x2(w.no)]}）` : ''}
                 </option>
               ))}
             </select>
@@ -172,9 +163,10 @@ function KitTab() {
               className="ib"
               style={{ width: 26, height: 26 }}
               title="試聴"
+              aria-label={`${r.name}の音を試聴`}
               onClick={() => {
                 if (valid) previewWav(no!);
-                else useKitSound(r.ch);
+                else if (kf) void previewFile(kf);
               }}
             >
               {Icon.speaker(14)}
@@ -462,7 +454,15 @@ function HeaderTab() {
         <span className="lbl">ファイル名</span>
         <span className="mono">{meta.fileName}</span>
         <span className="lbl">読み込み</span>
-        <span>{meta.encoding === 'shift_jis' ? 'Shift_JIS' : meta.encoding === 'utf-8-bom' ? 'UTF-8（BOM付き）' : 'UTF-8（BOMなし）'}</span>
+        <span>
+          {meta.encoding === 'shift_jis'
+            ? 'Shift_JIS'
+            : meta.encoding === 'utf-8-bom'
+              ? 'UTF-8（BOM付き）'
+              : meta.encoding === 'utf-8'
+                ? 'UTF-8（BOMなし）'
+                : 'UTF-16（BOM付き）'}
+        </span>
         <span className="lbl">保存</span>
         <span>Shift_JIS・CRLF</span>
         <span className="lbl">キットの音</span>

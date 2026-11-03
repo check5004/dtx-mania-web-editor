@@ -10,7 +10,21 @@ import { sub, type Frac } from '../dtx/fraction';
 import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
-import { bandOnsets, currentGhosts, dismissGhosts, ghostsInRange, setLoop, setWaveMode, useAssist, type AssistState } from '../store/assist';
+import {
+  bandOnsets,
+  beginLoopDrag,
+  currentGhosts,
+  dismissGhosts,
+  dragLoop,
+  endLoopDrag,
+  ghostsInRange,
+  setLoop,
+  setWaveMode,
+  useAssist,
+  LOOP_DIV,
+  type AssistState,
+  type LoopDrag,
+} from '../store/assist';
 import { bgmSource, COL_BGA, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
 import {
   deleteChips,
@@ -28,30 +42,35 @@ import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
 import { useFind } from '../store/find';
 import { usePhrase } from '../store/phrase';
-import { issuesOf, useCheck } from '../store/check';
+import { gotoNextIssue, issuesOf, useCheck, type Issue } from '../store/check';
 import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
 import { thumb, useThumbs } from './thumbs';
 import { promptDialog } from './dialogs';
 import { songLength } from './hooks';
 import { chipBpmLabel, meterLabel } from './format';
 import { SectionPopover } from './SectionPopover';
+import { pickBgmFile } from '../app/fileActions';
 
 export const GEO = {
   head: 30,
   bottom: 28,
+  /** ループの帯（いちばん左。ドラッグでループの範囲） */
+  loopW: 14,
   gutterW: 36,
-  bpmX: 36,
+  bpmX: 50,
   bpmW: 44,
-  laneX: 84,
+  laneX: 98,
   laneW: 40,
-  bgmX: 488,
+  bgmX: 502,
   bgmW: 28,
-  hitsX: 520,
+  hitsX: 534,
   hitsW: 64,
-  waveX: 588,
+  waveX: 602,
   waveW: 108,
-  miniW: 72,
-  /** 強さのレーン（強さの編集モード） */
+  miniW: 86,
+  /** 全体図の左のループの帯 */
+  miniLoopW: 13,
+  /** ベロシティのレーン（ベロシティの編集モード） */
   velGap: 10,
   velW: 84,
 };
@@ -90,7 +109,7 @@ type Drag =
   | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean }
   | { type: 'erase'; ids: Set<number>; ghosts: Set<string> }
   | { type: 'cursor' }
-  | { type: 'loop'; a: number; b: number }
+  | { type: 'loop'; ld: LoopDrag; y0: number; where: 'chart' | 'mini' }
   | { type: 'mini' };
 
 interface Hover {
@@ -100,6 +119,18 @@ interface Hover {
   pos: Pos | null;
   alt: boolean;
   ghost: Ghost | null;
+  /** 小節番号の列・波形の上：クリックで再生を始める位置（拍） */
+  start?: number;
+}
+
+/** 譜面の上に出す説明（警告の中身・操作のヒント） */
+interface Tip {
+  key: string;
+  x: number;
+  y: number;
+  level: 'error' | 'warn' | 'hint';
+  title: string;
+  lines: string[];
 }
 
 interface Local {
@@ -148,7 +179,7 @@ function chartWidth(): number {
   return baseWidth() + (v.mode ? GEO.velGap + v.lanes.length * GEO.velW : 0);
 }
 
-/** 強さのレーン i の左端（譜面の左端から） */
+/** ベロシティのレーン i の左端（譜面の左端から） */
 function velLaneX(i: number): number {
   return baseWidth() + GEO.velGap + i * GEO.velW;
 }
@@ -166,6 +197,28 @@ export function ChartCanvas() {
   const L = useRef<Local>({ w: 0, h: 0, dpr: 1, dirty: true, drag: null, hover: null, followScroll: null, mini: null, spec: null, pointer: null });
   const [popover, setPopover] = useState<{ m: number; x: number; y: number } | null>(null);
   const [help, setHelp] = useState<{ x: number; y: number } | null>(null);
+  const [tip, setTipState] = useState<Tip | null>(null);
+  const tipRef = useRef<{ key: string | null; timer: number }>({ key: null, timer: 0 });
+  /** 説明を出す。警告はすぐ、操作のヒントは少し止まってから */
+  const showTip = (t: Tip | null) => {
+    const r = tipRef.current;
+    if ((t?.key ?? null) === r.key) {
+      if (t) setTipState((cur) => (cur && cur.key === t.key ? { ...cur, x: t.x, y: t.y } : cur));
+      return;
+    }
+    r.key = t?.key ?? null;
+    window.clearTimeout(r.timer);
+    if (!t) {
+      setTipState(null);
+      return;
+    }
+    if (t.level === 'hint') {
+      setTipState(null);
+      r.timer = window.setTimeout(() => setTipState(t), 650);
+    } else {
+      setTipState(t);
+    }
+  };
   const inputMode = useAssist((s) => s.inputMode);
   const playing = useEditor((s) => s.playing);
   const div = useEditor((s) => s.view.div);
@@ -250,7 +303,7 @@ export function ChartCanvas() {
       const s = useEditor.getState();
       const g = geom(l, s.view.scrollBeat, s.view.pxPerBeat);
       if (e.altKey) {
-        // Alt+ホイール：選んだチップの強さ（Shift で1ずつ）。強さのレーンの上なら、そのチップ
+        // Alt+ホイール：選んだチップのベロシティ（Shift で1ずつ）。ベロシティのレーンの上なら、そのチップ
         const h = hitTest(l, g, e.offsetX, e.offsetY);
         const step = e.shiftKey ? 1 : 5;
         const dir = (e.deltaY || e.deltaX) < 0 ? 1 : -1;
@@ -290,6 +343,7 @@ export function ChartCanvas() {
     const h = hitTest(l, g, x, y);
     setPopover(null);
     setHelp(null);
+    showTip(null);
     if (!h) return;
     // 見出しのボタン
     if (h.kind === 'header') {
@@ -336,6 +390,10 @@ export function ChartCanvas() {
       return;
     }
     if (e.button === 2) {
+      if (h.kind === 'loop' || h.kind === 'miniLoop') {
+        setLoop(null);
+        return;
+      }
       if (h.kind === 'chip') {
         l.drag = { type: 'erase', ids: new Set([h.view.c.id]), ghosts: new Set() };
         l.dirty = true;
@@ -351,9 +409,23 @@ export function ChartCanvas() {
       scrollFromMini(l, y);
       return;
     }
+    if (h.kind === 'loop') {
+      l.drag = { type: 'loop', ld: beginLoopDrag(Math.max(0, g.yToBeat(y)), 7 / g.px), y0: y, where: 'chart' };
+      return;
+    }
+    if (h.kind === 'miniLoop') {
+      const mg = miniGeom(l);
+      l.drag = { type: 'loop', ld: beginLoopDrag(mg.beatAt(y), (6 * mg.end) / (mg.bottom - mg.top)), y0: y, where: 'mini' };
+      return;
+    }
     if (h.kind === 'ghost') {
       // 候補を採用（その位置にチップを置く）
       placeChip(h.ghost.lane, false, h.ghost.pos);
+      return;
+    }
+    if (h.kind === 'audio' && !useAssist.getState().data && (useAssist.getState().status === 'nosource' || useAssist.getState().status === 'none')) {
+      // 原曲がまだ無い：波形の列をクリックで読み込む
+      pickBgmFile();
       return;
     }
     if (h.kind === 'gutter' || h.kind === 'header' || h.kind === 'audio') {
@@ -362,7 +434,8 @@ export function ChartCanvas() {
       const p = snapToGrid(tempo, beat, s.view.div);
       const b = tempo.beatOf(p.m, p.f);
       if (e.shiftKey && h.kind === 'gutter') {
-        l.drag = { type: 'loop', a: b, b };
+        // Shift+ドラッグでもループの範囲を作れる（以前の操作）
+        l.drag = { type: 'loop', ld: { mode: 'new', origin: b, a0: b, b0: b, moved: false }, y0: y, where: 'chart' };
         return;
       }
       l.drag = { type: 'cursor' };
@@ -416,9 +489,14 @@ export function ChartCanvas() {
         l.hover = { x, y, lane: h.lane, pos, alt: e.shiftKey, ghost: null };
       } else if (h && h.kind === 'ghost') {
         l.hover = { x, y, lane: h.ghost.lane, pos: null, alt: false, ghost: h.ghost };
+      } else if (h && (h.kind === 'gutter' || h.kind === 'audio')) {
+        const tempo = tempoOf(s.doc);
+        const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
+        l.hover = { x, y, lane: -1, pos: null, alt: false, ghost: null, start: tempo.beatOf(p.m, p.f) };
       } else {
-        l.hover = h && h.kind !== 'mini' && h.kind !== 'vel' && h.kind !== 'velChip' ? { x, y, lane: -1, pos: null, alt: false, ghost: null } : null;
+        l.hover = h && h.kind !== 'mini' && h.kind !== 'miniLoop' && h.kind !== 'vel' && h.kind !== 'velChip' ? { x, y, lane: -1, pos: null, alt: false, ghost: null } : null;
       }
+      showTip(tipFor(l, g, h, x, y));
       const tool = useVel.getState().tool;
       const cur =
         h?.kind === 'vel' || h?.kind === 'velChip'
@@ -431,11 +509,15 @@ export function ChartCanvas() {
           ? 'grab'
           : h?.kind === 'ghost' || h?.kind === 'section'
             ? 'pointer'
-            : h?.kind === 'gutter' || h?.kind === 'mini' || h?.kind === 'audio'
-              ? 'ns-resize'
-              : h?.kind === 'header' && x - g.ox >= GEO.hitsX
+            : h?.kind === 'loop' || h?.kind === 'miniLoop'
+              ? loopCursor(l, g, h.kind, y)
+              : h?.kind === 'gutter' || h?.kind === 'audio'
                 ? 'pointer'
-                : 'default';
+                : h?.kind === 'mini'
+                  ? 'ns-resize'
+                  : h?.kind === 'header' && x - g.ox >= GEO.hitsX
+                    ? 'pointer'
+                    : 'default';
       canvasRef.current!.style.cursor = cur;
       return;
     }
@@ -474,9 +556,8 @@ export function ChartCanvas() {
       return;
     }
     if (d.type === 'loop') {
-      const tempo = tempoOf(s.doc);
-      const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
-      d.b = tempo.beatOf(p.m, p.f);
+      const beat = d.where === 'chart' ? Math.max(0, g.yToBeat(y)) : miniGeom(l).beatAt(y);
+      dragLoop(d.ld, beat, LOOP_DIV, Math.abs(y - d.y0) > 3);
       return;
     }
     if (d.type === 'mini') {
@@ -519,7 +600,7 @@ export function ChartCanvas() {
       if (views.length === 0) return;
       const at = new Map(views.map((v) => [v.c.id, v.beat]));
       applyVel(
-        `直線で強さを変える（${d.v0}→${d.v1}）`,
+        `直線でベロシティを変える（${d.v0}→${d.v1}）`,
         [...at.keys()],
         (_cur, c) => {
           if (span < 1e-6) return d.v1;
@@ -545,17 +626,7 @@ export function ChartCanvas() {
       return;
     }
     if (d.type === 'loop') {
-      const a = Math.min(d.a, d.b);
-      let b = Math.max(d.a, d.b);
-      if (b - a < 1e-6) {
-        // クリックだけならその小節
-        const tempo = tempoOf(s.doc);
-        const { m } = tempo.locate(a);
-        setLoop({ on: true, a: tempo.measureStart(m), b: tempo.measureStart(m + 1) });
-        return;
-      }
-      if (b <= a) b = a + 1;
-      setLoop({ on: true, a, b });
+      endLoopDrag(d.ld);
       return;
     }
     if (d.type === 'move') {
@@ -579,6 +650,13 @@ export function ChartCanvas() {
       // 小節番号のダブルクリック：その小節からセクションを始める（カーソルと同じく吸着した位置の小節）
       const { m } = snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div);
       setPopover({ m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, y - 10) });
+      return;
+    }
+    if (h?.kind === 'audio') {
+      // 波形のダブルクリック：そこから再生
+      const tempo = tempoOf(s.doc);
+      const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
+      void playFrom(tempo.beatOf(p.m, p.f));
       return;
     }
     if (h?.kind !== 'bpm') return;
@@ -609,6 +687,7 @@ export function ChartCanvas() {
         onPointerLeave={() => {
           L.current.hover = null;
           L.current.dirty = true;
+          showTip(null);
         }}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
@@ -622,6 +701,8 @@ export function ChartCanvas() {
       )}
       {inputMode === 'key' && <div className="rec-badge key">キー入力: カーソル位置に置く（↑↓で移動）</div>}
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
+      {tip && !popover && <ChartTip tip={tip} />}
+      <IssueBadge />
       {help && (
         <div className="popover" style={{ left: help.x - 200, top: help.y, width: 280 }} onPointerDown={(e) => e.stopPropagation()}>
           <div className="row" style={{ marginBottom: 6 }}>
@@ -695,13 +776,16 @@ type Hit =
   | { kind: 'bga' }
   | { kind: 'audio' }
   | { kind: 'header' }
+  | { kind: 'loop' }
   | { kind: 'mini' }
+  | { kind: 'miniLoop' }
   | { kind: 'vel'; idx: number; lane: number }
   | { kind: 'velChip'; idx: number; lane: number; view: ChipView };
 
-function colAt(g: Geom, x: number): number | 'gutter' | 'audio' | null {
+function colAt(g: Geom, x: number): number | 'gutter' | 'audio' | 'loop' | null {
   const rx = x - g.ox;
   if (rx < 0) return null;
+  if (rx < GEO.loopW) return 'loop';
   if (rx < GEO.bpmX) return 'gutter';
   if (rx < GEO.laneX) return COL_BPM;
   if (rx < GEO.laneX + GEO.laneW * 10) return laneAt(Math.floor((rx - GEO.laneX) / GEO.laneW)) ?? null;
@@ -725,7 +809,7 @@ function sectionTagAt(g: Geom, x: number, y: number): number | null {
 }
 
 function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
-  if (x >= l.w - GEO.miniW) return { kind: 'mini' };
+  if (x >= l.w - GEO.miniW) return x < l.w - GEO.miniW + GEO.miniLoopW && y >= GEO.head ? { kind: 'miniLoop' } : { kind: 'mini' };
   if (y < GEO.head) return { kind: 'header' };
   const vs = useVel.getState();
   if (vs.mode) {
@@ -753,6 +837,7 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   if (sm !== null) return { kind: 'section', m: sm };
   const col = colAt(g, x);
   if (col === null) return null;
+  if (col === 'loop') return { kind: 'loop' };
   if (col === 'gutter') return { kind: 'gutter' };
   if (col === 'audio') return { kind: 'audio' };
   const s = useEditor.getState();
@@ -813,7 +898,7 @@ function chipsInRect(l: Local, g: Geom, x0: number, y0: number, x1: number, y1: 
   return out;
 }
 
-/** 鉛筆：なぞった縦の範囲にあるチップを、なぞった位置の強さにする */
+/** 鉛筆：なぞった縦の範囲にあるチップを、なぞった位置のベロシティにする */
 function pencilApply(l: Local, g: Geom, idx: number, yA: number, yB: number, x: number, group: string) {
   const s = useEditor.getState();
   const lane = useVel.getState().lanes[idx];
@@ -825,7 +910,7 @@ function pencilApply(l: Local, g: Geom, idx: number, yA: number, yB: number, x: 
     .map((v) => v.c.id);
   if (ids.length === 0) return;
   const val = velFromX(x - g.ox, idx);
-  applyVel('鉛筆で強さを変える', ids, () => val, { group, similar: false });
+  applyVel('鉛筆でベロシティを変える', ids, () => val, { group, similar: false });
   void l;
 }
 
@@ -850,20 +935,117 @@ function miniEnd(): number {
   return end;
 }
 
-function scrollFromMini(l: Local, y: number) {
-  const s = useEditor.getState();
+/** 全体図の縦の位置と拍 */
+function miniGeom(l: Local) {
   const top = GEO.head + 6;
   const bottom = l.h - 6;
   const end = miniEnd();
-  const beat = ((bottom - y) / (bottom - top)) * end;
+  return {
+    top,
+    bottom,
+    end,
+    yOf: (b: number) => bottom - (b / end) * (bottom - top),
+    beatAt: (y: number) => Math.max(0, ((bottom - y) / (bottom - top)) * end),
+  };
+}
+
+function scrollFromMini(l: Local, y: number) {
+  const s = useEditor.getState();
+  const beat = miniGeom(l).beatAt(y);
   const viewBeats = (l.h - GEO.head - GEO.bottom) / s.view.pxPerBeat;
   l.followScroll = null;
   setView({ scrollBeat: Math.max(-2, beat - viewBeats / 2), follow: false });
 }
 
+/** ループの帯の上のマウスの形（A・B の印は上下に動かせる） */
+function loopCursor(l: Local, g: Geom, kind: 'loop' | 'miniLoop', y: number): string {
+  const loop = useAssist.getState().loop;
+  if (!loop || loop.b <= loop.a) return 'crosshair';
+  const yOf = kind === 'loop' ? g.beatToY : miniGeom(l).yOf;
+  if (Math.abs(y - yOf(loop.a)) <= 7 || Math.abs(y - yOf(loop.b)) <= 7) return 'ns-resize';
+  if (y < yOf(loop.a) && y > yOf(loop.b)) return 'grab';
+  return 'crosshair';
+}
+
+/** マウスの下の説明（無理な配置の警告・ループの帯・再生を始める位置） */
+function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | null {
+  if (!h || l.drag) return null;
+  const s = useEditor.getState();
+  const issuesOn = useCheck.getState().showIssues;
+  const at = (key: string, level: Tip['level'], title: string, lines: string[]): Tip => ({ key, x, y, level, title, lines });
+  if (issuesOn && (h.kind === 'chip' || h.kind === 'gutter')) {
+    let hits: Issue[] = [];
+    if (h.kind === 'chip') {
+      hits = issuesOf(s.doc).filter((is) => is.ids.includes(h.view.c.id));
+    } else if (x - g.ox < GEO.loopW + 24) {
+      hits = issuesOf(s.doc).filter((is) => Math.abs(g.beatToY(is.beat) - y) <= 8);
+    }
+    if (hits.length) {
+      const level = hits.some((is) => is.level === 'error') ? 'error' : 'warn';
+      return at(
+        `issue:${hits.map((is) => `${is.kind}${is.ids[0]}`).join(',')}`,
+        level,
+        level === 'error' ? '叩けない配置' : '難しい配置',
+        [...hits.map((is) => `${toMeasure(is.m)}小節: ${is.message}`), '一覧は右の「確かめる」。印は「譜面に印」で消せます'],
+      );
+    }
+  }
+  if (h.kind === 'loop' || h.kind === 'miniLoop') {
+    const loop = useAssist.getState().loop;
+    return at('loop', 'hint', 'ループの帯', loop
+      ? ['ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', '範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', '右クリック: ループを消す']
+      : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ']);
+  }
+  if (h.kind === 'gutter') return at('gutter', 'hint', '小節番号の列', ['クリック・ドラッグ: 再生を始める位置（▶）を置く', 'ダブルクリック: セクション名を付ける']);
+  if (h.kind === 'audio') return at('audio', 'hint', '原曲の打点・波形', ['クリック: 再生を始める位置（▶）を置く', 'ダブルクリック: そこから再生']);
+  return null;
+}
+
+function ChartTip({ tip }: { tip: Tip }) {
+  const left = Math.min(tip.x + 16, viewport.w - 300);
+  const top = Math.min(tip.y + 16, viewport.h - 30 - tip.lines.length * 18);
+  return (
+    <div className={`chart-tip ${tip.level}`} style={{ left: Math.max(4, left), top: Math.max(GEO.head + 2, top) }}>
+      <b>
+        {tip.level !== 'hint' && <span className="tip-mark">!</span>}
+        {tip.title}
+      </b>
+      {tip.lines.map((t, i) => (
+        <div key={i} className={i === tip.lines.length - 1 && tip.level !== 'hint' ? 'tip-foot' : undefined}>
+          {t}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 無理な配置があるとき、譜面の右上に件数を出す（クリックで次の場所へ） */
+function IssueBadge() {
+  const doc = useEditor((s) => s.doc);
+  const show = useCheck((s) => s.showIssues);
+  if (!show) return null;
+  const issues = issuesOf(doc);
+  if (!issues.length) return null;
+  const errors = issues.filter((i) => i.level === 'error').length;
+  const warns = issues.length - errors;
+  return (
+    <button
+      className={`issue-float ${errors ? 'error' : 'warn'}`}
+      style={{ right: GEO.miniW + 10, top: GEO.head + 8 }}
+      onClick={() => gotoNextIssue()}
+      title="無理な配置（同時に叩けない・速すぎる連打など）。クリックで次の場所へ移ってチップを選びます。印にマウスを乗せると中身が出ます。一覧は右の「確かめる」"
+    >
+      <span className="tip-mark">!</span>
+      {errors > 0 && <span>叩けない {errors}</span>}
+      {warns > 0 && <span>難しい {warns}</span>}
+      <span className="lbl">次へ ›</span>
+    </button>
+  );
+}
+
 function autoScrollWhileDragging(l: Local) {
   const d = l.drag;
-  if (!d || !l.pointer || (d.type !== 'move' && d.type !== 'rubber' && d.type !== 'erase' && d.type !== 'loop')) return;
+  if (!d || !l.pointer || (d.type !== 'move' && d.type !== 'rubber' && d.type !== 'erase' && !(d.type === 'loop' && d.where === 'chart'))) return;
   const s = useEditor.getState();
   const { y } = l.pointer;
   let v = 0;
@@ -930,8 +1112,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   ctx.fillRect(0, 0, W, H);
 
   // 列の背景
+  ctx.fillStyle = '#0A0D11';
+  ctx.fillRect(ox, GEO.head, GEO.loopW, H);
   ctx.fillStyle = C.col;
-  ctx.fillRect(ox, GEO.head, GEO.bpmX, H);
+  ctx.fillRect(ox + GEO.loopW, GEO.head, GEO.bpmX - GEO.loopW, H);
   ctx.fillStyle = '#0D1116';
   ctx.fillRect(ox + GEO.bpmX, GEO.head, GEO.bpmW, H);
   for (let i = 0; i < 10; i++) {
@@ -943,19 +1127,16 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   ctx.fillStyle = C.sep;
   for (let i = 0; i <= 10; i++) ctx.fillRect(ox + GEO.laneX + i * GEO.laneW - 0.5, GEO.head, 1, H);
   ctx.fillRect(ox + GEO.bpmX - 0.5, GEO.head, 1, H);
+  ctx.fillRect(ox + GEO.loopW - 0.5, GEO.head, 1, H);
   ctx.fillRect(ox + GEO.bgmX - 0.5, GEO.head, 1, H);
   ctx.fillRect(ox + GEO.bgmX + GEO.bgmW - 0.5, GEO.head, 1, H);
 
-  // ループの範囲
+  // ループの範囲（列の背景だけ。印と線は最後に描く）
   if (a.loop && a.loop.b > a.loop.a) {
     const y0 = g.beatToY(a.loop.b);
     const y1 = g.beatToY(a.loop.a);
-    ctx.fillStyle = a.loop.on ? 'rgba(255,199,104,.055)' : 'rgba(255,199,104,.025)';
+    ctx.fillStyle = a.loop.on ? 'rgba(255,199,104,.06)' : 'rgba(255,199,104,.025)';
     ctx.fillRect(ox + GEO.bpmX, y0, GEO.bgmX + GEO.bgmW - GEO.bpmX, y1 - y0);
-    ctx.fillStyle = a.loop.on ? C.loop : 'rgba(255,199,104,.4)';
-    ctx.fillRect(ox + 2, y0, 3, y1 - y0);
-    ctx.fillRect(ox + GEO.bpmX, Math.round(y0), GEO.bgmX + GEO.bgmW - GEO.bpmX, 1);
-    ctx.fillRect(ox + GEO.bpmX, Math.round(y1), GEO.bgmX + GEO.bgmW - GEO.bpmX, 1);
   }
 
   // グリッド
@@ -996,7 +1177,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     // 似た小節（カーソルの小節と同じパターン）
     if (same.has(m) || pinned.has(m)) {
       ctx.fillStyle = pinned.has(m) ? 'rgba(255,199,104,.85)' : 'rgba(76,194,255,.7)';
-      ctx.fillRect(ox + 6, yEnd + 2, 3, y - yEnd - 4);
+      ctx.fillRect(ox + GEO.loopW + 4, yEnd + 2, 3, y - yEnd - 4);
     }
     if (y >= GEO.head - 2 && y <= H + 2) {
       ctx.fillStyle = C.measure;
@@ -1306,13 +1487,14 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       const color = is.level === 'error' ? '#FF5A61' : '#FFB547';
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.moveTo(ox + 14, y - 6);
-      ctx.lineTo(ox + 21, y + 5);
-      ctx.lineTo(ox + 7, y + 5);
+      const tx = ox + GEO.loopW + 10;
+      ctx.moveTo(tx, y - 6);
+      ctx.lineTo(tx + 7, y + 5);
+      ctx.lineTo(tx - 7, y + 5);
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = '#0B0E13';
-      ctx.fillText('!', ox + 14, y + 1.5);
+      ctx.fillText('!', tx, y + 1.5);
     }
   }
 
@@ -1327,7 +1509,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     }
   }
 
-  // 強さのレーン
+  // ベロシティのレーン
   if (velMode) drawVelLanes(ctx, g, H, sel, d);
   else drawVelBubble(ctx, g, sel, H);
 
@@ -1355,33 +1537,37 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.lineWidth = 1;
     ctx.strokeRect(xa + 0.5, ya + 0.5, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
   }
-  // ループ範囲のドラッグ
-  if (d?.type === 'loop') {
-    const ya = g.beatToY(Math.max(d.a, d.b));
-    const yb = g.beatToY(Math.min(d.a, d.b));
-    ctx.fillStyle = 'rgba(255,199,104,.12)';
-    ctx.fillRect(ox, ya, x1 - ox, Math.max(2, yb - ya));
-  }
+  // ループ（帯・A と B の印・線）
+  drawLoop(ctx, g, H, cw, a);
 
-  // カーソル（F6で再生を始める位置）
+  // 再生を始める位置（▶）。小節番号の列か波形の上では、クリックしたときの位置を薄く出す
+  const hs = hv?.start;
+  if (hs !== undefined && !d && Math.abs(hs - s.cursorBeat) > 1e-6) {
+    const y = Math.round(g.beatToY(hs)) + 0.5;
+    ctx.strokeStyle = 'rgba(76,194,255,.45)';
+    ctx.setLineDash([3, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ox + GEO.bpmX, y);
+    ctx.lineTo(ox + cw, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    drawStartTag(ctx, ox, y, 0.45);
+  }
   {
     const y = Math.round(g.beatToY(s.cursorBeat)) + 0.5;
     if (y >= GEO.head && y <= H) {
       ctx.strokeStyle = C.accent;
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 1;
+      ctx.globalAlpha = playBeat !== null ? 0.5 : 0.9;
+      ctx.setLineDash([6, 3]);
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(ox + GEO.bpmX, y);
       ctx.lineTo(ox + cw, y);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = C.accent;
-      ctx.beginPath();
-      ctx.moveTo(ox + GEO.bpmX - 1, y);
-      ctx.lineTo(ox + GEO.bpmX - 8, y - 5);
-      ctx.lineTo(ox + GEO.bpmX - 8, y + 5);
-      ctx.closePath();
-      ctx.fill();
+      ctx.globalAlpha = 1;
+      drawStartTag(ctx, ox, y, playBeat !== null ? 0.6 : 1);
     }
   }
 
@@ -1389,7 +1575,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   if (playBeat !== null) {
     const y = Math.round(g.beatToY(playBeat));
     ctx.fillStyle = a.inputMode === 'rec' ? '#FF5A61' : C.playhead;
-    ctx.fillRect(ox, y - 1, cw, 2);
+    ctx.fillRect(ox + GEO.loopW, y - 1, cw - GEO.loopW, 2);
     ctx.shadowColor = ctx.fillStyle as string;
     ctx.shadowBlur = 8;
     ctx.fillRect(ox + GEO.laneX, y - 1, GEO.laneW * 10, 2);
@@ -1405,6 +1591,12 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   ctx.textAlign = 'center';
   ctx.fillStyle = C.text;
   ctx.fillText('BPM', ox + GEO.bpmX + GEO.bpmW / 2, GEO.head / 2);
+  ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillStyle = a.loop?.on ? C.loop : '#8D7A55';
+  ctx.fillText('A', ox + GEO.loopW / 2, GEO.head / 2 + 6);
+  ctx.fillText('B', ox + GEO.loopW / 2, GEO.head / 2 - 5);
+  ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillStyle = C.text;
   const ms = new Set(a.mute);
   const ss = new Set(a.solo);
   DRUM_LANES.forEach((lane, i) => {
@@ -1439,7 +1631,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     });
     ctx.font = '10px system-ui, sans-serif';
     ctx.fillStyle = C.text;
-    ctx.fillText(a.waveMode === 'wave' ? '原曲の波形 ⇄' : 'スペクトル ⇄', ox + GEO.waveX + GEO.waveW / 2, GEO.head / 2);
+    // BGA の列が波形の上に重なっているときは、見えている所の真ん中に出す
+    const waveRight = bgaVisible() && bgaX() < FULL_W ? Math.max(GEO.waveX + 40, bgaX() - 2) : GEO.waveX + GEO.waveW;
+    const narrowWave = waveRight - GEO.waveX < 80;
+    ctx.fillText(a.waveMode === 'wave' ? (narrowWave ? '波形 ⇄' : '原曲の波形 ⇄') : 'スペクトル ⇄', ox + (GEO.waveX + waveRight) / 2, GEO.head / 2);
   }
 
   if (velMode) {
@@ -1448,17 +1643,73 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     useVel.getState().lanes.forEach((lane, i) => {
       const def = DRUM_LANES[lane];
       const cx = ox + velLaneX(i) + GEO.velW / 2;
+      ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
       ctx.fillStyle = def.color;
-      ctx.fillText(`${def.key}`, cx - 14, GEO.head / 2);
+      ctx.fillText(`${def.key}`, cx, GEO.head / 2 - 6);
+      ctx.font = '9px system-ui, sans-serif';
       ctx.fillStyle = C.text;
-      ctx.fillText('の強さ', cx + 12, GEO.head / 2);
+      ctx.fillText('ベロシティ', cx, GEO.head / 2 + 7);
     });
   }
 
   drawMinimap(ctx, l, g, playBeat, a);
 }
 
-// ---- 強さ -----------------------------------------------------------------------
+/** 再生を始める位置の印（小節番号の列の左） */
+function drawStartTag(ctx: CanvasRenderingContext2D, ox: number, y: number, alpha: number) {
+  const x = ox + GEO.bpmX - 1;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = C.accent;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - 9, y - 6);
+  ctx.lineTo(x - 9, y + 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+/** ループ：左端の帯に範囲と A・B の印、譜面に A・B の線 */
+function drawLoop(ctx: CanvasRenderingContext2D, g: Geom, H: number, cw: number, a: AssistState) {
+  const { ox } = g;
+  const loop = a.loop;
+  if (!loop || loop.b <= loop.a) return;
+  const yB = g.beatToY(loop.b);
+  const yA = g.beatToY(loop.a);
+  if (yA < GEO.head - 14 || yB > H + 14) return;
+  const on = loop.on;
+  const col = on ? C.loop : 'rgba(255,199,104,.45)';
+  // 帯の範囲
+  const top = Math.max(GEO.head, yB);
+  const bottom = Math.min(H, yA);
+  if (bottom > top) {
+    ctx.fillStyle = on ? 'rgba(255,199,104,.35)' : 'rgba(255,199,104,.12)';
+    ctx.fillRect(ox + 2, top, GEO.loopW - 4, bottom - top);
+  }
+  // 線
+  ctx.fillStyle = col;
+  for (const y of [yA, yB]) {
+    if (y < GEO.head || y > H) continue;
+    ctx.fillRect(ox, Math.round(y) - 0.5, cw, 1);
+  }
+  // A・B の印（A は線の下、B は線の上。重ならない）
+  ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const tab = (y: number, label: string, below: boolean) => {
+    const ty = below ? y : y - 13;
+    if (ty + 13 < GEO.head || ty > H) return;
+    roundRect(ctx, ox + 1, ty, GEO.loopW - 2, 13, 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.fillStyle = '#1A1408';
+    ctx.fillText(label, ox + GEO.loopW / 2, ty + 7);
+  };
+  tab(yA, 'A', true);
+  tab(yB, 'B', false);
+}
+
+// ---- ベロシティ -----------------------------------------------------------------------
 
 function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Set<number>, d: Drag | null) {
   const v = useVel.getState();
@@ -1547,7 +1798,7 @@ function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Se
   }
 }
 
-/** 1つだけ選んだチップの横に強さの吹き出し */
+/** 1つだけ選んだチップの横にベロシティの吹き出し */
 function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>, H: number) {
   if (sel.size !== 1) return;
   const doc = useEditor.getState().doc;
@@ -1559,7 +1810,7 @@ function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>,
   const vel = wavVel(doc, v.c.v);
   const x = g.ox + laneCX(v.col) + 22;
   ctx.font = '10px system-ui, sans-serif';
-  const label = '強さ';
+  const label = 'ベロシティ';
   const hint = 'Alt+ホイール';
   ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
   const numW = ctx.measureText(String(vel)).width;
@@ -1612,11 +1863,15 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
         ? `原曲を解析中… ${Math.round(a.progress * 100)}%`
         : a.status === 'error'
           ? `解析できませんでした`
-          : '原曲（BGM）がありません';
+          : bgm
+            ? '原曲のファイルがありません'
+            : '原曲がありません';
     ctx.fillText(msg, 0, 0);
     if (a.status === 'nosource' || a.status === 'none') {
-      ctx.fillText('曲フォルダを開くか、', 0, 18);
-      ctx.fillText('テンポ合わせで指定', 0, 34);
+      ctx.fillStyle = C.accent;
+      ctx.fillText('クリックして読み込む', 0, 20);
+      ctx.fillStyle = C.dim;
+      ctx.fillText('（右の「原曲」からも）', 0, 36);
     }
     ctx.restore();
     return;
@@ -1785,9 +2040,8 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
   const side = useSidecar.getState();
   const doc = s.doc;
   const x = l.w - GEO.miniW;
-  const top = GEO.head + 6;
-  const bottom = l.h - 6;
-  const end = miniEnd();
+  const ML = GEO.miniLoopW;
+  const { top, bottom, end } = miniGeom(l);
   const ghosts = a.ghostsOn && a.data ? currentGhosts() : null;
   if (!l.mini || l.mini.doc !== doc || l.mini.h !== l.h || l.mini.endBeat !== end || l.mini.ghosts !== ghosts || l.mini.sections !== side.sections) {
     const c = l.mini?.canvas ?? document.createElement('canvas');
@@ -1797,8 +2051,11 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
     m.setTransform(l.dpr, 0, 0, l.dpr, 0, 0);
     m.fillStyle = '#0D1116';
     m.fillRect(0, 0, GEO.miniW, l.h);
+    m.fillStyle = '#0A0D11';
+    m.fillRect(0, 0, ML, l.h);
     m.fillStyle = '#1A2029';
     m.fillRect(0, 0, 1, l.h);
+    m.fillRect(ML, 0, 1, l.h);
     const tempo = tempoOf(doc);
     const yOf = (b: number) => bottom - (b / end) * (bottom - top);
     // セクションの色
@@ -1807,27 +2064,27 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
       const b1 = i + 1 < side.sections.length ? tempo.measureStart(side.sections[i + 1].m) : end;
       m.fillStyle = sectionColor(sc.name, side.sectionColors);
       m.globalAlpha = 0.8;
-      m.fillRect(2, yOf(b1), 3, yOf(b0) - yOf(b1));
+      m.fillRect(ML + 2, yOf(b1), 3, yOf(b0) - yOf(b1));
       m.globalAlpha = 1;
     });
     const lastM = tempo.locate(end).m;
     m.fillStyle = '#1C222B';
     for (let mm = 0; mm <= lastM; mm += 4) {
       const y = yOf(tempo.measureStart(mm));
-      m.fillRect(6, Math.round(y), GEO.miniW - 12, 1);
+      m.fillRect(ML + 6, Math.round(y), GEO.miniW - ML - 12, 1);
     }
     if (ghosts) {
       m.globalAlpha = 0.35;
       for (const gh of ghosts) {
         m.fillStyle = DRUM_LANES[gh.lane].color;
-        m.fillRect(6 + slotOf(gh.lane) * 6, Math.round(yOf(gh.beat)), 5, 1);
+        m.fillRect(ML + 6 + slotOf(gh.lane) * 6, Math.round(yOf(gh.beat)), 5, 1);
       }
       m.globalAlpha = 1;
     }
     for (const v of chipViews(doc)) {
       if (v.col < 0) continue;
       m.fillStyle = DRUM_LANES[v.col].color;
-      m.fillRect(6 + slotOf(v.col) * 6, Math.round(yOf(v.beat)), 5, 1);
+      m.fillRect(ML + 6 + slotOf(v.col) * 6, Math.round(yOf(v.beat)), 5, 1);
     }
     // BPM の変化
     m.fillStyle = C.amber;
@@ -1835,31 +2092,60 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
     l.mini = { canvas: c, doc, h: l.h, endBeat: end, ghosts, sections: side.sections };
   }
   ctx.drawImage(l.mini.canvas, x, 0, GEO.miniW, l.h);
-  // ループの範囲
+  // ループの範囲（左の帯に範囲と A・B の印）
   if (a.loop && a.loop.b > a.loop.a) {
     const ya = bottom - (a.loop.b / end) * (bottom - top);
     const yb = bottom - (a.loop.a / end) * (bottom - top);
-    ctx.fillStyle = a.loop.on ? 'rgba(255,199,104,.25)' : 'rgba(255,199,104,.1)';
-    ctx.fillRect(x + 2, ya, GEO.miniW - 4, Math.max(2, yb - ya));
+    const on = a.loop.on;
+    ctx.fillStyle = on ? 'rgba(255,199,104,.14)' : 'rgba(255,199,104,.06)';
+    ctx.fillRect(x + ML + 1, ya, GEO.miniW - ML - 2, Math.max(2, yb - ya));
+    ctx.fillStyle = on ? 'rgba(255,199,104,.45)' : 'rgba(255,199,104,.18)';
+    ctx.fillRect(x + 2, ya, ML - 4, Math.max(2, yb - ya));
+    ctx.fillStyle = on ? C.loop : 'rgba(255,199,104,.5)';
+    ctx.fillRect(x + 1, Math.round(ya) - 1, GEO.miniW - 2, 1);
+    ctx.fillRect(x + 1, Math.round(yb), GEO.miniW - 2, 1);
+    ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const tab = (ty: number, label: string) => {
+      roundRect(ctx, x + 1, ty, ML - 2, 10, 2);
+      ctx.fill();
+      ctx.fillStyle = '#1A1408';
+      ctx.fillText(label, x + ML / 2, ty + 5.5);
+      ctx.fillStyle = on ? C.loop : 'rgba(255,199,104,.5)';
+    };
+    tab(yb, 'A');
+    tab(ya - 10, 'B');
   }
   // 見えている範囲
   const y0 = bottom - (Math.max(0, g.maxBeat) / end) * (bottom - top);
   const y1 = bottom - (Math.max(0, g.minBeat) / end) * (bottom - top);
   ctx.fillStyle = 'rgba(76,194,255,.10)';
-  ctx.fillRect(x + 2, Math.max(top - 4, y0), GEO.miniW - 4, Math.max(4, y1 - y0));
+  ctx.fillRect(x + ML + 2, Math.max(top - 4, y0), GEO.miniW - ML - 4, Math.max(4, y1 - y0));
   ctx.strokeStyle = 'rgba(76,194,255,.55)';
   ctx.lineWidth = 1;
-  ctx.strokeRect(x + 2.5, Math.max(top - 4, y0) + 0.5, GEO.miniW - 5, Math.max(4, y1 - y0));
+  ctx.strokeRect(x + ML + 2.5, Math.max(top - 4, y0) + 0.5, GEO.miniW - ML - 5, Math.max(4, y1 - y0));
+  // 再生を始める位置
+  {
+    const y = Math.round(bottom - (s.cursorBeat / end) * (bottom - top));
+    ctx.fillStyle = C.accent;
+    ctx.beginPath();
+    ctx.moveTo(x + ML + 6, y);
+    ctx.lineTo(x + ML + 1, y - 4);
+    ctx.lineTo(x + ML + 1, y + 4);
+    ctx.closePath();
+    ctx.fill();
+  }
   if (playBeat !== null) {
     const y = bottom - (playBeat / end) * (bottom - top);
     ctx.fillStyle = C.playhead;
-    ctx.fillRect(x + 2, Math.round(y), GEO.miniW - 4, 2);
+    ctx.fillRect(x + ML + 1, Math.round(y), GEO.miniW - ML - 2, 2);
   }
   ctx.fillStyle = '#0E1217';
   ctx.fillRect(x, 0, GEO.miniW, GEO.head);
   ctx.font = '600 9px "JetBrains Mono", ui-monospace, monospace';
   ctx.fillStyle = C.text;
   ctx.textAlign = 'center';
-  ctx.fillText('全体', x + GEO.miniW / 2, GEO.head / 2);
+  ctx.fillText('全体', x + ML + (GEO.miniW - ML) / 2, GEO.head / 2);
   void sectionAt;
 }

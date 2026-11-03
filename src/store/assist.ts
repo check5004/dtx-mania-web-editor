@@ -7,6 +7,7 @@ import { classifyEvents, detectEvents, placeGhosts, GHOST_LANES, type Ghost, typ
 import { copyMeasureInto, measureSignatures, sameMeasures } from '../assist/similar';
 import type { DtxDoc } from '../dtx/model';
 import { bgmSource, tempoOf, wavPath } from './derived';
+import { snapToGrid } from '../edit/ops';
 import { edit, placeChips, useEditor } from './editor';
 
 export type InputMode = 'mouse' | 'key' | 'rec';
@@ -243,9 +244,139 @@ export { GHOST_LANES };
 
 // ---- ループ・速度・ミックス ----------------------------------------------------------
 
-export function setLoop(loop: LoopBeats | null) {
+export function setLoop(loop: LoopBeats | null, opts: { engine?: boolean } = {}) {
   aset({ loop });
-  applyLoopToEngine();
+  if (opts.engine !== false) applyLoopToEngine();
+}
+
+/** 吸着させた拍（div: 全音符の分割数） */
+export function snapBeat(beat: number, div: number): number {
+  const t = tempoOf(useEditor.getState().doc);
+  const p = snapToGrid(t, Math.max(0, beat), div);
+  return t.beatOf(p.m, p.f);
+}
+
+/** その拍の小節（ループの初期値に使う） */
+function measureRange(beat: number): { a: number; b: number } {
+  const t = tempoOf(useEditor.getState().doc);
+  const { m } = t.locate(Math.max(0, beat));
+  return { a: t.measureStart(m), b: t.measureStart(m + 1) };
+}
+
+/** 今の位置（再生中なら再生位置、止まっていれば再生を始める位置） */
+function hereBeat(): number {
+  const sec = engine.currentSec();
+  const s = useEditor.getState();
+  return sec === null ? s.cursorBeat : tempoOf(s.doc).secToBeat(sec);
+}
+
+/** ループのオン・オフ。範囲が無ければ、選んだチップの小節か今の位置の小節で作る */
+export function toggleLoop() {
+  const loop = aget().loop;
+  if (loop) {
+    setLoop({ ...loop, on: !loop.on });
+    return;
+  }
+  const s = useEditor.getState();
+  const t = tempoOf(s.doc);
+  if (s.selection.length) {
+    const ids = new Set(s.selection);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const c of s.doc.chips) {
+      if (!ids.has(c.id)) continue;
+      lo = Math.min(lo, c.m);
+      hi = Math.max(hi, c.m);
+    }
+    if (lo <= hi) {
+      setLoop({ on: true, a: t.measureStart(lo), b: t.measureStart(hi + 1) });
+      return;
+    }
+  }
+  setLoop({ on: true, ...measureRange(hereBeat()) });
+}
+
+/**
+ * 今の位置を A（ループの始まり）か B（終わり）にする。範囲が無ければ1小節ぶんで作る。
+ * A が B を越えたら B を、B が A より前なら A を1小節ずらす。
+ */
+export function setLoopPoint(which: 'a' | 'b', beat = hereBeat()) {
+  // ループの端は拍に吸着する（聴きながら押すと少し遅れるので、近い拍へ）
+  const b0 = snapBeat(beat, LOOP_DIV);
+  const t = tempoOf(useEditor.getState().doc);
+  const cur = aget().loop;
+  const barAt = (x: number) => t.measureBeats(t.locate(Math.max(0, x)).m);
+  if (which === 'a') {
+    const b = cur && cur.b > b0 + 1e-6 ? cur.b : b0 + barAt(b0);
+    setLoop({ on: true, a: b0, b });
+  } else {
+    let a = cur && cur.a < b0 - 1e-6 ? cur.a : Math.max(0, b0 - barAt(Math.max(0, b0 - 1e-6)));
+    if (b0 - a < 1e-6) a = 0;
+    if (b0 <= 1e-6) return;
+    setLoop({ on: true, a, b: b0 });
+  }
+}
+
+/** ループの端を吸着させる細かさ（4 = 拍） */
+export const LOOP_DIV = 4;
+
+/** ループの範囲をドラッグで変える（譜面・下の波形・全体図で共通） */
+export type LoopDragMode = 'new' | 'a' | 'b' | 'move';
+export interface LoopDrag {
+  mode: LoopDragMode;
+  /** 押したところの拍 */
+  origin: number;
+  a0: number;
+  b0: number;
+  moved: boolean;
+}
+
+/** どこを掴んだか（A・B の印の近く・範囲の中・空いた所） */
+export function loopGrab(beat: number, tol: number): LoopDragMode {
+  const l = aget().loop;
+  if (!l || l.b <= l.a) return 'new';
+  if (Math.abs(beat - l.a) <= tol && Math.abs(beat - l.a) <= Math.abs(beat - l.b)) return 'a';
+  if (Math.abs(beat - l.b) <= tol) return 'b';
+  if (beat > l.a && beat < l.b) return 'move';
+  return 'new';
+}
+
+export function beginLoopDrag(beat: number, tol: number): LoopDrag {
+  const l = aget().loop;
+  return { mode: loopGrab(beat, tol), origin: beat, a0: l?.a ?? beat, b0: l?.b ?? beat, moved: false };
+}
+
+/** ドラッグ中：ループを書き換える（エンジンへは離したときに渡す） */
+export function dragLoop(d: LoopDrag, beat: number, div: number, movedPx: boolean) {
+  if (!d.moved && !movedPx) return;
+  d.moved = true;
+  const snap = (x: number) => snapBeat(x, div);
+  const step = 4 / div;
+  const on = true;
+  if (d.mode === 'new') {
+    const a = snap(Math.min(d.origin, beat));
+    const b = snap(Math.max(d.origin, beat));
+    setLoop({ on, a, b: Math.max(b, a + step) }, { engine: false });
+  } else if (d.mode === 'a') {
+    setLoop({ on, a: Math.min(snap(beat), d.b0 - step), b: d.b0 }, { engine: false });
+  } else if (d.mode === 'b') {
+    setLoop({ on, a: d.a0, b: Math.max(snap(beat), d.a0 + step) }, { engine: false });
+  } else {
+    let a = snap(d.a0 + (beat - d.origin));
+    if (a < 0) a = 0;
+    setLoop({ on, a, b: a + (d.b0 - d.a0) }, { engine: false });
+  }
+}
+
+/** ドラッグを終える。動かさずにクリックだけなら、範囲の中はオン・オフ、空いた所はその小節をループ */
+export function endLoopDrag(d: LoopDrag) {
+  if (d.moved) {
+    applyLoopToEngine();
+    return;
+  }
+  const l = aget().loop;
+  if (d.mode === 'move' && l) setLoop({ ...l, on: !l.on });
+  else if (d.mode === 'new') setLoop({ on: true, ...measureRange(d.origin) });
 }
 
 /** 拍のループを秒にする（譜面の BPM が変わっても拍で覚えておく） */

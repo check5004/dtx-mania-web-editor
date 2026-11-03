@@ -148,7 +148,7 @@ function targets(): Set<number> {
 
 const laneName = (l: number) => DRUM_LANES[l]?.name ?? '';
 
-/** 見つかったチップを lane に移す。resound なら音もそのレーンの音にする（強さは保つ） */
+/** 見つかったチップを lane に移す。resound なら音もそのレーンの音にする（ベロシティは保つ） */
 export function relaneResults(lane: number, alt: AltMode, resound: boolean) {
   const ids = targets();
   if (!ids.size) return;

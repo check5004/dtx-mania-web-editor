@@ -2,7 +2,7 @@
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer';
 import { create } from 'zustand';
 import { engine, type Mix } from '../audio/engine';
-import { builtinFile } from '../audio/sounds';
+import { builtinFile, virtualSound } from '../audio/sounds';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
@@ -22,10 +22,10 @@ import {
   type Pos,
 } from '../edit/ops';
 import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
-import type { SongFolder } from '../fs/folder';
+import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
 import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
-import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavSources } from './derived';
+import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavSources, wavVolume } from './derived';
 import { loadSidecar, useSidecar, type SectionMark, type TempoAnchor } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
@@ -291,7 +291,7 @@ function findWavByPath(fields: Record<string, string>, file: string): number | n
   for (const [k, v] of Object.entries(fields)) {
     if (!/^WAV[0-9A-Z]{2}$/.test(k) || v.toLowerCase() !== file.toLowerCase()) continue;
     const no = parseInt(k.slice(3), 36);
-    // 強さ違い（#VOLUME 付き）より、そのままの音を選ぶ
+    // ベロシティ違い（#VOLUME 付き）より、そのままの音を選ぶ
     if (hit === null || (fields['VOLUME' + k.slice(3)] === undefined && fields['VOLUME' + toBase36x2(hit)] !== undefined)) hit = no;
   }
   return hit;
@@ -317,7 +317,7 @@ export function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
   return no;
 }
 
-/** 置く強さ（強さの操作は store/velocity が受け持つ。循環を避けるため関数で受け取る） */
+/** 置くベロシティ（ベロシティの操作は store/velocity が受け持つ。循環を避けるため関数で受け取る） */
 let placeVelProvider: () => number = () => 100;
 export function setPlaceVelProvider(fn: () => number) {
   placeVelProvider = fn;
@@ -331,7 +331,7 @@ export interface PlaceItem {
   lane: number;
   alt: boolean;
   pos: Pos;
-  /** 強さ（1〜100）。省くと操作バーで選んでいる強さ */
+  /** ベロシティ（1〜100）。省くと操作バーで選んでいるベロシティ */
   vel?: number;
 }
 
@@ -554,8 +554,13 @@ export function setFieldValue(key: string, value: string | undefined, label = `#
   if (/^(WAV|VOLUME|PAN|WAVVOL|WAVPAN)[0-9A-Z]{2}$|^PATH_WAV$/i.test(key)) void prepareSounds();
 }
 
-export function setLaneWav(base: number, no: number) {
-  set((s) => ({ laneWav: { ...s.laneWav, [base]: no } }));
+export function setLaneWav(base: number, no: number | null) {
+  set((s) => {
+    const laneWav = { ...s.laneWav };
+    if (no === null) delete laneWav[base];
+    else laneWav[base] = no;
+    return { laneWav };
+  });
 }
 
 /** BPM を変える（#BPM ヘッダ。曲頭に ch08/ch03 のBPMチップがあればそれも合わせる） */
@@ -662,7 +667,7 @@ export async function prepareSounds(): Promise<void> {
 export function previewWav(no: number) {
   engine.ensure();
   if (engine.preview(no)) return;
-  // 作ったばかりの強さ違いはまだ読み込まれていない：同じファイルの音を強さの比で鳴らす
+  // 作ったばかりのベロシティ違いはまだ読み込まれていない：同じファイルの音をベロシティの比で鳴らす
   const fields = get().doc.fields;
   const path = fields['WAV' + toBase36x2(no)];
   if (path === undefined) return;
@@ -673,6 +678,39 @@ export function previewWav(no: number) {
     engine.preview(other, velOfWav(fields, no) / Math.max(1, velOfWav(fields, other)));
     return;
   }
+  // 譜面でまだ使っていない音は再生用に読み込んでいないので、その場で読み込んで鳴らす
+  void previewFile(path, wavVolume(get().doc, no) / 100);
+}
+
+const previewCache = new Map<string, Promise<AudioBuffer | null>>();
+
+/** ファイル（曲フォルダの音・標準キット・ライブラリの音）を1回鳴らす。譜面は変えない */
+export async function previewFile(path: string, gain = 1): Promise<boolean> {
+  const ctx = engine.ensure();
+  const s = get();
+  const f = findFile(s.folder, path, s.doc.fields['PATH_WAV'] ?? '');
+  const vs = f ? null : virtualSound(path);
+  if (!f && !vs) return false;
+  const key = f ? `${s.folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : `virtual:${vs!.sampleId ?? vs!.file.toLowerCase()}`;
+  let p = previewCache.get(key);
+  if (!p) {
+    p = (async () => {
+      try {
+        if (f) return await ctx.decodeAudioData(await (await f.getFile()).arrayBuffer());
+        return await vs!.load();
+      } catch {
+        return null;
+      }
+    })();
+    previewCache.set(key, p);
+  }
+  const buf = await p;
+  if (!buf) {
+    previewCache.delete(key);
+    return false;
+  }
+  engine.previewBuffer(buf, gain);
+  return true;
 }
 
 /**
@@ -784,8 +822,17 @@ export function stop() {
   if (was) emit({ type: 'stop' });
 }
 
+/** 再生を止めて、止めた位置を次に再生を始める位置（カーソル）にする */
+export function pause() {
+  if (!get().playing) return;
+  const beat = currentBeat();
+  stop();
+  set({ cursorBeat: Math.max(0, beat) });
+}
+
+/** 再生・一時停止（Space）。一時停止した位置から続きを再生する */
 export function togglePlay() {
-  if (get().playing) stop();
+  if (get().playing) pause();
   else void playFrom(get().cursorBeat);
 }
 
