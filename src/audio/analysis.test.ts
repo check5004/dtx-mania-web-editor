@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeAudio, combinedOdf, downbeatPhase, pickOnsets, trackBeats, type Onset } from './analysis';
+import { analyzeAudio, combinedOdf, downbeatPhase, ODF_LAG, pickOnsets, trackBeats, type Onset } from './analysis';
 import { eightBeat, synth } from './testSignal';
 
 const SR = 44100;
@@ -34,11 +34,19 @@ describe('原曲の解析', () => {
     expect(lowFalse.length).toBeLessThanOrEqual(2);
   });
 
-  it('打点の時刻は 10ms 以内', () => {
+  it('打点の時刻は 10ms 以内（低域はキックの胴鳴りの遅れの分だけ前へ）', () => {
+    // 合成のキックは胴鳴りが 2ms で立ち上がるが、本物のキックは低音が大きくなるまで 10ms ほどかかる。
+    // 低域は本物に合わせて ODF_LAG だけ前へずらしているので、合成のキックはその分だけ早く出る。
+    const lag = ODF_LAG.low / data.frameRate;
     const low = pickOnsets(data.odf.low, data.frameRate, 0.5);
     for (const k of hits.filter((h) => h.kind === 'kick')) {
       const o = low.reduce((a, b) => (Math.abs(b.t - k.t) < Math.abs(a.t - k.t) ? b : a));
-      expect(Math.abs(o.t - k.t)).toBeLessThan(0.01);
+      expect(Math.abs(o.t + lag - k.t)).toBeLessThan(0.01);
+    }
+    const mid = pickOnsets(data.odf.mid, data.frameRate, 0.5);
+    for (const s of hits.filter((h) => h.kind === 'snare')) {
+      const o = mid.reduce((a, b) => (Math.abs(b.t - s.t) < Math.abs(a.t - s.t) ? b : a));
+      expect(Math.abs(o.t - s.t)).toBeLessThan(0.01);
     }
   });
 

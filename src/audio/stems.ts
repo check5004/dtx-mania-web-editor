@@ -24,9 +24,10 @@ const KIND_WORDS: [StemKind, RegExp][] = [
   ['other', /(other|inst|instrumental|accompaniment|その他)/i],
 ];
 
-/** ファイル名から種類を決める（drums.wav、song (Drums).wav、song_drums.flac など） */
+/** ファイル名から種類を決める（drums.wav、song (Drums).wav、song_drums.flac、曲_ドラム_mixed.mp3 など） */
 export function detectStemKind(fileName: string): StemKind {
-  const base = fileName.replace(/\.[^.]+$/, '');
+  // Mac や Google ドライブの zip から来た名前は濁点が分かれている（ド＝ト＋゛）ので、合わせてから見る
+  const base = fileName.normalize('NFC').replace(/\.[^.]+$/, '');
   // UVR などの「(Drums)」「[Drums]」「_drums」を先に見る
   const tagged = /[([_\-. ]([A-Za-z]+)[)\]]?\s*$/.exec(base)?.[1] ?? '';
   for (const [k, re] of KIND_WORDS) if (tagged && re.test(tagged)) return k;

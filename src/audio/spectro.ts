@@ -8,7 +8,7 @@
 //   drum   … 伸びる音（ベース・声・和音）を引いて、叩いた音だけを残す（ドラム強調）
 //   attack … 音の立ち上がりだけを出す（叩いた瞬間がはっきり分かる）
 //   raw    … そのまま
-import { applyChain, biquad, downmix, fft, resample } from './dsp';
+import { biquad, downmix, fft, filtfilt, resample } from './dsp';
 
 export type SpecMode = 'drum' | 'attack' | 'raw';
 export const SPEC_MODES: readonly SpecMode[] = ['drum', 'attack', 'raw'];
@@ -61,19 +61,10 @@ const RESOLUTIONS: Res[] = [
   { win: 0.0058, fMax: Infinity },
 ];
 
-/** 往復でフィルタをかける（位相のずれ＝時刻のずれが出ない） */
-function zeroPhase(x: Float32Array, chain: ReturnType<typeof biquad>[]): Float32Array {
-  const y = applyChain(x, chain);
-  y.reverse();
-  const z = applyChain(y, chain);
-  z.reverse();
-  return z;
-}
-
 function decimate(x: Float32Array, dec: number, sr: number, cutoff: number): Float32Array {
   if (dec <= 1) return x;
   const lp = biquad('lowpass', cutoff, 0.707, sr);
-  const y = zeroPhase(x, [lp, lp]);
+  const y = filtfilt(x, [lp, lp]);
   const n = Math.floor(y.length / dec);
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) out[i] = y[i * dec];

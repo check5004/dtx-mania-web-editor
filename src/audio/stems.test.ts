@@ -13,6 +13,11 @@ describe('ステム', () => {
     expect(detectStemKind('piano.mp3')).toBe('piano');
     expect(detectStemKind('other.wav')).toBe('other');
     expect(detectStemKind('foo.wav')).toBe('other');
+    // 濁点が分かれた名前（Mac・Google ドライブの zip）でも分かる
+    expect(detectStemKind('back number - 水平線_ドラム_mixed.mp3'.normalize('NFD'))).toBe('drums');
+    expect(detectStemKind('back number - 水平線_ベース_mixed.mp3'.normalize('NFD'))).toBe('bass');
+    expect(detectStemKind('back number - 水平線_ボーカル1_mixed.mp3'.normalize('NFD'))).toBe('vocals');
+    expect(detectStemKind('back number - 水平線_その他_mixed.mp3'.normalize('NFD'))).toBe('other');
   });
 
   it('表示名とファイルの置き場所は重ならないようにする', () => {

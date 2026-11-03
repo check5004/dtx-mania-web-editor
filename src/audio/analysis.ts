@@ -1,6 +1,6 @@
 // 原曲の解析。波形の山、帯域別（低・中・高）の打点の強さ、BPMの推定、拍の追跡。
 // 重い処理（フィルタ・自己相関）はワーカーで、軽い処理（打点の拾い出し・拍の追跡）は画面側でも使う。
-import { applyChain, biquad, downmix, quantile, resample } from './dsp';
+import { biquad, downmix, filtfilt, quantile, resample } from './dsp';
 
 /** 打点の強さを出す細かさ（1秒あたりのフレーム数。5ms刻み） */
 export const FRAME_RATE = 200;
@@ -83,6 +83,21 @@ const BAND_FILTERS: Record<Band, (sr: number) => ReturnType<typeof biquad>[]> = 
     return [hp, hp];
   },
 };
+
+/**
+ * 帯域ごとの立ち上がりの遅れ（フレーム、5ms 単位）。キックの低音は鳴り始めてから大きくなるまでに時間がかかり
+ * （50Hz の1周期は 20ms）、低域の立ち上がりの山は本当の打点より 10ms ほど遅れる。その分だけ前へずらして、
+ * 中域・高域と時刻をそろえる（正解の譜面つきのテスト曲3曲で、譜面の音と本物のドラムの録音の両方で測った値）。
+ */
+export const ODF_LAG: Record<Band, number> = { low: 2, mid: 0, high: 0 };
+
+/** 立ち上がりを lag フレーム前へずらす（後ろは 0） */
+function shiftEarlier(x: Float32Array, lag: number): Float32Array {
+  if (lag <= 0) return x;
+  const out = new Float32Array(x.length);
+  out.set(x.subarray(lag));
+  return out;
+}
 
 /** 帯域の音量の包絡と、立ち上がりの強さ（対数の増え方）を出す */
 export function bandEnvelope(x: Float32Array, sr: number, frameRate = FRAME_RATE): { env: Float32Array; odf: Float32Array } {
@@ -405,16 +420,20 @@ export function analyzeAudio(channels: Float32Array[], sr: number, progress?: (p
   progress?.(0.15);
   const x = resample(mono, sr, ANALYSIS_SR);
   progress?.(0.3);
+  const raw = {} as Record<Band, Float32Array>;
   const odf = {} as Record<Band, Float32Array>;
   const env = {} as Record<Band, Float32Array>;
   BANDS.forEach((b, i) => {
-    const y = applyChain(x, BAND_FILTERS[b](ANALYSIS_SR));
+    // 往復でかける（片道だとフィルタの分だけ遅れる。低域の帯ではキックが 5ms ほど遅れて見えた）
+    const y = filtfilt(x, BAND_FILTERS[b](ANALYSIS_SR));
     const r = bandEnvelope(y, ANALYSIS_SR);
-    odf[b] = r.odf;
+    raw[b] = r.odf;
+    odf[b] = shiftEarlier(r.odf, ODF_LAG[b]);
     env[b] = r.env;
     progress?.(0.3 + 0.15 * (i + 1));
   });
-  const tempo = estimateTempo(combinedOdf(odf), FRAME_RATE);
+  // BPM の推定は帯域をずらす前の立ち上がりで（帯域の重なり方が変わると倍・半分の選び方が変わるため、今までどおりに）
+  const tempo = estimateTempo(combinedOdf(raw), FRAME_RATE);
   progress?.(1);
   return { duration: mono.length / sr, peakRate: PEAK_RATE, peaks, frameRate: FRAME_RATE, odf, env, tempo };
 }

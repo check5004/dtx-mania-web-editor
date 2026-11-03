@@ -59,6 +59,18 @@ export function applyChain(x: Float32Array, chain: Biquad[]): Float32Array {
   return y === x ? new Float32Array(x) : y;
 }
 
+/**
+ * 往復でフィルタをかける（前から1回・後ろから1回）。位相のずれ＝時刻のずれが出ないので、打点の時刻が遅れない。
+ * 1回かけるより帯域の外がよく落ちる（2倍の次数）。
+ */
+export function filtfilt(x: Float32Array, chain: Biquad[]): Float32Array {
+  const y = applyChain(x, chain);
+  y.reverse();
+  const z = applyChain(y, chain);
+  z.reverse();
+  return z;
+}
+
 export function downmix(channels: Float32Array[]): Float32Array {
   if (channels.length === 1) return channels[0];
   const n = channels[0].length;
