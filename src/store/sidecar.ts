@@ -51,6 +51,10 @@ export interface SavedMix {
   /** 原曲・譜面の音のトラックのソロ */
   origSolo?: boolean;
   drumSolo?: boolean;
+  /** SE のトラックの音量・ミュート・ソロ */
+  se?: number;
+  seMute?: boolean;
+  seSolo?: boolean;
 }
 
 /** 参照映像（YouTube）。動画の秒 = 原曲の秒 + offset（anchors があればその所の差 d を足す） */
@@ -261,6 +265,9 @@ export function parseSidecar(text: string): SidecarData | null {
       if (b(m.origMute) !== undefined) out.mix.origMute = b(m.origMute);
       if (b(m.origSolo) !== undefined) out.mix.origSolo = b(m.origSolo);
       if (b(m.drumSolo) !== undefined) out.mix.drumSolo = b(m.drumSolo);
+      if (typeof m.se === 'number') out.mix.se = Math.min(1, v(m.se, 1));
+      if (b(m.seMute) !== undefined) out.mix.seMute = b(m.seMute);
+      if (b(m.seSolo) !== undefined) out.mix.seSolo = b(m.seSolo);
     }
     return out;
   } catch {

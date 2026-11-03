@@ -190,7 +190,7 @@ function syncOrigPlayback() {
 /** ソロがどれかのトラックに付いているか（ソロはトラックをまたいで効く） */
 export function anySolo(): boolean {
   const m = engine.mix;
-  return m.origSolo || m.drumSolo || tracks().some((t) => t.solo && loaded.has(t.file));
+  return m.origSolo || m.drumSolo || m.seSolo || tracks().some((t) => t.solo && loaded.has(t.file));
 }
 
 /** ステムのトラックが鳴るか（ミュート・ソロ。曲の音をまとめて消しているときは別） */
@@ -446,17 +446,23 @@ export function setChartTrack(p: { gain?: number; mute?: boolean; solo?: boolean
   if (p.mute !== undefined || p.solo !== undefined) leaveListenPreset();
 }
 
-/** このトラックだけをソロにする（Alt+S）。もう一度でソロを全部外す。id は 'orig'・'chart'・ステムのファイル */
+/** SE のトラック（音量・ミュート・ソロ） */
+export function setSeTrack(p: { gain?: number; mute?: boolean; solo?: boolean }) {
+  setMix({ ...(p.gain !== undefined ? { se: p.gain } : {}), ...(p.mute !== undefined ? { seMute: p.mute } : {}), ...(p.solo !== undefined ? { seSolo: p.solo } : {}) });
+  if (p.mute !== undefined || p.solo !== undefined) leaveListenPreset();
+}
+
+/** このトラックだけをソロにする（Alt+S）。もう一度でソロを全部外す。id は 'orig'・'chart'・'se'・ステムのファイル */
 export function soloOnly(id: string) {
   const m = engine.mix;
   const list = tracks();
-  const only = (id === 'orig' ? m.origSolo : id === 'chart' ? m.drumSolo : !!list.find((t) => t.file === id)?.solo) &&
-    [m.origSolo && id !== 'orig', m.drumSolo && id !== 'chart', ...list.map((t) => t.solo && t.file !== id)].every((x) => !x);
+  const only = (id === 'orig' ? m.origSolo : id === 'chart' ? m.drumSolo : id === 'se' ? m.seSolo : !!list.find((t) => t.file === id)?.solo) &&
+    [m.origSolo && id !== 'orig', m.drumSolo && id !== 'chart', m.seSolo && id !== 'se', ...list.map((t) => t.solo && t.file !== id)].every((x) => !x);
   setStems(
     list.map((t) => ({ ...t, solo: !only && t.file === id })),
     { quiet: true },
   );
-  setMix({ origSolo: !only && id === 'orig', drumSolo: !only && id === 'chart' });
+  setMix({ origSolo: !only && id === 'orig', drumSolo: !only && id === 'chart', seSolo: !only && id === 'se' });
   leaveListenPreset();
   applyStrips();
 }
@@ -486,7 +492,7 @@ export function setListen(p: Exclude<ListenPreset, 'custom'>) {
   const drumsOnly = (t: StemTrack) => t.kind === 'drums';
   const hasDrumStem = list.some(drumsOnly);
   // プリセットはソロを使わずミュートで作る（ソロはトラックをまたいで効くので）。ステムがあれば原曲のトラックは重なるので消す
-  const base = { bgmMute: false, origMute: has, origSolo: false, drumSolo: false, drumMute: false, drumPan: 0, bgmPan: 0 };
+  const base = { bgmMute: false, origMute: has, origSolo: false, drumSolo: false, drumMute: false, drumPan: 0, bgmPan: 0, seMute: false, seSolo: false };
   let next = list;
   switch (p) {
     case 'all':
@@ -522,7 +528,7 @@ export function leaveListenPreset() {
   saveMix();
 }
 
-/** 曲の音（原曲・ステム）をまとめてミュート（Alt+1）。トラックごとのミュートはそのまま */
+/** 曲の音（原曲・SE・ステム）をまとめてミュート（Alt+1）。トラックごとのミュートはそのまま */
 export function toggleBgmMute() {
   setMix({ bgmMute: !engine.mix.bgmMute });
   leaveListenPreset();
@@ -548,6 +554,9 @@ function saveMix() {
     origMute: m.origMute,
     origSolo: m.origSolo,
     drumSolo: m.drumSolo,
+    se: m.se,
+    seMute: m.seMute,
+    seSolo: m.seSolo,
   };
   rememberMix(saved);
 }
@@ -565,7 +574,7 @@ try {
 useEditor.subscribe((s, prev) => {
   if (s.mix !== prev.mix) {
     saveMix();
-    if (s.mix.origSolo !== prev.mix.origSolo || s.mix.drumSolo !== prev.mix.drumSolo) applyStrips();
+    if (s.mix.origSolo !== prev.mix.origSolo || s.mix.drumSolo !== prev.mix.drumSolo || s.mix.seSolo !== prev.mix.seSolo) applyStrips();
     syncOrigPlayback();
     if (s.mix.master !== prev.mix.master || s.mix.masterMute !== prev.mix.masterMute) {
       try {
@@ -584,7 +593,14 @@ useSidecar.subscribe((s, prev) => {
     const m = s.mix;
     const hasStems = s.stems.length > 0;
     sset({ listen: m?.listen ?? 'all' });
-    const tracksMix = { origMute: m?.origMute ?? hasStems, origSolo: m?.origSolo ?? false, drumSolo: m?.drumSolo ?? false };
+    const tracksMix = {
+      origMute: m?.origMute ?? hasStems,
+      origSolo: m?.origSolo ?? false,
+      drumSolo: m?.drumSolo ?? false,
+      se: m?.se ?? 1,
+      seMute: m?.seMute ?? false,
+      seSolo: m?.seSolo ?? false,
+    };
     setMix(
       m
         ? { bgm: m.bgm, drums: m.drums, bgmMute: m.bgmMute, drumMute: m.drumMute, metronome: m.metronome, click: m.click, clickBarOnly: m.clickBarOnly, drumPan: 0, bgmPan: 0, ...tracksMix }

@@ -38,6 +38,7 @@ import { useGuideline } from '../store/guideline';
 import { useSidecar } from '../store/sidecar';
 import { genViewport, GenCompare } from './GenCompare';
 import { Icon } from './icons';
+import { MasterMixer, TrackMixStrip } from './MixPanel';
 import { FollowToggle, LoopControls, PlayControls, SpeedControl } from './Transport';
 
 const KEEP_ITEMS: { k: keyof ReturnType<typeof useGen.getState>['keep']; label: string }[] = [
@@ -58,14 +59,15 @@ function typing(e: KeyboardEvent): boolean {
 
 /**
  * この画面のキー。再生まわりはエディタと同じ（Space・Shift+Space・↑↓ で ▶・Home・I/O/ /）。
- * ←→ は聴く譜面の切り替え。F5〜F7・Alt+1/2・Ctrl+S はエディタの共通のキーで効く
+ * ←→ は聴く譜面の切り替え。F5〜F7・Alt+1/2（曲の音・譜面の音を消す）・Ctrl+S はエディタの共通のキーで効く
  */
 function onGenKey(e: KeyboardEvent) {
   if (document.querySelector('.modal-back') || typing(e)) return;
   if (e.ctrlKey || e.metaKey) return;
   const k = e.key;
   if (k === 'Escape') {
-    goBack();
+    // ミックスの小窓が開いているときは、小窓を閉じるだけ（エディタには戻らない）
+    if (!document.querySelector('.mix-pop')) goBack();
     return;
   }
   if (k === ' ') {
@@ -219,6 +221,7 @@ export function AiGenPage() {
           {master.fields['TITLE'] || '無題'} · 元譜面 {g.masterLabel} Lv {g.masterLevel.toFixed(2)} · {feat.notes.toLocaleString()}ノーツ
         </span>
         <span className="grow" />
+        <MasterMixer />
         <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? `1難易度 約 ${formatUsd(costPer)}＋判定` : NO_KEY_TITLE}>
           {hasKey ? `● OpenRouter · ${model}` : 'キー未設定 · ルールだけで簡略化'}
         </span>
@@ -331,6 +334,7 @@ export function AiGenPage() {
               <i className="kept" /> 残した <i className="removed" /> 削った <i className="moved" /> 移した
             </span>
           </div>
+          <TrackMixStrip />
         </main>
         <aside className="gen-right scroll">
           <JudgeCard ds={ds} />

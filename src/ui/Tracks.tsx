@@ -2,8 +2,8 @@
 // トラックごとにミュート・ソロ・音量、解析元、譜面の右の列にスペクトルを出すチェック。上の帯はループとセクション。
 import { useEffect, useRef, useState } from 'react';
 import { computePeaks, stemKindInfo } from '../audio/stems';
-import { engine } from '../audio/engine';
-import { DRUM_LANES, drumChannel } from '../dtx/model';
+import { engine, type Mix } from '../audio/engine';
+import { DRUM_LANES, drumChannel, isSeChannel, type DtxDoc } from '../dtx/model';
 import { pickBgmFile } from '../app/fileActions';
 import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setSpecSource, setWaveMode, useAssist, type LoopDrag } from '../store/assist';
 import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
@@ -19,6 +19,7 @@ import {
   PEAK_RATE,
   setChartTrack,
   setOrigTrack,
+  setSeTrack,
   soloOnly,
   stemAudible,
   stemPeaks,
@@ -43,19 +44,41 @@ const ROW_MAX = 64;
 
 const ORIG_COLOR = '#8FA3BC';
 const CHART_COLOR = '#4CC2FF';
+const SE_COLOR = '#C3A6FF';
 
 /** 曲の長さが分からない空の譜面でも、シークバーで動けるように2分ぶん取っておく */
 const seekLength = (length: number) => (length > 0.5 ? length : 120);
 
 const pct = (v: number) => Math.round(v * 100);
 
-type Row =
+export type TrackRow =
   | { type: 'orig'; id: 'orig'; name: string; sub: string; color: string; state: 'ready' | 'none' | 'missing' | 'loading' }
   | { type: 'stem'; id: string; name: string; sub: string; color: string; t: StemTrack }
-  | { type: 'chart'; id: 'chart'; name: string; sub: string; color: string };
+  | { type: 'chart'; id: 'chart'; name: string; sub: string; color: string }
+  /** SE のチャンネル（61〜92）で鳴らす音。原曲のドラム（drums.ogg など）を SE で鳴らす譜面がある */
+  | { type: 'se'; id: 'se'; name: string; sub: string; color: string };
+type Row = TrackRow;
 
-/** 並べるトラック：譜面の音・原曲（ステムがあるときは原曲のファイルが読めたときだけ）・ステム */
-function useRows(): Row[] {
+/** SE のチャンネルで鳴らすファイル（出てくる順・重なりなし） */
+const seFilesCache = new WeakMap<DtxDoc, string[]>();
+function seFiles(doc: DtxDoc): string[] {
+  let out = seFilesCache.get(doc);
+  if (out) return out;
+  const seen = new Set<string>();
+  out = [];
+  for (const c of doc.chips) {
+    if (!isSeChannel(c.ch)) continue;
+    const f = (wavPath(doc, c.v) ?? '').split(/[\\/]/).pop() || `WAV${c.v}`;
+    if (seen.has(f)) continue;
+    seen.add(f);
+    out.push(f);
+  }
+  seFilesCache.set(doc, out);
+  return out;
+}
+
+/** 並べるトラック：譜面の音・原曲（ステムがあるときは原曲のファイルが読めたときだけ）・ステム。AI難易度生成の音量の列でも使う */
+export function useTrackRows(): Row[] {
   const doc = useEditor((s) => s.doc);
   const loading = useEditor((s) => s.loading);
   const stems = useSidecar((s) => s.stems);
@@ -77,6 +100,10 @@ function useRows(): Row[] {
       state: origBuf ? 'ready' : !bgm ? 'none' : loading ? 'loading' : 'missing',
     });
   }
+  const se = seFiles(doc);
+  if (se.length) {
+    rows.push({ type: 'se', id: 'se', name: 'SE', sub: se.length > 1 ? `${se[0]} ほか${se.length - 1}` : se[0], color: SE_COLOR });
+  }
   for (const t of stems) {
     const st = status[t.file];
     rows.push({
@@ -92,11 +119,39 @@ function useRows(): Row[] {
 }
 
 /** トラックが鳴るか（ミュート・ソロ・曲の音をまとめて消しているか） */
-function rowAudible(r: Row): boolean {
+export function rowAudible(r: Row): boolean {
   const a = engine.audible();
   if (r.type === 'orig') return a.orig;
   if (r.type === 'chart') return a.chart;
+  if (r.type === 'se') return a.se;
   return a.song && stemAudible(r.t);
+}
+
+/** トラックのミュート・ソロ・音量（原曲・譜面の音はミックス、ステムはステムの設定）と、音量の上限・ダブルクリックで戻す値 */
+export function trackMix(row: Row, mix: Mix) {
+  return {
+    muted: row.type === 'orig' ? mix.origMute : row.type === 'chart' ? mix.drumMute : row.type === 'se' ? mix.seMute : row.t.mute,
+    soloed: row.type === 'orig' ? mix.origSolo : row.type === 'chart' ? mix.drumSolo : row.type === 'se' ? mix.seSolo : row.t.solo,
+    gain: row.type === 'orig' ? mix.bgm : row.type === 'chart' ? mix.drums : row.type === 'se' ? mix.se : row.t.gain,
+    maxGain: row.type === 'stem' ? 1.5 : 1,
+    defGain: row.type === 'orig' ? 0.8 : row.type === 'chart' ? 0.9 : 1,
+  };
+}
+
+/** トラックの音量・ミュート・ソロを変える */
+export function setTrack(row: Row, p: { gain?: number; mute?: boolean; solo?: boolean }) {
+  if (row.type === 'orig') setOrigTrack(p);
+  else if (row.type === 'chart') setChartTrack(p);
+  else if (row.type === 'se') setSeTrack(p);
+  else updateStem(row.id, p);
+}
+
+/** 自分ではミュートしていないのに鳴らないわけ（ほかのトラックのソロ・曲の音をまとめて消している） */
+export function silentWhy(row: Row, mix: Mix, on: boolean, muted: boolean, soloed: boolean): string {
+  if (on || muted) return '';
+  if (anySolo() && !soloed) return '（他のトラックがソロ）';
+  if (mix.bgmMute && row.type !== 'chart') return '（曲の音をまとめて消しています）';
+  return '';
 }
 
 // 原曲の波形（ステムはステムの読み込みで作る）
@@ -112,6 +167,53 @@ function peaksOfOrig(): Float32Array | null {
     origPeaks.set(got.key, p);
   }
   return p;
+}
+
+// SE の音の波形（drums.ogg など長い音。ファイルごとに作っておく）
+const sePeaks = new Map<string, Float32Array>();
+function peaksOfSe(key: string, buf: AudioBuffer): Float32Array {
+  let p = sePeaks.get(key);
+  if (!p) {
+    if (sePeaks.size >= 8) sePeaks.clear();
+    p = computePeaks(buf, PEAK_RATE);
+    sePeaks.set(key, p);
+  }
+  return p;
+}
+
+/** SE のトラック：鳴らし始める所からその音の長さぶんの波形（1秒より短い音は印だけ） */
+function drawSeLane(c: CanvasRenderingContext2D, doc: DtxDoc, top: number, rowH: number, W: number, len: number, color: string) {
+  const tempo = tempoOf(doc);
+  const secPerPx = len / Math.max(1, W);
+  const mid = top + rowH / 2;
+  const amp = rowH / 2 - 3;
+  c.fillStyle = color;
+  let n = 0;
+  for (const ch of doc.chips) {
+    if (!isSeChannel(ch.ch)) continue;
+    if (++n > 400) break;
+    const sec0 = tempo.beatToSec(tempo.beatOf(ch.m, ch.f));
+    const x0 = (sec0 / len) * W;
+    const got = engine.buffer(ch.v);
+    if (!got || got.buf.duration < 1) {
+      c.fillRect(Math.floor(x0), top + 4, 1.5, Math.max(1, rowH - 8));
+      continue;
+    }
+    const peaks = peaksOfSe(got.key, got.buf);
+    for (let x = Math.max(0, Math.floor(x0)); x < W; x++) {
+      const t0 = x * secPerPx - sec0;
+      if (t0 > got.buf.duration) break;
+      let i0 = Math.floor(t0 * PEAK_RATE);
+      let i1 = Math.ceil((t0 + secPerPx) * PEAK_RATE);
+      if (i1 < 0 || i0 >= peaks.length) continue;
+      i0 = Math.max(0, i0);
+      i1 = Math.min(peaks.length - 1, Math.max(i0, i1));
+      let mx = 0;
+      for (let k = i0; k <= i1; k++) if (peaks[k] > mx) mx = peaks[k];
+      const h = Math.max(0.5, mx * amp);
+      c.fillRect(x, mid - h, 1, h * 2);
+    }
+  }
 }
 
 // ---- 操作（シーク・ループ） --------------------------------------------------------
@@ -400,7 +502,7 @@ export function TrackPanel({ length, span }: { length: number; span: number }) {
   }, []);
   void winH;
   const height = open ? Math.min(tracksH, maxTracksH()) : RULER_H;
-  const rows = useRows();
+  const rows = useTrackRows();
   const bodyH = Math.max(0, height - RULER_H - 1);
   const rowH = Math.max(ROW_MIN, Math.min(ROW_MAX, Math.floor(bodyH / Math.max(1, rows.length))));
   return (
@@ -622,6 +724,8 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
               c.fillStyle = DRUM_LANES[d.lane]?.color ?? CHART_COLOR;
               c.fillRect(Math.floor(x), top + pad + d.lane * laneH, 1.5, Math.max(1, laneH - 0.5));
             }
+          } else if (r.type === 'se') {
+            drawSeLane(c, doc, top, rowH, W, len, r.color);
           } else {
             const peaks = r.type === 'orig' ? peaksOfOrig() : stemPeaks(r.id);
             if (peaks) {
@@ -701,7 +805,6 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
   const [edit, setEdit] = useState<DOMRect | null>(null);
   const tall = h >= 42;
   const on = rowAudible(row);
-  const solo = anySolo();
 
   if (row.type === 'orig' && row.state !== 'ready') {
     return (
@@ -720,20 +823,12 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
   // 解析元（波形・原曲の打点・BPM推定に使う音）
   const eff = effectiveAnalysisStem();
   const isAnalysis = row.type === 'stem' ? eff?.file === row.id : row.type === 'orig' ? eff === null : false;
-  const audio = row.type !== 'chart' ? trackAudio(row.id) : null;
+  const audio = row.type === 'orig' || row.type === 'stem' ? trackAudio(row.id) : null;
   const specOn = !!audio && waveMode === 'spec' && (specSource ? specSource === audio.key : audio.key === srcKey);
 
-  const muted = row.type === 'orig' ? mix.origMute : row.type === 'chart' ? mix.drumMute : row.t.mute;
-  const soloed = row.type === 'orig' ? mix.origSolo : row.type === 'chart' ? mix.drumSolo : row.t.solo;
-  const gain = row.type === 'orig' ? mix.bgm : row.type === 'chart' ? mix.drums : row.t.gain;
-  const maxGain = row.type === 'stem' ? 1.5 : 1;
-  const defGain = row.type === 'orig' ? 0.8 : row.type === 'chart' ? 0.9 : 1;
-  const set = (p: { gain?: number; mute?: boolean; solo?: boolean }) => {
-    if (row.type === 'orig') setOrigTrack(p);
-    else if (row.type === 'chart') setChartTrack(p);
-    else updateStem(row.id, p);
-  };
-  const why = !on && !muted ? (solo && !soloed ? '（他のトラックがソロ）' : mix.bgmMute && row.type !== 'chart' ? '（曲の音をまとめて消しています）' : '') : '';
+  const { muted, soloed, gain, maxGain, defGain } = trackMix(row, mix);
+  const set = (p: { gain?: number; mute?: boolean; solo?: boolean }) => setTrack(row, p);
+  const why = silentWhy(row, mix, on, muted, soloed);
   const isStem = row.type === 'stem';
   const openEdit = (e: React.MouseEvent<HTMLElement>) => {
     const el = e.currentTarget.closest('.trk');
@@ -771,7 +866,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
           </span>
         )}
       </div>
-      {row.type !== 'chart' ? (
+      {row.type === 'orig' || row.type === 'stem' ? (
         <button
           className={`radio-btn small ${isAnalysis ? 'on' : ''}`}
           onClick={() => {
@@ -814,7 +909,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
         title={`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`}
       />
       <span className="mono trk-v">{pct(gain)}</span>
-      {row.type !== 'chart' ? (
+      {row.type === 'orig' || row.type === 'stem' ? (
         <label className={`trk-spec ${specOn ? 'on' : ''}`} title="譜面の右の列にこのトラックのスペクトルを出す（外すと波形に戻ります）">
           <input
             type="checkbox"

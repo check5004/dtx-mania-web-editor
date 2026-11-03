@@ -118,5 +118,9 @@ describe('ステム', () => {
     const withTracks = { ...d, mix: { ...d.mix, origMute: true, origSolo: false, drumSolo: true } };
     expect(parseSidecar(serializeSidecar(withTracks))!.mix).toEqual(withTracks.mix);
     expect(back.mix!.origMute).toBeUndefined();
+    // SE のトラック（音量・ミュート・ソロ。前の作業ファイルには無い）
+    const withSe = { ...d, mix: { ...d.mix, se: 0.4, seMute: true, seSolo: false } };
+    expect(parseSidecar(serializeSidecar(withSe))!.mix).toEqual(withSe.mix);
+    expect(back.mix!.se).toBeUndefined();
   });
 });

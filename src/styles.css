@@ -5243,6 +5243,102 @@ button.ms.s.on {
   background: #ffb547;
 }
 
+/* 見出しの行：マスターを足しても1行に収める（曲名は縮めて …） */
+.gen-page .tempo-head {
+  flex-wrap: nowrap;
+}
+
+.gen-page .tempo-head > .lbl.ellipsis {
+  min-width: 0;
+}
+
+.gen-page .tempo-head > .pill {
+  display: inline-block;
+  min-width: 0;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .gen-page .tempo-head {
+    flex-wrap: wrap;
+  }
+}
+
+/* 下の音量：トラックごとの M・S・音量（エディタの下のトラックの見出しと同じ） */
+.mix-strip {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.mix-strip-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+
+.mix-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px 0 9px;
+  border: 1px solid var(--line2);
+  border-left: 3px solid var(--line3);
+  border-radius: 7px;
+  background: var(--card);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.mix-chip b {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text);
+  max-width: 120px;
+  margin-right: 2px;
+}
+
+.mix-chip.off b {
+  color: var(--mute);
+}
+
+.mix-chip-sub {
+  max-width: 96px;
+  margin-right: 2px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--mute);
+}
+
+.mix-chip.off input.trk-vol {
+  opacity: 0.45;
+}
+
+.mix-chip .ms {
+  width: 22px;
+  height: 20px;
+  flex: none;
+}
+
+.mix-chip input.trk-vol {
+  width: 76px;
+  height: 14px;
+  margin: 0 0 0 3px;
+  flex: none;
+}
+
 .gen-right {
   border-left: 1px solid var(--line);
   background: var(--panel);

@@ -2,16 +2,17 @@
 // トラックごとの音量・ミュート・ソロは下のトラックで変える。ここの音量は聴くためのもの。DTX の #VOLUME や書き出しには影響しない。
 import { useEffect, useRef, useState } from 'react';
 import { DRUM_LANES } from '../dtx/model';
+import type { Mix } from '../audio/engine';
 import { clearMuteSolo, toggleMute, toggleSolo, useAssist } from '../store/assist';
 import { openPage, setMix, useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
-import { LISTEN_PRESETS, leaveListenPreset, setListen, toggleBgmMute, toggleDrumMute, useStems } from '../store/stems';
+import { LISTEN_PRESETS, leaveListenPreset, setListen, soloOnly, toggleBgmMute, toggleDrumMute, useStems } from '../store/stems';
 import { Icon } from './icons';
-import { releaseFocus } from './Tracks';
+import { releaseFocus, rowAudible, setTrack, silentWhy, trackMix, useTrackRows, type TrackRow } from './Tracks';
 
 const pct = (v: number) => Math.round(v * 100);
 
-/** 上のバーのマスター：全体の音量、曲の音（原曲・ステム）と譜面の音をまとめてミュート、クリック、ミックスのパネル */
+/** 上のバーのマスター：全体の音量、曲の音（原曲・SE・ステム）と譜面の音をまとめてミュート、クリック、ミックスのパネル */
 export function MasterMixer() {
   const mix = useEditor((s) => s.mix);
   const listen = useStems((s) => s.listen);
@@ -117,7 +118,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
         <span className="t">まとめて消す</span>
       </div>
       <div className="row" style={{ gap: 6 }}>
-        <button className={`btn small mute-tg ${mix.bgmMute ? 'muted' : ''}`} onClick={toggleBgmMute} aria-pressed={mix.bgmMute} title="原曲・ステムのトラックをまとめてミュート（トラックごとの設定はそのまま）">
+        <button className={`btn small mute-tg ${mix.bgmMute ? 'muted' : ''}`} onClick={toggleBgmMute} aria-pressed={mix.bgmMute} title="原曲・SE・ステムのトラックをまとめてミュート（トラックごとの設定はそのまま）">
           {Icon.wave(14)} 曲の音 <span className="key">Alt+1</span>
         </button>
         <button className={`btn small mute-tg ${mix.drumMute ? 'muted' : ''}`} onClick={toggleDrumMute} aria-pressed={mix.drumMute} title="譜面の音をミュート（下のトラックの「譜面の音」の M と同じ）">
@@ -126,7 +127,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
       </div>
 
       <p className="mix-hint" style={{ marginTop: 10 }}>
-        原曲・ステム・譜面の音のトラックごとの音量・ミュート・ソロは、下のトラックで変えられます{has ? `（ステム ${stems.length}本）` : ''}。
+        原曲・SE・ステム・譜面の音のトラックごとの音量・ミュート・ソロは、下のトラックで変えられます{has ? `（ステム ${stems.length}本）` : ''}。
       </p>
 
       <div className="mix-sec">
@@ -184,6 +185,82 @@ function MixPopover({ onClose }: { onClose: () => void }) {
         チップを置いたときに音を鳴らす
       </label>
       <p className="mix-note">ここと下のトラックは聴くための音量です。DTXの音量（#VOLUME）や書き出しには影響しません。書き出すときのミックスはステム画面で決めます。</p>
+    </div>
+  );
+}
+
+/**
+ * トラックごとの音量を横に並べた列（下のトラックの見出しと同じ M・S・音量）。
+ * 下のトラックが無い画面（AI難易度生成）で、譜面の音と原曲・ステムの釣り合いを変えるのに使う
+ */
+export function TrackMixStrip() {
+  const rows = useTrackRows();
+  const mix = useEditor((s) => s.mix);
+  useStems((s) => s.version);
+  useSidecar((s) => s.stems);
+  return (
+    <div className="mix-strip" role="group" aria-label="トラックの音量" onPointerUp={releaseFocus}>
+      <span
+        className="lbl mix-strip-t"
+        title="トラックごとの音量（聴くためのもの。DTXの音量（#VOLUME）や書き出しには影響しません）。Alt+1 で曲の音（原曲・SE・ステム）、Alt+2 で譜面の音をまとめて消します"
+      >
+        {Icon.sliders(13)} 音量
+      </span>
+      {rows.map((row) => (
+        <MixChip key={row.id} row={row} mix={mix} />
+      ))}
+    </div>
+  );
+}
+
+function MixChip({ row, mix }: { row: TrackRow; mix: Mix }) {
+  if (row.type === 'orig' && row.state !== 'ready') {
+    return (
+      <div className="mix-chip off" style={{ borderLeftColor: row.color }}>
+        <b className="ellipsis">{row.name}</b>
+        <span className="lbl">{row.state === 'missing' ? '見つかりません' : row.state === 'loading' ? '読み込み中…' : 'まだありません'}</span>
+      </div>
+    );
+  }
+  const on = rowAudible(row);
+  const { muted, soloed, gain, maxGain, defGain } = trackMix(row, mix);
+  const why = silentWhy(row, mix, on, muted, soloed);
+  return (
+    <div className={`mix-chip ${on ? '' : 'off'}`} style={{ borderLeftColor: row.color }} title={why ? `鳴っていません${why}` : `${row.name}：${row.sub}`}>
+      <b className="ellipsis">{row.name}</b>
+      {(row.type === 'orig' || row.type === 'se') && <span className="mix-chip-sub ellipsis">{row.sub}</span>}
+      <button
+        className={`ms m ${muted ? 'on' : ''}`}
+        onClick={() => setTrack(row, { mute: !muted })}
+        aria-label={`${row.name}をミュート`}
+        aria-pressed={muted}
+        title={`ミュート${row.type === 'chart' ? '（Alt+2）' : ''}`}
+      >
+        M
+      </button>
+      <button
+        className={`ms s ${soloed ? 'on' : ''}`}
+        onClick={(e) => (e.altKey ? soloOnly(row.id) : setTrack(row, { solo: !soloed }))}
+        aria-label={`${row.name}をソロ`}
+        aria-pressed={soloed}
+        title="ソロ（Alt+クリックでこのトラックだけ）"
+      >
+        S
+      </button>
+      <input
+        type="range"
+        className="trk-vol"
+        min={0}
+        max={maxGain}
+        step={0.01}
+        value={gain}
+        style={{ accentColor: row.color }}
+        onChange={(e) => setTrack(row, { gain: Number(e.target.value) })}
+        onDoubleClick={() => setTrack(row, { gain: defGain })}
+        aria-label={`${row.name}の音量`}
+        title={`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`}
+      />
+      <span className="mono trk-v">{pct(gain)}</span>
     </div>
   );
 }

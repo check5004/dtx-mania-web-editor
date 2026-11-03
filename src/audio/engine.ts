@@ -54,7 +54,7 @@ export interface Mix {
   /** 譜面の音（チップのドラム）のトラックの音量 */
   drums: number;
   metronome: boolean;
-  /** 曲の音（原曲・ステム）をまとめてミュート（Alt+1） */
+  /** 曲の音（原曲・SE・ステム）をまとめてミュート（Alt+1） */
   bgmMute: boolean;
   /** 譜面の音のミュート（Alt+2） */
   drumMute: boolean;
@@ -73,6 +73,10 @@ export interface Mix {
   drumPan: number;
   /** 原曲のパン（ステムが無いときの聴き比べで左に振る） */
   bgmPan: number;
+  /** SE のチャンネル（61〜92）のトラックの音量・ミュート・ソロ。原曲のドラムなどを SE で鳴らす譜面がある */
+  se: number;
+  seMute: boolean;
+  seSolo: boolean;
 }
 
 /** ステムのトラックの鳴らし方 */
@@ -173,6 +177,9 @@ class AudioEngine {
     clickBarOnly: false,
     drumPan: 0,
     bgmPan: 0,
+    se: 1,
+    seMute: false,
+    seSolo: false,
   };
   bgmFilter: BgmFilter = 'all';
   /** BGM を鳴らさない（YouTube の音で聴くとき） */
@@ -245,14 +252,15 @@ class AudioEngine {
   }
 
   /** 原曲・譜面の音のトラックが鳴るか（ミュート・ソロ。ソロはステムも含めてトラックをまたいで効く） */
-  audible(): { orig: boolean; chart: boolean; song: boolean } {
+  audible(): { orig: boolean; chart: boolean; song: boolean; se: boolean } {
     const m = this.mix;
-    const anySolo = m.origSolo || m.drumSolo || m.stemSolo;
+    const anySolo = m.origSolo || m.drumSolo || m.stemSolo || m.seSolo;
     const song = !this.bgmMuted && !m.bgmMute;
     return {
       song,
       orig: song && !m.origMute && (!anySolo || m.origSolo),
       chart: !m.drumMute && (!anySolo || m.drumSolo),
+      se: song && !m.seMute && (!anySolo || m.seSolo),
     };
   }
 
@@ -263,7 +271,7 @@ class AudioEngine {
     this.master.gain.value = m.masterMute ? 0 : m.master;
     this.buses.bgm.gain.value = a.orig ? m.bgm : 0;
     this.stemBus.gain.value = a.song ? 1 : 0;
-    this.buses.se.gain.value = a.song && !(m.origSolo || m.drumSolo || m.stemSolo) ? 1 : 0;
+    this.buses.se.gain.value = a.se ? m.se : 0;
     this.buses.drum.gain.value = a.chart ? m.drums : 0;
     this.buses.click.gain.value = m.metronome || this.forceClick ? Math.max(0.05, m.click) : 0;
     if (this.drumPanNode) this.drumPanNode.pan.value = Math.max(-1, Math.min(1, m.drumPan));
