@@ -28,6 +28,8 @@ export interface AssistState {
   data: AnalysisData | null;
   spectro: wk.SpectroData | null;
   spectroStatus: 'none' | 'loading' | 'ready' | 'error';
+  /** スペクトルに出している音（setSpecSource で選んだ音の key）。null なら解析元の音 */
+  specSource: string | null;
   waveMode: 'wave' | 'spec';
   /** 譜面の右の「原曲の打点」「原曲の波形」の列を出すか */
   audioCols: boolean;
@@ -54,6 +56,7 @@ export const useAssist = create<AssistState>(() => ({
   data: null,
   spectro: null,
   spectroStatus: 'none',
+  specSource: null,
   waveMode: 'wave',
   audioCols: true,
   ghostsOn: true,
@@ -95,13 +98,13 @@ export function syncAnalysis() {
   if (s.screen === 'home') return;
   const bgm = bgmSource(s.doc);
   if (!bgm) {
-    if (aget().status !== 'nosource') aset({ src: null, status: 'nosource', data: null, spectro: null, spectroStatus: 'none' });
+    if (aget().status !== 'nosource') aset({ src: null, status: 'nosource', data: null, ...specReset() });
     return;
   }
   const stem = analysisProvider?.() ?? null;
   const got = stem ?? engine.buffer(bgm.wav);
   if (!got) {
-    if (!s.loading && aget().status !== 'loading') aset({ src: null, status: 'nosource', data: null, spectro: null, spectroStatus: 'none' });
+    if (!s.loading && aget().status !== 'loading') aset({ src: null, status: 'nosource', data: null, ...specReset() });
     return;
   }
   const cur = aget();
@@ -112,7 +115,7 @@ export function syncAnalysis() {
   if (running === got.key) return;
   running = got.key;
   const name = stem ? stem.name : ((wavPath(s.doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '');
-  aset({ src: { wav: bgm.wav, key: got.key, name }, status: 'loading', progress: 0, error: null, data: null, spectro: null, spectroStatus: 'none', dismissed: new Set() });
+  aset({ src: { wav: bgm.wav, key: got.key, name }, status: 'loading', progress: 0, error: null, data: null, ...specReset(), dismissed: new Set() });
   void (async () => {
     try {
       await wk.loadAudio(got.key, got.buf);
@@ -130,17 +133,41 @@ export function syncAnalysis() {
   })();
 }
 
+/** 解析元が変わったとき：別に選んだ音のスペクトルは残す */
+function specReset(): Partial<AssistState> {
+  return specSrc ? {} : { spectro: null, spectroStatus: 'none' };
+}
+
+/** スペクトルに出す音（setSpecSource で選んだもの。無ければ解析元） */
+let specSrc: AnalysisSource | null = null;
+
 export async function loadSpectrogram() {
   const a = aget();
-  if (!a.src || a.spectroStatus === 'loading' || a.spectroStatus === 'ready') return;
-  const key = a.src.key;
+  const own = specSrc;
+  const key = own ? own.key : a.src?.key;
+  if (!key || a.spectroStatus === 'loading' || a.spectroStatus === 'ready') return;
   aset({ spectroStatus: 'loading' });
+  const current = () => (specSrc ? specSrc.key : aget().src?.key) === key;
   try {
+    if (own) await wk.loadAudio(own.key, own.buf);
     const sp = await wk.spectrogram(key);
-    if (aget().src?.key === key) aset({ spectro: sp, spectroStatus: 'ready' });
+    if (current()) aset({ spectro: sp, spectroStatus: 'ready' });
   } catch {
-    if (aget().src?.key === key) aset({ spectroStatus: 'error' });
+    if (current()) aset({ spectroStatus: 'error' });
   }
+}
+
+/**
+ * 譜面の右の列にスペクトルを出す音を選ぶ（下のトラックの「スペクトル」のチェック）。
+ * null なら解析元の音に戻す。音を選ぶとスペクトル表示に切り替える。
+ */
+export function setSpecSource(src: AnalysisSource | null) {
+  const prev = specSrc?.key ?? null;
+  specSrc = src;
+  const next = src?.key ?? null;
+  if (prev !== next) aset({ specSource: next, spectro: null, spectroStatus: 'none' });
+  if (src) aset({ waveMode: 'spec' });
+  if (aget().waveMode === 'spec') void loadSpectrogram();
 }
 
 export function setWaveMode(m: 'wave' | 'spec') {
@@ -485,6 +512,10 @@ export function clearSimilarPin() {
 
 /** 新しい譜面を開いたときに、譜面ごとの状態を戻す */
 export function resetAssistForDoc() {
+  if (specSrc) {
+    specSrc = null;
+    aset({ specSource: null, spectro: null, spectroStatus: 'none' });
+  }
   aset({ loop: null, dismissed: new Set(), similarPin: null });
 }
 
