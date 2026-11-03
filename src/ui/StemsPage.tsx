@@ -38,6 +38,8 @@ import { formatPosition, formatTime } from './format';
 import { useCanvas, usePlayBeat, useSongSpan } from './hooks';
 import { Icon } from './icons';
 import { StemTrackPopover } from './StemTrackPopover';
+import { SeparatePanel } from './SeparatePanel';
+import { closeSeparationPanel, useSeparate } from '../store/separate';
 
 const RULER_H = 40;
 const ROW_H = 96;
@@ -56,6 +58,10 @@ export function StemsPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
   const [zoom, setZoom] = useState<Zoom>('all');
+  const sepOpen = useSeparate((s) => s.panelOpen);
+  const sepPhase = useSeparate((s) => s.phase);
+  // ステムが無いときは、分解がいちばんの入り口なので出しておく
+  const showSep = sepOpen || sepPhase !== 'idle' || stems.length === 0;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -90,6 +96,11 @@ export function StemsPage() {
         </span>
         <span className="grow" />
         <span className="lbl hide-narrow">再生位置・ループはエディタと共通です</span>
+        {!showSep && (
+          <button className="btn small" onClick={() => useSeparate.setState({ panelOpen: true })} title="原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分ける">
+            {Icon.layers(14)} 原曲から分解
+          </button>
+        )}
         <button className="btn small" onClick={() => fileInput.current?.click()}>
           {Icon.plus(14)} ステムを追加
         </button>
@@ -109,6 +120,7 @@ export function StemsPage() {
       <StemsTransport zoom={zoom} setZoom={setZoom} />
       <div className="stems-body">
         <div className="stems-main scroll">
+          {showSep && <SeparatePanel onClose={stems.length ? closeSeparationPanel : undefined} />}
           <div className="stems-grid">
             <div className="stems-list">
               <div className="stems-list-head" style={{ height: RULER_H }}>
@@ -134,7 +146,7 @@ export function StemsPage() {
             <span>
               <b>ここにファイルをまとめてドロップしてステムを追加</b>
               <span className="lbl" style={{ display: 'block', marginTop: 4 }}>
-                ステム分離ソフトで作ったファイルを読み込みます。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/
+                ステム分離ソフトで作ったファイルを読み込みます（上の「原曲から分解」ならブラウザの中で作れます）。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/
                 にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。
               </span>
             </span>

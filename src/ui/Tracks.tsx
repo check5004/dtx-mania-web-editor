@@ -30,6 +30,7 @@ import { formatTime } from './format';
 import { songLength, usePlayBeat, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 import { StemTrackPopover } from './StemTrackPopover';
+import { openSeparation, separating, useSeparate } from '../store/separate';
 
 /** トラックの見出しの幅 */
 export const HEAD_W = 344;
@@ -429,7 +430,10 @@ function Corner({ length, open }: { length: number; open: boolean }) {
   const beat = usePlayBeat();
   const stems = useSidecar((s) => s.stems);
   const busy = useStems((s) => s.busy);
+  const sepPhase = useSeparate((s) => s.phase);
+  const sepProgress = useSeparate((s) => s.progress);
   const file = useRef<HTMLInputElement>(null);
+  const sepBusy = separating();
   return (
     <div className="tracks-corner" style={{ width: HEAD_W }}>
       <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? 'トラックを閉じる（上の境目をドラッグで高さを変えられます）' : 'トラックを開く'} aria-expanded={open}>
@@ -442,11 +446,20 @@ function Corner({ length, open }: { length: number; open: boolean }) {
         <span className="lbl ellipsis" title={busy}>
           {busy}
         </span>
+      ) : sepBusy ? (
+        <button className="link-btn" onClick={openSeparation} title="原曲をステムに分解しています（ステムとミックスの画面で、ようすを見る・中止する）">
+          分解中 {sepPhase === 'run' || sepPhase === 'encode' ? `${Math.round(sepProgress * 100)}%` : '…'}
+        </button>
       ) : (
         <>
           <button className="link-btn" onClick={() => file.current?.click()} title="ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする">
             {Icon.plus(12)} ステム
           </button>
+          {stems.length === 0 && bgmSource(doc) && (
+            <button className="link-btn" onClick={openSeparation} title="原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする">
+              分解
+            </button>
+          )}
           {stems.length > 0 && (
             <button className="link-btn" onClick={() => openPage('stems')} title="ステムとミックスの画面（頭のずれ・パン・書き出し）">
               {Icon.layers(12)}

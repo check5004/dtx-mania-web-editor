@@ -159,7 +159,11 @@ export function toast(text: string, level: Toast['level'] = 'info', ms = 4000) {
 
 // ---- 読み込み -----------------------------------------------------------------
 
+/** 譜面を開き直した回数（時間のかかる処理が、終わったときに同じ譜面のままか確かめる） */
+export let openedDocs = 0;
+
 export function openDocument(doc: DtxDoc, meta: DocMeta, folder: SongFolder | null, opts: { dirty?: boolean } = {}) {
+  openedDocs++;
   engine.stop();
   const used = mostUsedWav(doc);
   const laneWav: Record<number, number> = {};

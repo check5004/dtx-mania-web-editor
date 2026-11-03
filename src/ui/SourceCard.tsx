@@ -9,6 +9,7 @@ import { bgmSource, wavPath } from '../store/derived';
 import { openPage, openTempo, useEditor } from '../store/editor';
 import { readyStems, useStems } from '../store/stems';
 import { useSidecar } from '../store/sidecar';
+import { openSeparation, separating, useSeparate } from '../store/separate';
 import { formatTime } from './format';
 import { useSoundsVersion } from './hooks';
 import { Icon } from './icons';
@@ -25,6 +26,8 @@ export function SourceCard() {
   useStems((s) => s.version);
   useSoundsVersion();
   const [over, setOver] = useState(false);
+  useSeparate((s) => s.phase);
+  const sepBusy = separating();
   const bgm = bgmSource(doc);
   const path = bgm ? (wavPath(doc, bgm.wav) ?? '') : '';
   const name = path.split(/[\\/]/).pop() ?? '';
@@ -80,6 +83,25 @@ export function SourceCard() {
             </button>
           </div>
           {analysis && <div className="lbl" style={{ marginTop: 6 }}>{analysis}</div>}
+          {has && stems.length === 0 && (
+            <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
+              {sepBusy ? (
+                <>
+                  ステムに分解しています…{' '}
+                  <button className="link-btn" onClick={openSeparation}>
+                    ようす
+                  </button>
+                </>
+              ) : (
+                <>
+                  ドラム抜きの BGM を作るには{' '}
+                  <button className="link-btn" onClick={openSeparation} title="原曲をブラウザの中でドラムとドラム抜きに分ける">
+                    ステムに分解
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {stems.length > 0 && (
             <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
               ステム {stems.length} 本を鳴らしています（原曲と鳴らし分けるのは下のトラックで）。
