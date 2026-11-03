@@ -6,7 +6,7 @@ import { useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { Icon } from './icons';
 import { destroyPlayer, mountPlayer, setListen, useYt, youtubeId } from './youtube';
-import { alignBlocker, cancelAutoAlign, setAutoOnLoad, startAutoAlign, undoAutoAlign, useYtAlign } from './ytAlign';
+import { alignBlocker, cancelAutoAlign, keepStartOffset, setAutoOnLoad, startAutoAlign, undoAutoAlign, useYtAlign } from './ytAlign';
 import { canCaptureTab } from '../audio/tabCapture';
 
 export function ReferenceCard() {
@@ -151,9 +151,18 @@ export function ReferenceCard() {
 
 const KIND_NOTE = {
   const: '',
-  drift: 'テンポが少しずつ違う動画（ライブ版など）なので、所ごとに合わせてなめらかにつないでいます。',
-  edit: '途中で編集が違う所があります（ゲームサイズ・MVの編集など）。所ごとに合わせ、飛ぶ所で切り替えます。',
+  drift: 'テンポが少しずつ違う動画（ライブ版など）と判断し、所ごとに合わせてなめらかにつないでいます。違うときは「一定にする」で、曲の最初で合わせたずれのままにできます。',
+  edit: '途中で編集が違う動画（ゲームサイズ・MVの編集など）と判断し、飛ぶ所で切り替えています。違うときは「一定にする」で、曲の最初で合わせたずれのままにできます。',
 } as const;
+
+/** 所ごとの差をやめて、曲の最初のずれのままにするボタン */
+function KeepStartButton() {
+  return (
+    <button className="btn small ghost" style={{ height: 22 }} onClick={keepStartOffset} title="所ごとの差を使わず、曲の最初の所で合わせたずれのまま一定にします">
+      一定にする
+    </button>
+  );
+}
 
 /** 自動で合わせる（ボタン・進み具合・結果） */
 function AutoAlign() {
@@ -193,6 +202,12 @@ function AutoAlign() {
     // 所ごとに合わせたときは、曲の中でのずれの幅を出す
     const offs = (yt.anchors ?? []).map((x) => off + x.d);
     const range = offs.length >= 2 ? `${fmt(Math.min(...offs))}〜${fmt(Math.max(...offs))} s` : null;
+    const undo = (
+      <button className="btn small ghost" style={{ height: 22, flex: 'none' }} onClick={undoAutoAlign} title="自動で合わせる前のずれに戻します">
+        元に戻す
+      </button>
+    );
+    const note = (t: string) => <span style={{ color: 'var(--text3)', lineHeight: 1.5 }}>{t}</span>;
     return (
       <div className="notice info" style={{ flexDirection: 'column', gap: 4 }}>
         <div className="row" style={{ gap: 8 }}>
@@ -202,12 +217,17 @@ function AutoAlign() {
             {range ? '（所ごと）' : ''}
             {d.kind === 'const' && d.support >= 2 ? `（${d.support}か所で一致）` : d.conf < 0.6 ? '（自信は低め）' : ''}
           </span>
-          <button className="btn small ghost" style={{ height: 22 }} onClick={undoAutoAlign} title="自動で合わせる前のずれに戻します">
-            元に戻す
-          </button>
+          {!range && undo}
         </div>
-        {KIND_NOTE[d.kind] && <span style={{ color: 'var(--text3)', lineHeight: 1.5 }}>{KIND_NOTE[d.kind]}</span>}
-        {!last.precise && <span style={{ color: 'var(--text3)', lineHeight: 1.5 }}>音が届くまでの遅れを測れなかったので、数十ミリ秒ずれることがあります（± で直せます）。</span>}
+        {range && KIND_NOTE[d.kind] && note(KIND_NOTE[d.kind])}
+        {!range && d.doubt.length > 0 && note(`${d.doubt.length}か所で曲の別の所に似た結果が出ましたが、${d.support >= 2 ? `ほかの${d.support}か所がそろっているので、ずれは` : 'ずれを変えるほどの根拠がないので、'}一定のままにしました。`)}
+        {!last.precise && note('音が届くまでの遅れを測れなかったので、数十ミリ秒ずれることがあります（± で直せます）。')}
+        {range && (
+          <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+            <KeepStartButton />
+            {undo}
+          </div>
+        )}
       </div>
     );
   }
@@ -220,9 +240,10 @@ function AutoAlign() {
           : blocker
             ? blocker
             : yt.auto
-              ? `自動で合わせ済み${yt.auto.kind === 'drift' ? '（所ごと・ライブ）' : yt.auto.kind === 'edit' ? '（所ごと・編集違い）' : ''}`
+              ? `自動で合わせ済み${yt.anchors?.length ? (yt.auto.kind === 'drift' ? '（所ごと・ライブ）' : '（所ごと・編集違い）') : ''}`
               : 'YouTubeの音を聞いて、原曲とのずれを自動で合わせます'}
       </span>
+      {!!yt.anchors?.length && st.phase !== 'failed' && <KeepStartButton />}
       <button
         className={'btn small' + (yt.auto || st.phase === 'failed' ? ' ghost' : ' primary')}
         style={{ height: 24, flex: 'none' }}

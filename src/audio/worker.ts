@@ -76,7 +76,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     if (req.type === 'alignProbe') {
       const idx = alignIndex(req.key, src);
       const r = searchProbe(idx, alignFeatures([req.pcm], req.sr));
-      post({ id: req.id, ok: true, result: r });
+      post({ id: req.id, ok: true, result: r }, r.zc ? [r.zc.buffer as ArrayBuffer] : []);
       return;
     }
     if (req.type === 'stretch') {

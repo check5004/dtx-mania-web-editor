@@ -114,12 +114,67 @@ describe('何か所かの結果のまとめ方', () => {
     for (const a of [10, 60, 120, 170]) expect(a + d.offset + anchorDelta(d.anchors, a)).toBeCloseTo(v(a), 1);
   });
 
-  it('途中で飛ぶと編集違い（edit）。時間が戻る組み合わせは使わない', () => {
-    // 原曲の 40 秒以降は動画で 20 秒先（ゲームサイズ）。探り 3 は似た別の所（時間が戻る）にも候補がある
-    const d = decideOffset([probe(26, m(16, 15)), probe(90, m(50, 15)), probe(120, m(80, 14), m(20, 13))])!;
+  it('雑音で少し弱い（z 7〜8）探りでも、ずれがなめらかに続けばライブ（drift）。曲の頭も合う', () => {
+    // 動画の秒 = 20 + 原曲の秒 / 1.02。真ん中の探りだけがよく似て、前後は雑音で z 7.7〜7.8
+    const v = (a: number) => 20 + a / 1.02;
+    const at = (a: number, z: number) => probe(v(a) - 4, m(a - 4, z));
+    const d = decideOffset([at(33, 7.8), at(68, 12), at(109, 7.7)])!;
+    expect(d.kind).toBe('drift');
+    for (const a of [5, 10, 60, 120]) expect(Math.abs(a + d.offset + anchorDelta(d.anchors, a) - v(a))).toBeLessThan(0.05);
+  });
+
+  it('ずれが行ったり来たりする並び（拍や小節の取り違え）は、ライブにしない', () => {
+    // 正しいずれは 10。探り 2・4 は雑音で正しい所が弱く、1 小節（1.6 秒）ずれた所にいちばん似る
+    const d = decideOffset([
+      probe(26, m(16, 15)),
+      probe(66, m(54.4, 7.5), m(56, 5)),
+      probe(106, m(96, 15)),
+      probe(146, m(134.4, 7.5), m(136, 5)),
+    ])!;
+    expect(d.kind).toBe('const');
+    expect(d.offset).toBeCloseTo(10, 3);
+    expect(d.doubt).toEqual([1, 3]);
+  });
+
+  it('途中で飛ぶと編集違い（edit）。飛んだ先も 2 か所以上でそろったときだけ。時間が戻る組み合わせは使わない', () => {
+    // 動画の秒 = 原曲の秒 + 10、原曲の 40 秒以降は + 40（動画の側に 30 秒ぶん別の場面）。探り 4 は似た別の所（時間が戻る）にも候補がある
+    const d = decideOffset([probe(26, m(16, 15)), probe(12, m(2, 16)), probe(90, m(50, 15)), probe(120, m(80, 14), m(20, 13))])!;
     expect(d.kind).toBe('edit');
+    // 基準は曲の最初の所のずれ
+    expect(d.offset).toBeCloseTo(10, 3);
     expect(20 + d.offset + anchorDelta(d.anchors, 20)).toBeCloseTo(30, 3);
     expect(70 + d.offset + anchorDelta(d.anchors, 70)).toBeCloseTo(110, 3);
+  });
+
+  it('飛んだ先が 1 か所だけなら、ずれは変えない（確かめる探りに回す）', () => {
+    const d = decideOffset([probe(26, m(16, 15)), probe(12, m(2, 16)), probe(120, m(80, 14))])!;
+    expect(d.kind).toBe('const');
+    expect(d.offset).toBeCloseTo(10, 3);
+    expect(d.doubt).toEqual([2]);
+  });
+
+  it('1 か所だけ別のサビにいちばん似ても、正しい所でも十分似ていれば飛ばない（途切れていない動画）', () => {
+    // 正しいずれは 10。探り 2 は 30 秒あとのサビに z 18 で似るが、正しい所も z 11（0.61 倍）
+    const d1 = decideOffset([probe(20, m(10, 17)), probe(60, m(80, 18), m(50, 11)), probe(100, m(90, 17))])!;
+    expect(d1.kind).toBe('const');
+    expect(d1.offset).toBeCloseTo(10, 3);
+    expect(d1.support).toBe(3);
+    // 終わりの探りで、似たサビが 3 つ上に並び、正しい所は 4 番目
+    const d2 = decideOffset([probe(20, m(10, 17)), probe(60, m(50, 18)), probe(100, m(110, 18), m(70, 17), m(130, 16.5), m(90, 16))])!;
+    expect(d2.kind).toBe('const');
+    expect(d2.offset).toBeCloseTo(10, 3);
+    expect(d2.doubt).toEqual([]);
+  });
+
+  it('どの探りでもよく似るずれ（繰り返しの多い曲）は、飛んだ根拠にしない', () => {
+    // 探り 3・4 は 20 秒あとのずれでもよく似るが、探り 1・2 もそのずれで同じくらい似る
+    const d = decideOffset([
+      probe(20, m(10, 17), m(-10, 15)),
+      probe(40, m(30, 17), m(10, 15)),
+      probe(80, m(50, 17), m(70, 12)),
+      probe(100, m(70, 17), m(90, 12)),
+    ])!;
+    expect(d.kind).toBe('const');
   });
 
   it('当てになる候補が無ければ null か、自信の低い結果', () => {
@@ -135,8 +190,8 @@ describe('聞き取る所の決め方', () => {
     expect(v1).toBeCloseTo(70, 5);
     const done = [probe(v1, m(v1 - 12, 20))];
     const v2 = nextProbe({ vdur: 200, adur: 180, len: 8, done })!;
-    // 原曲の 10% （18 秒）を、ずれ 12 秒で動画の時刻に直した所
-    expect(v2).toBeCloseTo(18 + 12 - 4, 5);
+    // 原曲の最初（8%、14.4 秒）を、ずれ 12 秒で動画の時刻に直した所
+    expect(v2).toBeCloseTo(14.4 + 12 - 4, 5);
   });
 
   it('3 か所で合えば終わる', () => {
@@ -144,9 +199,24 @@ describe('聞き取る所の決め方', () => {
     expect(nextProbe({ vdur: 200, adur: 180, len: 8, done })).toBeNull();
   });
 
-  it('5 回で打ち切る', () => {
-    const done = [0, 1, 2, 3, 4].map((i) => probe(10 + i * 30, m(0, 2, 0.05)));
+  it('6 回で打ち切る', () => {
+    const done = [0, 1, 2, 3, 4, 5].map((i) => probe(10 + i * 30, m(0, 2, 0.05)));
     expect(nextProbe({ vdur: 200, adur: 180, len: 8, done })).toBeNull();
+  });
+
+  it('1 か所だけ食い違ったら、その探りのずれで先をもう一度聞き、確かめたら終わる', () => {
+    // ずれ 12 で 3 か所合い、終わりの 1 か所（動画の 150 秒）だけ ずれ -8（原曲の 158 秒）に似る
+    const done = [probe(70, m(58, 20)), probe(26, m(14, 20)), probe(110, m(98, 20)), probe(150, m(158, 18))];
+    const v = nextProbe({ vdur: 220, adur: 200, len: 8, done })!;
+    // 原曲の 162 + 12.8 秒を、ずれ -8 で動画の時刻に直した所
+    expect(v).toBeCloseTo(162 + 12.8 - 8 - 4, 5);
+    // 聞き直して決めたずれに合った（取り違えだった）なら、それで終わり
+    const again = [...done, probe(v, m(v - 12, 19))];
+    expect(nextProbe({ vdur: 220, adur: 200, len: 8, done: again })).toBeNull();
+    expect(decideOffset(again)!.kind).toBe('const');
+    // 曲の終わり際しか先が無ければ、手前側で確かめる
+    const v2 = nextProbe({ vdur: 200, adur: 180, len: 8, done })!;
+    expect(v2).toBeCloseTo(162 - 12.8 - 8 - 4, 5);
   });
 });
 

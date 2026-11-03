@@ -237,7 +237,7 @@ export async function startAutoAlign(): Promise<void> {
       }
       set({ phase: 'think', note: '原曲と照らし合わせています…' });
       const r = await wk.alignProbe(ref.key, got.pcm, ctx.sampleRate);
-      done.push({ v: got.v, len: PROBE_SEC, cands: r.cands, active: r.active });
+      done.push({ v: got.v, len: PROBE_SEC, cands: r.cands, active: r.active, zc: r.zc, pad: r.pad });
     }
     const dec = decideOffset(done);
     // 調べるとき用（うまく合わないときに、コンソールのこの行を見れば様子が分かる）
@@ -247,7 +247,13 @@ export async function startAutoAlign(): Promise<void> {
         delta: Math.round(delta * 1000),
         clicks: found.map((x) => Math.round(x * 1000)),
         probes: done.map((p) => ({ v: Math.round(p.v * 100) / 100, top: p.cands.slice(0, 2).map((c) => [Math.round((p.v - c.sec) * 1000) / 1000, Math.round(c.z * 10) / 10]) })),
-        dec: dec && { offset: Math.round(dec.offset * 1000) / 1000, kind: dec.kind, conf: Math.round(dec.conf * 100) / 100, anchors: dec.anchors.map((x) => [Math.round(x.a * 10) / 10, Math.round(x.d * 1000) / 1000]) },
+        dec: dec && {
+          offset: Math.round(dec.offset * 1000) / 1000,
+          kind: dec.kind,
+          conf: Math.round(dec.conf * 100) / 100,
+          anchors: dec.anchors.map((x) => [Math.round(x.a * 10) / 10, Math.round(x.d * 1000) / 1000]),
+          doubt: dec.doubt,
+        },
       }),
     );
     if (!dec || dec.conf < 0.3) throw new Error('動画の中に原曲と同じ曲の所が見つかりませんでした。別の動画か、手で合わせてください');
@@ -280,6 +286,15 @@ export async function startAutoAlign(): Promise<void> {
     running = false;
     abortReason = null;
   }
+}
+
+/** 所ごとの差を使わず、曲の最初の所で合わせたずれのまま一定にする */
+export function keepStartOffset() {
+  const yt = useSidecar.getState().youtube;
+  if (!yt?.anchors?.length) return;
+  const first = [...yt.anchors].sort((p, q) => p.a - q.a)[0];
+  setYoutube({ url: yt.url, offset: Math.round((yt.offset + first.d) * 1000) / 1000, ...(yt.auto ? { auto: { ...yt.auto, kind: 'const' as const } } : {}) });
+  if (useYtAlign.getState().phase === 'done') set({ phase: 'idle', last: null });
 }
 
 /** 自動で合わせる前のずれに戻す */

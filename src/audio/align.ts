@@ -385,6 +385,12 @@ export interface AlignSearch {
   cands: AlignMatch[];
   /** 探りの中で音が鳴っていた割合 */
   active: number;
+  /**
+   * ずらしごとの z（候補に出なかった所も含む全体）。原曲の秒 = (l - pad) / ALIGN_FPS。
+   * 「ほかの探りが決めたずれでも、この探りは似ているか」を確かめるのに使う
+   */
+  zc?: Float32Array;
+  pad?: number;
 }
 
 export const ALIGN_WEIGHTS: Record<Group, number> = { onset: 1, mel: 1, chroma: 1 };
@@ -446,7 +452,9 @@ export function searchProbe(idx: RefIndex, probe: AlignFeat, maxCands = 6): Alig
     const parts = { onset: partAt('onset', l), mel: partAt('mel', l), chroma: partAt('chroma', l) };
     return { sec: (l - og.pad + d) / ALIGN_FPS, score: comb[l], z: (comb[l] - med) / mad, parts };
   });
-  return { cands, active };
+  const zc = new Float32Array(lagsN);
+  for (let l = 0; l < lagsN; l++) zc[l] = (comb[l] - med) / mad;
+  return { cands, active, zc, pad: og.pad };
 }
 
 // ---- 何か所かの結果をまとめる --------------------------------------------------------------
@@ -459,6 +467,9 @@ export interface ProbeResult {
   len: number;
   cands: AlignMatch[];
   active: number;
+  /** ずらしごとの z（AlignSearch.zc）。無ければ候補だけで判断する */
+  zc?: Float32Array;
+  pad?: number;
 }
 
 /** 原曲の時刻 a の所の、動画とのずれ（動画の秒 = a + offset + d） */
@@ -481,6 +492,8 @@ export interface AlignDecision {
   support: number;
   /** 使った候補（探りごと。使わなかった探りは null） */
   picks: (AlignMatch | null)[];
+  /** 決めたずれでは全く合わないのに、ほかの探りがそろわず、ずれを変える根拠にしなかった探り（確かめ直す） */
+  doubt: number[];
 }
 
 /** 候補がどれだけ当てになるか（0〜1） */
@@ -499,6 +512,11 @@ export const SAME_TOL = 0.08;
 /** ライブのテンポ違いとみなす、ずれの変わり方の上限（間の長さに対する割合） */
 const DRIFT_MAX = 0.06;
 
+/** 探りが、あるずれを「支える」とみなす z（その探りでいちばん似る所に対する割合） */
+const SUPPORT_RATIO = 0.55;
+/** 探りが、あるずれを「否定する」とみなす z の割合（これより似ていなければ、そのずれでは合わない） */
+const DENY_RATIO = 0.4;
+
 interface Pick {
   p: number;
   c: AlignMatch;
@@ -510,92 +528,250 @@ interface Pick {
 }
 
 /**
- * 探りの結果をまとめて、ずれを決める。
- * 探りごとに候補を 1 つ選ぶ（または使わない）組み合わせを全部比べ、次の点数が一番高いものにする。
- *  ・候補の確かさの和
- *  ・同じずれ（±80ms）の候補どうしは加点（2 か所で合えば、繰り返しのサビで割れた候補もそろう）
- *  ・原曲の順と動画の順が逆になる組み合わせは使わない（時間は戻らない）
- *  ・ずれが変わる所は減点（なめらかに変わる＝ライブのテンポ違いは少し、飛ぶ＝編集違いは多め）
- * 全部が同じずれ → const、少しずつ変わる → drift、途中で飛ぶ → edit
+ * 探り pr を、ずれ o（動画の秒 − 原曲の秒）の ±tol 秒の範囲で見たときに、いちばん似る所。
+ * z の曲線があればそこから（候補に出なかった所でも分かる）、無ければ候補から探す
+ */
+export function peakNear(pr: ProbeResult, o: number, tol = SAME_TOL): AlignMatch | null {
+  const s = pr.v - o;
+  const zc = pr.zc;
+  if (zc && pr.pad !== undefined) {
+    const c = Math.round(s * ALIGN_FPS) + pr.pad;
+    const r = Math.max(1, Math.round(tol * ALIGN_FPS));
+    let best = -1;
+    for (let l = Math.max(0, c - r); l <= Math.min(zc.length - 1, c + r); l++) if (best < 0 || zc[l] > zc[best]) best = l;
+    if (best < 0) return null;
+    let d = 0;
+    if (best > 0 && best < zc.length - 1) {
+      const a = zc[best - 1];
+      const b = zc[best];
+      const e = zc[best + 1];
+      const den = a - 2 * b + e;
+      if (den < -1e-9) d = Math.max(-0.5, Math.min(0.5, (0.5 * (a - e)) / den));
+    }
+    const sec = (best - pr.pad + d) / ALIGN_FPS;
+    // 候補に同じ所があれば、そちらの似かた（score）も使う
+    const same = pr.cands.find((x) => Math.abs(x.sec - sec) < 0.03);
+    return same ?? { sec, z: zc[best], score: NaN, parts: { onset: NaN, mel: NaN, chroma: NaN } };
+  }
+  let m: AlignMatch | null = null;
+  for (const c of pr.cands) if (Math.abs(c.sec - s) <= tol && (!m || c.z > m.z)) m = c;
+  return m;
+}
+
+/** 探り pr が、ずれ o のときにどれだけ似ているか（z。似る所が無ければ 0） */
+export function zAt(pr: ProbeResult, o: number, tol = SAME_TOL): number {
+  return peakNear(pr, o, tol)?.z ?? 0;
+}
+
+const zTopOf = (pr: ProbeResult) => pr.cands[0]?.z ?? 0;
+const actOf = (pr: ProbeResult) => Math.min(1, pr.active / 0.6);
+/** z からの重み（0〜1） */
+const wOfZ = (pr: ProbeResult, z: number) => Math.max(0, Math.min(1, (z - 5) / 10)) * actOf(pr);
+
+/** 探り pr はずれ o を支えるか（そのずれでも、いちばん似る所に近いくらい似る）。支えるなら z、でなければ 0 */
+function supportZ(pr: ProbeResult, o: number): number {
+  const z = zAt(pr, o);
+  return z >= Math.max(Z_MIN, SUPPORT_RATIO * zTopOf(pr)) ? z : 0;
+}
+
+/** 探り pr はずれ o をはっきり否定するか（当てになる所がほかにあり、o ではほとんど似ない） */
+function denies(pr: ProbeResult, o: number): boolean {
+  const top = zTopOf(pr);
+  return top >= Z_OK && pr.active >= 0.3 && zAt(pr, o) < Math.max(4, DENY_RATIO * top);
+}
+
+/** ずれの候補に使う、探りの選びうる候補（いちばんの候補よりずっと弱いものは使わない） */
+function optionsOf(pr: ProbeResult, p: number): Pick[] {
+  const top = zTopOf(pr);
+  return pr.cands
+    .filter((c) => c.z >= Math.max(Z_MIN, top * 0.7))
+    .slice(0, 3)
+    .map((c) => ({ p, c, o: pr.v - c.sec, a: c.sec + pr.len / 2, w: wOfZ(pr, c.z) }))
+    .filter((x) => x.w > 0);
+}
+
+/**
+ * 探りの結果をまとめて、ずれを決める。「曲の最初で合ったずれのまま」が基本で、ずれを変えるのは強い根拠があるときだけ。
+ * 1. ずれの見込み（各探りの候補）ごとに、それを支える探りの重みを足し、いちばん支えられたずれを基準にする
+ *    （支える = そのずれでも、その探りでいちばん似る所に近いくらい似る。繰り返しのサビで別の所が一番でも、
+ *    正しい所でも同じくらい似ていれば支える。ほぼ同じなら、曲の早い所で合う方）
+ * 2. 基準のずれではほとんど似ない探りが 2 か所以上あり、それらが同じ別のずれでそろい、基準の探りより
+ *    全部あと（または全部まえ）なら、途中で飛ぶ（edit。ゲームサイズ・編集違い）
+ * 3. そうでなく、ずれがなめらかに一方向へ少しずつ変わる並びなら drift（テンポが少し違うライブ版）。
+ *    雑音で少し弱い探り（z 6〜8）も、この並びの根拠には使う
+ * 4. どちらでもなければ一定（const）。食い違った探りは doubt に入れる（1 か所だけでは、ずれを変えない）
  */
 export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
-  const options: Pick[][] = probes.map((pr, p) => {
-    const act = Math.min(1, pr.active / 0.6);
-    // 一番の候補よりずっと弱い候補は使わない（繰り返しのサビのように本当に割れているときだけ迷う）
-    const zTop = pr.cands[0]?.z ?? 0;
-    return pr.cands
-      .filter((c) => c.z >= Math.max(Z_MIN, zTop * 0.7))
-      .slice(0, 3)
-      .map((c) => ({ p, c, o: pr.v - c.sec, a: c.sec + pr.len / 2, w: candWeight(c) * act }))
-      .filter((x) => x.w > 0);
+  const none = (): (AlignMatch | null)[] => probes.map(() => null);
+  const hyps: number[] = [];
+  probes.forEach((pr) => {
+    for (const c of pr.cands) if (c.z >= Z_MIN) hyps.push(pr.v - c.sec);
   });
-  if (options.every((o) => o.length === 0)) {
+  if (hyps.length === 0) {
     // どれも弱い: いちばんましな候補を、自信低めで返す
     let m: Pick | null = null;
     probes.forEach((pr, p) => {
       const c = pr.cands[0];
       if (!c) return;
-      const w = candWeight(c) * Math.min(1, pr.active / 0.6);
+      const w = candWeight(c) * actOf(pr);
       if (!m || w > m.w) m = { p, c, o: pr.v - c.sec, a: c.sec + pr.len / 2, w };
     });
     const best = m as Pick | null;
     if (!best || best.c.z < 4) return null;
-    return { offset: best.o, anchors: [], kind: 'const', conf: Math.min(0.3, best.w + 0.1), support: 1, picks: probes.map((_, p) => (p === best.p ? best.c : null)) };
+    const picks = none();
+    picks[best.p] = best.c;
+    return { offset: best.o, anchors: [], kind: 'const', conf: Math.min(0.3, best.w + 0.1), support: 1, picks, doubt: [] };
   }
-  let best: { score: number; picks: Pick[] } | null = null;
-  const cur: Pick[] = [];
-  const evaluate = () => {
-    if (cur.length === 0) return;
-    const ps = [...cur].sort((x, y) => x.a - y.a);
-    // 時間は戻らない（原曲の順に並べたとき、動画の時刻も増える）
-    for (let i = 1; i < ps.length; i++) {
-      const va = ps[i - 1].a + ps[i - 1].o;
-      const vb = ps[i].a + ps[i].o;
-      if (vb <= va + 0.5 || ps[i].a - ps[i - 1].a < 1) return;
+
+  // 1. 基準のずれ
+  const scored = hyps.map((o) => {
+    let score = 0;
+    let first = Infinity;
+    for (const pr of probes) {
+      const z = supportZ(pr, o);
+      if (z <= 0) continue;
+      score += wOfZ(pr, z);
+      first = Math.min(first, pr.v - o);
     }
-    let score = ps.reduce((s, x) => s + x.w, 0);
-    for (let i = 0; i < ps.length; i++)
-      for (let j = i + 1; j < ps.length; j++) if (Math.abs(ps[i].o - ps[j].o) <= SAME_TOL) score += 0.6 * Math.min(ps[i].w, ps[j].w) + 0.15;
-    for (let i = 1; i < ps.length; i++) {
-      const dof = Math.abs(ps[i].o - ps[i - 1].o);
-      if (dof <= SAME_TOL) continue;
-      score -= dof <= DRIFT_MAX * (ps[i].a - ps[i - 1].a) ? 0.15 : 0.45;
-    }
-    if (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) <= 1e-9 && ps.length > best.picks.length)) best = { score, picks: ps };
-  };
-  const walk = (p: number) => {
-    if (p === options.length) {
-      evaluate();
+    return { o, score, first };
+  });
+  const top = Math.max(...scored.map((x) => x.score));
+  if (!(top > 0)) return null;
+  const b0 = scored.filter((x) => x.score >= top * 0.95 - 1e-9).sort((x, y) => x.first - y.first)[0].o;
+
+  /** 基準を支える探り */
+  const S: Pick[] = [];
+  /** 基準を支えず、ほかの所でははっきり似る探り（ずれが変わった根拠の候補） */
+  const D: number[] = [];
+  /** D のうち、基準のずれではほとんど似ない探り（途中で飛んだ根拠の候補） */
+  const C: number[] = [];
+  const N: number[] = [];
+  probes.forEach((pr, p) => {
+    if (supportZ(pr, b0) > 0) {
+      const c = peakNear(pr, b0)!;
+      S.push({ p, c, o: pr.v - c.sec, a: c.sec + pr.len / 2, w: wOfZ(pr, c.z) });
       return;
     }
-    walk(p + 1);
-    for (const o of options[p]) {
-      cur.push(o);
-      walk(p + 1);
-      cur.pop();
-    }
+    // ほかの所で似る（ライブのずれの変わり方の根拠には、雑音で少し弱くなった探りも使う）
+    if (zTopOf(pr) >= Z_MIN && pr.active >= 0.3) D.push(p);
+    else N.push(p);
+    // 途中で飛ぶ根拠には、当てになる所がほかにあり、基準のずれではほとんど似ない探りだけを使う
+    if (denies(pr, b0)) C.push(p);
+  });
+  const wsum = S.reduce((s, x) => s + x.w, 0);
+  const base = wsum > 0 ? S.reduce((s, x) => s + x.o * x.w, 0) / wsum : b0;
+  const vOf = (x: Pick) => x.a + x.o;
+
+  const constResult = (): AlignDecision => {
+    const picks = none();
+    for (const x of S) picks[x.p] = x.c;
+    const wTop = Math.max(0, ...S.map((x) => x.w));
+    let conf = S.length >= 2 ? Math.min(1, 0.6 + 0.12 * S.length + 0.25 * wTop) : Math.min(0.6, 0.25 + 0.4 * wTop);
+    // 食い違った探りがあれば少し下げる
+    if (D.length > 0) conf = Math.min(conf, 0.85);
+    return { offset: base, anchors: [], kind: 'const', conf, support: S.length, picks, doubt: D };
   };
-  walk(0);
-  const chosen = (best as { score: number; picks: Pick[] } | null)?.picks;
-  if (!chosen || chosen.length === 0) return null;
-  const picks = probes.map((_, p) => chosen.find((x) => x.p === p)?.c ?? null);
-  const top = chosen.reduce((x, y) => (y.w > x.w ? y : x));
-  const agree = chosen.filter((x) => Math.abs(x.o - top.o) <= SAME_TOL);
-  if (agree.length === chosen.length) {
-    const w = agree.reduce((s, x) => s + x.w, 0);
-    const offset = agree.reduce((s, x) => s + x.o * x.w, 0) / w;
-    const conf =
-      agree.length >= 2 ? Math.min(1, 0.6 + 0.12 * agree.length + 0.25 * top.w) : Math.min(0.6, 0.25 + 0.4 * top.w);
-    return { offset, anchors: [], kind: 'const', conf, support: agree.length, picks };
+  if (D.length < 2 || S.length === 0) return constResult();
+
+  const finish = (chain: Pick[], kind: AlignKind): AlignDecision => {
+    const ps = [...chain].sort((x, y) => x.a - y.a);
+    // 曲の最初の所のずれを基準にする（「一定にする」とこのずれが残る）
+    const offset = ps[0].o;
+    const picks = none();
+    for (const x of ps) picks[x.p] = x.c;
+    const conf = Math.min(0.8, 0.3 + 0.25 * Math.min(...ps.map((x) => x.w)) + 0.1 * ps.length);
+    const used = new Set(ps.map((x) => x.p));
+    return {
+      offset,
+      anchors: ps.map((x) => ({ a: x.a, d: x.o - offset })),
+      kind,
+      conf,
+      support: ps.length,
+      picks,
+      doubt: D.filter((p) => !used.has(p)),
+    };
+  };
+
+  // 2. 途中で飛ぶ（edit）: 否定した探りのうち 2 か所以上が同じ別のずれでそろい、基準の探りより全部あと（まえ）
+  let edit: { grp: Pick[]; w: number } | null = null;
+  for (const p of C) {
+    for (const opt of optionsOf(probes[p], p)) {
+      const o2 = opt.o;
+      if (Math.abs(o2 - base) <= SAME_TOL) continue;
+      // 基準の探りの多くも o2 で似るなら、繰り返しの多い曲でずれが決めきれないだけ（飛んだ根拠にしない）。
+      // 1 つだけなら、飛ぶ所をまたいだ探り（両方を含む）かもしれない
+      const both = S.filter((x) => supportZ(probes[x.p], o2) > 0).length;
+      if (both >= Math.max(2, Math.ceil(S.length / 2))) continue;
+      const grp: Pick[] = [];
+      for (const q of C) {
+        if (supportZ(probes[q], o2) <= 0) continue;
+        const c = peakNear(probes[q], o2)!;
+        grp.push({ p: q, c, o: probes[q].v - c.sec, a: c.sec + probes[q].len / 2, w: wOfZ(probes[q], c.z) });
+      }
+      if (grp.length < 2) continue;
+      const after = Math.min(...grp.map((x) => x.a)) > Math.max(...S.map((x) => x.a)) && Math.min(...grp.map(vOf)) > Math.max(...S.map(vOf)) + 0.5;
+      const before = Math.max(...grp.map((x) => x.a)) < Math.min(...S.map((x) => x.a)) && Math.max(...grp.map(vOf)) + 0.5 < Math.min(...S.map(vOf));
+      if (!after && !before) continue;
+      const w = grp.reduce((s, x) => s + x.w, 0);
+      if (!edit || w > edit.w) edit = { grp, w };
+    }
   }
-  let drift = true;
-  for (let i = 1; i < chosen.length; i++) {
-    const da = chosen[i].a - chosen[i - 1].a;
-    if (Math.abs(chosen[i].o - chosen[i - 1].o) > DRIFT_MAX * da) drift = false;
+
+  // 3. 少しずつ変わる（drift）: 基準の探り＋ほかの所で似る探り（＋どちらでもない探り）が、なめらかで一方向の並びになる。
+  //    ほかの所で似る探りが 2 か所以上入っていること（1 か所だけの取り違えでは、ずれを変えない）
+  let drift: { chain: Pick[]; w: number } | null = null;
+  {
+    // 基準の探りは、近く（±0.4 秒）でいちばん似る所のずれを使う（ライブではそこが本当の位置）
+    const fixed = S.map((x) => {
+      const c = peakNear(probes[x.p], base, 0.4) ?? x.c;
+      return { ...x, c, o: probes[x.p].v - c.sec, a: c.sec + probes[x.p].len / 2 };
+    });
+    const free = [...D, ...N];
+    const opts = free.map((p) => optionsOf(probes[p], p));
+    const cur: Pick[] = [];
+    const walk = (i: number) => {
+      if (i === free.length) {
+        const nD = cur.filter((x) => D.includes(x.p)).length;
+        if (nD < 2) return;
+        const ps = [...fixed, ...cur].sort((x, y) => x.a - y.a);
+        // ずれは一方向に少しずつ変わる（テンポが違えば遅れ・進みがたまっていく）。行ったり来たりするのは取り違え
+        const trend = ps[ps.length - 1].o - ps[0].o;
+        if (Math.abs(trend) <= 2 * SAME_TOL) return;
+        for (let k = 1; k < ps.length; k++) {
+          const da = ps[k].a - ps[k - 1].a;
+          if (da < 1 || vOf(ps[k]) <= vOf(ps[k - 1]) + 0.5) return;
+          const dd = ps[k].o - ps[k - 1].o;
+          if (Math.abs(dd) > DRIFT_MAX * da) return;
+          if (dd * Math.sign(trend) < -SAME_TOL) return;
+        }
+        const w = ps.reduce((s, x) => s + x.w, 0);
+        if (!drift || w > drift.w) drift = { chain: ps, w };
+        return;
+      }
+      walk(i + 1);
+      for (const o of opts[i]) {
+        cur.push(o);
+        walk(i + 1);
+        cur.pop();
+      }
+    };
+    walk(0);
   }
-  const anchors = chosen.map((x) => ({ a: x.a, d: x.o - top.o }));
-  const conf = Math.min(0.8, 0.3 + 0.25 * Math.min(...chosen.map((x) => x.w)) + 0.1 * chosen.length);
-  return { offset: top.o, anchors, kind: drift ? 'drift' : 'edit', conf, support: agree.length, picks };
+
+  const ed = edit as { grp: Pick[]; w: number } | null;
+  const dr = drift as { chain: Pick[]; w: number } | null;
+  if (ed) {
+    // 飛ぶ所がなめらか（間に対して小さい）で、なめらかな並びでも説明できるなら drift
+    const g = [...ed.grp].sort((x, y) => x.a - y.a);
+    const ss = [...S].sort((x, y) => x.a - y.a);
+    const after = g[0].a > ss[ss.length - 1].a;
+    const p = after ? ss[ss.length - 1] : g[g.length - 1];
+    const q = after ? g[0] : ss[0];
+    const smooth = Math.abs(q.o - p.o) <= DRIFT_MAX * Math.max(1e-6, q.a - p.a);
+    if (!(smooth && dr)) return finish([...S, ...ed.grp], 'edit');
+  }
+  if (dr) return finish(dr.chain, 'drift');
+  return constResult();
 }
 
 /**
@@ -625,8 +801,8 @@ export function anchorDelta(anchors: readonly AlignAnchor[], a: number): number 
 
 /** 1 回の探りの長さ（秒） */
 export const PROBE_SEC = 8;
-/** 探りの回数の上限 */
-export const MAX_PROBES = 5;
+/** 探りの回数の上限（ふつうは 3 回。食い違いを確かめる・ライブや編集違いを細かく見るときだけ増える） */
+export const MAX_PROBES = 6;
 /** 曲の頭・真ん中・終わりの 3 か所で合えば十分 */
 const WANT_GOOD = 3;
 
@@ -651,7 +827,35 @@ export function nextProbe(inp: ProbePlanInput): number | null {
   const good = done.filter((d) => d.cands[0] && d.cands[0].z >= Z_OK && d.active >= 0.3);
   const dec = good.length > 0 ? decideOffset(done) : null;
   if (good.length >= WANT_GOOD) {
-    if (!dec || dec.kind === 'const') return null;
+    if (!dec) return null;
+    if (dec.kind === 'const') {
+      // 1 か所だけ、決めたずれでは全く合わなかった: その探りのずれで近くをもう一度聞いて確かめる
+      // （本当に途中で飛んでいれば 2 か所目もそろう。繰り返しのサビの取り違えなら、決めたずれに合う）
+      const sa = dec.picks.flatMap((c, p) => (c ? [c.sec + done[p].len / 2] : []));
+      if (sa.length === 0) return null;
+      const lo = Math.min(...sa);
+      const hi = Math.max(...sa);
+      for (const p of dec.doubt) {
+        const c = done[p].cands[0];
+        if (!c) continue;
+        const od = done[p].v - c.sec;
+        const ad = c.sec + len / 2;
+        // 基準の探りに挟まれた所なら、飛んだのではない（時間は戻らない）
+        if (ad > lo && ad < hi) continue;
+        // 基準の探りから離れる向き（飛んだ先の側）を先に、入らなければ反対側を聞く
+        const dir = ad >= hi ? 1 : -1;
+        for (const at of [ad + dir * 1.6 * len, ad - dir * 1.6 * len]) {
+          // 曲の終わり際（小さくなっていく所）は当てにならないので避ける
+          if (at < len || at > adur - len) continue;
+          const v = clampV(at + od - len / 2);
+          const prev = done.find((d) => Math.abs(d.v - v) < len * 0.75);
+          // まだ聞いていなければ聞く。聞いて当てになる結果が出ていれば確かめ済み。当てにならなければ反対側を聞く
+          if (!prev) return v;
+          if (good.includes(prev)) break;
+        }
+      }
+      return null;
+    }
     const an = dec.anchors;
     if (dec.kind === 'edit') {
       // 途中で飛ぶ（編集違い）: 飛ぶ所を挟み込む（後ろのずれで間の真ん中を聞く。合えば飛ぶ所はそれより前）
@@ -686,15 +890,22 @@ export function nextProbe(inp: ProbePlanInput): number | null {
   // ずれの見当（当てになる探り、無ければ前に合わせたずれ）
   const guess = dec ? dec.offset : (inp.hint ?? null);
   if (guess !== null && adur > len) {
-    // 原曲の頭・終わり・真ん中（まだ聞いていない所）を、動画の時刻に直して聞く
-    const heard = good.map((d) => d.v - guess + len / 2);
-    for (const q of [0.1, 0.9, 0.5, 0.3, 0.7]) {
-      const a = q * adur;
-      if (heard.some((h) => Math.abs(h - a) < Math.max(len, adur * 0.12))) continue;
-      const v = clampV(a + guess - len / 2);
+    // 原曲の最初（いちばん大事。必ず近くを聞く）・終わり・真ん中（まだ聞いていない所）を、動画の時刻に直して聞く
+    const heard = good.map((d) => d.cands[0].sec + len / 2);
+    const wide = Math.max(len, adur * 0.12);
+    const targets = [
+      { a: Math.min(20, Math.max(len, 0.08 * adur)), r: len },
+      { a: 0.9 * adur, r: wide },
+      { a: 0.5 * adur, r: wide },
+      { a: 0.3 * adur, r: wide },
+      { a: 0.7 * adur, r: wide },
+    ];
+    for (const t of targets) {
+      if (heard.some((h) => Math.abs(h - t.a) < t.r)) continue;
+      const v = clampV(t.a + guess - len / 2);
       if (!near(v)) return v;
       // そこでは見当のずれで合わなかった（編集で飛んでいるかもしれない）: 動画の同じ割合の所で聞き直す
-      const vb = clampV(q * vdur - len / 2);
+      const vb = clampV((t.a / adur) * vdur - len / 2);
       if (!near(vb)) return vb;
     }
     if (good.length > 0) return null;
