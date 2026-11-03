@@ -9,7 +9,7 @@ import { gridStep, snapToGrid } from '../edit/ops';
 import { chartFeatures, FEATURE_DEFS, lastMeasure } from '../gen/features';
 import { DEFAULT_RUNG, describePolicy, DIFFICULTIES, FILL_STYLES, MAX_RUNG, policyFor } from '../gen/simplify';
 import { setLoopPoint, toggleLoop } from '../store/assist';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { tempoOf } from '../store/derived';
 import { goBack, goToStart, openPage, openSettings, playFrom, setCursorBeat, togglePause, togglePlay, useEditor } from '../store/editor';
 import {
@@ -222,7 +222,7 @@ export function AiGenPage() {
         </span>
         <span className="grow" />
         <MasterMixer />
-        <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? `1難易度 約 ${formatUsd(costPer)}＋判定` : NO_KEY_TITLE}>
+        <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? `1難易度 約 ${formatUsd(costPer)}＋判定` : noKeyTitle()}>
           {hasKey ? `● OpenRouter · ${model}` : 'キー未設定 · ルールだけで簡略化'}
         </span>
         {anyResult && (
@@ -384,7 +384,7 @@ export function AiGenPage() {
           </p>
           {!hasKey && (
             <p className="lbl">
-              {NO_KEY_TITLE}。いまは標準の方針で、機械的な推定が目標に入るまで段を調整しています。{' '}
+              {noKeyTitle()}。いまは標準の方針で、機械的な推定が目標に入るまで段を調整しています。{' '}
               <button className="link-btn" onClick={() => openSettings('ai')}>
                 キーを設定
               </button>

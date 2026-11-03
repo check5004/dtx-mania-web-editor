@@ -2,7 +2,7 @@
 import type { CSSProperties, PointerEvent } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { useAssist } from '../store/assist';
 import { acceptGhost, askAi, dismissGhost, ghostBadge, sourceLabel, stepGhost, useComplete } from '../store/complete';
 import { useEditor } from '../store/editor';
@@ -67,7 +67,7 @@ export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: n
     style.bottom = a.h - (a.top - 6);
   }
   const range = len === 1 ? toMeasure(b.at) : `${toMeasure(b.at)}〜${toMeasure(b.at + len - 1)}`;
-  const aiTitle = hasKey ? `この先の続きをAIに3つ作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「フレーズ候補」のモデルを使います` : NO_KEY_TITLE;
+  const aiTitle = hasKey ? `この先の続きをAIに3つ作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「フレーズ候補」のモデルを使います` : noKeyTitle();
   const stop = (e: PointerEvent) => e.stopPropagation();
   const aiButton = (
     <button className="tg-ai" onClick={() => void askAi()} disabled={!hasKey || c.aiLoading} title={aiTitle}>

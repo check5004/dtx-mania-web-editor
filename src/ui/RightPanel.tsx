@@ -1,3 +1,4 @@
+import { tr, pl, isJa } from '../i18n';
 import { sameMeasures } from '../assist/similar';
 import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
@@ -8,7 +9,7 @@ import type { SpecMode } from '../audio/spectro';
 import { SPEC_ZONES } from './specColors';
 import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
 import { useInputSettings } from '../input/settings';
-import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
+import { setSelectionVel, toggleVelMode, velPresetNames } from '../store/velocity';
 import { useState } from 'react';
 import { deleteMeasures, deleteSelection, insertMeasures, openPage, setMeasureLength, setKind, setSelectionWav, toast, useEditor } from '../store/editor';
 import { judgeCurrent, useAiLevel } from '../store/aiLevel';
@@ -17,7 +18,7 @@ import { openMeasureGen } from '../store/measureGen';
 import { AMOUNT, setCompleteSettings, useComplete, type CompleteAmount } from '../store/complete';
 import { drumStatusText, setDrumsEnabled, useDrums } from '../store/drums';
 import { ADTOF } from '../transcribe/model';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
 import { channelName, chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
 import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
@@ -59,8 +60,9 @@ function SelectionCard() {
     return (
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          操作のしかた
+          {tr('操作のしかた', 'How to edit')}
         </div>
+        {isJa() ? (
         <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
           <div>クリック … チップを置く</div>
           <div>
@@ -85,6 +87,37 @@ function SelectionCard() {
             <kbd>Tab</kbd> … 点線の続き（TAB補完）を入れる
           </div>
         </div>
+        ) : (
+          <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
+            <div>Click … place a chip</div>
+            <div>
+              <kbd>Shift</kbd>+click … HH open / left bass drum
+            </div>
+            <div>Double-click … delete (drag with the right button to delete several)</div>
+            <div>Right-click … menu (on a chip: velocity, lane, delete; on an empty spot: grid)</div>
+            <div>Drag on an empty spot … box-select</div>
+            <div>
+              Drag chips / <kbd>↑</kbd>
+              <kbd>↓</kbd>
+              <kbd>←</kbd>
+              <kbd>→</kbd> … move
+            </div>
+            <div>
+              <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> … copy / paste at the cursor
+            </div>
+            <div>Click the measure-number column or the waveform … playback start (▶)</div>
+            <div>Drag the A·B strip at the left edge … loop range</div>
+            <div>
+              <kbd>I</kbd> <kbd>O</kbd> … set A / B here (loops once both are set), <kbd>/</kbd> … loop on/off
+            </div>
+            <div>
+              <kbd>Ctrl</kbd>+wheel … zoom, <kbd>[</kbd> <kbd>]</kbd> … grid
+            </div>
+            <div>
+              <kbd>Tab</kbd> … accept the dotted suggestion (Tab completion)
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -99,19 +132,19 @@ function SelectionCard() {
     <div className="card">
       <div className="row" style={{ marginBottom: 10 }}>
         <span className="dot" style={{ background: color, width: 10, height: 10 }} />
-        <span style={{ fontWeight: 600 }}>{one ? channelName(one.ch) : `${chips.length} 個のチップ`}</span>
+        <span style={{ fontWeight: 600 }}>{one ? channelName(one.ch) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</span>
         {one && <span className="lbl mono">ch {one.ch.toString(16).toUpperCase().padStart(2, '0')}</span>}
         <span className="grow" />
-        <button className="ib" style={{ width: 28, height: 28 }} onClick={deleteSelection} title="削除（Delete）">
+        <button className="ib" style={{ width: 28, height: 28 }} onClick={deleteSelection} title={tr('削除（Delete）', 'Delete (Delete)')}>
           {Icon.trash(14)}
         </button>
       </div>
       <div className="form-grid">
         {one && (
           <>
-            <span className="lbl">位置</span>
+            <span className="lbl">{tr('位置', 'Position')}</span>
             <span className="mono">
-              小節 {toMeasure(one.m)} · {fracToString(one.f)}
+              {tr('小節', 'Measure')} {toMeasure(one.m)} · {fracToString(one.f)}
             </span>
           </>
         )}
@@ -119,24 +152,34 @@ function SelectionCard() {
           <>
             <span className="lbl">WAV</span>
             <select className="field mono" style={{ height: 28, fontSize: 12 }} value={v ?? ''} onChange={(e) => setSelectionWav(Number(e.target.value))}>
-              {v === null && <option value="">（いろいろ）</option>}
-              {v !== null && doc.fields['WAV' + toBase36x2(v)] === undefined && <option value={v}>{toBase36x2(v)}（未定義）</option>}
+              {v === null && <option value="">{tr('（いろいろ）', '(mixed)')}</option>}
+              {v !== null && doc.fields['WAV' + toBase36x2(v)] === undefined && (
+                <option value={v}>
+                  {toBase36x2(v)}
+                  {tr('（未定義）', ' (undefined)')}
+                </option>
+              )}
               {wavs.map((n) => (
                 <option key={n} value={n}>
                   {toBase36x2(n)} {wavPath(doc, n)}
                 </option>
               ))}
             </select>
-            <span className="lbl">種類</span>
+            <span className="lbl">{tr('種類', 'Type')}</span>
             <div className="seg">
               {(
                 [
-                  ['normal', '通常'],
-                  ['hidden', '不可視'],
-                  ['nochip', '音だけ'],
+                  ['normal', tr('通常', 'Normal')],
+                  ['hidden', tr('不可視', 'Invisible')],
+                  ['nochip', tr('音だけ', 'Sound only')],
                 ] as const
               ).map(([k, label]) => (
-                <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)} title={k === 'hidden' ? '叩く必要はあるが見えないチップ' : k === 'nochip' ? '空打ちしたときに鳴る音（チップは出ない）' : ''}>
+                <button
+                  key={k}
+                  className={kind === k ? 'on' : ''}
+                  onClick={() => setKind(k)}
+                  title={k === 'hidden' ? tr('叩く必要はあるが見えないチップ', 'A chip you still have to hit, but it is not shown') : k === 'nochip' ? tr('空打ちしたときに鳴る音（チップは出ない）', 'Sound played when hitting the pad with no chip (no chip appears)') : ''}
+                >
                   {label}
                 </button>
               ))}
@@ -166,7 +209,7 @@ function VelRow({ chips }: { chips: { v: number }[] }) {
   const shown = drag ?? avg;
   return (
     <>
-      <span className="lbl">ベロシティ</span>
+      <span className="lbl">{tr('ベロシティ', 'Velocity')}</span>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div className="vel-row">
           <span className="mono" style={{ fontSize: 12 }}>
@@ -186,14 +229,14 @@ function VelRow({ chips }: { chips: { v: number }[] }) {
               if (drag !== null) setSelectionVel(drag);
               setDrag(null);
             }}
-            aria-label="選んだチップのベロシティ"
+            aria-label={tr('選んだチップのベロシティ', 'Velocity of the selected chips')}
           />
-          <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(true)} title="ベロシティの編集（V）" aria-label="ベロシティの編集">
+          <button className="ib" style={{ width: 26, height: 26 }} onClick={() => toggleVelMode(true)} title={tr('ベロシティの編集（V）', 'Edit velocity (V)')} aria-label={tr('ベロシティの編集', 'Edit velocity')}>
             {Icon.bars(14)}
           </button>
         </div>
         <div className="seg small" style={{ display: 'flex' }}>
-          {VEL_PRESET_NAMES.map((name, i) => (
+          {velPresetNames().map((name, i) => (
             <button key={name} style={{ flex: 1 }} className={same && vals[0] === presets[i] ? 'on' : ''} onClick={() => setSelectionVel(presets[i])}>
               {name} <span className="mono lbl">{presets[i]}</span>
             </button>
@@ -226,11 +269,11 @@ function MeasureCard() {
   return (
     <div className="card">
       <div className="section-title" style={{ marginBottom: 8 }}>
-        小節 <span className="mono">{toMeasure(m)}</span>
-        <span className="lbl">（カーソル位置）</span>
+        {tr('小節', 'Measure')} <span className="mono">{toMeasure(m)}</span>
+        <span className="lbl">{tr('（カーソル位置）', '(at the cursor)')}</span>
       </div>
       <div className="form-grid">
-        <span className="lbl">拍子</span>
+        <span className="lbl">{tr('拍子', 'Meter')}</span>
         <select
           className="field mono"
           style={{ height: 28 }}
@@ -238,14 +281,14 @@ function MeasureCard() {
           onChange={async (e) => {
             if (e.target.value === 'custom') {
               const v = await promptDialog({
-                title: `小節 ${toMeasure(m)} の拍子`,
-                body: '「7/8」「13/16」のような拍子か、4/4 を 1 とした長さ（0.875 など）を入れてください。',
+                title: tr(`小節 ${toMeasure(m)} の拍子`, `Meter of measure ${toMeasure(m)}`),
+                body: tr('「7/8」「13/16」のような拍子か、4/4 を 1 とした長さ（0.875 など）を入れてください。', 'Enter a meter like "7/8" or "13/16", or a length where 4/4 = 1 (e.g. 0.875).'),
                 value: meterLabel(cur),
-                ok: '変える',
+                ok: tr('変える', 'Change'),
               });
               const len = v ? parseMeter(v) : null;
               if (len) apply(len);
-              else if (v) toast('拍子として読めませんでした', 'error');
+              else if (v) toast(tr('拍子として読めませんでした', "Couldn't read that as a meter"), 'error');
               return;
             }
             const hit = METERS.find(([k]) => k === e.target.value);
@@ -258,27 +301,29 @@ function MeasureCard() {
               {k}
             </option>
           ))}
-          <option value="custom">ほかの拍子…</option>
+          <option value="custom">{tr('ほかの拍子…', 'Other meter…')}</option>
         </select>
         <span className="lbl">BPM</span>
         <span className="mono">{chipBpmLabel(tempo.bpmAt(tempo.measureStart(m)))}</span>
       </div>
       <p className="lbl" style={{ margin: '8px 0 0' }}>
-        {own !== undefined ? `この小節で長さを ${own} に変えています（#${toMeasure(m)}02）。` : '拍子を変えると、この小節だけが変わります（次の小節は元に戻します）。'}
+        {own !== undefined
+          ? tr(`この小節で長さを ${own} に変えています（#${toMeasure(m)}02）。`, `This measure's length is changed to ${own} (#${toMeasure(m)}02).`)
+          : tr('拍子を変えると、この小節だけが変わります（次の小節は元に戻します）。', 'Changing the meter affects only this measure (the next measure goes back to the previous meter).')}
       </p>
       <div className="row" style={{ gap: 6, marginTop: 8 }}>
-        <button className="btn small ghost" onClick={() => insertMeasures(m)} title="この小節の前に空の小節を1つ入れます（後ろはずれます）">
-          {Icon.plus(12)} 前に1小節挿入
+        <button className="btn small ghost" onClick={() => insertMeasures(m)} title={tr('この小節の前に空の小節を1つ入れます（後ろはずれます）', 'Insert one empty measure before this one (everything after it shifts)')}>
+          {Icon.plus(12)} {tr('前に1小節挿入', 'Insert measure before')}
         </button>
         <button
           className="btn small ghost"
           onClick={() => {
             const r = deleteMeasures(m);
-            toast(`小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個）。Ctrl+Z で戻せます`, 'ok');
+            toast(tr(`小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個）。Ctrl+Z で戻せます`, `Deleted measure ${toMeasure(m)} (${r.removed} ${pl(r.removed, 'chip')}). Ctrl+Z to undo.`), 'ok');
           }}
-          title="この小節を消して後ろを詰めます"
+          title={tr('この小節を消して後ろを詰めます', 'Delete this measure and close the gap')}
         >
-          この小節を削除
+          {tr('この小節を削除', 'Delete this measure')}
         </button>
       </div>
       <div className="row" style={{ gap: 6, marginTop: 8 }}>
@@ -286,18 +331,21 @@ function MeasureCard() {
         <button
           className="btn small grow"
           onClick={() => openMeasureGen(m)}
-          title="この小節のドラムの案を作ります（AI・採譜・写す）。譜面の小節線の左の ✨ や Alt+G と同じ。入れるまで譜面は変わりません"
+          title={tr(
+            'この小節のドラムの案を作ります（AI・採譜・写す）。譜面の小節線の左の ✨ や Alt+G と同じ。入れるまで譜面は変わりません',
+            "Make drum ideas for this measure (AI, transcription, copy). Same as the ✨ left of the bar line or Alt+G. The chart doesn't change until you insert one",
+          )}
         >
-          この小節をAIで生成
+          {tr('この小節をAIで生成', 'Generate this measure with AI')}
         </button>
       </div>
       <div className="row" style={{ gap: 6, marginTop: 6 }}>
         <span className="ai-spark" style={{ visibility: 'hidden' }}>{Icon.sparkle(12)}</span>
-        <button className="btn small grow" onClick={() => phraseNow('fill')} title="選んだ範囲（なければカーソルの小節）にフィルの候補を3つ点線で出します">
-          フィルの候補
+        <button className="btn small grow" onClick={() => phraseNow('fill')} title={tr('選んだ範囲（なければカーソルの小節）にフィルの候補を3つ点線で出します', 'Show 3 fill suggestions as dotted chips in the selection (or the cursor measure)')}>
+          {tr('フィルの候補', 'Fill ideas')}
         </button>
-        <button className="btn small grow" onClick={() => phraseNow('rhythm')} title="選んだ範囲（なければカーソルの小節）にリズムの候補を3つ点線で出します">
-          リズムの候補
+        <button className="btn small grow" onClick={() => phraseNow('rhythm')} title={tr('選んだ範囲（なければカーソルの小節）にリズムの候補を3つ点線で出します', 'Show 3 groove suggestions as dotted chips in the selection (or the cursor measure)')}>
+          {tr('リズムの候補', 'Groove ideas')}
         </button>
       </div>
     </div>
@@ -309,17 +357,32 @@ function phraseNow(kind: 'fill' | 'rhythm') {
   void makeCandidates(kind);
 }
 
-const BANDS: [BgmFilter, string, string][] = [
-  ['all', '全体', '原曲をそのまま'],
-  ['low', '低域', 'キックが聴きやすい（〜160Hz）'],
-  ['mid', '中域', 'スネア・タムが聴きやすい（200〜3500Hz）'],
-  ['high', '高域', 'ハイハット・シンバルが聴きやすい（5000Hz〜）'],
+const bands = (): [BgmFilter, string, string][] => [
+  ['all', tr('全体', 'Full'), tr('原曲をそのまま', 'The original as is')],
+  ['low', tr('低域', 'Low'), tr('キックが聴きやすい（〜160Hz）', 'Easier to hear the kick (up to 160 Hz)')],
+  ['mid', tr('中域', 'Mid'), tr('スネア・タムが聴きやすい（200〜3500Hz）', 'Easier to hear the snare and toms (200–3500 Hz)')],
+  ['high', tr('高域', 'High'), tr('ハイハット・シンバルが聴きやすい（5000Hz〜）', 'Easier to hear the hi-hat and cymbals (5000 Hz and up)')],
 ];
 
-const SPEC_MODE_UI: [SpecMode, string, string][] = [
-  ['drum', 'ドラム強調', '伸びる音（ベース・声・和音）を引いて、叩いた音だけを光らせます。光った帯の下の端が叩いた瞬間です。'],
-  ['attack', 'アタック', '音の立ち上がりだけを出します。細かい連打や、シンバルが鳴り続ける中の刻みを数えるときに。'],
-  ['raw', 'そのまま', '音の大きさをそのまま出します。シンバルの伸び（オープン・クラッシュ）の長さを見るときに。'],
+const specModeUi = (): [SpecMode, string, string][] => [
+  [
+    'drum',
+    tr('ドラム強調', 'Drum focus'),
+    tr(
+      '伸びる音（ベース・声・和音）を引いて、叩いた音だけを光らせます。光った帯の下の端が叩いた瞬間です。',
+      'Subtracts sustained sounds (bass, vocals, chords) so only hits light up. The bottom edge of a lit band is the moment of the hit.',
+    ),
+  ],
+  [
+    'attack',
+    tr('アタック', 'Attack'),
+    tr('音の立ち上がりだけを出します。細かい連打や、シンバルが鳴り続ける中の刻みを数えるときに。', 'Shows only note onsets. Useful for counting fast rolls, or steady hits under a ringing cymbal.'),
+  ],
+  [
+    'raw',
+    tr('そのまま', 'Raw'),
+    tr('音の大きさをそのまま出します。シンバルの伸び（オープン・クラッシュ）の長さを見るときに。', 'Shows loudness as is. Useful for seeing how long cymbals ring (open hi-hat, crash).'),
+  ],
 ];
 
 /** 原曲の列を波形かスペクトルにする。スペクトルの見せ方・明るさ・色の見方 */
@@ -328,29 +391,29 @@ function SpecControls() {
   return (
     <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
       <div className="row">
-        <span className="lbl">譜面の右の原曲の列</span>
+        <span className="lbl">{tr('譜面の右の原曲の列', 'Original column right of the chart')}</span>
         <span className="grow" />
         <div className="seg small">
           <button className={a.waveMode === 'wave' ? 'on' : ''} onClick={() => setWaveMode('wave')}>
-            波形
+            {tr('波形', 'Wave')}
           </button>
-          <button className={a.waveMode === 'spec' ? 'on' : ''} onClick={() => setWaveMode('spec')} title="ドラムの帯域ごとに色分けしたスペクトル">
-            スペクトル
+          <button className={a.waveMode === 'spec' ? 'on' : ''} onClick={() => setWaveMode('spec')} title={tr('ドラムの帯域ごとに色分けしたスペクトル', 'Spectrum colored by drum frequency band')}>
+            {tr('スペクトル', 'Spectrum')}
           </button>
         </div>
       </div>
       {a.waveMode === 'spec' && (
         <>
           <div className="seg" style={{ display: 'flex' }}>
-            {SPEC_MODE_UI.map(([k, label, tip]) => (
+            {specModeUi().map(([k, label, tip]) => (
               <button key={k} className={a.specMode === k ? 'on' : ''} style={{ flex: 1 }} title={tip} onClick={() => setSpecMode(k)}>
                 {label}
               </button>
             ))}
           </div>
-          <span className="lbl">{SPEC_MODE_UI.find(([k]) => k === a.specMode)?.[2]}</span>
-          <label className="slider-row" title="スペクトルの明るさ。小さな音を見たいときは上げる">
-            <span className="lbl">明るさ</span>
+          <span className="lbl">{specModeUi().find(([k]) => k === a.specMode)?.[2]}</span>
+          <label className="slider-row" title={tr('スペクトルの明るさ。小さな音を見たいときは上げる', 'Spectrum brightness. Raise it to see quiet sounds')}>
+            <span className="lbl">{tr('明るさ', 'Brightness')}</span>
             <input type="range" min={0.5} max={2.5} step={0.1} value={a.specGain} onChange={(e) => setSpecGain(Number(e.target.value))} />
             <span className="mono lbl">{Math.round(a.specGain * 100)}</span>
           </label>
@@ -358,11 +421,11 @@ function SpecControls() {
             {SPEC_ZONES.filter((z) => z.key !== 'mid').map((z) => (
               <span key={z.key} className="row lbl" style={{ gap: 4 }} title={z.tip}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: z.color, flex: 'none' }} />
-                {z.key === 'body' ? 'タム・スネアの胴' : z.label}
+                {z.key === 'body' ? tr('タム・スネアの胴', 'Tom/snare body') : z.label}
               </span>
             ))}
           </div>
-          <span className="lbl">列の見出しの帯域をクリックすると、原曲をその帯域だけで聴けます。</span>
+          <span className="lbl">{tr('列の見出しの帯域をクリックすると、原曲をその帯域だけで聴けます。', 'Click a band in the column header to hear only that band of the original.')}</span>
         </>
       )}
     </div>
@@ -391,14 +454,14 @@ function AssistCard() {
   return (
     <div className="card">
       <div className="row" style={{ marginBottom: 10 }}>
-        <span style={{ fontWeight: 700 }}>耳コピアシスト</span>
+        <span style={{ fontWeight: 700 }}>{tr('耳コピアシスト', 'Transcription assist')}</span>
         <span className="grow" />
-        <span className="lbl mono">{measureRange(vis.from, vis.to, tempo)} を表示中</span>
+        <span className="lbl mono">{tr(`${measureRange(vis.from, vis.to, tempo)} を表示中`, `Showing ${measureRange(vis.from, vis.to, tempo)}`)}</span>
       </div>
       {a.status === 'loading' && (
         <div style={{ marginBottom: 10 }}>
           <div className="lbl" style={{ marginBottom: 4 }}>
-            原曲を解析中… {Math.round(a.progress * 100)}%（{a.src?.name}）
+            {tr(`原曲を解析中… ${Math.round(a.progress * 100)}%（${a.src?.name ?? ''}）`, `Analyzing the original… ${Math.round(a.progress * 100)}% (${a.src?.name ?? ''})`)}
           </div>
           <div className="progress">
             <div style={{ width: `${Math.round(a.progress * 100)}%` }} />
@@ -408,21 +471,26 @@ function AssistCard() {
       {(a.status === 'nosource' || a.status === 'none') && (
         <div className="notice info" style={{ marginBottom: 10 }}>
           <span style={{ flex: 'none', marginTop: 1 }}>{Icon.info(14)}</span>
-          <span>原曲（BGMチップ ch01）が鳴らせないため、波形と原曲の打点は出ません。曲フォルダを開くか、テンポ合わせ画面で原曲を選んでください。</span>
+          <span>
+            {tr(
+              '原曲（BGMチップ ch01）が鳴らせないため、波形と原曲の打点は出ません。曲フォルダを開くか、テンポ合わせ画面で原曲を選んでください。',
+              "The original (BGM chip, ch01) can't be played, so the waveform and detected hits aren't shown. Open the song folder, or pick the original on the tempo screen.",
+            )}
+          </span>
         </div>
       )}
       {a.status === 'error' && (
         <div className="notice" style={{ marginBottom: 10 }}>
           <span style={{ flex: 'none', marginTop: 1 }}>{Icon.warn(14)}</span>
-          <span>原曲を解析できませんでした: {a.error}</span>
+          <span>{tr(`原曲を解析できませんでした: ${a.error}`, `Couldn't analyze the original: ${a.error}`)}</span>
         </div>
       )}
       <div>
         <div className="lbl" style={{ marginBottom: 6 }}>
-          原曲を聴く帯域
+          {tr('原曲を聴く帯域', 'Listen to a band of the original')}
         </div>
         <div className="seg" style={{ display: 'flex' }}>
-          {BANDS.map(([k, label, tip]) => (
+          {bands().map(([k, label, tip]) => (
             <button key={k} className={a.bandFilter === k ? 'on' : ''} style={{ flex: 1 }} title={tip} onClick={() => setBandFilter(k)}>
               {label}
             </button>
@@ -433,39 +501,55 @@ function AssistCard() {
       {pin ? (
         <div className="similar-box pinned">
           <span style={{ fontSize: 12 }}>
-            小節 <b className="mono">{toMeasure(pin.base)}</b> を直しました。直す前に同じだった小節:
+            {isJa() ? (
+              <>
+                小節 <b className="mono">{toMeasure(pin.base)}</b> を直しました。直す前に同じだった小節:
+              </>
+            ) : (
+              <>
+                You edited measure <b className="mono">{toMeasure(pin.base)}</b>. Measures that matched it before the edit:
+              </>
+            )}
           </span>
           <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>
             {pin.targets.map(toMeasure).join(' · ')}
           </span>
           <div className="row">
             <button className="btn small primary" onClick={() => applySimilar()}>
-              {pin.targets.length} 小節にまとめて反映
+              {tr(`${pin.targets.length} 小節にまとめて反映`, `Apply to all ${pin.targets.length}`)}
             </button>
             <button className="btn small ghost" onClick={clearSimilarPin}>
-              やめる
+              {tr('やめる', 'Cancel')}
             </button>
           </div>
         </div>
       ) : same.length > 0 ? (
         <div className="similar-box">
           <span style={{ fontSize: 12 }}>
-            <b className="mono">{toMeasure(cm)}</b> と同じパターンの小節（{same.length}）
+            {isJa() ? (
+              <>
+                <b className="mono">{toMeasure(cm)}</b> と同じパターンの小節（{same.length}）
+              </>
+            ) : (
+              <>
+                Measures with the same pattern as <b className="mono">{toMeasure(cm)}</b> ({same.length})
+              </>
+            )}
           </span>
           <span className="mono" style={{ fontSize: 12, color: 'var(--accent)' }}>
             {same.slice(0, 16).map(toMeasure).join(' · ')}
             {same.length > 16 ? ' …' : ''}
           </span>
-          <span className="lbl">この小節を直すと、ほかの小節にもまとめて反映できます。</span>
+          <span className="lbl">{tr('この小節を直すと、ほかの小節にもまとめて反映できます。', 'Edit this measure and you can apply the change to the others in one go.')}</span>
         </div>
       ) : null}
       <label className="row lbl" style={{ marginTop: 10 }}>
         <input type="checkbox" checked={a.audioCols} onChange={(e) => useAssist.setState({ audioCols: e.target.checked })} />
-        譜面の右に原曲の打点と波形（スペクトル）を出す
+        {tr('譜面の右に原曲の打点と波形（スペクトル）を出す', 'Show detected hits and the waveform (spectrum) of the original right of the chart')}
       </label>
       {a.audioCols && (
-        <label className="slider-row" style={{ marginTop: 6, gridTemplateColumns: '68px minmax(0, 1fr) 36px' }} title="上げると弱い音も打点として出します（関係ない音も増えます）">
-          <span className="lbl">打点の感度</span>
+        <label className="slider-row" style={{ marginTop: 6, gridTemplateColumns: '68px minmax(0, 1fr) 36px' }} title={tr('上げると弱い音も打点として出します（関係ない音も増えます）', 'Higher values also detect quiet hits (and more unrelated sounds)')}>
+          <span className="lbl">{tr('打点の感度', 'Sensitivity')}</span>
           <input type="range" min={0} max={1} step={0.05} value={a.sensitivity} onChange={(e) => useAssist.setState({ sensitivity: Number(e.target.value) })} />
           <span className="mono lbl">{Math.round(a.sensitivity * 100)}</span>
         </label>
@@ -483,10 +567,13 @@ function DrumModelRow() {
     <div style={{ marginTop: 8 }}>
       <label
         className="row lbl"
-        title={`原曲からドラムの5種（BD・SD・タム・HH・シンバル）の打点を聞き取ります。初回だけモデル（2.2MB）を Hugging Face から、動かす部分（約4MB）をこのサイトから読み込みます。音はこのブラウザの外に出しません。モデル: ${ADTOF.credit}・${ADTOF.license}`}
+        title={tr(
+          `原曲からドラムの5種（BD・SD・タム・HH・シンバル）の打点を聞き取ります。初回だけモデル（2.2MB）を Hugging Face から、動かす部分（約4MB）をこのサイトから読み込みます。音はこのブラウザの外に出しません。モデル: ${ADTOF.credit}・${ADTOF.license}`,
+          `Detects hits of 5 drum classes (BD, SD, toms, HH, cymbals) in the original. The first time, it downloads the model (2.2 MB) from Hugging Face and the runtime (about 4 MB) from this site. The audio never leaves this browser. Model: ${ADTOF.credit}, ${ADTOF.license}`,
+        )}
       >
         <input type="checkbox" checked={d.enabled} onChange={(e) => setDrumsEnabled(e.target.checked)} />
-        ドラムの採譜モデルで打点を聞き取る
+        {tr('ドラムの採譜モデルで打点を聞き取る', 'Detect hits with the drum transcription model')}
       </label>
       {d.enabled && d.status === 'loading' && (
         <div style={{ marginTop: 4 }}>
@@ -501,20 +588,25 @@ function DrumModelRow() {
       {d.enabled && d.status === 'error' && (
         <div className="notice" style={{ marginTop: 6 }}>
           <span style={{ flex: 'none', marginTop: 1 }}>{Icon.warn(14)}</span>
-          <span>{text}。低・中・高の3帯域の打点を出しています。</span>
+          <span>{tr(`${text}。低・中・高の3帯域の打点を出しています。`, `${text}. Showing hits from the 3 bands (low, mid, high) instead.`)}</span>
         </div>
       )}
-      {d.enabled && d.status === 'ready' && <div className="lbl" style={{ marginTop: 2, lineHeight: 1.6 }}>原曲の打点を5種で出し、TAB補完の候補選びと照合にも使っています。</div>}
+      {d.enabled && d.status === 'ready' && (
+        <div className="lbl" style={{ marginTop: 2, lineHeight: 1.6 }}>
+          {tr('原曲の打点を5種で出し、TAB補完の候補選びと照合にも使っています。', 'Shows hits in 5 classes and also uses them to pick and check Tab completion suggestions.')}
+        </div>
+      )}
     </div>
   );
 }
 
-const AUDIO_NOTE: Record<string, string> = {
-  ready: '原曲の聞こえ方も使って予測しています（2番のサビ＝1番のサビ など）。',
-  loading: '原曲の聞こえ方を調べています…',
-  error: '原曲の聞こえ方を調べられませんでした。譜面だけで予測します。',
-  none: '原曲が無いので、譜面だけで予測します。',
-};
+const audioNote = (k: string): string =>
+  ({
+    ready: tr('原曲の聞こえ方も使って予測しています（2番のサビ＝1番のサビ など）。', 'Also uses how the original sounds to predict (e.g. 2nd chorus = 1st chorus).'),
+    loading: tr('原曲の聞こえ方を調べています…', 'Analyzing how the original sounds…'),
+    error: tr('原曲の聞こえ方を調べられませんでした。譜面だけで予測します。', "Couldn't analyze the original. Predicting from the chart alone."),
+    none: tr('原曲が無いので、譜面だけで予測します。', 'No original audio, so predicting from the chart alone.'),
+  })[k] ?? '';
 
 function CompleteCard() {
   const c = useComplete();
@@ -522,28 +614,31 @@ function CompleteCard() {
   return (
     <div className="card">
       <div className="row" style={{ marginBottom: 6 }}>
-        <span style={{ fontWeight: 700 }}>TAB補完</span>
+        <span style={{ fontWeight: 700 }}>{tr('TAB補完', 'Tab completion')}</span>
         <span className="grow" />
         <label className="row lbl" style={{ gap: 6 }}>
           <input type="checkbox" checked={c.enabled} onChange={(e) => setCompleteSettings({ enabled: e.target.checked })} />
-          使う
+          {tr('使う', 'On')}
         </label>
       </div>
       <p className="lbl" style={{ margin: 0, lineHeight: 1.7 }}>
-        チップを置くと、その先の空いた小節に続きを点線で出します。この曲でもう打った小節を写すので、打つほど当たります。
+        {tr(
+          'チップを置くと、その先の空いた小節に続きを点線で出します。この曲でもう打った小節を写すので、打つほど当たります。',
+          'As you place chips, a continuation appears as dotted chips in the empty measures ahead. It copies measures you already wrote in this song, so it gets better the more you write.',
+        )}
       </p>
       {c.enabled && (
         <>
           <div className="form-grid" style={{ marginTop: 8 }}>
-            <span className="lbl">先まで</span>
+            <span className="lbl">{tr('先まで', 'Look ahead')}</span>
             <div className="seg small" style={{ display: 'flex' }}>
               {[1, 2, 3, 4].map((n) => (
                 <button key={n} className={c.ahead === n ? 'on' : ''} style={{ flex: 1 }} onClick={() => setCompleteSettings({ ahead: n })}>
-                  {n}小節
+                  {tr(`${n}小節`, `${n} ${pl(n, 'bar')}`)}
                 </button>
               ))}
             </div>
-            <span className="lbl">出す量</span>
+            <span className="lbl">{tr('出す量', 'Amount')}</span>
             <div className="seg small" style={{ display: 'flex' }}>
               {(Object.keys(AMOUNT) as CompleteAmount[]).map((k) => (
                 <button key={k} className={c.amount === k ? 'on' : ''} style={{ flex: 1 }} title={AMOUNT[k].tip} onClick={() => setCompleteSettings({ amount: k })}>
@@ -552,19 +647,35 @@ function CompleteCard() {
               ))}
             </div>
           </div>
-          <div className="lbl" style={{ marginTop: 8, lineHeight: 1.9, color: 'var(--text3)' }}>
-            <div>
-              <kbd>Tab</kbd> … まとめて入れる、<kbd>Shift</kbd>+<kbd>Tab</kbd> … 1小節だけ
+          {isJa() ? (
+            <div className="lbl" style={{ marginTop: 8, lineHeight: 1.9, color: 'var(--text3)' }}>
+              <div>
+                <kbd>Tab</kbd> … まとめて入れる、<kbd>Shift</kbd>+<kbd>Tab</kbd> … 1小節だけ
+              </div>
+              <div>
+                <kbd>Alt</kbd>+<kbd>]</kbd> <kbd>[</kbd> … 次・前の候補（点線が無いときはカーソルの所に出す）
+              </div>
+              <div>
+                <kbd>Esc</kbd> … 消す。<span style={{ color: '#FF9F43' }}>オレンジの枠</span> … 原曲でその音が聞こえない所（バスドラム・スネア・タム）
+              </div>
             </div>
-            <div>
-              <kbd>Alt</kbd>+<kbd>]</kbd> <kbd>[</kbd> … 次・前の候補（点線が無いときはカーソルの所に出す）
+          ) : (
+            <div className="lbl" style={{ marginTop: 8, lineHeight: 1.9, color: 'var(--text3)' }}>
+              <div>
+                <kbd>Tab</kbd> … accept all, <kbd>Shift</kbd>+<kbd>Tab</kbd> … accept one measure
+              </div>
+              <div>
+                <kbd>Alt</kbd>+<kbd>]</kbd> <kbd>[</kbd> … next / previous suggestion (shows one at the cursor if there are none)
+              </div>
+              <div>
+                <kbd>Esc</kbd> … dismiss. <span style={{ color: '#FF9F43' }}>Orange outline</span> … that sound isn't heard in the original there (bass drum, snare, toms)
+              </div>
             </div>
-            <div>
-              <kbd>Esc</kbd> … 消す。<span style={{ color: '#FF9F43' }}>オレンジの枠</span> … 原曲でその音が聞こえない所（バスドラム・スネア・タム）
-            </div>
-          </div>
+          )}
           <p className="lbl" style={{ margin: '6px 0 0' }}>
-            {c.audio === 'ready' && drumsReady ? '原曲の聞こえ方と、採譜したドラム（バスドラム・スネア・タム）との合い方も使って予測しています。' : AUDIO_NOTE[c.audio]}
+            {c.audio === 'ready' && drumsReady
+              ? tr('原曲の聞こえ方と、採譜したドラム（バスドラム・スネア・タム）との合い方も使って予測しています。', 'Also uses how the original sounds and how well it matches the transcribed drums (bass drum, snare, toms).')
+              : audioNote(c.audio)}
           </p>
         </>
       )}
@@ -584,49 +695,60 @@ function CheckCard() {
   return (
     <div className="card">
       <div className="section-title" style={{ marginBottom: 8 }}>
-        確かめる
+        {tr('確かめる', 'Checks')}
       </div>
       <div className="check-level">
         <div>
-          <div className="lbl">推定レベル（機械的な目安）</div>
+          <div className="lbl">{tr('推定レベル（機械的な目安）', 'Estimated level (computed guide)')}</div>
           <div className="check-lv mono">{lv ? lv.level.toFixed(2) : '—'}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div className="lbl">曲情報のLv</div>
+          <div className="lbl">{tr('曲情報のLv', 'Lv in song info')}</div>
           <div className="mono" style={{ fontSize: 15 }}>
             {formatLevel(cur)}
           </div>
           {lv && (
-            <button className="link-btn" onClick={() => adoptLevel(lv.level)} title="#DLEVEL に書きます（Ctrl+Z で戻せます）">
-              これにする
+            <button className="link-btn" onClick={() => adoptLevel(lv.level)} title={tr('#DLEVEL に書きます（Ctrl+Z で戻せます）', 'Writes it to #DLEVEL (Ctrl+Z to undo)')}>
+              {tr('これにする', 'Use this')}
             </button>
           )}
         </div>
       </div>
       {lv ? (
         <div className="check-facts lbl">
-          平均 {lv.avgNps.toFixed(1)} 打/秒 · 最も密な2秒 {lv.peakNps.toFixed(1)} 打/秒 · 最大同時 {lv.maxChord} · 速い連打 {Math.round(lv.fastRatio * 100)}%
+          {tr(
+            `平均 ${lv.avgNps.toFixed(1)} 打/秒 · 最も密な2秒 ${lv.peakNps.toFixed(1)} 打/秒 · 最大同時 ${lv.maxChord} · 速い連打 ${Math.round(lv.fastRatio * 100)}%`,
+            `Avg ${lv.avgNps.toFixed(1)} hits/s · densest 2 s ${lv.peakNps.toFixed(1)} hits/s · max chord ${lv.maxChord} · fast runs ${Math.round(lv.fastRatio * 100)}%`,
+          )}
         </div>
       ) : (
-        <div className="check-facts lbl">チップが8個以上になると出します。</div>
+        <div className="check-facts lbl">{tr('チップが8個以上になると出します。', 'Shown once there are 8 or more chips.')}</div>
       )}
       <AiLevelRow mech={lv?.level ?? null} />
       <div className="row" style={{ marginTop: 10, gap: 8 }}>
-        <b style={{ fontSize: 12.5 }}>無理な配置</b>
+        <b style={{ fontSize: 12.5 }}>{tr('無理な配置', 'Unplayable spots')}</b>
         {issues.length === 0 ? (
           <span className="lbl" style={{ color: 'var(--ok)' }}>
-            見つかりません
+            {tr('見つかりません', 'None found')}
           </span>
         ) : (
           <>
-            {errors > 0 && <span className="issue-badge error">叩けない {errors}</span>}
-            {warns > 0 && <span className="issue-badge warn">難しい {warns}</span>}
+            {errors > 0 && (
+              <span className="issue-badge error">
+                {tr('叩けない', 'Unplayable')} {errors}
+              </span>
+            )}
+            {warns > 0 && (
+              <span className="issue-badge warn">
+                {tr('難しい', 'Hard')} {warns}
+              </span>
+            )}
           </>
         )}
         <span className="grow" />
-        <label className="row lbl" style={{ gap: 4 }} title="譜面の左端と、かかわるチップに印を出します">
+        <label className="row lbl" style={{ gap: 4 }} title={tr('譜面の左端と、かかわるチップに印を出します', 'Marks them at the left edge of the chart and on the chips involved')}>
           <input type="checkbox" checked={show} onChange={(e) => setShowIssues(e.target.checked)} />
-          譜面に印
+          {tr('譜面に印', 'Mark in chart')}
         </label>
       </div>
       {issues.length > 0 && (
@@ -641,7 +763,7 @@ function CheckCard() {
           </div>
           {issues.length > 4 && (
             <button className="link-btn" onClick={() => setOpen(!open)}>
-              {open ? '閉じる' : `ほか ${issues.length - 4} 件を見る`}
+              {open ? tr('閉じる', 'Close') : tr(`ほか ${issues.length - 4} 件を見る`, `Show ${issues.length - 4} more`)}
             </button>
           )}
         </>
@@ -661,21 +783,25 @@ function AiLevelRow({ mech }: { mech: number | null }) {
     <div className="ai-level">
       <div className="row" style={{ gap: 8 }}>
         <span className="ai-spark">{Icon.sparkle(13)}</span>
-        <b style={{ fontSize: 12.5 }}>AIのレベル判定</b>
+        <b style={{ fontSize: 12.5 }}>{tr('AIのレベル判定', 'AI level rating')}</b>
         <span className="grow" />
-        {r && <span className={`ai-conf ${r.confidence}`}>{r.confidence === 'high' ? '自信度 高' : r.confidence === 'medium' ? '自信度 中' : '自信度 低'}</span>}
+        {r && (
+          <span className={`ai-conf ${r.confidence}`}>
+            {r.confidence === 'high' ? tr('自信度 高', 'High confidence') : r.confidence === 'medium' ? tr('自信度 中', 'Medium confidence') : tr('自信度 低', 'Low confidence')}
+          </span>
+        )}
         <button
           className="btn small"
           disabled={!hasKey || st.loading || !mech}
           onClick={() => void judgeCurrent()}
-          title={hasKey ? `ガイドラインと似た譜面を物差しに判定します（1回 約 ${formatUsd(cost)}）` : NO_KEY_TITLE}
+          title={hasKey ? tr(`ガイドラインと似た譜面を物差しに判定します（1回 約 ${formatUsd(cost)}）`, `Rates the level against the guidelines and similar charts (about ${formatUsd(cost)} per run)`) : noKeyTitle()}
         >
-          {st.loading ? '判定中…' : r ? '判定し直す' : 'AIで判定'}
+          {st.loading ? tr('判定中…', 'Rating…') : r ? tr('判定し直す', 'Rate again') : tr('AIで判定', 'Rate with AI')}
         </button>
       </div>
       {!hasKey && (
         <div className="lbl" style={{ marginTop: 4 }}>
-          {NO_KEY_TITLE}。いまは機械的な推定だけ出しています。
+          {tr(`${noKeyTitle()}。いまは機械的な推定だけ出しています。`, `${noKeyTitle()}. Only the computed estimate is shown for now.`)}
         </div>
       )}
       {st.error && <div className="ai-err">{st.error}</div>}
@@ -685,25 +811,29 @@ function AiLevelRow({ mech }: { mech: number | null }) {
             <span className="check-lv mono" style={{ fontSize: 20 }}>
               {r.level.toFixed(2)}
             </span>
-            {mech !== null && <span className="lbl">計算 {mech.toFixed(2)}</span>}
+            {mech !== null && <span className="lbl">{tr(`計算 ${mech.toFixed(2)}`, `Computed ${mech.toFixed(2)}`)}</span>}
             <span className="grow" />
-            <button className="link-btn" onClick={() => adoptLevel(r.level)} title="#DLEVEL に書きます（Ctrl+Z で戻せます）">
-              これにする
+            <button className="link-btn" onClick={() => adoptLevel(r.level)} title={tr('#DLEVEL に書きます（Ctrl+Z で戻せます）', 'Writes it to #DLEVEL (Ctrl+Z to undo)')}>
+              {tr('これにする', 'Use this')}
             </button>
           </div>
           <ul className="ai-reasons">
             {r.reasons.map((x, i) => (
               <li key={i}>{x}</li>
             ))}
-            {r.hardest && <li>難所: {r.hardest}</li>}
-            {r.gap && <li>計算との違い: {r.gap}</li>}
+            {r.hardest && <li>{tr(`難所: ${r.hardest}`, `Hardest part: ${r.hardest}`)}</li>}
+            {r.gap && <li>{tr(`計算との違い: ${r.gap}`, `Vs. computed: ${r.gap}`)}</li>}
           </ul>
           <div className="lbl">
-            {stale ? '判定のあとに譜面が変わりました · ' : ''}似た譜面 {r.nearCount} 曲で比較 · {formatUsd(r.cost)}
+            {stale ? tr('判定のあとに譜面が変わりました · ', 'The chart changed after rating · ') : ''}
+            {tr(`似た譜面 ${r.nearCount} 曲で比較`, `Compared with ${r.nearCount} similar ${pl(r.nearCount, 'chart')}`)} · {formatUsd(r.cost)}
             {r.nearCount === 0 && (
               <>
                 {' '}
-                · <button className="link-btn" onClick={() => openPage('guideline')}>手元の曲を集計すると精度が上がります</button>
+                ·{' '}
+                <button className="link-btn" onClick={() => openPage('guideline')}>
+                  {tr('手元の曲を集計すると精度が上がります', 'Analyzing your own songs makes it more accurate')}
+                </button>
               </>
             )}
           </div>
@@ -719,9 +849,9 @@ function StatsCard() {
   return (
     <div className="card">
       <div className="section-title" style={{ marginBottom: 8 }}>
-        レーン別のノーツ
+        {tr('レーン別のノーツ', 'Notes per lane')}
         <span className="grow" />
-        <span className="mono lbl">合計 {st.notes}</span>
+        <span className="mono lbl">{tr(`合計 ${st.notes}`, `Total ${st.notes}`)}</span>
       </div>
       <div className="stat-grid">
         {DRUM_LANES.map((l, i) => (
@@ -742,14 +872,34 @@ function NoticeCard() {
   const folder = useEditor((s) => s.folder);
   const items: { level: 'warn' | 'info'; text: string }[] = [];
   if (meta.encodingNote) items.push({ level: 'warn', text: meta.encodingNote });
-  if (meta.hasRandom) items.push({ level: 'info', text: '#RANDOM/#IF の分岐があります。分岐の中のチップは表示・編集できませんが、保存してもそのまま残ります。' });
-  if (!folder) items.push({ level: 'info', text: '曲フォルダを開いていないため、原曲や曲フォルダの音は鳴りません。チップの音は内蔵キットで鳴ります。' });
+  if (meta.hasRandom)
+    items.push({
+      level: 'info',
+      text: tr(
+        '#RANDOM/#IF の分岐があります。分岐の中のチップは表示・編集できませんが、保存してもそのまま残ります。',
+        "This chart has #RANDOM/#IF branches. Chips inside them can't be shown or edited, but they are kept as is when saving.",
+      ),
+    });
+  if (!folder)
+    items.push({
+      level: 'info',
+      text: tr(
+        '曲フォルダを開いていないため、原曲や曲フォルダの音は鳴りません。チップの音は内蔵キットで鳴ります。',
+        "No song folder is open, so the original and the folder's sounds won't play. Chips play with the built-in kit.",
+      ),
+    });
   if (missing.length > 0) {
     const names = missing.slice(0, 6).map((n) => `${toBase36x2(n)} ${wavPath(doc, n) ?? ''}`);
-    items.push({ level: 'warn', text: `見つからない・読めない音が ${missing.length} 個あります: ${names.join('、')}${missing.length > 6 ? ' …' : ''}（MP3以外の形式やファイル名を確認してください）` });
+    items.push({
+      level: 'warn',
+      text: tr(
+        `見つからない・読めない音が ${missing.length} 個あります: ${names.join('、')}${missing.length > 6 ? ' …' : ''}（MP3以外の形式やファイル名を確認してください）`,
+        `${missing.length} ${pl(missing.length, 'sound')} missing or unreadable: ${names.join(', ')}${missing.length > 6 ? ' …' : ''} (check the file names and formats)`,
+      ),
+    });
   }
-  for (const w of meta.warnings.slice(0, 6)) items.push({ level: 'warn', text: `${w.line}行目: ${w.message}` });
-  if (meta.warnings.length > 6) items.push({ level: 'warn', text: `ほかに ${meta.warnings.length - 6} 件の注意があります` });
+  for (const w of meta.warnings.slice(0, 6)) items.push({ level: 'warn', text: tr(`${w.line}行目: ${w.message}`, `Line ${w.line}: ${w.message}`) });
+  if (meta.warnings.length > 6) items.push({ level: 'warn', text: tr(`ほかに ${meta.warnings.length - 6} 件の注意があります`, `${meta.warnings.length - 6} more ${pl(meta.warnings.length - 6, 'warning')}`) });
   if (items.length === 0) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

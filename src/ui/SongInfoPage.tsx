@@ -4,7 +4,7 @@ import type { YtPick } from '../ai/songAgent';
 import { itunesSearch, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type StoreHit } from '../ai/songInfo';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { setField } from '../edit/ops';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { edit, goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion } from '../store/songinfo';
@@ -287,7 +287,7 @@ function LookupCard() {
       </div>
       {!hasKey && !running && (
         <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6 }}>
-          {NO_KEY_TITLE}。キーがあると、Web検索で公式の YouTube 動画・曲の紹介文も探します。
+          {noKeyTitle()}。キーがあると、Web検索で公式の YouTube 動画・曲の紹介文も探します。
         </p>
       )}
       {steps.length > 0 && <StepList />}

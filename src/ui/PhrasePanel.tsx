@@ -2,7 +2,7 @@
 import { useEffect } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { setView, useEditor } from '../store/editor';
 import { tempoOf } from '../store/derived';
 import { applyCandidate, closePhrase, makeCandidates, setPhraseRange, stepCandidate, usePhrase } from '../store/phrase';
@@ -89,7 +89,7 @@ export function PhrasePanel() {
           </>
         ) : (
           <>
-            <span title={NO_KEY_TITLE}>キーが無いので「似た小節からコピー」と「直前小節の複製」だけ出します。</span>{' '}
+            <span title={noKeyTitle()}>キーが無いので「似た小節からコピー」と「直前小節の複製」だけ出します。</span>{' '}
             <button className="link-btn" onClick={() => openSettings('ai')}>
               キーを設定
             </button>

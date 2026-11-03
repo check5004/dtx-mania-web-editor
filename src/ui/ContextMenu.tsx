@@ -3,6 +3,7 @@
 // - 何もない所：グリッドの切り替え（ボタン1回）・ここから再生・ループ・貼り付け
 // - 小節番号・✨ の列：小節の操作。ループの帯：ループの操作。END：曲の終わりの決め方
 // 一度で済む操作（強・中・弱、レーン、グリッド、コマンド）は押すと閉じる。±・スライダー・ホイールは開いたまま微調整できる。
+import { tr, pl } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
@@ -34,7 +35,7 @@ import {
   useEditor,
 } from '../store/editor';
 import { openMeasureGen, useMeasureGen } from '../store/measureGen';
-import { nudgeVel, setVelOf, velStep, VEL_PRESET_NAMES } from '../store/velocity';
+import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
 import { channelName, chipBpmLabel } from './format';
@@ -175,10 +176,10 @@ async function askBpm(pos: Pos) {
   const tempo = tempoOf(doc);
   const cur = tempo.bpmAt(tempo.beatOf(pos.m, pos.f));
   const v = await promptDialog({
-    title: `小節 ${toMeasure(pos.m)} の BPM`,
-    body: 'この位置からのBPMを入力してください（#BPMzz と ch08 で書き出します）。',
+    title: tr(`小節 ${toMeasure(pos.m)} の BPM`, `BPM at measure ${toMeasure(pos.m)}`),
+    body: tr('この位置からのBPMを入力してください（#BPMzz と ch08 で書き出します）。', 'Enter the BPM from this position on (written as #BPMzz and ch08).'),
     value: chipBpmLabel(cur),
-    ok: '決定',
+    ok: tr('決定', 'OK'),
   });
   const bpm = v ? Number(v) : NaN;
   if (Number.isFinite(bpm) && bpm > 0) placeBpmChange(pos, bpm);
@@ -186,10 +187,10 @@ async function askBpm(pos: Pos) {
 
 // ---- チップ -------------------------------------------------------------------
 
-const KINDS: [ChipKind, string, string][] = [
-  ['normal', '通常', ''],
-  ['hidden', '不可視', '叩く必要はあるが見えないチップ'],
-  ['nochip', '音だけ', '空打ちしたときに鳴る音（チップは出ない）'],
+const chipKinds = (): [ChipKind, string, string][] => [
+  ['normal', tr('通常', 'Normal'), ''],
+  ['hidden', tr('不可視', 'Invisible'), tr('叩く必要はあるが見えないチップ', 'A chip you still have to hit, but it is not shown')],
+  ['nochip', tr('音だけ', 'Sound only'), tr('空打ちしたときに鳴る音（チップは出ない）', 'Sound played when hitting the pad with no chip (no chip appears)')],
 ];
 
 function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: number }) {
@@ -225,10 +226,10 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
     <>
       <div className="ctx-head">
         <span className="dot" style={{ background: color, width: 10, height: 10, flex: 'none' }} />
-        <b className="ellipsis">{one ? channelName(one.ch) : `${chips.length} 個のチップ`}</b>
+        <b className="ellipsis">{one ? channelName(one.ch) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</b>
         <span className="ctx-head-sub mono ellipsis">{one ? `${toMeasure(one.m)} · ${fracToString(one.f)}` : laneSummary(chips)}</span>
         {drums.length > 0 && (
-          <button className="ib tiny" onClick={() => hear(drumIds, anchor, true)} title="音を聴く" aria-label="音を聴く">
+          <button className="ib tiny" onClick={() => hear(drumIds, anchor, true)} title={tr('音を聴く', 'Listen')} aria-label={tr('音を聴く', 'Listen')}>
             {Icon.speaker(13)}
           </button>
         )}
@@ -265,8 +266,8 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
           })}
           <div className="ctx-sec">
             <div className="ctx-sec-title">
-              <span>レーンを変える</span>
-              <span className="ctx-dim">同じ時刻のまま・音もそのレーンに</span>
+              <span>{tr('レーンを変える', 'Change lane')}</span>
+              <span className="ctx-dim">{tr('同じ時刻のまま・音もそのレーンに', 'Same timing · uses that lane\'s sound')}</span>
             </div>
             <div className="ctx-lanes">
               {order.map((lane) => {
@@ -277,7 +278,7 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
                     key={lane}
                     className={`ctx-lane ${on ? (lanes.size === 1 ? 'on' : 'some') : ''}`}
                     style={{ ['--c' as string]: def.color }}
-                    title={`${def.name}${on && lanes.size === 1 ? '（今のレーン）' : 'へ移す'}`}
+                    title={on && lanes.size === 1 ? tr(`${def.name}（今のレーン）`, `${def.name} (current lane)`) : tr(`${def.name}へ移す`, `Move to ${def.name}`)}
                     onClick={() => moveTo(lane)}
                   >
                     {def.key}
@@ -287,9 +288,9 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
             </div>
           </div>
           <div className="ctx-row">
-            <span className="ctx-row-label">種類</span>
+            <span className="ctx-row-label">{tr('種類', 'Type')}</span>
             <div className="ctx-tri">
-              {KINDS.map(([k, label, tip]) => (
+              {chipKinds().map(([k, label, tip]) => (
                 <button
                   key={k}
                   className={kinds.size === 1 && kinds.has(k) ? 'on' : ''}
@@ -307,13 +308,13 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
           <Sep />
         </>
       )}
-      {isBpm && <Item label="BPM を変える…" hint="ダブルクリック" onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
+      {isBpm && <Item label={tr('BPM を変える…', 'Change BPM…')} hint={tr('ダブルクリック', 'Double-click')} onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
       {extras.map((it, i) => (
         <ExtraItem key={i} it={it} />
       ))}
       {(isBpm || extras.length > 0) && <Sep />}
       <Item
-        label="コピー"
+        label={tr('コピー', 'Copy')}
         hint="Ctrl+C"
         onClick={then(() => {
           useEditor.setState({ selection: [...ids] });
@@ -321,14 +322,20 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
         })}
       />
       <Item
-        label="切り取り"
+        label={tr('切り取り', 'Cut')}
         hint="Ctrl+X"
         onClick={then(() => {
           useEditor.setState({ selection: [...ids] });
           cutSelection();
         })}
       />
-      <Item icon={Icon.trash(13)} danger label={chips.length > 1 ? `${chips.length} 個を削除` : '削除'} hint={isBpm ? 'Delete' : 'ダブルクリック・Delete'} onClick={then(() => deleteChips(ids))} />
+      <Item
+        icon={Icon.trash(13)}
+        danger
+        label={chips.length > 1 ? tr(`${chips.length} 個を削除`, `Delete ${chips.length}`) : tr('削除', 'Delete')}
+        hint={isBpm ? 'Delete' : tr('ダブルクリック・Delete', 'Double-click / Delete')}
+        onClick={then(() => deleteChips(ids))}
+      />
     </>
   );
 }
@@ -378,13 +385,13 @@ function VelBlock({ ids, anchor, group }: { ids: number[]; anchor: number; group
   }, []);
   const min = step > 1 ? step : 1;
   return (
-    <div className="ctx-sec" ref={box} title={`ホイールでも ±${step}（Shift で 1 ずつ）`}>
+    <div className="ctx-sec" ref={box} title={tr(`ホイールでも ±${step}（Shift で 1 ずつ）`, `The wheel also changes it by ±${step} (Shift: by 1)`)}>
       <div className="ctx-sec-title">
-        <span>ベロシティ</span>
+        <span>{tr('ベロシティ', 'Velocity')}</span>
         <span className="ctx-vel-val mono">{same ? avg : `~${avg}`}</span>
       </div>
       <div className="ctx-tri">
-        {VEL_PRESET_NAMES.map((name, i) => (
+        {velPresetNames().map((name, i) => (
           <button
             key={name}
             className={same && avg === presets[i] ? 'on' : ''}
@@ -399,7 +406,7 @@ function VelBlock({ ids, anchor, group }: { ids: number[]; anchor: number; group
         ))}
       </div>
       <div className="ctx-slider">
-        <button className="ctx-step" onClick={(e) => nudge(-(e.shiftKey ? 1 : step))} title={`-${step}（Shift で -1）`} aria-label="弱く">
+        <button className="ctx-step" onClick={(e) => nudge(-(e.shiftKey ? 1 : step))} title={tr(`-${step}（Shift で -1）`, `-${step} (Shift: -1)`)} aria-label={tr('弱く', 'Softer')}>
           {Icon.minus(12)}
         </button>
         <input
@@ -411,9 +418,9 @@ function VelBlock({ ids, anchor, group }: { ids: number[]; anchor: number; group
           onChange={(e) => setVelOf(ids, Number(e.target.value), group)}
           onPointerUp={() => hear(ids, anchor)}
           onKeyUp={() => hear(ids, anchor)}
-          aria-label="ベロシティ"
+          aria-label={tr('ベロシティ', 'Velocity')}
         />
-        <button className="ctx-step" onClick={(e) => nudge(e.shiftKey ? 1 : step)} title={`+${step}（Shift で +1）`} aria-label="強く">
+        <button className="ctx-step" onClick={(e) => nudge(e.shiftKey ? 1 : step)} title={tr(`+${step}（Shift で +1）`, `+${step} (Shift: +1)`)} aria-label={tr('強く', 'Harder')}>
           {Icon.plus(12)}
         </button>
       </div>
@@ -424,27 +431,31 @@ function VelBlock({ ids, anchor, group }: { ids: number[]; anchor: number; group
 // ---- 何もない所 ----------------------------------------------------------------
 
 /** グリッドのボタンの並び（左ほど粗い）。3連は 8分の3連（1/12）から */
-const GRID_ROWS: { label: string; divs: number[] }[] = [
-  { label: '通常', divs: [4, 8, 16, 32, 64, 192] },
-  { label: '3連', divs: [12, 24, 48, 96] },
-  { label: '5・7連', divs: [20, 40, 28] },
+const gridRows = (): { key: string; label: string; divs: number[] }[] => [
+  { key: 'even', label: tr('通常', 'Even'), divs: [4, 8, 16, 32, 64, 192] },
+  { key: 'tri', label: tr('3連', 'Triplet'), divs: [12, 24, 48, 96] },
+  { key: 'odd', label: tr('5・7連', '5 & 7'), divs: [20, 40, 28] },
 ];
 
-const GRID_NAME: Record<number, string> = {
-  4: '4分',
-  8: '8分',
-  12: '8分の3連',
-  16: '16分',
-  20: '16分の5連',
-  24: '16分の3連',
-  28: '16分の7連',
-  32: '32分',
-  40: '32分の5連',
-  48: '32分の3連',
-  64: '64分',
-  96: '64分の3連',
-  192: 'いちばん細かい',
-};
+function gridName(d: number): string {
+  const names: Record<number, [string, string]> = {
+    4: ['4分', 'quarter'],
+    8: ['8分', '8th'],
+    12: ['8分の3連', '8th triplet'],
+    16: ['16分', '16th'],
+    20: ['16分の5連', '16th quintuplet'],
+    24: ['16分の3連', '16th triplet'],
+    28: ['16分の7連', '16th septuplet'],
+    32: ['32分', '32nd'],
+    40: ['32分の5連', '32nd quintuplet'],
+    48: ['32分の3連', '32nd triplet'],
+    64: ['64分', '64th'],
+    96: ['64分の3連', '64th triplet'],
+    192: ['いちばん細かい', 'finest'],
+  };
+  const n = names[d];
+  return n ? tr(n[0], n[1]) : '';
+}
 
 /** 小節のチップのうち、今のグリッドに乗らないものがあれば、全部が乗る一番粗いグリッド */
 export function gridHint(doc: DtxDoc, m: number, div: number): number | null {
@@ -464,36 +475,42 @@ function GridPicker({ m }: { m: number }) {
   };
   const custom = async () => {
     closeCtxMenu();
-    const v = await promptDialog({ title: 'グリッドの細かさ', body: '全音符をいくつに分けるか（1〜192）。5連の16分なら 20、7連なら 28、6連なら 24。', value: String(div), ok: '決定' });
+    const v = await promptDialog({
+      title: tr('グリッドの細かさ', 'Grid resolution'),
+      body: tr('全音符をいくつに分けるか（1〜192）。5連の16分なら 20、7連なら 28、6連なら 24。', 'How many parts to divide a whole note into (1–192). 16th-note quintuplets: 20, septuplets: 28, sextuplets: 24.'),
+      value: String(div),
+      ok: tr('決定', 'OK'),
+    });
     const n = Math.round(Number(v));
     if (v && n >= 1 && n <= 192) setView({ div: n });
   };
+  const rows = gridRows();
   return (
     <div className="ctx-sec">
       <div className="ctx-sec-title">
         <span>
-          グリッド <b className="mono ctx-cur">1/{div}</b>
+          {tr('グリッド', 'Grid')} <b className="mono ctx-cur">1/{div}</b>
         </span>
-        <span className="ctx-dim" title="[ と ] でも1段ずつ変えられます">
+        <span className="ctx-dim" title={tr('[ と ] でも1段ずつ変えられます', '[ and ] also step through them')}>
           <kbd>[</kbd> <kbd>]</kbd>
         </span>
       </div>
-      {GRID_ROWS.map((row) => (
-        <div className="ctx-grid-row" key={row.label}>
+      {rows.map((row) => (
+        <div className="ctx-grid-row" key={row.key}>
           <span className="rl">{row.label}</span>
           {row.divs.map((d) => (
             <button
               key={d}
               className={`ctx-grid-btn mono ${div === d ? 'on' : ''} ${hint === d ? 'fit' : ''}`}
-              title={`1/${d}（${GRID_NAME[d]}）${hint === d ? '。この小節のチップが全部乗ります' : ''}`}
+              title={tr(`1/${d}（${gridName(d)}）${hint === d ? '。この小節のチップが全部乗ります' : ''}`, `1/${d} (${gridName(d)})${hint === d ? '. Every chip in this measure fits on it' : ''}`)}
               onClick={() => pick(d)}
             >
               {d}
             </button>
           ))}
-          {row === GRID_ROWS[GRID_ROWS.length - 1] && (
-            <button className="link-btn ctx-custom" onClick={() => void custom()} title="好きな数で分ける（6連なら 24 など）">
-              {(GRID_DIVS as readonly number[]).includes(div) ? '任意…' : `任意 ${div}…`}
+          {row === rows[rows.length - 1] && (
+            <button className="link-btn ctx-custom" onClick={() => void custom()} title={tr('好きな数で分ける（6連なら 24 など）', 'Divide by any number (e.g. 24 for sextuplets)')}>
+              {(GRID_DIVS as readonly number[]).includes(div) ? tr('任意…', 'Custom…') : tr(`任意 ${div}…`, `Custom ${div}…`)}
             </button>
           )}
         </div>
@@ -501,7 +518,7 @@ function GridPicker({ m }: { m: number }) {
       {hint !== null && (
         <div className="ctx-fit-note">
           <span className="fit-dot" />
-          小節 {toMeasure(m)} のチップは 1/{hint} なら全部乗ります
+          {tr(`小節 ${toMeasure(m)} のチップは 1/${hint} なら全部乗ります`, `All chips in measure ${toMeasure(m)} fit on 1/${hint}`)}
         </div>
       )}
     </div>
@@ -526,16 +543,22 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
         </>
       )}
       <Sep />
-      <Item icon={Icon.play(11)} label="ここから再生" hint="▶ をここに" onClick={then(() => void playFrom(menu.beat))} />
-      <Item icon={Icon.loop(12)} label={`小節 ${toMeasure(m)} をループ`} onClick={then(() => loopMeasure(m))} />
-      <Item label={clip ? `ここに貼り付け（${clip} 個）` : 'ここに貼り付け'} hint="Ctrl+V" disabled={!clip} title={clip ? undefined : 'コピーしたチップがありません'} onClick={then(() => paste(menu.beat))} />
+      <Item icon={Icon.play(11)} label={tr('ここから再生', 'Play from here')} hint={tr('▶ をここに', 'Moves ▶ here')} onClick={then(() => void playFrom(menu.beat))} />
+      <Item icon={Icon.loop(12)} label={tr(`小節 ${toMeasure(m)} をループ`, `Loop measure ${toMeasure(m)}`)} onClick={then(() => loopMeasure(m))} />
       <Item
-        label={`小節 ${toMeasure(m)} のチップを選ぶ`}
-        hint={inMeasure.length ? `${inMeasure.length} 個` : undefined}
+        label={clip ? tr(`ここに貼り付け（${clip} 個）`, `Paste here (${clip})`) : tr('ここに貼り付け', 'Paste here')}
+        hint="Ctrl+V"
+        disabled={!clip}
+        title={clip ? undefined : tr('コピーしたチップがありません', 'No copied chips')}
+        onClick={then(() => paste(menu.beat))}
+      />
+      <Item
+        label={tr(`小節 ${toMeasure(m)} のチップを選ぶ`, `Select chips in measure ${toMeasure(m)}`)}
+        hint={inMeasure.length ? String(inMeasure.length) : undefined}
         disabled={!inMeasure.length}
         onClick={then(() => useEditor.setState({ selection: inMeasure }))}
       />
-      {menu.col === 'bpm' && <Item label="ここに BPM 変化を置く…" hint="ダブルクリック" onClick={then(() => void askBpm(menu.pos))} />}
+      {menu.col === 'bpm' && <Item label={tr('ここに BPM 変化を置く…', 'Place a BPM change here…')} hint={tr('ダブルクリック', 'Double-click')} onClick={then(() => void askBpm(menu.pos))} />}
     </>
   );
 }
@@ -544,7 +567,14 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
 
 function deleteMeasureWithToast(m: number) {
   const r = deleteMeasures(m, 1);
-  toast(`小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個${r.kept ? `、BPM変化・BGMの開始 ${r.kept} 個は次の小節の頭へ移動` : ''}）。Ctrl+Z で戻せます`, 'ok', 6000);
+  toast(
+    tr(
+      `小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個${r.kept ? `、BPM変化・BGMの開始 ${r.kept} 個は次の小節の頭へ移動` : ''}）。Ctrl+Z で戻せます`,
+      `Deleted measure ${toMeasure(m)} (${r.removed} ${pl(r.removed, 'chip')}${r.kept ? `; moved ${r.kept} BPM-change/BGM-start ${pl(r.kept, 'chip')} to the start of the next measure` : ''}). Ctrl+Z to undo.`,
+    ),
+    'ok',
+    6000,
+  );
 }
 
 function MeasureMenu({ m }: { m: number }) {
@@ -555,18 +585,23 @@ function MeasureMenu({ m }: { m: number }) {
   return (
     <>
       <div className="ctx-head">
-        <b>小節 {toMeasure(m)}</b>
-        <span className="ctx-head-sub">{ids.length ? `チップ ${ids.length} 個` : '空の小節'}</span>
+        <b>{tr(`小節 ${toMeasure(m)}`, `Measure ${toMeasure(m)}`)}</b>
+        <span className="ctx-head-sub">{ids.length ? tr(`チップ ${ids.length} 個`, `${ids.length} ${pl(ids.length, 'chip')}`) : tr('空の小節', 'Empty measure')}</span>
       </div>
-      <Item icon={Icon.sparkle(12)} label={genOpen ? 'AI の生成をやめる' : 'この小節を AI で生成'} hint="✨" onClick={then(() => openMeasureGen(m))} />
-      <Item icon={Icon.play(11)} label="この小節から再生" onClick={then(() => void playFrom(tempo.measureStart(m)))} />
-      <Item icon={Icon.loop(12)} label="この小節をループ" onClick={then(() => loopMeasure(m))} />
-      <Item label="この小節のチップを選ぶ" hint={ids.length ? `${ids.length} 個` : undefined} disabled={!ids.length} onClick={then(() => useEditor.setState({ selection: ids }))} />
-      <Item label="セクション名を付ける…" hint="ダブルクリック" onClick={then(() => openSectionEditor(m))} />
+      <Item icon={Icon.sparkle(12)} label={genOpen ? tr('AI の生成をやめる', 'Stop AI generation') : tr('この小節を AI で生成', 'Generate this measure with AI')} hint="✨" onClick={then(() => openMeasureGen(m))} />
+      <Item icon={Icon.play(11)} label={tr('この小節から再生', 'Play from this measure')} onClick={then(() => void playFrom(tempo.measureStart(m)))} />
+      <Item icon={Icon.loop(12)} label={tr('この小節をループ', 'Loop this measure')} onClick={then(() => loopMeasure(m))} />
+      <Item label={tr('この小節のチップを選ぶ', 'Select chips in this measure')} hint={ids.length ? String(ids.length) : undefined} disabled={!ids.length} onClick={then(() => useEditor.setState({ selection: ids }))} />
+      <Item label={tr('セクション名を付ける…', 'Name a section…')} hint={tr('ダブルクリック', 'Double-click')} onClick={then(() => openSectionEditor(m))} />
       <Sep />
-      <Item label="前の小節をこの小節に写す" disabled={m === 0} title="この小節のドラムを、前の小節と同じにします（Ctrl+D は ▶ の小節）" onClick={then(() => duplicatePrevMeasure(m))} />
-      <Item label="この小節の前に 1 小節入れる" onClick={then(() => insertMeasures(m))} />
-      <Item label="この小節を削除して詰める" danger onClick={then(() => deleteMeasureWithToast(m))} />
+      <Item
+        label={tr('前の小節をこの小節に写す', 'Copy the previous measure here')}
+        disabled={m === 0}
+        title={tr('この小節のドラムを、前の小節と同じにします（Ctrl+D は ▶ の小節）', 'Makes the drums in this measure the same as the previous one (Ctrl+D does it for the ▶ measure)')}
+        onClick={then(() => duplicatePrevMeasure(m))}
+      />
+      <Item label={tr('この小節の前に 1 小節入れる', 'Insert a measure before this one')} onClick={then(() => insertMeasures(m))} />
+      <Item label={tr('この小節を削除して詰める', 'Delete this measure and close the gap')} danger onClick={then(() => deleteMeasureWithToast(m))} />
     </>
   );
 }
@@ -583,15 +618,22 @@ function LoopMenu({ beat }: { beat: number }) {
       {(loop || mark) && (
         <Item
           icon={Icon.close(11)}
-          label={loop ? 'ループを消す' : `${mark!.side === 'a' ? 'A' : 'B'} の印を消す`}
+          label={loop ? tr('ループを消す', 'Clear loop') : tr(`${mark!.side === 'a' ? 'A' : 'B'} の印を消す`, `Clear the ${mark!.side === 'a' ? 'A' : 'B'} mark`)}
           onClick={then(() => setLoop(null))}
         />
       )}
-      {loop && <Item icon={Icon.loop(12)} label={loop.on ? 'ループを止める（範囲は残す）' : 'ループをオンにする'} hint="/" onClick={then(() => setLoop({ ...loop, on: !loop.on }))} />}
+      {loop && (
+        <Item
+          icon={Icon.loop(12)}
+          label={loop.on ? tr('ループを止める（範囲は残す）', 'Turn loop off (keep the range)') : tr('ループをオンにする', 'Turn loop on')}
+          hint="/"
+          onClick={then(() => setLoop({ ...loop, on: !loop.on }))}
+        />
+      )}
       {(loop || mark) && <Sep />}
-      <Item label={`小節 ${toMeasure(m)} をループ`} onClick={then(() => loopMeasure(m))} />
-      <Item label="ここを A（始まり）にする" onClick={then(() => setLoopPoint('a', beat))} />
-      <Item label="ここを B（終わり）にする" onClick={then(() => setLoopPoint('b', beat))} />
+      <Item label={tr(`小節 ${toMeasure(m)} をループ`, `Loop measure ${toMeasure(m)}`)} onClick={then(() => loopMeasure(m))} />
+      <Item label={tr('ここを A（始まり）にする', 'Set A (start) here')} onClick={then(() => setLoopPoint('a', beat))} />
+      <Item label={tr('ここを B（終わり）にする', 'Set B (end) here')} onClick={then(() => setLoopPoint('b', beat))} />
     </>
   );
 }
@@ -604,17 +646,17 @@ function EndMenu() {
   return (
     <>
       <div className="ctx-head">
-        <b>曲の終わり（END）</b>
-        <span className="ctx-head-sub mono">小節 {toMeasure(songEndM(doc))}</span>
+        <b>{tr('曲の終わり（END）', 'Song end (END)')}</b>
+        <span className="ctx-head-sub mono">{tr(`小節 ${toMeasure(songEndM(doc))}`, `Measure ${toMeasure(songEndM(doc))}`)}</span>
       </div>
       <Item
-        label={auto ? '原曲の鳴り終わりに合わせる' : '自動（最後のチップのすぐ後）に戻す'}
-        hint="ダブルクリック"
+        label={auto ? tr('原曲の鳴り終わりに合わせる', 'Match where the original audio ends') : tr('自動（最後のチップのすぐ後）に戻す', 'Back to automatic (right after the last chip)')}
+        hint={tr('ダブルクリック', 'Double-click')}
         disabled={doc.endMeasure === undefined}
         onClick={then(resetSongEnd)}
       />
-      <Item label="最後のチップのすぐ後にする" onClick={then(songEndAtLastChip)} />
-      <Item label="▶ の所にする" onClick={then(songEndAtCursor)} />
+      <Item label={tr('最後のチップのすぐ後にする', 'Right after the last chip')} onClick={then(songEndAtLastChip)} />
+      <Item label={tr('▶ の所にする', 'At ▶')} onClick={then(songEndAtCursor)} />
     </>
   );
 }

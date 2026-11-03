@@ -1,5 +1,6 @@
 // 下のトラック：DTM の音声トラックのように、原曲・ステム・譜面の音を1本ずつ並べる。
 // トラックごとにミュート・ソロ・音量、解析元、譜面の右の列にスペクトルを出すチェック。上の帯はループとセクション。
+import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { computePeaks, stemKindInfo } from '../audio/stems';
 import { engine, type Mix } from '../audio/engine';
@@ -30,6 +31,7 @@ import {
 import { formatTime } from './format';
 import { songLength, usePlayBeat, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
+import { useLang } from '../i18n/useLang';
 import { StemTrackPopover } from './StemTrackPopover';
 import { openSeparation, separating, useSeparate } from '../store/separate';
 
@@ -86,7 +88,7 @@ export function useTrackRows(): Row[] {
   useStems((s) => s.version);
   useSoundsVersion();
   // 譜面の音をいちばん上に（トラックが多くて下に隠れても、編集している音はいつも見える）
-  const rows: Row[] = [{ type: 'chart', id: 'chart', name: '譜面の音', sub: '置いたチップのドラム', color: CHART_COLOR }];
+  const rows: Row[] = [{ type: 'chart', id: 'chart', name: tr('譜面の音', 'Chart sounds'), sub: tr('置いたチップのドラム', 'Drums of the placed chips'), color: CHART_COLOR }];
   const bgm = bgmSource(doc);
   const origBuf = bgm ? engine.buffer(bgm.wav) : null;
   const origFile = bgm ? ((wavPath(doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '') : '';
@@ -94,15 +96,15 @@ export function useTrackRows(): Row[] {
     rows.push({
       type: 'orig',
       id: 'orig',
-      name: '原曲',
-      sub: origFile || '音声ファイルなし',
+      name: tr('原曲', 'Original'),
+      sub: origFile || tr('音声ファイルなし', 'No audio file'),
       color: ORIG_COLOR,
       state: origBuf ? 'ready' : !bgm ? 'none' : loading ? 'loading' : 'missing',
     });
   }
   const se = seFiles(doc);
   if (se.length) {
-    rows.push({ type: 'se', id: 'se', name: 'SE', sub: se.length > 1 ? `${se[0]} ほか${se.length - 1}` : se[0], color: SE_COLOR });
+    rows.push({ type: 'se', id: 'se', name: 'SE', sub: se.length > 1 ? tr(`${se[0]} ほか${se.length - 1}`, `${se[0]} + ${se.length - 1} more`) : se[0], color: SE_COLOR });
   }
   for (const t of stems) {
     const st = status[t.file];
@@ -110,7 +112,7 @@ export function useTrackRows(): Row[] {
       type: 'stem',
       id: t.file,
       name: t.name,
-      sub: `${t.file.replace(/^stems\//, '')}${st === 'missing' ? ' · 見つかりません' : st === 'error' ? ' · 読めません' : st === 'loading' ? ' · 読み込み中…' : ''}`,
+      sub: `${t.file.replace(/^stems\//, '')}${st === 'missing' ? tr(' · 見つかりません', ' · not found') : st === 'error' ? tr(' · 読めません', ' · unreadable') : st === 'loading' ? tr(' · 読み込み中…', ' · loading…') : ''}`,
       color: stemKindInfo(t.kind).color,
       t,
     });
@@ -149,8 +151,8 @@ export function setTrack(row: Row, p: { gain?: number; mute?: boolean; solo?: bo
 /** 自分ではミュートしていないのに鳴らないわけ（ほかのトラックのソロ・曲の音をまとめて消している） */
 export function silentWhy(row: Row, mix: Mix, on: boolean, muted: boolean, soloed: boolean): string {
   if (on || muted) return '';
-  if (anySolo() && !soloed) return '（他のトラックがソロ）';
-  if (mix.bgmMute && row.type !== 'chart') return '（曲の音をまとめて消しています）';
+  if (anySolo() && !soloed) return tr('（他のトラックがソロ）', ' (another track is soloed)');
+  if (mix.bgmMute && row.type !== 'chart') return tr('（曲の音をまとめて消しています）', ' (the song audio is muted as a whole)');
   return '';
 }
 
@@ -538,7 +540,7 @@ function Corner({ length, open }: { length: number; open: boolean }) {
   const sepBusy = separating();
   return (
     <div className="tracks-corner" style={{ width: HEAD_W }}>
-      <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? 'トラックを閉じる（上の境目をドラッグで高さを変えられます）' : 'トラックを開く'} aria-expanded={open}>
+      <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? tr('トラックを閉じる（上の境目をドラッグで高さを変えられます）', 'Close the tracks (drag the edge above to change their height)') : tr('トラックを開く', 'Open the tracks')} aria-expanded={open}>
         {open ? Icon.chevronDown(14) : Icon.chevronUp(14)}
       </button>
       <span className="mono t-now">{formatTime(tempoOf(doc).beatToSec(Math.max(0, beat)))}</span>
@@ -549,21 +551,21 @@ function Corner({ length, open }: { length: number; open: boolean }) {
           {busy}
         </span>
       ) : sepBusy ? (
-        <button className="link-btn" onClick={openSeparation} title="原曲をステムに分解しています（ステムとミックスの画面で、ようすを見る・中止する）">
-          分解中 {sepPhase === 'run' || sepPhase === 'encode' ? `${Math.round(sepProgress * 100)}%` : '…'}
+        <button className="link-btn" onClick={openSeparation} title={tr('原曲をステムに分解しています（ステムとミックスの画面で、ようすを見る・中止する）', 'Splitting the original into stems (watch or cancel it on the Stems and mix screen)')}>
+          {tr('分解中', 'Splitting')} {sepPhase === 'run' || sepPhase === 'encode' ? `${Math.round(sepProgress * 100)}%` : '…'}
         </button>
       ) : (
         <>
-          <button className="link-btn" onClick={() => file.current?.click()} title="ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする">
-            {Icon.plus(12)} ステム
+          <button className="link-btn" onClick={() => file.current?.click()} title={tr('ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする', 'Load stems (audio split into drums, bass, vocals, etc.) as tracks')}>
+            {Icon.plus(12)} {tr('ステム', 'Stems')}
           </button>
           {stems.length === 0 && bgmSource(doc) && (
-            <button className="link-btn" onClick={openSeparation} title="原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする">
-              分解
+            <button className="link-btn" onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする', 'Split the original in the browser into drums and no-drums (or per instrument) and add them as stem tracks')}>
+              {tr('分解', 'Split')}
             </button>
           )}
           {stems.length > 0 && (
-            <button className="link-btn" onClick={() => openPage('stems')} title="ステムとミックスの画面（頭のずれ・パン・書き出し）">
+            <button className="link-btn" onClick={() => openPage('stems')} title={tr('ステムとミックスの画面（頭のずれ・パン・書き出し）', 'Stems and mix screen (start offset, pan, export)')}>
               {Icon.layers(12)}
             </button>
           )}
@@ -598,12 +600,13 @@ function Ruler({ length, span }: { length: number; span: number }) {
   const colors = useSidecar((s) => s.sectionColors);
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
   const handlers = useSeekPointer(span, true);
+  const lang = useLang();
   useDraw(
     ref,
     (ctx, W, H, dpr) => {
       const len = seekLength(span);
       const tempo = tempoOf(doc);
-      const key = [doc, W, H, len, sections, colors, dpr];
+      const key = [doc, W, H, len, sections, colors, dpr, lang];
       if (!cache.current || cache.current.key.some((v, i) => v !== key[i])) {
         const off = cache.current?.canvas ?? document.createElement('canvas');
         off.width = Math.floor(W * dpr);
@@ -616,12 +619,12 @@ function Ruler({ length, span }: { length: number; span: number }) {
         c.font = '10px system-ui, sans-serif';
         c.textBaseline = 'middle';
         c.fillStyle = '#4E4532';
-        c.fillText('A–B ループ: ここをドラッグ', 6, LOOP_H / 2 + 1);
+        c.fillText(tr('A–B ループ: ここをドラッグ', 'A–B loop: drag here'), 6, LOOP_H / 2 + 1);
         if (sections.length === 0) {
           c.fillStyle = '#151A21';
           c.fillRect(0, SEC_TOP, W, SEC_H);
           c.fillStyle = '#5F6978';
-          c.fillText('セクション: 小節番号をダブルクリックで付けられます', 6, SEC_TOP + SEC_H / 2 + 1);
+          c.fillText(tr('セクション: 小節番号をダブルクリックで付けられます', 'Sections: double-click a measure number to add one'), 6, SEC_TOP + SEC_H / 2 + 1);
         } else {
           const firstX = (tempo.beatToSec(tempo.measureStart(sections[0].m)) / len) * W;
           if (firstX > 2) {
@@ -656,15 +659,21 @@ function Ruler({ length, span }: { length: number; span: number }) {
       ctx.restore();
       drawOverlay(ctx, W, H, span, SEC_TOP, { tabs: true, cursor, beat, playing, end: length });
     },
-    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, colors],
+    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, colors, lang],
   );
   return (
     <canvas
       ref={ref}
       className="tracks-ruler"
       {...handlers}
-      aria-label="ループの帯とセクション。クリックで再生を始める位置、上の帯のドラッグでループの範囲、END の札のドラッグで曲の終わり"
-      title="クリック: 再生を始める位置（▶）/ 上の帯をドラッグ: ループ（A–B）の範囲、A・B の印をドラッグで端を動かす / 右クリック（上の帯）: ループのメニュー（消す・ここを A・B に）/ END の札をドラッグ: 曲の終わりを動かす（ダブルクリックで原曲の終わりに戻す、右クリックでメニュー）"
+      aria-label={tr(
+        'ループの帯とセクション。クリックで再生を始める位置、上の帯のドラッグでループの範囲、END の札のドラッグで曲の終わり',
+        'Loop strip and sections. Click to set the playback start, drag the top strip for the loop range, drag the END tag for the song end',
+      )}
+      title={tr(
+        'クリック: 再生を始める位置（▶）/ 上の帯をドラッグ: ループ（A–B）の範囲、A・B の印をドラッグで端を動かす / 右クリック（上の帯）: ループのメニュー（消す・ここを A・B に）/ END の札をドラッグ: 曲の終わりを動かす（ダブルクリックで原曲の終わりに戻す、右クリックでメニュー）',
+        'Click: playback start (▶) / Drag the top strip: loop range (A–B); drag the A or B mark to move that end / Right-click (top strip): loop menu (clear, set A or B here) / Drag the END tag: move the song end (double-click to go back to the end of the original audio, right-click for a menu)',
+      )}
     />
   );
 }
@@ -685,6 +694,7 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
   const sounds = useSoundsVersion();
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
   const handlers = useSeekPointer(span, false);
+  const lang = useLang();
   const H = rows.length * rowH;
   const audible = rows.map(rowAudible).join('');
   useDraw(
@@ -694,7 +704,7 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
       const tempo = tempoOf(doc);
       const bgm = bgmSource(doc);
       const at = bgm?.sec ?? 0;
-      const key = [doc, W, Hc, len, rowH, rows.map((r) => r.id).join('|'), audible, sections, stems, version, sounds, dpr];
+      const key = [doc, W, Hc, len, rowH, rows.map((r) => r.id).join('|'), audible, sections, stems, version, sounds, dpr, lang];
       if (!cache.current || cache.current.key.some((v, i) => v !== key[i])) {
         const off = cache.current?.canvas ?? document.createElement('canvas');
         off.width = Math.floor(W * dpr);
@@ -753,11 +763,11 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
               const msg =
                 r.type === 'orig'
                   ? r.state === 'loading'
-                    ? '読み込み中…'
+                    ? tr('読み込み中…', 'Loading…')
                     : r.state === 'missing'
-                      ? '原曲のファイルが曲フォルダに見つかりません'
-                      : '原曲（音声ファイル）を読み込むと波形が出ます。ステムだけでも使えます（「＋ステム」）'
-                  : '読み込み中…';
+                      ? tr('原曲のファイルが曲フォルダに見つかりません', 'The original audio file is not in the song folder')
+                      : tr('原曲（音声ファイル）を読み込むと波形が出ます。ステムだけでも使えます（「＋ステム」）', 'Load the original audio file to see its waveform. Stems alone also work ("+ Stems")')
+                  : tr('読み込み中…', 'Loading…');
               c.fillText(msg, 8, top + rowH / 2);
             }
           }
@@ -778,7 +788,7 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
       ctx.restore();
       drawOverlay(ctx, W, Hc, span, 0, { tabs: false, cursor, beat, playing, end: length });
     },
-    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix],
+    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix, lang],
   );
   return (
     <canvas
@@ -786,8 +796,14 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
       className="tracks-lanes"
       style={{ height: H }}
       {...handlers}
-      aria-label="トラックの波形。クリックで再生を始める位置、A・B の線をドラッグでループの端、END の線のドラッグで曲の終わり"
-      title="クリック: 再生を始める位置（▶）/ A・B の線をドラッグ: ループの端を動かす / END（白い線）をドラッグ: 曲の終わりを動かす"
+      aria-label={tr(
+        'トラックの波形。クリックで再生を始める位置、A・B の線をドラッグでループの端、END の線のドラッグで曲の終わり',
+        'Track waveforms. Click to set the playback start, drag the A or B line for the loop ends, drag the END line for the song end',
+      )}
+      title={tr(
+        'クリック: 再生を始める位置（▶）/ A・B の線をドラッグ: ループの端を動かす / END（白い線）をドラッグ: 曲の終わりを動かす',
+        'Click: playback start (▶) / Drag the A or B line: move that loop end / Drag END (white line): move the song end',
+      )}
     />
   );
 }
@@ -811,10 +827,14 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
       <div className="trk off" style={{ height: h, borderLeftColor: row.color }}>
         <div className="trk-name">
           <b>{row.name}</b>
-          {tall && <span className="sub ellipsis">{row.state === 'missing' ? `${row.sub} · 見つかりません` : row.state === 'loading' ? '読み込み中…' : 'まだありません'}</span>}
+          {tall && (
+            <span className="sub ellipsis">
+              {row.state === 'missing' ? tr(`${row.sub} · 見つかりません`, `${row.sub} · not found`) : row.state === 'loading' ? tr('読み込み中…', 'Loading…') : tr('まだありません', 'None yet')}
+            </span>
+          )}
         </div>
-        <button className="btn small" onClick={pickBgmFile} title="原曲（音声ファイル）を読み込む。曲フォルダにコピーして BGM（#WAV・ch01）に登録します">
-          {Icon.plus(13)} 原曲を読み込む
+        <button className="btn small" onClick={pickBgmFile} title={tr('原曲（音声ファイル）を読み込む。曲フォルダにコピーして BGM（#WAV・ch01）に登録します', 'Load the original audio file. It is copied into the song folder and registered as the BGM (#WAV, ch01)')}>
+          {Icon.plus(13)} {tr('原曲を読み込む', 'Load original')}
         </button>
       </div>
     );
@@ -839,7 +859,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
     <div
       className={`trk ${on ? '' : 'off'}`}
       style={{ height: h, borderLeftColor: row.color }}
-      title={why ? `鳴っていません${why}` : undefined}
+      title={why ? tr(`鳴っていません${why}`, `Not playing${why}`) : undefined}
       onContextMenu={
         isStem
           ? (e) => {
@@ -851,11 +871,11 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
     >
       <div className="trk-name">
         <span className="trk-title">
-          <b className="ellipsis" onDoubleClick={isStem ? openEdit : undefined} title={isStem ? `${row.name}（ダブルクリックで名前と種類を変える）` : undefined}>
+          <b className="ellipsis" onDoubleClick={isStem ? openEdit : undefined} title={isStem ? tr(`${row.name}（ダブルクリックで名前と種類を変える）`, `${row.name} (double-click to change the name and type)`) : undefined}>
             {row.name}
           </b>
           {isStem && (
-            <button className={`ib trk-edit ${edit ? 'open' : ''}`} onClick={openEdit} title="名前と種類を変える（名前のダブルクリック・右クリックでも）" aria-label={`${row.name}の名前と種類を変える`}>
+            <button className={`ib trk-edit ${edit ? 'open' : ''}`} onClick={openEdit} title={tr('名前と種類を変える（名前のダブルクリック・右クリックでも）', 'Change the name and type (or double-click / right-click the name)')} aria-label={tr(`${row.name}の名前と種類を変える`, `Change the name and type of ${row.name}`)}>
               {Icon.pencil(11)}
             </button>
           )}
@@ -875,23 +895,23 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
           }}
           title={
             isAnalysis
-              ? '解析元：波形・原曲の打点・BPM推定をこのトラックから作っています'
-              : '解析元にする（波形・原曲の打点・BPM推定をこのトラックから作る）'
+              ? tr('解析元：波形・原曲の打点・BPM推定をこのトラックから作っています', 'Analysis source: the waveform, detected hits and BPM estimate come from this track')
+              : tr('解析元にする（波形・原曲の打点・BPM推定をこのトラックから作る）', 'Use as the analysis source (the waveform, detected hits and BPM estimate come from this track)')
           }
-          aria-label={`${row.name}を解析元にする`}
+          aria-label={tr(`${row.name}を解析元にする`, `Use ${row.name} as the analysis source`)}
           aria-pressed={isAnalysis}
         />
       ) : (
         <span className="radio-pad" />
       )}
-      <button className={`ms m ${muted ? 'on' : ''}`} onClick={() => set({ mute: !muted })} aria-label={`${row.name}をミュート`} title={`ミュート${row.type === 'chart' ? '（Alt+2）' : ''}`}>
+      <button className={`ms m ${muted ? 'on' : ''}`} onClick={() => set({ mute: !muted })} aria-label={tr(`${row.name}をミュート`, `Mute ${row.name}`)} title={`${tr('ミュート', 'Mute')}${row.type === 'chart' ? tr('（Alt+2）', ' (Alt+2)') : ''}`}>
         M
       </button>
       <button
         className={`ms s ${soloed ? 'on' : ''}`}
         onClick={(e) => (e.altKey ? soloOnly(row.id) : set({ solo: !soloed }))}
-        aria-label={`${row.name}をソロ`}
-        title="ソロ（Alt+クリックでこのトラックだけ）"
+        aria-label={tr(`${row.name}をソロ`, `Solo ${row.name}`)}
+        title={tr('ソロ（Alt+クリックでこのトラックだけ）', 'Solo (Alt+click for this track only)')}
       >
         S
       </button>
@@ -905,12 +925,12 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
         style={{ accentColor: row.color }}
         onChange={(e) => set({ gain: Number(e.target.value) })}
         onDoubleClick={() => set({ gain: defGain })}
-        aria-label={`${row.name}の音量`}
-        title={`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`}
+        aria-label={tr(`${row.name}の音量`, `${row.name} volume`)}
+        title={tr(`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`, `${row.name} volume (double-click to reset to ${pct(defGain)})`)}
       />
       <span className="mono trk-v">{pct(gain)}</span>
       {row.type === 'orig' || row.type === 'stem' ? (
-        <label className={`trk-spec ${specOn ? 'on' : ''}`} title="譜面の右の列にこのトラックのスペクトルを出す（外すと波形に戻ります）">
+        <label className={`trk-spec ${specOn ? 'on' : ''}`} title={tr('譜面の右の列にこのトラックのスペクトルを出す（外すと波形に戻ります）', "Show this track's spectrum in the column right of the chart (uncheck to go back to the waveform)")}>
           <input
             type="checkbox"
             checked={specOn}
@@ -925,7 +945,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
               }
             }}
           />
-          スペクトル
+          {tr('スペクトル', 'Spectrum')}
         </label>
       ) : (
         <span className="trk-spec pad" />

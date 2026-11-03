@@ -1,6 +1,7 @@
 // 原曲のドラムの採譜（ADTOF）の状態。解析元の音（BGM か、解析元に選んだステム）が決まったら、別スレッドで採譜する。
 // 結果は「原曲の打点」の列（5種）、TAB補完の「原曲と照合」、AI のフレーズ候補に渡す原曲の打点に使う。
 // 一度採譜した音はブラウザに覚えておき（transcribe/client）、次に開いたときはすぐ出す。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import type { DrumClass } from '../bench/classes';
 import { transcribe, type TranscribeStage } from '../transcribe/client';
@@ -151,10 +152,10 @@ export function drumHitsByClass(sensitivity: number): DrumHitsByClass | null {
 /** 進み具合の表示 */
 export function drumStatusText(d: DrumState): string {
   if (d.status === 'loading') {
-    if (d.stage === 'model') return `採譜モデルを読み込み中… ${Math.round(d.progress * 100)}%`;
-    if (d.stage === 'run') return `ドラムを採譜中… ${Math.round(d.progress * 100)}%`;
-    return 'ドラムの採譜を準備中…';
+    if (d.stage === 'model') return tr(`採譜モデルを読み込み中… ${Math.round(d.progress * 100)}%`, `Loading the transcription model… ${Math.round(d.progress * 100)}%`);
+    if (d.stage === 'run') return tr(`ドラムを採譜中… ${Math.round(d.progress * 100)}%`, `Transcribing drums… ${Math.round(d.progress * 100)}%`);
+    return tr('ドラムの採譜を準備中…', 'Preparing drum transcription…');
   }
-  if (d.status === 'error') return `採譜できませんでした: ${d.error ?? ''}`;
+  if (d.status === 'error') return tr(`採譜できませんでした: ${d.error ?? ''}`, `Couldn't transcribe: ${d.error ?? ''}`);
   return '';
 }

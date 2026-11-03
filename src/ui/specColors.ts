@@ -1,5 +1,6 @@
 // スペクトルの色。周波数の帯でドラムのレーンの色に寄せる（キック=紫、タム・スネアの胴=橙、
 // その他の楽器が多い中域=灰青、スネアの響き=黄、ハイハット・シンバル=水色）。明るさが音の大きさ。
+import { withTr } from '../i18n';
 import { SPEC_F_HI, SPEC_F_LO, binFreq } from '../audio/spectro';
 
 /** 帯域の目安（列の見出しと色の切れ目に使う） */
@@ -17,12 +18,19 @@ export interface SpecZone {
   tip: string;
 }
 
+// 見出しと説明は言語で変わる（withTr のゲッター）
+const zone = (z: Omit<SpecZone, 'label' | 'short' | 'tip'>, label: [string, string], short: [string, string], tip: [string, string]): SpecZone =>
+  withTr(z as SpecZone, { label, short, tip });
+
 export const SPEC_ZONES: readonly SpecZone[] = [
-  { key: 'kick', label: 'キック', short: 'BD', from: SPEC_F_LO, to: 120, color: '#A48CFF', listen: 'low', tip: 'キック（バスドラム）の胴鳴り。〜120Hz' },
-  { key: 'body', label: '胴', short: '胴', from: 120, to: 400, color: '#FF9A3C', listen: 'mid', tip: 'タム・スネアの胴鳴り。120〜400Hz（ベースも重なる）' },
-  { key: 'mid', label: '中', short: '中', from: 400, to: 1600, color: '#7F93AD', listen: 'mid', tip: '声・ギターが多い帯。400〜1600Hz（ドラムは目立ちにくい）' },
-  { key: 'snare', label: 'スネア', short: 'SD', from: 1600, to: 5000, color: '#FFD54F', listen: 'mid', tip: 'スネアの響き・アタック。1.6〜5kHz' },
-  { key: 'metal', label: 'HH・シンバル', short: 'HH', from: 5000, to: SPEC_F_HI, color: '#4FC3F7', listen: 'high', tip: 'ハイハット・シンバル・ライド。5kHz〜。短い線＝クローズ、長く伸びる＝オープン・クラッシュ' },
+  zone({ key: 'kick', from: SPEC_F_LO, to: 120, color: '#A48CFF', listen: 'low' }, ['キック', 'Kick'], ['BD', 'BD'], ['キック（バスドラム）の胴鳴り。〜120Hz', 'Kick (bass drum) body. Up to 120 Hz']),
+  zone({ key: 'body', from: 120, to: 400, color: '#FF9A3C', listen: 'mid' }, ['胴', 'Body'], ['胴', 'Bd'], ['タム・スネアの胴鳴り。120〜400Hz（ベースも重なる）', 'Tom and snare body. 120–400 Hz (bass overlaps here too)']),
+  zone({ key: 'mid', from: 400, to: 1600, color: '#7F93AD', listen: 'mid' }, ['中', 'Mid'], ['中', 'Mid'], ['声・ギターが多い帯。400〜1600Hz（ドラムは目立ちにくい）', 'Mostly vocals and guitar. 400–1600 Hz (drums stand out less here)']),
+  zone({ key: 'snare', from: 1600, to: 5000, color: '#FFD54F', listen: 'mid' }, ['スネア', 'Snare'], ['SD', 'SD'], ['スネアの響き・アタック。1.6〜5kHz', 'Snare ring and attack. 1.6–5 kHz']),
+  zone({ key: 'metal', from: 5000, to: SPEC_F_HI, color: '#4FC3F7', listen: 'high' }, ['HH・シンバル', 'HH/cymbals'], ['HH', 'HH'], [
+    'ハイハット・シンバル・ライド。5kHz〜。短い線＝クローズ、長く伸びる＝オープン・クラッシュ',
+    'Hi-hat, cymbals and ride. 5 kHz and up. Short lines = closed, long trails = open or crash',
+  ]),
 ];
 
 const BG: [number, number, number] = [11, 14, 19];

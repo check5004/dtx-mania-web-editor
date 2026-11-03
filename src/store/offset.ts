@@ -1,6 +1,7 @@
 // 「原曲の打点」（ドラムの採譜）と譜面のチップのずれ（assist/offsetCheck）を、今の譜面と採譜の結果で測る。
 // 原曲の打点の見出しに出し、ⓘ の説明から1クリックで直す（開始位置＝BGM の位置、または BPM）。
 // 打点をステムから取っているときは、ステムと原曲のずれ（audio/lag）も測る（分離ソフトが頭に無音を足すことがあるため）。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { analyzeOffset, chipTimes, constantBpm, localOffset, shiftBgm, type OffsetReport } from '../assist/offsetCheck';
 import { applyPlan, evaluatePlan, normalizeAnchors, type TempoAnchor } from '../assist/tempoPlan';
@@ -104,11 +105,11 @@ export function stemLagWarn(): StemLag | null {
  */
 export function offsetBadge(from: number, to: number): string | null {
   const sl = stemLagWarn();
-  if (sl) return `ステム ${fmtMs(sl.lag!)}`;
+  if (sl) return tr(`ステム ${fmtMs(sl.lag!)}`, `Stem ${fmtMs(sl.lag!)}`);
   const r = offsetReport();
   if (!r || r.verdict === 'ok' || r.verdict === 'few') return null;
   const v = r.verdict === 'start' ? r.offset : (localOffset(r, from, to) ?? r.offset);
-  return `ずれ ${fmtMs(v)}`;
+  return tr(`ずれ ${fmtMs(v)}`, `Off ${fmtMs(v)}`);
 }
 
 // ---- 直す ----------------------------------------------------------------------------
@@ -142,7 +143,7 @@ export function fixStart(): boolean {
   const res = { err: null as number | null };
   const side = anchorSide(before, after);
   const ok = edit(
-    `開始位置を ${fmtMs(d)} 直す`,
+    tr(`開始位置を ${fmtMs(d)} 直す`, `Shift the start by ${fmtMs(d)}`),
     (dr) => {
       res.err = shiftBgm(dr, tempo, d);
     },
@@ -151,15 +152,18 @@ export function fixStart(): boolean {
   if (!ok) {
     toast(
       res.err === null
-        ? '原曲の始まりが譜面の頭に近いため、これ以上前へ動かせません。テンポ合わせで小節番号をうしろにしてください。'
-        : 'ずれが小さく、BGM の位置（1小節を384に分けた位置）では動かせませんでした。',
+        ? tr(
+            '原曲の始まりが譜面の頭に近いため、これ以上前へ動かせません。テンポ合わせで小節番号をうしろにしてください。',
+            "The original starts too close to the top of the chart to move it any earlier. Move the measure numbers later in Tempo sync.",
+          )
+        : tr('ずれが小さく、BGM の位置（1小節を384に分けた位置）では動かせませんでした。', "The offset is too small to move the BGM (positions are 1/384 of a measure)."),
       'warn',
       6000,
     );
     return false;
   }
   side.redo();
-  toast(`開始位置を ${fmtMs(d)} 直しました（原曲の BGM のチップを動かしました）。Ctrl+Z で戻せます`, 'ok');
+  toast(tr(`開始位置を ${fmtMs(d)} 直しました（原曲の BGM のチップを動かしました）。Ctrl+Z で戻せます`, `Shifted the start by ${fmtMs(d)} (moved the original's BGM chip). Ctrl+Z to undo`), 'ok');
   return true;
 }
 
@@ -174,14 +178,21 @@ export function fixBpm(): boolean {
   const anchor: TempoAnchor = { m, t: fit.t0 + tempo.measureStart(m) * (60 / fit.bpm) };
   const r = evaluatePlan(doc, { bpm: fit.bpm, anchors: [anchor] });
   if (!r.bgm) {
-    toast('原曲の始まりが譜面の頭より前になるため、BGM を置けません。テンポ合わせで小節番号をうしろにしてください。', 'warn', 6000);
+    toast(
+      tr(
+        '原曲の始まりが譜面の頭より前になるため、BGM を置けません。テンポ合わせで小節番号をうしろにしてください。',
+        "The original would start before the top of the chart, so the BGM can't be placed. Move the measure numbers later in Tempo sync.",
+      ),
+      'warn',
+      6000,
+    );
     return false;
   }
   const side = anchorSide(before, [anchor]);
-  const ok = edit(`BPM を ${fit.bpm} に直す`, (d) => applyPlan(d, r, null), { side });
+  const ok = edit(tr(`BPM を ${fit.bpm} に直す`, `Set BPM to ${fit.bpm}`), (d) => applyPlan(d, r, null), { side });
   if (!ok) return false;
   side.redo();
-  toast(`BPM を ${fit.from} から ${fit.bpm} に直し、原曲の位置も合わせました。Ctrl+Z で戻せます`, 'ok');
+  toast(tr(`BPM を ${fit.from} から ${fit.bpm} に直し、原曲の位置も合わせました。Ctrl+Z で戻せます`, `Changed BPM from ${fit.from} to ${fit.bpm} and repositioned the original. Ctrl+Z to undo`), 'ok');
   return true;
 }
 
@@ -229,6 +240,10 @@ export function fixStemLag(): boolean {
   if (!t) return false;
   const next = Math.round(t.offsetMs - s.lag * 1000);
   updateStem(s.file, { offsetMs: next });
-  toast(`ステム（${t.name}）の頭のずれを ${t.offsetMs} → ${next}ms にしました。打点は採譜し直してから出ます`, 'ok', 6000);
+  toast(
+    tr(`ステム（${t.name}）の頭のずれを ${t.offsetMs} → ${next}ms にしました。打点は採譜し直してから出ます`, `Changed the start offset of the stem (${t.name}) from ${t.offsetMs} to ${next}ms. Hits appear after transcribing again`),
+    'ok',
+    6000,
+  );
   return true;
 }

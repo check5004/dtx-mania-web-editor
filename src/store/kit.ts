@@ -1,5 +1,6 @@
 // 使うキット。譜面を書くときはキットを選ぶだけでよく、WAV 番号の割り当てはエディタが行う。
 // キットは「同梱の標準キット」と「ライブラリのキット（取り込んだ曲のキット・自分で作ったキット）」。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { builtinFile, builtinKitById, KIT_LANES, laneByKey, virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
@@ -25,19 +26,19 @@ export interface KitChoice {
   id: string;
   name: string;
   desc: string;
-  group: '標準キット' | '曲から' | '自分のキット';
+  group: 'builtin' | 'song' | 'own';
 }
 
 export function kitChoices(): KitChoice[] {
   const lib = useLibrary.getState();
   return [
-    ...[...builtinKitById.values()].map((k) => ({ id: k.id, name: k.name, desc: k.desc, group: '標準キット' as const })),
+    ...[...builtinKitById.values()].map((k) => ({ id: k.id, name: k.name, desc: k.desc, group: 'builtin' as const })),
     ...lib.kits
       .filter((k) => k.origin === 'song')
-      .map((k) => ({ id: `lib:${k.id}`, name: k.name, desc: `${k.artist ? `${k.artist} · ` : ''}取り込んだ曲の音`, group: '曲から' as const })),
+      .map((k) => ({ id: `lib:${k.id}`, name: k.name, desc: `${k.artist ? `${k.artist} · ` : ''}${tr('取り込んだ曲の音', 'sounds from an imported song')}`, group: 'song' as const })),
     ...lib.kits
       .filter((k) => k.origin === 'user')
-      .map((k) => ({ id: `lib:${k.id}`, name: k.name, desc: 'ライブラリで作ったキット', group: '自分のキット' as const })),
+      .map((k) => ({ id: `lib:${k.id}`, name: k.name, desc: tr('ライブラリで作ったキット', 'A kit you made in the library'), group: 'own' as const })),
   ];
 }
 
@@ -92,7 +93,7 @@ export function applyKitToChips(kitId = useKit.getState().kitId): number {
   let n = 0;
   const name = kitChoices().find((k) => k.id === kitId)?.name ?? kitId;
   const laneWav: Record<number, number> = {};
-  edit(`置いてあるチップの音を「${name}」にする`, (d) => {
+  edit(tr(`置いてあるチップの音を「${name}」にする`, `Switch placed chips to "${name}"`), (d) => {
     const baseNo = new Map<number, number>();
     const noFor = (ch: number): number | null => {
       if (baseNo.has(ch)) return baseNo.get(ch)!;

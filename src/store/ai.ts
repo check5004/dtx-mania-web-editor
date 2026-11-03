@@ -1,5 +1,6 @@
 // AI（OpenRouter）の設定と呼び出し。キー・処理ごとのモデル・使いすぎ防止・使った額の記録。
 // キーは暗号化されないので、「保存しない」を選ぶとタブを閉じたら消える（sessionStorage）。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { AiError, chat, estimateTokens, fetchKeyInfo, fetchModels, isChatModel, missingKeys, parseJsonLoose, repairPrompt, type ChatResult, type Effort, type KeyInfo, type OrModel } from '../ai/openrouter';
 import { estimateCost, modelInfo, taskDef, TASKS, type AiTask } from '../ai/tasks';
@@ -134,7 +135,10 @@ export const hasAiKey = (s: AiState = get()) => s.key.trim().length > 0;
 export const useHasAiKey = () => useAi((s) => s.key.trim().length > 0);
 
 /** キーを持たないときに AI のボタンへ出す説明 */
-export const NO_KEY_TITLE = 'キーを設定すると使えます（設定 › AI）';
+/** AI のキーが無いときの説明（表示のたびに今の言語で） */
+export function noKeyTitle(): string {
+  return tr('キーを設定すると使えます（設定 › AI）', 'Available once you set an API key (Settings › AI)');
+}
 
 export function setKey(key: string) {
   const k = key.trim();
@@ -273,7 +277,7 @@ export function checkMonthlyCap(add: number) {
  */
 export async function beginAi(task: AiTask, est: number, quiet = false): Promise<AiSession | null> {
   const s = get();
-  if (!hasAiKey(s)) throw new AiError(NO_KEY_TITLE);
+  if (!hasAiKey(s)) throw new AiError(noKeyTitle());
   const def = taskDef(task);
   const cfg = s.tasks[task];
   const info = modelInfo(cfg.model, s.models);
@@ -312,7 +316,7 @@ export async function beginAi(task: AiTask, est: number, quiet = false): Promise
  */
 export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T> | null> {
   const s = get();
-  if (!hasAiKey(s)) throw new AiError(NO_KEY_TITLE);
+  if (!hasAiKey(s)) throw new AiError(noKeyTitle());
   const def = taskDef(task);
   const cfg = s.tasks[task];
   const info = modelInfo(cfg.model, s.models);

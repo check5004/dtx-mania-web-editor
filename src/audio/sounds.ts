@@ -1,6 +1,7 @@
 // 曲フォルダに無くてもエディタが用意できる音（標準キットとライブラリの音）。
 // 譜面の #WAV に書かれたファイルが曲フォルダに無いとき、ここから鳴らし、保存するときに曲フォルダへ書き出す。
-import { CH } from '../dtx/model';
+import { tr, withTr } from '../i18n';
+import { CH, drumChannel } from '../dtx/model';
 import { encodeWav, loadKit as loadSynthKit } from './kit';
 
 export interface KitLane {
@@ -10,19 +11,22 @@ export interface KitLane {
 }
 
 /** キットのレーン（チャンネルごとに1音） */
+/** 名前はレーンの名前（表示のたびに今の言語で） */
+const kitLane = (key: string, ch: number): KitLane => withTr({ key, ch } as KitLane, { label: () => drumChannel(ch)?.name ?? '' });
+
 export const KIT_LANES: readonly KitLane[] = [
-  { key: 'lc', ch: CH.LC, label: '左シンバル' },
-  { key: 'hhc', ch: CH.HHC, label: 'HHクローズ' },
-  { key: 'hho', ch: CH.HHO, label: 'HHオープン' },
-  { key: 'lp', ch: CH.LP, label: '左ペダル' },
-  { key: 'lbd', ch: CH.LBD, label: '左バスドラム' },
-  { key: 'sd', ch: CH.SD, label: 'スネア' },
-  { key: 'ht', ch: CH.HT, label: 'ハイタム' },
-  { key: 'bd', ch: CH.BD, label: 'バスドラム' },
-  { key: 'lt', ch: CH.LT, label: 'ロータム' },
-  { key: 'ft', ch: CH.FT, label: 'フロアタム' },
-  { key: 'cy', ch: CH.CY, label: '右シンバル' },
-  { key: 'rd', ch: CH.RD, label: 'ライド' },
+  kitLane('lc', CH.LC),
+  kitLane('hhc', CH.HHC),
+  kitLane('hho', CH.HHO),
+  kitLane('lp', CH.LP),
+  kitLane('lbd', CH.LBD),
+  kitLane('sd', CH.SD),
+  kitLane('ht', CH.HT),
+  kitLane('bd', CH.BD),
+  kitLane('lt', CH.LT),
+  kitLane('ft', CH.FT),
+  kitLane('cy', CH.CY),
+  kitLane('rd', CH.RD),
 ];
 
 export const laneByCh = new Map(KIT_LANES.map((l) => [l.ch, l]));
@@ -36,13 +40,13 @@ export interface BuiltinKit {
 
 /** 同梱の標準キット（GeneralUser GS のドラムセットから切り出したもの。synth は以前の版の合成音） */
 export const BUILTIN_KITS: readonly BuiltinKit[] = [
-  { id: 'std', name: 'スタンダード', desc: 'GM音源のスタンダードキット。迷ったらこれ' },
-  { id: 'rock', name: 'ロック', desc: '太いキックとスネアのパワーキット' },
-  { id: 'room', name: 'ルーム', desc: '部屋鳴りのある自然なキット' },
-  { id: 'jazz', name: 'ジャズ（ブラシ）', desc: 'ブラシのスネアと軽いシンバル' },
-  { id: 'elec', name: 'エレクトロ（808・909風）', desc: 'リズムマシンの音' },
-  { id: 'metal', name: 'メタル', desc: 'パワーキットにチャイナシンバルと低いキック' },
-  { id: 'synth', name: 'シンセ（軽量）', desc: '以前の版の合成音（ファイルを読み込まずに作る）' },
+  withTr({ id: 'std' } as BuiltinKit, { name: ['スタンダード', 'Standard'], desc: ['GM音源のスタンダードキット。迷ったらこれ', 'The GM standard kit. Pick this if unsure'] }),
+  withTr({ id: 'rock' } as BuiltinKit, { name: ['ロック', 'Rock'], desc: ['太いキックとスネアのパワーキット', 'A power kit with a fat kick and snare'] }),
+  withTr({ id: 'room' } as BuiltinKit, { name: ['ルーム', 'Room'], desc: ['部屋鳴りのある自然なキット', 'A natural kit with room ambience'] }),
+  withTr({ id: 'jazz' } as BuiltinKit, { name: ['ジャズ（ブラシ）', 'Jazz (brushes)'], desc: ['ブラシのスネアと軽いシンバル', 'Brushed snare and light cymbals'] }),
+  withTr({ id: 'elec' } as BuiltinKit, { name: ['エレクトロ（808・909風）', 'Electro (808/909 style)'], desc: ['リズムマシンの音', 'Drum machine sounds'] }),
+  withTr({ id: 'metal' } as BuiltinKit, { name: ['メタル', 'Metal'], desc: ['パワーキットにチャイナシンバルと低いキック', 'A power kit with a china cymbal and a low kick'] }),
+  withTr({ id: 'synth' } as BuiltinKit, { name: ['シンセ（軽量）', 'Synth (light)'], desc: ['以前の版の合成音（ファイルを読み込まずに作る）', 'Synthesized sounds from earlier versions (made without loading files)'] }),
 ];
 
 export const builtinKitById = new Map(BUILTIN_KITS.map((k) => [k.id, k]));
@@ -130,7 +134,7 @@ export function virtualSound(path: string): VirtualSound | null {
     const kit = builtinKitById.get(b.kit)!;
     return {
       file: builtinFile(b.kit, b.lane.ch)!,
-      origin: `標準キット（${kit.name}）`,
+      origin: tr(`標準キット（${kit.name}）`, `Built-in kit (${kit.name})`),
       load: () => loadBuiltin(b.kit, b.lane.key),
       bytes: async () => {
         const buf = await loadBuiltin(b.kit, b.lane.key);

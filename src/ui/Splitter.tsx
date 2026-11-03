@@ -1,19 +1,20 @@
 // パネルの境目：ドラッグで幅（高さ）を変え、ボタンかダブルクリックで開け閉めする。
+import { tr } from '../i18n';
 import { useRef } from 'react';
 import { LAYOUT_LIMITS, maxTracksH, SEEK_CLOSED_H, setLayout, togglePanel, useLayout } from '../store/layout';
 
 /** 左右のパネルと譜面の境目 */
 export function VSplitter({ side, open }: { side: 'left' | 'right'; open: boolean }) {
   const drag = useRef<{ x0: number; w0: number; moved: boolean } | null>(null);
-  const label = side === 'left' ? '左のパネル' : '右のパネル';
+  const label = side === 'left' ? tr('左のパネル', 'left panel') : tr('右のパネル', 'right panel');
   return (
     <div className={`vsplit ${side}`}>
       <div
         className="vsplit-hit"
         role="separator"
         aria-orientation="vertical"
-        aria-label={`${label}の幅`}
-        title={`ドラッグで${label}の幅を変える（ダブルクリックで${open ? '閉じる' : '開く'}）`}
+        aria-label={tr(`${label}の幅`, `Width of the ${label}`)}
+        title={tr(`ドラッグで${label}の幅を変える（ダブルクリックで${open ? '閉じる' : '開く'}）`, `Drag to resize the ${label} (double-click to ${open ? 'close' : 'open'} it)`)}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           e.preventDefault();
@@ -53,8 +54,8 @@ export function VSplitter({ side, open }: { side: 'left' | 'right'; open: boolea
       <button
         className="vsplit-btn"
         onClick={() => togglePanel(side)}
-        title={`${label}を${open ? '閉じる' : '開く'}`}
-        aria-label={`${label}を${open ? '閉じる' : '開く'}`}
+        title={tr(`${label}を${open ? '閉じる' : '開く'}`, `${open ? 'Close' : 'Open'} the ${label}`)}
+        aria-label={tr(`${label}を${open ? '閉じる' : '開く'}`, `${open ? 'Close' : 'Open'} the ${label}`)}
       >
         {(side === 'left') === open ? '‹' : '›'}
       </button>
@@ -65,7 +66,7 @@ export function VSplitter({ side, open }: { side: 'left' | 'right'; open: boolea
 /** 閉じたパネルの細い帯（クリックで開く） */
 export function PanelRail({ side, label }: { side: 'left' | 'right'; label: string }) {
   return (
-    <button className={`panel-rail ${side}`} onClick={() => togglePanel(side, true)} title={`${label}を開く`} aria-label={`${label}を開く`}>
+    <button className={`panel-rail ${side}`} onClick={() => togglePanel(side, true)} title={tr(`${label}を開く`, `Open: ${label}`)} aria-label={tr(`${label}を開く`, `Open: ${label}`)}>
       <span className="rail-arrow">{side === 'left' ? '›' : '‹'}</span>
       <span className="rail-text">{label}</span>
     </button>
@@ -81,8 +82,8 @@ export function HSplitter() {
       className="hsplit"
       role="separator"
       aria-orientation="horizontal"
-      aria-label="下のトラックの高さ"
-      title={`ドラッグで下のトラックの高さを変える（ダブルクリックで${open ? '閉じる' : '開く'}）`}
+      aria-label={tr('下のトラックの高さ', 'Height of the bottom tracks')}
+      title={tr(`ドラッグで下のトラックの高さを変える（ダブルクリックで${open ? '閉じる' : '開く'}）`, `Drag to resize the bottom tracks (double-click to ${open ? 'close' : 'open'} them)`)}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.preventDefault();

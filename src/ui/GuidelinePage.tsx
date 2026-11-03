@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { downloadBytes } from '../fs/folder';
 import { FEATURE_DEFS } from '../gen/features';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { goBack, openSettings, toast, useEditor } from '../store/editor';
 import {
   addRow,
@@ -68,7 +68,7 @@ export function GuidelinePage() {
           v{st.guide.version} · 手元{songs}曲・{st.charts.length}譜面から作成{st.guide.updatedAt ? ` · ${new Date(st.guide.updatedAt).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit' })} 更新` : ''}
         </span>
         <span className="grow" />
-        <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? undefined : NO_KEY_TITLE}>
+        <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? undefined : noKeyTitle()}>
           {hasKey ? '● OpenRouter · キー設定済み' : 'キー未設定（集計と手書きは使えます）'}
         </span>
         <button className="btn small" onClick={() => jsonInput.current?.click()}>
@@ -197,7 +197,7 @@ export function GuidelinePage() {
               <button
                 className="btn small on-amber"
                 disabled={!hasKey || running || bs.count === 0}
-                title={hasKey ? `${model} · 1回 約 ${formatUsd(cost)}（全レベル帯）` : NO_KEY_TITLE}
+                title={hasKey ? `${model} · 1回 約 ${formatUsd(cost)}（全レベル帯）` : noKeyTitle()}
                 onClick={() => void draftWithAi([band])}
               >
                 {Icon.sparkle(13)} {running ? '下書き中…' : gb.rows.length ? 'AIで下書きし直す' : 'AIで下書き'}
@@ -205,7 +205,7 @@ export function GuidelinePage() {
             </div>
             {!hasKey && (
               <p className="lbl" style={{ margin: '6px 0 0' }}>
-                {NO_KEY_TITLE}。基準文は「行を追加」で手で書けます。{' '}
+                {noKeyTitle()}。基準文は「行を追加」で手で書けます。{' '}
                 <button className="link-btn" onClick={() => openSettings('ai')}>
                   キーを設定
                 </button>

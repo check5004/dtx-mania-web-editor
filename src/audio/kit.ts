@@ -1,5 +1,6 @@
 // 内蔵の合成ドラムキット。曲フォルダに音が無いレーンに置いたチップは、この音を WAV にして曲フォルダへ書き出す。
-import { CH } from '../dtx/model';
+import { withTr } from '../i18n';
+import { CH, drumChannel } from '../dtx/model';
 
 export interface KitSound {
   ch: number;
@@ -7,19 +8,22 @@ export interface KitSound {
   label: string;
 }
 
+/** 名前はレーンの名前（表示のたびに今の言語で） */
+const kitSound = (ch: number, file: string): KitSound => withTr({ ch, file } as KitSound, { label: () => drumChannel(ch)?.name ?? '' });
+
 export const KIT_SOUNDS: readonly KitSound[] = [
-  { ch: CH.LC, file: 'dtxweb_kit_lc.wav', label: '左シンバル' },
-  { ch: CH.HHC, file: 'dtxweb_kit_hhc.wav', label: 'HHクローズ' },
-  { ch: CH.HHO, file: 'dtxweb_kit_hho.wav', label: 'HHオープン' },
-  { ch: CH.LP, file: 'dtxweb_kit_lp.wav', label: '左ペダル' },
-  { ch: CH.LBD, file: 'dtxweb_kit_lbd.wav', label: '左バスドラム' },
-  { ch: CH.SD, file: 'dtxweb_kit_sd.wav', label: 'スネア' },
-  { ch: CH.HT, file: 'dtxweb_kit_ht.wav', label: 'ハイタム' },
-  { ch: CH.BD, file: 'dtxweb_kit_bd.wav', label: 'バスドラム' },
-  { ch: CH.LT, file: 'dtxweb_kit_lt.wav', label: 'ロータム' },
-  { ch: CH.FT, file: 'dtxweb_kit_ft.wav', label: 'フロアタム' },
-  { ch: CH.CY, file: 'dtxweb_kit_cy.wav', label: '右シンバル' },
-  { ch: CH.RD, file: 'dtxweb_kit_rd.wav', label: 'ライド' },
+  kitSound(CH.LC, 'dtxweb_kit_lc.wav'),
+  kitSound(CH.HHC, 'dtxweb_kit_hhc.wav'),
+  kitSound(CH.HHO, 'dtxweb_kit_hho.wav'),
+  kitSound(CH.LP, 'dtxweb_kit_lp.wav'),
+  kitSound(CH.LBD, 'dtxweb_kit_lbd.wav'),
+  kitSound(CH.SD, 'dtxweb_kit_sd.wav'),
+  kitSound(CH.HT, 'dtxweb_kit_ht.wav'),
+  kitSound(CH.BD, 'dtxweb_kit_bd.wav'),
+  kitSound(CH.LT, 'dtxweb_kit_lt.wav'),
+  kitSound(CH.FT, 'dtxweb_kit_ft.wav'),
+  kitSound(CH.CY, 'dtxweb_kit_cy.wav'),
+  kitSound(CH.RD, 'dtxweb_kit_rd.wav'),
 ];
 
 export const kitByChannel = new Map(KIT_SOUNDS.map((k) => [k.ch, k]));

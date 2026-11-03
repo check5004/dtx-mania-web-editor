@@ -1,5 +1,6 @@
 // 聴く音量とミックス：上のバーのマスター（全体の音量・曲の音と譜面の音のミュート・クリック）と、「ミックス」で開くパネル。
 // トラックごとの音量・ミュート・ソロは下のトラックで変える。ここの音量は聴くためのもの。DTX の #VOLUME や書き出しには影響しない。
+import { tr, pl } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { DRUM_LANES } from '../dtx/model';
 import type { Mix } from '../audio/engine';
@@ -34,11 +35,11 @@ export function MasterMixer() {
   const preset = LISTEN_PRESETS.find((p) => p.id === listen);
   const groupMuted = mix.bgmMute || mix.drumMute;
   return (
-    <div className="master" ref={wrap} role="group" aria-label="マスター" onPointerUp={releaseFocus}>
+    <div className="master" ref={wrap} role="group" aria-label={tr('マスター', 'Master')} onPointerUp={releaseFocus}>
       <button
         className={`ib ${mix.masterMute ? 'muted' : ''}`}
         onClick={() => setMix({ masterMute: !mix.masterMute })}
-        title={mix.masterMute ? '音を出す' : 'すべての音を消す'}
+        title={mix.masterMute ? tr('音を出す', 'Unmute') : tr('すべての音を消す', 'Mute everything')}
         aria-pressed={mix.masterMute}
       >
         {mix.masterMute ? Icon.speakerOff(16) : Icon.speaker(16)}
@@ -52,20 +53,26 @@ export function MasterMixer() {
         value={mix.master}
         onChange={(e) => setMix({ master: Number(e.target.value), masterMute: false })}
         onDoubleClick={() => setMix({ master: 0.9 })}
-        aria-label="マスターの音量"
-        title={`マスターの音量 ${pct(mix.master)}（すべての音。ダブルクリックで 90 に戻す）。トラックごとの音量は下のトラックで変えます`}
+        aria-label={tr('マスターの音量', 'Master volume')}
+        title={tr(
+          `マスターの音量 ${pct(mix.master)}（すべての音。ダブルクリックで 90 に戻す）。トラックごとの音量は下のトラックで変えます`,
+          `Master volume ${pct(mix.master)} (all sound; double-click to reset to 90). Change each track's volume in the tracks below`,
+        )}
       />
-      <button className={`ib mixer-click ${mix.metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !mix.metronome })} title={`クリック（メトロノーム）${mix.metronome ? 'を止める' : 'を鳴らす'}`} aria-pressed={mix.metronome}>
+      <button className={`ib mixer-click ${mix.metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !mix.metronome })} title={mix.metronome ? tr('クリック（メトロノーム）を止める', 'Turn the click (metronome) off') : tr('クリック（メトロノーム）を鳴らす', 'Turn the click (metronome) on')} aria-pressed={mix.metronome}>
         {Icon.metronome(15)}
       </button>
       <button
         className={`btn small mixer-open ${open ? 'on' : ''}`}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        title={`ミックス（聞こえ方${preset && listen !== 'all' ? `: ${preset.label}` : ''}・曲の音と譜面の音をまとめて消す・レーンのミュートとソロ・クリックの音量）`}
+        title={tr(
+          `ミックス（聞こえ方${preset && listen !== 'all' ? `: ${preset.label}` : ''}・曲の音と譜面の音をまとめて消す・レーンのミュートとソロ・クリックの音量）`,
+          `Mix (listening mode${preset && listen !== 'all' ? `: ${preset.label}` : ''}, mute the song or chart sounds, lane mute and solo, click volume)`,
+        )}
       >
         {Icon.sliders(14)}
-        {groupMuted && <i className="mute-dot" title={mix.bgmMute ? '曲の音を消しています（Alt+1）' : '譜面の音を消しています（Alt+2）'} />}
+        {groupMuted && <i className="mute-dot" title={mix.bgmMute ? tr('曲の音を消しています（Alt+1）', 'Song audio is muted (Alt+1)') : tr('譜面の音を消しています（Alt+2）', 'Chart sounds are muted (Alt+2)')} />}
         {Icon.chevronDown(12)}
       </button>
       {open && <MixPopover onClose={() => setOpen(false)} />}
@@ -83,11 +90,11 @@ function MixPopover({ onClose }: { onClose: () => void }) {
   const has = stems.length > 0;
   const hasDrums = stems.some((t) => t.kind === 'drums');
   const preset = LISTEN_PRESETS.find((p) => p.id === listen);
-  const hint = preset ? (has ? preset.hint : preset.hintNoStems) : 'M・Sで個別に変えています。';
+  const hint = preset ? (has ? preset.hint : preset.hintNoStems) : tr('M・Sで個別に変えています。', 'Changed individually with M and S.');
   return (
-    <div className="mix-pop down" role="dialog" aria-label="ミックス">
+    <div className="mix-pop down" role="dialog" aria-label={tr('ミックス', 'Mix')}>
       <div className="mix-head">
-        <b>ミックス</b>
+        <b>{tr('ミックス', 'Mix')}</b>
         <span className="grow" />
         <button
           className="link-btn"
@@ -96,14 +103,14 @@ function MixPopover({ onClose }: { onClose: () => void }) {
             openPage('stems');
           }}
         >
-          ステム画面で開く {Icon.chevronRight(12)}
+          {tr('ステム画面で開く', 'Open in Stems')} {Icon.chevronRight(12)}
         </button>
-        <button className="ib" onClick={onClose} title="閉じる">
+        <button className="ib" onClick={onClose} title={tr('閉じる', 'Close')}>
           {Icon.close(14)}
         </button>
       </div>
       <div className="lbl" style={{ marginBottom: 6 }}>
-        聞こえ方
+        {tr('聞こえ方', 'Listening mode')}
       </div>
       <div className="seg full">
         {LISTEN_PRESETS.map((p) => (
@@ -115,30 +122,33 @@ function MixPopover({ onClose }: { onClose: () => void }) {
       <p className="mix-hint">{hint}</p>
 
       <div className="mix-sec">
-        <span className="t">まとめて消す</span>
+        <span className="t">{tr('まとめて消す', 'Mute groups')}</span>
       </div>
       <div className="row" style={{ gap: 6 }}>
-        <button className={`btn small mute-tg ${mix.bgmMute ? 'muted' : ''}`} onClick={toggleBgmMute} aria-pressed={mix.bgmMute} title="原曲・SE・ステムのトラックをまとめてミュート（トラックごとの設定はそのまま）">
-          {Icon.wave(14)} 曲の音 <span className="key">Alt+1</span>
+        <button className={`btn small mute-tg ${mix.bgmMute ? 'muted' : ''}`} onClick={toggleBgmMute} aria-pressed={mix.bgmMute} title={tr('原曲・SE・ステムのトラックをまとめてミュート（トラックごとの設定はそのまま）', 'Mute the original, SE and stem tracks together (each track keeps its own settings)')}>
+          {Icon.wave(14)} {tr('曲の音', 'Song audio')} <span className="key">Alt+1</span>
         </button>
-        <button className={`btn small mute-tg ${mix.drumMute ? 'muted' : ''}`} onClick={toggleDrumMute} aria-pressed={mix.drumMute} title="譜面の音をミュート（下のトラックの「譜面の音」の M と同じ）">
-          {mix.drumMute ? Icon.chartOff(14) : Icon.drum(14)} 譜面の音 <span className="key">Alt+2</span>
+        <button className={`btn small mute-tg ${mix.drumMute ? 'muted' : ''}`} onClick={toggleDrumMute} aria-pressed={mix.drumMute} title={tr('譜面の音をミュート（下のトラックの「譜面の音」の M と同じ）', 'Mute the chart sounds (same as M on the "Chart sounds" track below)')}>
+          {mix.drumMute ? Icon.chartOff(14) : Icon.drum(14)} {tr('譜面の音', 'Chart sounds')} <span className="key">Alt+2</span>
         </button>
       </div>
 
       <p className="mix-hint" style={{ marginTop: 10 }}>
-        原曲・SE・ステム・譜面の音のトラックごとの音量・ミュート・ソロは、下のトラックで変えられます{has ? `（ステム ${stems.length}本）` : ''}。
+        {tr(
+          `原曲・SE・ステム・譜面の音のトラックごとの音量・ミュート・ソロは、下のトラックで変えられます${has ? `（ステム ${stems.length}本）` : ''}。`,
+          `Change the volume, mute and solo of each track (original, SE, stems, chart sounds) in the tracks below${has ? ` (${stems.length} ${pl(stems.length, 'stem')})` : ''}.`,
+        )}
       </p>
 
       <div className="mix-sec">
-        <span className="t">譜面の音・レーン</span>
+        <span className="t">{tr('譜面の音・レーン', 'Chart sounds by lane')}</span>
         <span className="grow" />
         {(mute.length > 0 || solo.length > 0) && (
           <button className="link-btn" onClick={clearMuteSolo}>
-            解除
+            {tr('解除', 'Reset')}
           </button>
         )}
-        <span className="lbl">押すとミュート · Alt+押すとソロ</span>
+        <span className="lbl">{tr('押すとミュート · Alt+押すとソロ', 'Click to mute · Alt+click to solo')}</span>
       </div>
       <div className="lane-ms">
         {DRUM_LANES.map((l, i) => {
@@ -155,7 +165,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
                 else toggleMute(i);
                 leaveListenPreset();
               }}
-              title={`${l.name}：押すとミュート、Alt+押すとソロ`}
+              title={tr(`${l.name}：押すとミュート、Alt+押すとソロ`, `${l.name}: click to mute, Alt+click to solo`)}
             >
               {l.key}
             </button>
@@ -164,27 +174,32 @@ function MixPopover({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="mix-sec">
-        <span className="t">クリック</span>
+        <span className="t">{tr('クリック', 'Click')}</span>
       </div>
       <div className="row" style={{ gap: 10 }}>
         <label className="row lbl" style={{ gap: 6 }}>
           <input type="checkbox" checked={mix.metronome} onChange={(e) => setMix({ metronome: e.target.checked })} />
-          鳴らす
+          {tr('鳴らす', 'On')}
         </label>
-        <input type="range" min={0} max={1} step={0.01} value={mix.click} onChange={(e) => setMix({ click: Number(e.target.value) })} style={{ flex: 1 }} aria-label="クリックの音量" />
+        <input type="range" min={0} max={1} step={0.01} value={mix.click} onChange={(e) => setMix({ click: Number(e.target.value) })} style={{ flex: 1 }} aria-label={tr('クリックの音量', 'Click volume')} />
         <span className="mono lbl" style={{ width: 26, textAlign: 'right' }}>
           {pct(mix.click)}
         </span>
         <label className="row lbl" style={{ gap: 6 }}>
           <input type="checkbox" checked={mix.clickBarOnly} onChange={(e) => setMix({ clickBarOnly: e.target.checked })} />
-          小節の頭だけ
+          {tr('小節の頭だけ', 'Downbeats only')}
         </label>
       </div>
       <label className="row lbl" style={{ marginTop: 8 }}>
         <input type="checkbox" checked={previewOnPlace} onChange={(e) => useEditor.setState({ previewOnPlace: e.target.checked })} />
-        チップを置いたときに音を鳴らす
+        {tr('チップを置いたときに音を鳴らす', 'Play the sound when placing a chip')}
       </label>
-      <p className="mix-note">ここと下のトラックは聴くための音量です。DTXの音量（#VOLUME）や書き出しには影響しません。書き出すときのミックスはステム画面で決めます。</p>
+      <p className="mix-note">
+        {tr(
+          'ここと下のトラックは聴くための音量です。DTXの音量（#VOLUME）や書き出しには影響しません。書き出すときのミックスはステム画面で決めます。',
+          "These volumes (here and in the tracks below) are only for listening. They don't change the DTX volume (#VOLUME) or exports. Set the export mix on the Stems screen.",
+        )}
+      </p>
     </div>
   );
 }
@@ -199,12 +214,15 @@ export function TrackMixStrip() {
   useStems((s) => s.version);
   useSidecar((s) => s.stems);
   return (
-    <div className="mix-strip" role="group" aria-label="トラックの音量" onPointerUp={releaseFocus}>
+    <div className="mix-strip" role="group" aria-label={tr('トラックの音量', 'Track volumes')} onPointerUp={releaseFocus}>
       <span
         className="lbl mix-strip-t"
-        title="トラックごとの音量（聴くためのもの。DTXの音量（#VOLUME）や書き出しには影響しません）。Alt+1 で曲の音（原曲・SE・ステム）、Alt+2 で譜面の音をまとめて消します"
+        title={tr(
+          'トラックごとの音量（聴くためのもの。DTXの音量（#VOLUME）や書き出しには影響しません）。Alt+1 で曲の音（原曲・SE・ステム）、Alt+2 で譜面の音をまとめて消します',
+          "Volume per track (for listening only; doesn't change the DTX volume (#VOLUME) or exports). Alt+1 mutes the song audio (original, SE, stems), Alt+2 mutes the chart sounds",
+        )}
       >
-        {Icon.sliders(13)} 音量
+        {Icon.sliders(13)} {tr('音量', 'Volume')}
       </span>
       {rows.map((row) => (
         <MixChip key={row.id} row={row} mix={mix} />
@@ -218,7 +236,7 @@ function MixChip({ row, mix }: { row: TrackRow; mix: Mix }) {
     return (
       <div className="mix-chip off" style={{ borderLeftColor: row.color }}>
         <b className="ellipsis">{row.name}</b>
-        <span className="lbl">{row.state === 'missing' ? '見つかりません' : row.state === 'loading' ? '読み込み中…' : 'まだありません'}</span>
+        <span className="lbl">{row.state === 'missing' ? tr('見つかりません', 'Not found') : row.state === 'loading' ? tr('読み込み中…', 'Loading…') : tr('まだありません', 'None yet')}</span>
       </div>
     );
   }
@@ -226,24 +244,24 @@ function MixChip({ row, mix }: { row: TrackRow; mix: Mix }) {
   const { muted, soloed, gain, maxGain, defGain } = trackMix(row, mix);
   const why = silentWhy(row, mix, on, muted, soloed);
   return (
-    <div className={`mix-chip ${on ? '' : 'off'}`} style={{ borderLeftColor: row.color }} title={why ? `鳴っていません${why}` : `${row.name}：${row.sub}`}>
+    <div className={`mix-chip ${on ? '' : 'off'}`} style={{ borderLeftColor: row.color }} title={why ? tr(`鳴っていません${why}`, `Not playing${why}`) : tr(`${row.name}：${row.sub}`, `${row.name}: ${row.sub}`)}>
       <b className="ellipsis">{row.name}</b>
       {(row.type === 'orig' || row.type === 'se') && <span className="mix-chip-sub ellipsis">{row.sub}</span>}
       <button
         className={`ms m ${muted ? 'on' : ''}`}
         onClick={() => setTrack(row, { mute: !muted })}
-        aria-label={`${row.name}をミュート`}
+        aria-label={tr(`${row.name}をミュート`, `Mute ${row.name}`)}
         aria-pressed={muted}
-        title={`ミュート${row.type === 'chart' ? '（Alt+2）' : ''}`}
+        title={`${tr('ミュート', 'Mute')}${row.type === 'chart' ? tr('（Alt+2）', ' (Alt+2)') : ''}`}
       >
         M
       </button>
       <button
         className={`ms s ${soloed ? 'on' : ''}`}
         onClick={(e) => (e.altKey ? soloOnly(row.id) : setTrack(row, { solo: !soloed }))}
-        aria-label={`${row.name}をソロ`}
+        aria-label={tr(`${row.name}をソロ`, `Solo ${row.name}`)}
         aria-pressed={soloed}
-        title="ソロ（Alt+クリックでこのトラックだけ）"
+        title={tr('ソロ（Alt+クリックでこのトラックだけ）', 'Solo (Alt+click for this track only)')}
       >
         S
       </button>
@@ -257,8 +275,8 @@ function MixChip({ row, mix }: { row: TrackRow; mix: Mix }) {
         style={{ accentColor: row.color }}
         onChange={(e) => setTrack(row, { gain: Number(e.target.value) })}
         onDoubleClick={() => setTrack(row, { gain: defGain })}
-        aria-label={`${row.name}の音量`}
-        title={`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`}
+        aria-label={tr(`${row.name}の音量`, `${row.name} volume`)}
+        title={tr(`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`, `${row.name} volume (double-click to reset to ${pct(defGain)})`)}
       />
       <span className="mono trk-v">{pct(gain)}</span>
     </div>

@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { dropAudioInEditor, openDroppedFiles, openFolderFromInput, openFolderPicker, save } from '../app/fileActions';
 import { frac } from '../dtx/fraction';
@@ -317,7 +318,7 @@ export function Editor() {
   }, []);
   const hasLeft = !velMode;
   const cols = effectiveColumns(layout, width, hasLeft);
-  const rightLabel = velMode ? 'ベロシティの道具' : previewMode === 'side' ? 'NX風プレビュー' : '原曲・耳コピアシスト・確かめる';
+  const rightLabel = velMode ? tr('ベロシティの道具', 'Velocity tools') : previewMode === 'side' ? tr('NX風プレビュー', 'NX-style preview') : tr('原曲・耳コピアシスト・確かめる', 'Original, transcription assist, checks');
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -372,7 +373,7 @@ export function Editor() {
                 : `minmax(0, 1fr) 0px ${cols.right}px`,
             }}
           >
-            {hasLeft && (cols.leftOpen ? <LeftPanel /> : <PanelRail side="left" label="キット・WAV・曲情報" />)}
+            {hasLeft && (cols.leftOpen ? <LeftPanel /> : <PanelRail side="left" label={tr('キット・WAV・曲情報', 'Kit, WAV, song info')} />)}
             {hasLeft && <VSplitter side="left" open={cols.leftOpen} />}
             <section className="chart-area">
               <ChartCanvas />

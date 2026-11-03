@@ -1,4 +1,5 @@
 // 表示用の書式。
+import { tr } from '../i18n';
 import { toMeasure } from '../dtx/base36';
 import { bgaChannel, CH, drumChannel } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
@@ -8,12 +9,12 @@ export function channelName(ch: number): string {
   const d = drumChannel(ch);
   if (d) return d.name;
   if (ch === CH.BGM) return 'BGM';
-  if (ch === CH.BPM || ch === CH.BPM_EX) return 'BPM変化';
-  if (ch === CH.FILLIN) return 'フィルイン区間';
-  if (ch === CH.FILLIN_SOUND) return 'フィルインの音';
+  if (ch === CH.BPM || ch === CH.BPM_EX) return tr('BPM変化', 'BPM change');
+  if (ch === CH.FILLIN) return tr('フィルイン区間', 'Fill-in section');
+  if (ch === CH.FILLIN_SOUND) return tr('フィルインの音', 'Fill-in sound');
   const b = bgaChannel(ch);
   if (b) return b.name;
-  return `SE（ch ${ch.toString(16).toUpperCase()}）`;
+  return tr(`SE（ch ${ch.toString(16).toUpperCase()}）`, `SE (ch ${ch.toString(16).toUpperCase()})`);
 }
 
 export function chipBpmLabel(bpm: number): string {

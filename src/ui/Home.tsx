@@ -1,3 +1,4 @@
+import { tr, pl, locale, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { listRecent, newEmptySong, openDroppedFiles, openFolderPicker, openRecent } from '../app/fileActions';
 import { supportsDirectWrite } from '../fs/folder';
@@ -6,15 +7,25 @@ import { useEditor } from '../store/editor';
 import { FolderInput } from './Editor';
 import { formatLevel } from './format';
 import { Icon } from './icons';
+import { LangSwitch } from './LangSwitch';
 
 function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
-  if (s < 60) return 'たった今';
-  if (s < 3600) return `${Math.floor(s / 60)}分前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
-  if (s < 86400 * 2) return '昨日';
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)}日前`;
-  return new Date(t).toLocaleDateString('ja-JP');
+  if (s < 60) return tr('たった今', 'just now');
+  if (s < 3600) {
+    const n = Math.floor(s / 60);
+    return tr(`${n}分前`, `${n} ${pl(n, 'minute')} ago`);
+  }
+  if (s < 86400) {
+    const n = Math.floor(s / 3600);
+    return tr(`${n}時間前`, `${n} ${pl(n, 'hour')} ago`);
+  }
+  if (s < 86400 * 2) return tr('昨日', 'yesterday');
+  if (s < 86400 * 7) {
+    const n = Math.floor(s / 86400);
+    return tr(`${n}日前`, `${n} days ago`);
+  }
+  return new Date(t).toLocaleDateString(locale());
 }
 
 export function Home() {
@@ -36,25 +47,31 @@ export function Home() {
           <span className="logo-mark">D</span>
           DTX Web Editor
         </span>
-        <span className="lbl">DTXManiaNX 向けのドラム譜面エディタ</span>
+        <span className="lbl hide-narrow">{tr('DTXManiaNX 向けのドラム譜面エディタ', 'Drum chart editor for DTXManiaNX')}</span>
         <span className="grow" />
+        <LangSwitch small />
         {hasDoc && (
           <button className="btn small" onClick={() => useEditor.setState({ screen: 'editor' })}>
-            編集中の譜面に戻る
+            {tr('編集中の譜面に戻る', 'Back to the open chart')}
           </button>
         )}
       </header>
       <main className="home-main">
         <div>
-          <h1>新しい譜面をつくる・続きを編集する</h1>
+          <h1>{tr('新しい譜面をつくる・続きを編集する', 'Start a new chart or continue editing')}</h1>
           <p className="lbl" style={{ fontSize: 12.5 }}>
-            データはこのブラウザの中だけで扱います。どこにもアップロードしません。
+            {tr('データはこのブラウザの中だけで扱います。どこにもアップロードしません。', 'Your data stays in this browser. Nothing is uploaded anywhere.')}
           </p>
         </div>
         {!direct && (
           <div className="notice">
             <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>
-            <span>このブラウザは曲フォルダへの直接保存に対応していないため、保存はダウンロードになります。Chrome か Edge なら曲フォルダに直接上書き保存できます。</span>
+            <span>
+              {tr(
+                'このブラウザは曲フォルダへの直接保存に対応していないため、保存はダウンロードになります。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
+                "This browser can't save directly into the song folder, so saving downloads the files instead. In Chrome or Edge, saving overwrites the files in the song folder.",
+              )}
+            </span>
           </div>
         )}
         <div className="home-cards">
@@ -72,13 +89,18 @@ export function Home() {
             }}
           >
             <span className="pill" style={{ alignSelf: 'flex-start', background: '#10202b', color: 'var(--accent)' }}>
-              おすすめ
+              {tr('おすすめ', 'Recommended')}
             </span>
-            <h3>原曲の音声ファイルから</h3>
-            <p>原曲（WAV・OGG・MP3）をここにドロップすると、その曲をBGMにした新しい譜面を作ります。DTXファイルを落とすとそのまま開きます。</p>
+            <h3>{tr('原曲の音声ファイルから', 'From the song audio file')}</h3>
+            <p>
+              {tr(
+                '原曲（WAV・OGG・MP3）をここにドロップすると、その曲をBGMにした新しい譜面を作ります。DTXファイルを落とすとそのまま開きます。',
+                'Drop the original song (WAV, OGG or MP3) here to start a new chart with it as the BGM. Drop a DTX file to open it as is.',
+              )}
+            </p>
             <div className="actions">
               <button className="btn primary" onClick={() => audioInput.current?.click()}>
-                ファイルを選ぶ
+                {tr('ファイルを選ぶ', 'Choose file')}
               </button>
             </div>
             <input
@@ -93,20 +115,29 @@ export function Home() {
             />
           </div>
           <div className="home-card">
-            <h3>曲フォルダを開く</h3>
-            <p>既存のDTXと音をまとめて読み込みます。{direct ? '保存するとそのフォルダに上書きされます。' : '保存はダウンロードになります。'}DTXが無いフォルダなら新しい譜面を作ります。</p>
+            <h3>{tr('曲フォルダを開く', 'Open a song folder')}</h3>
+            <p>
+              {tr('既存のDTXと音をまとめて読み込みます。', 'Loads an existing DTX together with its sounds. ')}
+              {direct ? tr('保存するとそのフォルダに上書きされます。', 'Saving overwrites the files in that folder. ') : tr('保存はダウンロードになります。', 'Saving downloads the files. ')}
+              {tr('DTXが無いフォルダなら新しい譜面を作ります。', 'If the folder has no DTX, a new chart is created.')}
+            </p>
             <div className="actions">
               <button className="btn" onClick={() => void openFolderPicker(folderInput.current)}>
-                {Icon.folder()} フォルダを選ぶ
+                {Icon.folder()} {tr('フォルダを選ぶ', 'Choose folder')}
               </button>
             </div>
           </div>
           <div className="home-card">
-            <h3>空の譜面から</h3>
-            <p>原曲なしで、内蔵キットの音だけで譜面を作ります。原曲はあとから曲フォルダに入れてWAVリストに追加できます。</p>
+            <h3>{tr('空の譜面から', 'From an empty chart')}</h3>
+            <p>
+              {tr(
+                '原曲なしで、内蔵キットの音だけで譜面を作ります。原曲はあとから曲フォルダに入れてWAVリストに追加できます。',
+                'Make a chart with only the built-in kit sounds, without the original song. You can add the song to the song folder and the WAV list later.',
+              )}
+            </p>
             <div className="actions">
               <button className="btn" onClick={() => void newEmptySong()}>
-                {Icon.file()} 空の譜面を作る
+                {Icon.file()} {tr('空の譜面を作る', 'Create empty chart')}
               </button>
             </div>
           </div>
@@ -114,11 +145,11 @@ export function Home() {
 
         <section>
           <div className="row" style={{ marginBottom: 10 }}>
-            <h3 style={{ margin: 0, fontSize: 15 }}>最近の曲</h3>
-            <span className="lbl">ブラウザ内に自動保存されています</span>
+            <h3 style={{ margin: 0, fontSize: 15 }}>{tr('最近の曲', 'Recent songs')}</h3>
+            <span className="lbl">{tr('ブラウザ内に自動保存されています', 'Autosaved in this browser')}</span>
           </div>
           {recent.length === 0 ? (
-            <p className="lbl">まだありません。譜面を開くか作ると、ここに並びます。</p>
+            <p className="lbl">{tr('まだありません。譜面を開くか作ると、ここに並びます。', 'Nothing yet. Charts you open or create will appear here.')}</p>
           ) : (
             <div className="recent-list">
               {recent.map((r) => (
@@ -129,22 +160,22 @@ export function Home() {
                     </span>
                     <span style={{ minWidth: 0, flex: 1 }}>
                       <span className="ellipsis" style={{ display: 'block', fontWeight: 600 }}>
-                        {r.title || '無題'}
+                        {r.title || tr('無題', 'Untitled')}
                       </span>
                       <span className="lbl ellipsis" style={{ display: 'block' }}>
-                        {[r.artist || 'アーティスト未設定', r.bpm && `${r.bpm} BPM`, `Lv ${formatLevel(r.level)}`].filter(Boolean).join(' · ')}
+                        {[r.artist || tr('アーティスト未設定', 'No artist'), r.bpm && `${r.bpm} BPM`, `Lv ${formatLevel(r.level)}`].filter(Boolean).join(' · ')}
                       </span>
                       <span className="lbl ellipsis" style={{ display: 'block' }}>
                         {r.folderName ? `${r.folderName}/` : ''}
                         {r.fileName} · {ago(r.updatedAt)}
                       </span>
                     </span>
-                    {!r.saved && <span className="pill warn">未保存</span>}
+                    {!r.saved && <span className="pill warn">{tr('未保存', 'Unsaved')}</span>}
                   </button>
                   <button
                     className="ib"
                     style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24 }}
-                    title="一覧から消す（曲フォルダのファイルは消えません）"
+                    title={tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')}
                     onClick={async () => {
                       await deleteRecent(r.id);
                       setRecent(await listRecent());
@@ -159,26 +190,48 @@ export function Home() {
         </section>
 
         <section>
-          <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>操作のきほん</h3>
-          <div className="flow">
-            <div>
-              <b>置く・消す</b>レーンをクリックで置く、ダブルクリックで消す。<kbd>Shift</kbd>でHHオープン・左バスドラム。
+          <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>{tr('操作のきほん', 'Basics')}</h3>
+          {isJa() ? (
+            <div className="flow">
+              <div>
+                <b>置く・消す</b>レーンをクリックで置く、ダブルクリックで消す。<kbd>Shift</kbd>でHHオープン・左バスドラム。
+              </div>
+              <div>
+                <b>右クリック</b>チップの上ならベロシティ・HHオープン/クローズ・レーン・削除のメニュー。何もない所ならグリッドをボタン1回で切り替え。
+              </div>
+              <div>
+                <b>選ぶ・動かす</b>空いた所をドラッグで範囲選択、チップをドラッグか矢印キーで移動。<kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd>でコピー。
+              </div>
+              <div>
+                <b>聴く</b>
+                <kbd>Space</kbd>で再生と停止。止めると青い ▶（再生を始める位置）に戻ります。<kbd>Shift</kbd>+<kbd>Space</kbd>はその場で止めます。<kbd>F5</kbd> 最初から、<kbd>F6</kbd> ▶ から、<kbd>F7</kbd> 停止。
+              </div>
+              <div>
+                <b>保存</b>
+                <kbd>Ctrl</kbd>+<kbd>S</kbd>で曲フォルダにShift_JISで保存。NXでそのまま読めます。
+              </div>
             </div>
-            <div>
-              <b>右クリック</b>チップの上ならベロシティ・HHオープン/クローズ・レーン・削除のメニュー。何もない所ならグリッドをボタン1回で切り替え。
+          ) : (
+            <div className="flow">
+              <div>
+                <b>Place / delete</b>Click a lane to place a chip, double-click to delete it. Hold <kbd>Shift</kbd> for HH open and the left bass drum.
+              </div>
+              <div>
+                <b>Right-click</b>On a chip: velocity, HH open/closed, lane and delete. On an empty spot: switch the grid in one click.
+              </div>
+              <div>
+                <b>Select / move</b>Drag on an empty spot to box-select. Move chips by dragging or with the arrow keys. <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> to copy.
+              </div>
+              <div>
+                <b>Listen</b>
+                <kbd>Space</kbd> plays and stops. Stopping returns to the blue ▶ (where playback starts). <kbd>Shift</kbd>+<kbd>Space</kbd> stops right there. <kbd>F5</kbd> from the top, <kbd>F6</kbd> from ▶, <kbd>F7</kbd> stop.
+              </div>
+              <div>
+                <b>Save</b>
+                <kbd>Ctrl</kbd>+<kbd>S</kbd> saves to the song folder in Shift_JIS, ready for NX.
+              </div>
             </div>
-            <div>
-              <b>選ぶ・動かす</b>空いた所をドラッグで範囲選択、チップをドラッグか矢印キーで移動。<kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd>でコピー。
-            </div>
-            <div>
-              <b>聴く</b>
-              <kbd>Space</kbd>で再生と停止。止めると青い ▶（再生を始める位置）に戻ります。<kbd>Shift</kbd>+<kbd>Space</kbd>はその場で止めます。<kbd>F5</kbd> 最初から、<kbd>F6</kbd> ▶ から、<kbd>F7</kbd> 停止。
-            </div>
-            <div>
-              <b>保存</b>
-              <kbd>Ctrl</kbd>+<kbd>S</kbd>で曲フォルダにShift_JISで保存。NXでそのまま読めます。
-            </div>
-          </div>
+          )}
         </section>
       </main>
       <FolderInput inputRef={folderInput} />

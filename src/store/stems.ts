@@ -1,5 +1,6 @@
 // ステム音源：読み込み・DTM風の再生（ミュート・ソロ・音量・パン）・聞こえ方のプリセット・書き出しと DTX への登録。
 // ステムは BGM チップ（ch01）の位置から鳴らす。ステムがあるときは、その BGM の代わりにステムを鳴らす（ステムの合計＝原曲）。
+import { tr, withTr, pl } from '../i18n';
 import { create } from 'zustand';
 import { engine, STEM_BASE, type StemStrip } from '../audio/engine';
 import { computePeaks, encodeAudio, guessStems, isKindLabel, renderMix, shiftBuffer, stemFilePath, stemKindInfo, uniqueStemName, type StemGuess } from '../audio/stems';
@@ -134,7 +135,7 @@ export async function syncStems() {
     );
   }
   sset({ status: { ...status } });
-  if (jobs.length) sset({ busy: 'ステムを読み込んでいます…' });
+  if (jobs.length) sset({ busy: tr('ステムを読み込んでいます…', 'Loading stems…') });
   await Promise.all(jobs);
   if (token !== syncToken) return;
   sset({ status, busy: null });
@@ -238,7 +239,7 @@ setAnalysisProvider(() => {
   const l = loaded.get(eff.file);
   const t = tracks().find((x) => x.file === eff.file);
   if (!l || !t) return null;
-  return { key: `stem:${l.key}:${t.offsetMs}`, buf: l.buf, name: `${t.name}（${t.file.split('/').pop()}）` };
+  return { key: `stem:${l.key}:${t.offsetMs}`, buf: l.buf, name: tr(`${t.name}（${t.file.split('/').pop()}）`, `${t.name} (${t.file.split('/').pop()})`) };
 });
 
 /** トラックの音（スペクトルに出すとき）。'orig' は原曲、それ以外はステムのファイル */
@@ -246,7 +247,7 @@ export function trackAudio(id: string): AnalysisSource | null {
   if (id === 'orig') {
     const bgm = bgmSource(useEditor.getState().doc);
     const got = bgm ? engine.buffer(bgm.wav) : null;
-    return got ? { key: got.key, buf: got.buf, name: '原曲' } : null;
+    return got ? { key: got.key, buf: got.buf, name: tr('原曲', 'Original') } : null;
   }
   const l = loaded.get(id);
   const t = tracks().find((x) => x.file === id);
@@ -260,13 +261,13 @@ export function trackAudio(id: string): AnalysisSource | null {
 export async function importStems(files: File[]): Promise<number> {
   const audio = files.filter((f) => AUDIO_EXT.test(f.name));
   if (audio.length === 0) {
-    toast('音声ファイル（WAV・OGG・MP3・FLAC）を選んでください', 'warn');
+    toast(tr('音声ファイル（WAV・OGG・MP3・FLAC）を選んでください', 'Choose audio files (WAV, OGG, MP3, FLAC)'), 'warn');
     return 0;
   }
   const firstStems = tracks().length === 0;
   let folder: SongFolder | null = useEditor.getState().folder;
   if (!folder) {
-    folder = folderFromFiles([], useEditor.getState().doc.fields['TITLE'] || '新しい曲');
+    folder = folderFromFiles([], useEditor.getState().doc.fields['TITLE'] || tr('新しい曲', 'New song'));
     useEditor.setState({ folder });
   }
   const list = [...tracks()];
@@ -278,7 +279,7 @@ export async function importStems(files: File[]): Promise<number> {
     audio.map((f) => f.name),
     { existing: list.map((t) => t.file), taken: list.map((t) => t.name), hints: songHints() },
   );
-  sset({ busy: 'ステムをコピーしています…' });
+  sset({ busy: tr('ステムをコピーしています…', 'Copying stems…') });
   try {
     for (const [i, f] of audio.entries()) {
       // 曲フォルダの stems/ にもう同じファイルがあれば、コピーせずにそれを使う
@@ -310,7 +311,10 @@ export async function importStems(files: File[]): Promise<number> {
   await syncStems();
   checkLengths();
   toast(
-    `ステムを ${added.length} 本読み込みました：${added.map((t) => t.name).join('・')}${memory ? '（曲フォルダへは保存するときに書き出します）' : reused === added.length ? '（曲フォルダの stems/ にあるファイルを使います）' : '（曲フォルダの stems/ にコピー）'}。名前と種類はトラックの ✎ で変えられます`,
+    tr(
+      `ステムを ${added.length} 本読み込みました：${added.map((t) => t.name).join('・')}${memory ? '（曲フォルダへは保存するときに書き出します）' : reused === added.length ? '（曲フォルダの stems/ にあるファイルを使います）' : '（曲フォルダの stems/ にコピー）'}。名前と種類はトラックの ✎ で変えられます`,
+      `Loaded ${added.length} ${pl(added.length, 'stem')}: ${added.map((t) => t.name).join(', ')}${memory ? ' (written to the song folder when you save)' : reused === added.length ? ' (using the files already in stems/ in the song folder)' : ' (copied to stems/ in the song folder)'}. Change names and types with ✎ on each track`,
+    ),
     'ok',
     7000,
   );
@@ -321,7 +325,7 @@ export async function importStems(files: File[]): Promise<number> {
 function ensureBgmAnchor() {
   const doc = useEditor.getState().doc;
   if (bgmSource(doc)) return;
-  edit('ステム用に BGM の位置を用意', (d) => {
+  edit(tr('ステム用に BGM の位置を用意', 'Add a BGM position for stems'), (d) => {
     const no = freeWavNumber(d) ?? 1;
     setField(d, 'WAV' + toBase36x2(no), 'bgm.ogg');
     d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: no });
@@ -335,7 +339,12 @@ function checkLengths() {
   const lens = ready.map((t) => loaded.get(t.file)!.raw.duration);
   const max = Math.max(...lens);
   const short = ready.filter((_, i) => max - lens[i] > 0.05);
-  if (short.length) toast(`${short.map((t) => t.name).join('・')} が他より短いので、末尾は無音として扱います`, 'info', 6000);
+  if (short.length)
+    toast(
+      tr(`${short.map((t) => t.name).join('・')} が他より短いので、末尾は無音として扱います`, `${short.map((t) => t.name).join(', ')} ${short.length === 1 ? 'is' : 'are'} shorter than the others, so the end is treated as silence`),
+      'info',
+      6000,
+    );
 }
 
 /** トラックの差 */
@@ -469,21 +478,41 @@ export function soloOnly(id: string) {
 
 // ---- 聞こえ方 -------------------------------------------------------------------
 
-export const LISTEN_PRESETS: { id: Exclude<ListenPreset, 'custom'>; label: string; hint: string; hintNoStems: string }[] = [
-  { id: 'all', label: '全部', hint: 'すべてのステムと譜面の音を鳴らします（原曲のトラックはステムと重なるので消します）。', hintNoStems: '原曲と譜面の音を鳴らします。' },
-  {
-    id: 'game',
-    label: 'ゲームと同じ',
-    hint: 'ドラム以外のステムと譜面の音を鳴らします。NXで遊ぶときと同じ聞こえ方で、譜面だけでドラムが成り立っているか確かめます。',
-    hintNoStems: 'ステムが無いので原曲にドラムが入ったままです（「全部」と同じ）。ドラムのステムを読み込むと、ドラム抜きで聴けます。',
-  },
-  { id: 'drums', label: 'ドラムだけ', hint: 'ドラムのステムだけを鳴らし、譜面の音は止めます。', hintNoStems: 'ドラムのステムを読み込むと使えます。' },
-  {
-    id: 'compare',
-    label: '聴き比べ',
-    hint: 'ドラムのステムを左、譜面の音を右に振って同時に鳴らします。ずれや抜けを聞き分けられます。',
-    hintNoStems: '原曲を左、譜面の音を右に振って同時に鳴らします。ずれや抜けを聞き分けられます。',
-  },
+type ListenPresetDef = { id: Exclude<ListenPreset, 'custom'>; label: string; hint: string; hintNoStems: string };
+
+export const LISTEN_PRESETS: ListenPresetDef[] = [
+  withTr({ id: 'all' } as ListenPresetDef, {
+    label: ['全部', 'All'],
+    hint: ['すべてのステムと譜面の音を鳴らします（原曲のトラックはステムと重なるので消します）。', 'Plays all stems and the chart sounds (the original track is muted because it overlaps the stems).'],
+    hintNoStems: ['原曲と譜面の音を鳴らします。', 'Plays the original and the chart sounds.'],
+  }),
+  withTr({ id: 'game' } as ListenPresetDef, {
+    label: ['ゲームと同じ', 'Like the game'],
+    hint: [
+      'ドラム以外のステムと譜面の音を鳴らします。NXで遊ぶときと同じ聞こえ方で、譜面だけでドラムが成り立っているか確かめます。',
+      'Plays the non-drum stems and the chart sounds, just like playing in NX, so you can check that the chart alone carries the drums.',
+    ],
+    hintNoStems: [
+      'ステムが無いので原曲にドラムが入ったままです（「全部」と同じ）。ドラムのステムを読み込むと、ドラム抜きで聴けます。',
+      'Without stems the original still contains the drums (same as "All"). Load a drum stem to listen without the drums.',
+    ],
+  }),
+  withTr({ id: 'drums' } as ListenPresetDef, {
+    label: ['ドラムだけ', 'Drums only'],
+    hint: ['ドラムのステムだけを鳴らし、譜面の音は止めます。', 'Plays only the drum stem and mutes the chart sounds.'],
+    hintNoStems: ['ドラムのステムを読み込むと使えます。', 'Available after loading a drum stem.'],
+  }),
+  withTr({ id: 'compare' } as ListenPresetDef, {
+    label: ['聴き比べ', 'Compare'],
+    hint: [
+      'ドラムのステムを左、譜面の音を右に振って同時に鳴らします。ずれや抜けを聞き分けられます。',
+      'Plays the drum stem panned left and the chart sounds panned right at the same time, so you can hear offsets and missing notes.',
+    ],
+    hintNoStems: [
+      '原曲を左、譜面の音を右に振って同時に鳴らします。ずれや抜けを聞き分けられます。',
+      'Plays the original panned left and the chart sounds panned right at the same time, so you can hear offsets and missing notes.',
+    ],
+  }),
 ];
 
 export function setListen(p: Exclude<ListenPreset, 'custom'>) {
@@ -663,40 +692,42 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
   const doc0 = useEditor.getState().doc;
   const folder = useEditor.getState().folder;
   if (!folder) {
-    toast('先に曲フォルダを開いてください', 'warn');
+    toast(tr('先に曲フォルダを開いてください', 'Open a song folder first'), 'warn');
     return [];
   }
   const list = readyStems().filter((t) => o.include.includes(t.file));
   if (!list.length) {
-    toast('書き出すステムを選んでください', 'warn');
+    toast(tr('書き出すステムを選んでください', 'Choose the stems to export'), 'warn');
     return [];
   }
   const range = exportRangeSec(o.mode === 'bgm' ? 'song' : o.range);
   if (!range || range.to - range.from < 0.1) {
-    toast(o.range === 'loop' ? 'ループ範囲がありません' : '選択範囲がありません（チップを選んでください）', 'warn');
+    toast(o.range === 'loop' ? tr('ループ範囲がありません', 'There is no loop range') : tr('選択範囲がありません（チップを選んでください）', 'Nothing is selected (select some chips)'), 'warn');
     return [];
   }
   const fade = o.mode !== 'bgm' && o.range !== 'song' ? 1 : 0;
   const ext = o.format === 'ogg' ? '.ogg' : '.wav';
   const jobs: { name: string; tracks: StemTrack[] }[] =
     o.mode === 'each'
-      ? list.map((t) => ({ name: `${cleanName(o.fileName.replace(/\{名前\}/g, t.name)) || `stems_${t.name}`}${ext}`, tracks: [t] }))
+      ? list.map((t) => ({ name: `${cleanName(o.fileName.replace(/\{(名前|name)\}/g, t.name)) || `stems_${t.name}`}${ext}`, tracks: [t] }))
       : [{ name: `${cleanName(o.fileName.replace(/\.(ogg|wav)$/i, '')) || 'bgm'}${ext}`, tracks: list }];
   const written: string[] = [];
   let memory = 0;
   try {
     for (const [i, j] of jobs.entries()) {
-      sset({ busy: `書き出し中 ${i + 1}/${jobs.length}: ${j.name}（ミックス）` });
+      sset({ busy: tr(`書き出し中 ${i + 1}/${jobs.length}: ${j.name}（ミックス）`, `Exporting ${i + 1}/${jobs.length}: ${j.name} (mixing)`) });
       const buf = await renderMix(
         j.tracks.map((t) => ({ buf: loaded.get(t.file)!.buf, gain: o.useTrackSettings ? t.gain : 1, pan: o.useTrackSettings ? t.pan : 0 })),
         { from: range.from, to: range.to, fade, peakDb: o.normalize ? -1 : null },
       );
-      const bytes = await encodeAudio(buf, o.format, (p) => sset({ busy: `書き出し中 ${i + 1}/${jobs.length}: ${j.name}（${o.format.toUpperCase()} ${Math.round(p * 100)}%）` }));
+      const bytes = await encodeAudio(buf, o.format, (p) =>
+        sset({ busy: tr(`書き出し中 ${i + 1}/${jobs.length}: ${j.name}（${o.format.toUpperCase()} ${Math.round(p * 100)}%）`, `Exporting ${i + 1}/${jobs.length}: ${j.name} (${o.format.toUpperCase()} ${Math.round(p * 100)}%)`) }),
+      );
       if ((await putFile(folder, j.name, bytes)) === 'memory') memory++;
       written.push(j.name);
     }
   } catch (e) {
-    toast(`書き出せませんでした: ${(e as Error).message}`, 'error', 8000);
+    toast(tr(`書き出せませんでした: ${(e as Error).message}`, `Couldn't export: ${(e as Error).message}`), 'error', 8000);
     return written;
   } finally {
     sset({ busy: null });
@@ -704,7 +735,10 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
   if (o.mode !== 'each' && o.register !== 'none') registerExport(written[0], o.register, doc0);
   else void prepareSounds();
   toast(
-    `${written.join('、')} を書き出しました${o.register === 'bgm' && o.mode !== 'each' ? '（BGMに登録）' : o.register === 'preview' && o.mode !== 'each' ? '（#PREVIEW に設定）' : ''}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`,
+    tr(
+      `${written.join('、')} を書き出しました${o.register === 'bgm' && o.mode !== 'each' ? '（BGMに登録）' : o.register === 'preview' && o.mode !== 'each' ? '（#PREVIEW に設定）' : ''}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`,
+      `Exported ${written.join(', ')}${o.register === 'bgm' && o.mode !== 'each' ? ' (set as BGM)' : o.register === 'preview' && o.mode !== 'each' ? ' (set as #PREVIEW)' : ''}${memory ? '. It is written to the song folder when you save' : ''}`,
+    ),
     'ok',
     7000,
   );
@@ -713,11 +747,11 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
 
 function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useEditor.getState().doc) {
   if (how === 'preview') {
-    edit('#PREVIEW を設定', (d) => setField(d, 'PREVIEW', file));
+    edit(tr('#PREVIEW を設定', 'Set #PREVIEW'), (d) => setField(d, 'PREVIEW', file));
     return;
   }
   const bgm = bgmSource(doc0);
-  edit('BGM を登録', (d) => {
+  edit(tr('BGM を登録', 'Set BGM'), (d) => {
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), file);
       return;
@@ -735,7 +769,7 @@ function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useEditor.g
  */
 export function defaultExportName(mode: ExportMode, format: 'ogg' | 'wav'): string {
   const ext = format === 'ogg' ? '.ogg' : '.wav';
-  if (mode === 'each') return 'stems_{名前}';
+  if (mode === 'each') return tr('stems_{名前}', 'stems_{name}');
   if (mode === 'all') return `preview${ext}`;
   if (mode === 'selected') return `mix${ext}`;
   const s = useEditor.getState();

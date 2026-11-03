@@ -1,4 +1,5 @@
 // エディタ内部の譜面データ。DTXと同じ「小節・チャンネル・チップ」の形で持つ。
+import { tr, withTr } from '../i18n';
 import type { Frac } from './fraction';
 
 /** 1つのチップ。位置は小節番号と小節内の分数（0以上1未満）。 */
@@ -96,18 +97,22 @@ export interface LaneDef {
   altColor?: string;
 }
 
+function lane(def: Omit<LaneDef, 'name' | 'mainName' | 'altName'>, name: readonly [string, string], mainName: readonly [string, string], altName?: readonly [string, string]): LaneDef {
+  return withTr(def as LaneDef, { name, mainName, altName });
+}
+
 /** ドラムの10レーン。並びは NX の標準（LC・HH・LP・SD・HT・BD・LT・FT・CY・RD） */
 export const DRUM_LANES: readonly LaneDef[] = [
-  { key: 'LC', name: '左シンバル', color: '#FF5C8A', main: CH.LC, mainName: '左シンバル' },
-  { key: 'HH', name: 'ハイハット', color: '#4FC3F7', main: CH.HHC, mainName: 'HHクローズ', alt: CH.HHO, altName: 'HHオープン', altColor: '#4FC3F7' },
-  { key: 'LP', name: '左ペダル', color: '#F48FB1', main: CH.LP, mainName: '左ペダル', alt: CH.LBD, altName: '左バスドラム', altColor: '#CE93D8' },
-  { key: 'SD', name: 'スネア', color: '#FFD54F', main: CH.SD, mainName: 'スネア' },
-  { key: 'HT', name: 'ハイタム', color: '#66BB6A', main: CH.HT, mainName: 'ハイタム' },
-  { key: 'BD', name: 'バスドラム', color: '#9C84E0', main: CH.BD, mainName: 'バスドラム' },
-  { key: 'LT', name: 'ロータム', color: '#EF5350', main: CH.LT, mainName: 'ロータム' },
-  { key: 'FT', name: 'フロアタム', color: '#FF9800', main: CH.FT, mainName: 'フロアタム' },
-  { key: 'CY', name: '右シンバル', color: '#42A5F5', main: CH.CY, mainName: '右シンバル' },
-  { key: 'RD', name: 'ライド', color: '#80DEEA', main: CH.RD, mainName: 'ライド' },
+  lane({ key: 'LC', color: '#FF5C8A', main: CH.LC }, ['左シンバル', 'Left cymbal'], ['左シンバル', 'Left cymbal']),
+  lane({ key: 'HH', color: '#4FC3F7', main: CH.HHC, alt: CH.HHO, altColor: '#4FC3F7' }, ['ハイハット', 'Hi-hat'], ['HHクローズ', 'HH closed'], ['HHオープン', 'HH open']),
+  lane({ key: 'LP', color: '#F48FB1', main: CH.LP, alt: CH.LBD, altColor: '#CE93D8' }, ['左ペダル', 'Left pedal'], ['左ペダル', 'Left pedal'], ['左バスドラム', 'Left bass drum']),
+  lane({ key: 'SD', color: '#FFD54F', main: CH.SD }, ['スネア', 'Snare'], ['スネア', 'Snare']),
+  lane({ key: 'HT', color: '#66BB6A', main: CH.HT }, ['ハイタム', 'High tom'], ['ハイタム', 'High tom']),
+  lane({ key: 'BD', color: '#9C84E0', main: CH.BD }, ['バスドラム', 'Bass drum'], ['バスドラム', 'Bass drum']),
+  lane({ key: 'LT', color: '#EF5350', main: CH.LT }, ['ロータム', 'Low tom'], ['ロータム', 'Low tom']),
+  lane({ key: 'FT', color: '#FF9800', main: CH.FT }, ['フロアタム', 'Floor tom'], ['フロアタム', 'Floor tom']),
+  lane({ key: 'CY', color: '#42A5F5', main: CH.CY }, ['右シンバル', 'Right cymbal'], ['右シンバル', 'Right cymbal']),
+  lane({ key: 'RD', color: '#80DEEA', main: CH.RD }, ['ライド', 'Ride'], ['ライド', 'Ride']),
 ];
 
 export interface DrumChannelInfo {
@@ -122,13 +127,13 @@ export interface DrumChannelInfo {
 
 const drumInfo = new Map<number, DrumChannelInfo>();
 DRUM_LANES.forEach((l, i) => {
-  const reg = (base: number, alt: boolean, name: string) => {
-    drumInfo.set(base, { lane: i, kind: 'normal', alt, base, name });
-    drumInfo.set(base + 0x20, { lane: i, kind: 'hidden', alt, base, name: `${name}（不可視）` });
-    drumInfo.set(base + 0xa0, { lane: i, kind: 'nochip', alt, base, name: `${name}（チップ無し時の音）` });
+  const reg = (base: number, alt: boolean, name: () => string) => {
+    drumInfo.set(base, withTr({ lane: i, kind: 'normal', alt, base } as DrumChannelInfo, { name }));
+    drumInfo.set(base + 0x20, withTr({ lane: i, kind: 'hidden', alt, base } as DrumChannelInfo, { name: () => `${name()}${tr('（不可視）', ' (invisible)')}` }));
+    drumInfo.set(base + 0xa0, withTr({ lane: i, kind: 'nochip', alt, base } as DrumChannelInfo, { name: () => `${name()}${tr('（チップ無し時の音）', ' (no-chip sound)')}` }));
   };
-  reg(l.main, false, l.mainName);
-  if (l.alt !== undefined && l.altName) reg(l.alt, true, l.altName);
+  reg(l.main, false, () => l.mainName);
+  if (l.alt !== undefined && l.altName) reg(l.alt, true, () => l.altName ?? '');
 });
 
 /** ドラムのチャンネルなら、レーンと種類を返す */
@@ -170,24 +175,10 @@ export interface BgaChannelDef {
 
 /** BGA のレイヤー 1〜8 と差し替え、動画のチャンネル */
 export const BGA_CHANNELS: readonly BgaChannelDef[] = [
-  { ch: 0x04, name: 'BGA レイヤー1', movie: false, swap: false },
-  { ch: 0x07, name: 'BGA レイヤー2', movie: false, swap: false },
-  { ch: 0x55, name: 'BGA レイヤー3', movie: false, swap: false },
-  { ch: 0x56, name: 'BGA レイヤー4', movie: false, swap: false },
-  { ch: 0x57, name: 'BGA レイヤー5', movie: false, swap: false },
-  { ch: 0x58, name: 'BGA レイヤー6', movie: false, swap: false },
-  { ch: 0x59, name: 'BGA レイヤー7', movie: false, swap: false },
-  { ch: 0x60, name: 'BGA レイヤー8', movie: false, swap: false },
-  { ch: 0xc4, name: 'レイヤー1の差し替え', movie: false, swap: true },
-  { ch: 0xc7, name: 'レイヤー2の差し替え', movie: false, swap: true },
-  { ch: 0xd5, name: 'レイヤー3の差し替え', movie: false, swap: true },
-  { ch: 0xd6, name: 'レイヤー4の差し替え', movie: false, swap: true },
-  { ch: 0xd7, name: 'レイヤー5の差し替え', movie: false, swap: true },
-  { ch: 0xd8, name: 'レイヤー6の差し替え', movie: false, swap: true },
-  { ch: 0xd9, name: 'レイヤー7の差し替え', movie: false, swap: true },
-  { ch: 0xe0, name: 'レイヤー8の差し替え', movie: false, swap: true },
-  { ch: 0x54, name: '動画', movie: true, swap: false },
-  { ch: 0x5a, name: '動画（全画面）', movie: true, swap: false },
+  ...[0x04, 0x07, 0x55, 0x56, 0x57, 0x58, 0x59, 0x60].map((ch, i) => withTr({ ch, movie: false, swap: false } as BgaChannelDef, { name: [`BGA レイヤー${i + 1}`, `BGA layer ${i + 1}`] })),
+  ...[0xc4, 0xc7, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xe0].map((ch, i) => withTr({ ch, movie: false, swap: true } as BgaChannelDef, { name: [`レイヤー${i + 1}の差し替え`, `Layer ${i + 1} swap`] })),
+  withTr({ ch: 0x54, movie: true, swap: false } as BgaChannelDef, { name: ['動画', 'Movie'] }),
+  withTr({ ch: 0x5a, movie: true, swap: false } as BgaChannelDef, { name: ['動画（全画面）', 'Movie (full screen)'] }),
 ];
 
 const bgaInfo = new Map(BGA_CHANNELS.map((b) => [b.ch, b]));

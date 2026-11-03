@@ -1,3 +1,4 @@
+import { tr, locale } from '../i18n';
 import { supportsDirectWrite } from '../fs/folder';
 import { HSplitter } from './Splitter';
 import { bgmSource, docStats } from '../store/derived';
@@ -25,10 +26,10 @@ export function Footer() {
   const span = useSongSpan(doc);
 
   const where = folder?.dir
-    ? `${folder.name}/${meta.fileName}（曲フォルダに直接保存）`
+    ? tr(`${folder.name}/${meta.fileName}（曲フォルダに直接保存）`, `${folder.name}/${meta.fileName} (saved directly to the song folder)`)
     : supportsDirectWrite()
-      ? `${meta.fileName}（保存するときに曲フォルダを選びます）`
-      : `${meta.fileName}（ダウンロードで保存）`;
+      ? tr(`${meta.fileName}（保存するときに曲フォルダを選びます）`, `${meta.fileName} (you choose the song folder when saving)`)
+      : tr(`${meta.fileName}（ダウンロードで保存）`, `${meta.fileName} (saved as a download)`);
 
   return (
     <footer className="footer">
@@ -36,23 +37,27 @@ export function Footer() {
       <TrackPanel length={length} span={span} />
       <div className="status">
         <span>
-          ノーツ <b>{stats.notes.toLocaleString()}</b>
+          {tr('ノーツ', 'Notes')} <b>{stats.notes.toLocaleString(locale())}</b>
         </span>
         <span>
-          小節 <b>{Math.max(stats.measures, songEndM(doc))}</b>
+          {tr('小節', 'Measures')} <b>{Math.max(stats.measures, songEndM(doc))}</b>
         </span>
         <span>
           WAV <b>{stats.wavCount}</b>
         </span>
         <span>
-          長さ <b>{formatTime(length, false)}</b>
+          {tr('長さ', 'Length')} <b>{formatTime(length, false)}</b>
         </span>
-        {missing.length > 0 && <span className="pill warn">見つからない音 {missing.length}</span>}
+        {missing.length > 0 && (
+          <span className="pill warn">
+            {tr('見つからない音', 'Missing sounds')} {missing.length}
+          </span>
+        )}
         <span className="grow" />
         <span className="ellipsis" style={{ color: dirty ? 'var(--amber)' : 'var(--mute)' }}>
-          {dirty ? '未保存の変更あり' : savedAt ? '保存済み' : '変更なし'} · {where}
+          {dirty ? tr('未保存の変更あり', 'Unsaved changes') : savedAt ? tr('保存済み', 'Saved') : tr('変更なし', 'No changes')} · {where}
         </span>
-        <span className="pill" title="保存するときの文字コード（NXが読める形式）">
+        <span className="pill" title={tr('保存するときの文字コード（NXが読める形式）', 'Text encoding used when saving (a format NX can read)')}>
           Shift_JIS
         </span>
       </div>

@@ -6,6 +6,7 @@
 // - キーボード：← → で隣のメニュー、↑ ↓ で項目、Home・End、Enter・Space で実行、Esc で閉じる。
 //   Ctrl・Alt 付きのキーと F キーはメニューを閉じてからいつもどおり効かせる（Ctrl+Z など）
 // - 幅は中身（いちばん長い項目とショートカット）に合わせて広がり、折り返さない。画面の右や下からはみ出すときは寄せる・スクロールする
+import { tr } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { markDismissPress } from '../store/ctxMenu';
 
@@ -57,7 +58,7 @@ const lastItem = (entries: MenuEntry[]) => step(entries, entries.length, -1);
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 if (typeof window !== 'undefined') window.addEventListener('keydown', (e) => keyHandler?.(e), true);
 
-export function MenuBar({ menus, label = 'メニュー' }: { menus: MenuDef[]; label?: string }) {
+export function MenuBar({ menus, label = tr('メニュー', 'Menu') }: { menus: MenuDef[]; label?: string }) {
   const [open, setOpen] = useState<OpenState | null>(null);
   /** Tab で止まるタイトル（矢印で動かす。WAI-ARIA の menubar と同じ） */
   const [tabStop, setTabStop] = useState(0);

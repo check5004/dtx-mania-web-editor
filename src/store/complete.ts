@@ -2,6 +2,7 @@
 // 予測は assist/complete（この曲で打った小節を写す）、原曲の構造は assist/measureAudio、原曲との照合は assist/evidence、
 // 原曲で聞こえるドラム（採譜モデルの打点）との合い方は assist/heard が受け持つ。
 // 点線を出すのは、チップを置いた（足した）ときだけ。足した中でいちばん後ろの小節の次から、空いている小節にだけ出す。
+import { tr, withTr } from '../i18n';
 import { create } from 'zustand';
 import { AiError } from '../ai/openrouter';
 import { buildContext, decodeCandidates, PHRASE_SCHEMA, phrasePrompt, type PhraseCandidate } from '../ai/phrase';
@@ -16,7 +17,7 @@ import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { Frac } from '../dtx/fraction';
 import type { DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
-import { hasAiKey, NO_KEY_TITLE, runAi } from './ai';
+import { hasAiKey, noKeyTitle, runAi } from './ai';
 import { aiOnsets, useAssist } from './assist';
 import { drumsAudible, readyDrums, useDrums } from './drums';
 import { drumHits, type DrumHit } from '../transcribe/peaks';
@@ -34,9 +35,18 @@ export type CompleteAmount = 'few' | 'normal' | 'many';
  * 見込み 0.3〜0.4 の予測でそのまま正解が 39%、0.4〜0.5 で 54%、0.5 以上で 65% だった（docs/bench.md の「TAB補完」）。
  */
 export const AMOUNT: Record<CompleteAmount, { label: string; min: number; tip: string }> = {
-  few: { label: '控えめ', min: 0.5, tip: '当たりやすいときだけ出します。5小節に1回ほど出て、約3分の2がそのまま正解' },
-  normal: { label: 'ふつう', min: 0.35, tip: '2小節に1回ほど出て、半分強がそのまま正解。外れても少し直すだけのことが多い' },
-  many: { label: '多め', min: 0.2, tip: '自信が低くても出します。3小節に2回ほど出て、そのまま正解は約半分（直す前提の下書き）' },
+  few: withTr(
+    { min: 0.5 } as { label: string; min: number; tip: string },
+    { label: ['控えめ', 'Fewer'], tip: ['当たりやすいときだけ出します。5小節に1回ほど出て、約3分の2がそのまま正解', 'Shows ideas only when they are likely right. About once every 5 measures, and about two thirds are right as is'] },
+  ),
+  normal: withTr(
+    { min: 0.35 } as { label: string; min: number; tip: string },
+    { label: ['ふつう', 'Normal'], tip: ['2小節に1回ほど出て、半分強がそのまま正解。外れても少し直すだけのことが多い', 'About once every 2 measures, and a bit over half are right as is. Misses usually need only small fixes'] },
+  ),
+  many: withTr(
+    { min: 0.2 } as { label: string; min: number; tip: string },
+    { label: ['多め', 'More'], tip: ['自信が低くても出します。3小節に2回ほど出て、そのまま正解は約半分（直す前提の下書き）', 'Shows ideas even with low confidence. About 2 of every 3 measures, and about half are right as is (a draft to fix up)'] },
+  ),
 };
 
 /** Alt+] で呼び出したとき（自分から求めたときは、見込みが低くても出す） */
@@ -175,12 +185,12 @@ export function ghostBadge(): { at: number; ghost: Ghost | null } | null {
 
 /** 候補の出どころ（札に出す） */
 export function sourceLabel(c: Candidate): string {
-  if (c.kind === 'ai') return `AI：${c.name ?? '候補'}`;
+  if (c.kind === 'ai') return tr(`AI：${c.name ?? '候補'}`, `AI: ${c.name ?? 'idea'}`);
   if (c.src === null) return '';
-  if (c.kind === 'structure') return `原曲で同じに聞こえる 小節 ${toMeasure(c.src)} から`;
-  if (c.period === 1) return '直前の小節を続ける';
-  if (c.period !== null && c.period <= 8) return `${c.period}小節前と同じ流れ`;
-  return `小節 ${toMeasure(c.src)} と同じ流れ`;
+  if (c.kind === 'structure') return tr(`原曲で同じに聞こえる 小節 ${toMeasure(c.src)} から`, `From measure ${toMeasure(c.src)}, which sounds the same in the original`);
+  if (c.period === 1) return tr('直前の小節を続ける', 'Continue the previous measure');
+  if (c.period !== null && c.period <= 8) return tr(`${c.period}小節前と同じ流れ`, `Same flow as ${c.period} measures back`);
+  return tr(`小節 ${toMeasure(c.src)} と同じ流れ`, `Same flow as measure ${toMeasure(c.src)}`);
 }
 
 // ---- 原曲との照合（聞こえない所に印） --------------------------------------------------
@@ -504,7 +514,10 @@ export function acceptGhost(count?: number): boolean {
   const n = Math.max(1, Math.min(count ?? g.measures.length, g.measures.length));
   const from = g.from;
   const to = from + n - 1;
-  const label = n === 1 ? `TAB補完で小節 ${toMeasure(from)} を入れる` : `TAB補完で小節 ${toMeasure(from)}〜${toMeasure(to)} を入れる`;
+  const label =
+    n === 1
+      ? tr(`TAB補完で小節 ${toMeasure(from)} を入れる`, `Tab completion: fill measure ${toMeasure(from)}`)
+      : tr(`TAB補完で小節 ${toMeasure(from)}〜${toMeasure(to)} を入れる`, `Tab completion: fill measures ${toMeasure(from)}–${toMeasure(to)}`);
   edit(label, (d) => {
     for (let i = 0; i < n; i++) {
       for (const c of g.measures[i]) {
@@ -536,7 +549,7 @@ export function stepGhost(d: 1 | -1): boolean {
 export function summon() {
   const s = useEditor.getState();
   if (!get().enabled) {
-    toast('TAB補完はオフです。右のパネルの「TAB補完」の「使う」にチェックを入れると使えます', 'info');
+    toast(tr('TAB補完はオフです。右のパネルの「TAB補完」の「使う」にチェックを入れると使えます', 'Tab completion is off. Check "Use" under "Tab completion" in the right panel to turn it on'), 'info');
     return;
   }
   if (!canShow()) return;
@@ -567,7 +580,8 @@ function cancelAi() {
   if (get().aiLoading) set({ aiLoading: false });
 }
 
-const AI_NOTE =
+// AI への指示（日本語のまま。返す文の言語は aiLangRule で別に指定する）
+const AI_NOTE = // i18n-ignore
   'TAB補完：直前までの譜面から自然に続くドラムを。曲の流れ（同じ所の繰り返し、区切りのフィル）と原曲の打点に合わせ、いちばんありそうなものを最初に。';
 
 function aiCandidate(pc: PhraseCandidate, from: number, len: number): Candidate {
@@ -585,7 +599,7 @@ export async function askAi() {
   const c = get();
   if (!c.enabled) return;
   if (!hasAiKey()) {
-    toast(NO_KEY_TITLE, 'warn');
+    toast(noKeyTitle(), 'warn');
     return;
   }
   const doc = useEditor.getState().doc;
@@ -623,7 +637,7 @@ export async function askAi() {
     }
     const ai = decodeCandidates(r.data, { from, to: from + len - 1 }, tempo).map((pc) => aiCandidate(pc, from, len));
     if (ai.length === 0) {
-      set({ aiLoading: false, aiError: 'AIの候補が使える形になりませんでした' });
+      set({ aiLoading: false, aiError: tr('AIの候補が使える形になりませんでした', "The AI's ideas couldn't be used") });
       return;
     }
     const rest = get().at === from ? get().cands.filter((x) => x.kind !== 'ai') : [];

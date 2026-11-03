@@ -1,4 +1,5 @@
 // ベロシティ（ベロシティ）の操作：置くベロシティ（強・中・弱）、選んだチップのベロシティ、ベロシティの編集モードの道具。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { sameMeasures } from '../assist/similar';
 import { drumChannel, DRUM_LANES, type Chip, type DtxDoc } from '../dtx/model';
@@ -48,7 +49,10 @@ export const useVel = create<VelState>(() => ({
 const vget = useVel.getState;
 const vset = useVel.setState;
 
-export const VEL_PRESET_NAMES = ['強', '中', '弱'] as const;
+/** 置くベロシティの3段の名前（表示のたびに今の言語で返す） */
+export function velPresetNames(): readonly [string, string, string] {
+  return [tr('強', 'Hard'), tr('中', 'Mid'), tr('弱', 'Soft')];
+}
 
 /** いま置くベロシティ */
 export function placeVel(): number {

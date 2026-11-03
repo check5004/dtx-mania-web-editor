@@ -1,3 +1,4 @@
+import { tr, pl, getLang, setLang, LANG_NAMES } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { downloadDtx, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
@@ -47,6 +48,7 @@ import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
 import { MasterMixer } from './MixPanel';
 import { MenuBar, type MenuDef } from './MenuBar';
+import { useLang } from '../i18n/useLang';
 
 const cursorM = () => {
   const s = useEditor.getState();
@@ -56,24 +58,34 @@ const cursorM = () => {
 function deleteCursorMeasure() {
   const m = cursorM();
   const r = deleteMeasures(m, 1);
-  toast(`小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個${r.kept ? `、BPM変化・BGMの開始 ${r.kept} 個は次の小節の頭へ移動` : ''}）。Ctrl+Z で戻せます`, 'ok', 6000);
+  toast(
+    tr(
+      `小節 ${toMeasure(m)} を削除しました（チップ ${r.removed} 個${r.kept ? `、BPM変化・BGMの開始 ${r.kept} 個は次の小節の頭へ移動` : ''}）。Ctrl+Z で戻せます`,
+      `Deleted measure ${toMeasure(m)} (${r.removed} ${pl(r.removed, 'chip')}${r.kept ? `; moved ${r.kept} BPM-change/BGM-start ${pl(r.kept, 'chip')} to the start of the next measure` : ''}). Ctrl+Z to undo.`,
+    ),
+    'ok',
+    6000,
+  );
 }
 
 async function bulkMeasures() {
   const m = cursorM();
   const v = await promptDialog({
-    title: `小節 ${toMeasure(m)} から挿入・削除`,
-    body: '増やすなら正の数（カーソルの小節の前に空の小節を入れる）、減らすなら負の数（カーソルの小節から消して詰める）を入れてください。',
+    title: tr(`小節 ${toMeasure(m)} から挿入・削除`, `Insert or delete measures at ${toMeasure(m)}`),
+    body: tr(
+      '増やすなら正の数（カーソルの小節の前に空の小節を入れる）、減らすなら負の数（カーソルの小節から消して詰める）を入れてください。',
+      'Enter a positive number to insert that many empty measures before the cursor measure, or a negative number to delete measures from the cursor measure and close the gap.',
+    ),
     value: '1',
-    ok: '実行',
+    ok: tr('実行', 'Apply'),
   });
   const n = Math.trunc(Number(v));
   if (!v || !Number.isFinite(n) || n === 0) return;
   if (n > 0) {
-    if (insertMeasures(m, n)) toast(`${n} 小節を挿入しました`, 'ok');
+    if (insertMeasures(m, n)) toast(tr(`${n} 小節を挿入しました`, `Inserted ${n} ${pl(n, 'measure')}`), 'ok');
   } else {
     const r = deleteMeasures(m, -n);
-    toast(`${-n} 小節を削除しました（チップ ${r.removed} 個）`, 'ok');
+    toast(tr(`${-n} 小節を削除しました（チップ ${r.removed} 個）`, `Deleted ${-n} ${pl(-n, 'measure')} (${r.removed} ${pl(r.removed, 'chip')})`), 'ok');
   }
 }
 
@@ -90,7 +102,9 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   const previewMode = usePreview((st) => st.mode);
   useSoundsVersion();
   const barRef = useRef<HTMLElement>(null);
-  const fit = useTopbarFit(barRef, `${meta.fileName}|${meta.siblings.length}|${f0(doc.fields['TITLE'])}`);
+  // 言語が変わると文字の幅が変わるので、畳む段を測り直す
+  const lang = useLang();
+  const fit = useTopbarFit(barRef, `${lang}|${meta.fileName}|${meta.siblings.length}|${f0(doc.fields['TITLE'])}`);
 
   const f = doc.fields;
   const length = useSongLength(doc);
@@ -98,101 +112,104 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
 
   const menus: MenuDef[] = [
     {
-      label: 'ファイル',
+      label: tr('ファイル', 'File'),
       items: () => [
-        { label: '曲フォルダを開く…', key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
-        { label: '新しい譜面…', run: () => void newEmptySong() },
-        { label: bgmSource(s().doc) ? '原曲を差し替える…' : '原曲（音声ファイル）を読み込む…', run: pickBgmFile },
+        { label: tr('曲フォルダを開く…', 'Open song folder…'), key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
+        { label: tr('新しい譜面…', 'New chart…'), run: () => void newEmptySong() },
+        { label: bgmSource(s().doc) ? tr('原曲を差し替える…', 'Replace original audio…') : tr('原曲（音声ファイル）を読み込む…', 'Load original audio file…'), run: pickBgmFile },
         '-',
-        { label: '保存', key: 'Ctrl+S', run: () => void save() },
-        { label: '名前を付けて保存…', key: 'Ctrl+Shift+S', run: () => void save({ as: true }) },
-        { label: 'DTXファイルだけダウンロード', run: downloadDtx },
+        { label: tr('保存', 'Save'), key: 'Ctrl+S', run: () => void save() },
+        { label: tr('名前を付けて保存…', 'Save as…'), key: 'Ctrl+Shift+S', run: () => void save({ as: true }) },
+        { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: downloadDtx },
         '-',
-        { label: 'ホームに戻る', run: goHome },
+        { label: tr('ホームに戻る', 'Back to home'), run: goHome },
       ],
     },
     {
-      label: '編集',
+      label: tr('編集', 'Edit'),
       items: () => [
-        { label: undoLabel ? `元に戻す（${undoLabel}）` : '元に戻す', key: 'Ctrl+Z', run: undo, disabled: !canUndo },
-        { label: redoLabel ? `やり直す（${redoLabel}）` : 'やり直す', key: 'Ctrl+Y', run: redo, disabled: !canRedo },
+        { label: undoLabel ? tr(`元に戻す（${undoLabel}）`, `Undo (${undoLabel})`) : tr('元に戻す', 'Undo'), key: 'Ctrl+Z', run: undo, disabled: !canUndo },
+        { label: redoLabel ? tr(`やり直す（${redoLabel}）`, `Redo (${redoLabel})`) : tr('やり直す', 'Redo'), key: 'Ctrl+Y', run: redo, disabled: !canRedo },
         '-',
-        { label: '切り取り', key: 'Ctrl+X', run: cutSelection, disabled: s().selection.length === 0 },
-        { label: 'コピー', key: 'Ctrl+C', run: () => void copySelection(), disabled: s().selection.length === 0 },
-        { label: 'カーソル位置に貼り付け', key: 'Ctrl+V', run: paste, disabled: s().clipboard.length === 0 },
-        { label: '削除', key: 'Delete', run: deleteSelection, disabled: s().selection.length === 0 },
+        { label: tr('切り取り', 'Cut'), key: 'Ctrl+X', run: cutSelection, disabled: s().selection.length === 0 },
+        { label: tr('コピー', 'Copy'), key: 'Ctrl+C', run: () => void copySelection(), disabled: s().selection.length === 0 },
+        { label: tr('カーソル位置に貼り付け', 'Paste at cursor'), key: 'Ctrl+V', run: paste, disabled: s().clipboard.length === 0 },
+        { label: tr('削除', 'Delete'), key: 'Delete', run: deleteSelection, disabled: s().selection.length === 0 },
         '-',
-        { label: 'ドラムのチップをすべて選択', key: 'Ctrl+A', run: selectAll },
-        { label: '選択を解除', key: 'Esc', run: () => useEditor.setState({ selection: [] }) },
+        { label: tr('ドラムのチップをすべて選択', 'Select all drum chips'), key: 'Ctrl+A', run: selectAll },
+        { label: tr('選択を解除', 'Deselect'), key: 'Esc', run: () => useEditor.setState({ selection: [] }) },
         '-',
-        { label: '検索と置換・レーンの入れ替え…', key: 'Ctrl+F', run: openFind },
-        { label: '選んだチップを左右反転', run: mirrorSelection, disabled: s().selection.length === 0 },
-        { label: '選んだチップをフラムにする／1打に戻す', key: 'Alt+F', run: toggleFlamSelection, disabled: s().selection.length === 0 },
+        { label: tr('検索と置換・レーンの入れ替え…', 'Find & replace / swap lanes…'), key: 'Ctrl+F', run: openFind },
+        { label: tr('選んだチップを左右反転', 'Mirror selected chips'), run: mirrorSelection, disabled: s().selection.length === 0 },
+        { label: tr('選んだチップをフラムにする／1打に戻す', 'Make selected chips a flam / back to one hit'), key: 'Alt+F', run: toggleFlamSelection, disabled: s().selection.length === 0 },
         '-',
-        { label: 'カーソルの小節の前に小節を挿入', run: () => insertMeasures(cursorM()) },
-        { label: 'カーソルの小節を削除して詰める', run: () => deleteCursorMeasure() },
-        { label: '小節をまとめて挿入・削除…', run: () => void bulkMeasures() },
+        { label: tr('カーソルの小節の前に小節を挿入', 'Insert measure before cursor measure'), run: () => insertMeasures(cursorM()) },
+        { label: tr('カーソルの小節を削除して詰める', 'Delete cursor measure and close gap'), run: () => deleteCursorMeasure() },
+        { label: tr('小節をまとめて挿入・削除…', 'Insert or delete several measures…'), run: () => void bulkMeasures() },
         '-',
-        { label: '曲の終わり（END）を ▶ の所にする', run: songEndAtCursor },
-        { label: 'END を最後のチップのすぐ後にする', run: songEndAtLastChip },
-        { label: 'END を原曲の鳴り終わりに合わせる', run: resetSongEnd, disabled: s().doc.endMeasure === undefined },
+        { label: tr('曲の終わり（END）を ▶ の所にする', 'Set song end (END) at ▶'), run: songEndAtCursor },
+        { label: tr('END を最後のチップのすぐ後にする', 'Set END right after the last chip'), run: songEndAtLastChip },
+        { label: tr('END を原曲の鳴り終わりに合わせる', 'Set END where the original audio ends'), run: resetSongEnd, disabled: s().doc.endMeasure === undefined },
       ],
     },
     {
-      label: '表示',
+      label: tr('表示', 'View'),
       items: () => [
-        { label: '左のパネル（キット・WAV・曲情報）', checked: useLayout.getState().leftOpen, run: () => togglePanel('left') },
-        { label: '右のパネル（原曲・耳コピアシスト・確かめる）', checked: useLayout.getState().rightOpen, run: () => togglePanel('right') },
-        { label: '下のトラック（原曲・ステム・譜面の音）', checked: useLayout.getState().seekOpen, run: () => togglePanel('seek') },
+        { label: tr('左のパネル（キット・WAV・曲情報）', 'Left panel (kit, WAV, song info)'), checked: useLayout.getState().leftOpen, run: () => togglePanel('left') },
+        { label: tr('右のパネル（原曲・耳コピアシスト・確かめる）', 'Right panel (original, transcription assist, checks)'), checked: useLayout.getState().rightOpen, run: () => togglePanel('right') },
+        { label: tr('下のトラック（原曲・ステム・譜面の音）', 'Bottom tracks (original, stems, chart sounds)'), checked: useLayout.getState().seekOpen, run: () => togglePanel('seek') },
         '-',
-        { label: '拡大', key: 'Ctrl+ホイール', run: () => zoom(1.25) },
-        { label: '縮小', run: () => zoom(0.8) },
+        { label: tr('拡大', 'Zoom in'), key: tr('Ctrl+ホイール', 'Ctrl+Wheel'), run: () => zoom(1.25) },
+        { label: tr('縮小', 'Zoom out'), run: () => zoom(0.8) },
         '-',
-        ...GRID_DIVS.map((d) => ({ label: `グリッド ${gridLabel(d)}`, checked: s().view.div === d, run: () => setView({ div: d }) })),
+        ...GRID_DIVS.map((d) => ({ label: tr(`グリッド ${gridLabel(d)}`, `Grid ${gridLabel(d)}`), checked: s().view.div === d, run: () => setView({ div: d }) })),
         '-',
-        { label: 'BGA・動画の列を出す', checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) },
-        { label: 'BGA の列を広げてサムネイルを出す', checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
+        { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) },
+        { label: tr('BGA の列を広げてサムネイルを出す', 'Widen BGA columns to show thumbnails'), checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
         '-',
-        { label: 'NX風プレビュー（右のパネル）', checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
-        { label: 'NX風プレビュー（全画面）', key: 'Shift+P', run: () => togglePreview('full') },
+        { label: tr('NX風プレビュー（右のパネル）', 'NX-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
+        { label: tr('NX風プレビュー（全画面）', 'NX-style preview (full screen)'), key: 'Shift+P', run: () => togglePreview('full') },
+        '-',
+        // 画面の言語。名前はその言語自身で書く（どちらの言語の画面でも見つけられるように）
+        ...(['en', 'ja'] as const).map((l) => ({ label: LANG_NAMES[l], checked: getLang() === l, run: () => setLang(l) })),
       ],
     },
     {
-      label: '再生',
+      label: tr('再生', 'Playback'),
       items: () => [
-        { label: '最初から再生', key: 'F5', run: () => void playFrom(0) },
-        { label: '▶ の位置から再生', key: 'F6', run: () => void playFrom(s().cursorBeat) },
-        { label: '停止（▶ に戻る）', key: 'F7', run: stop, disabled: !s().playing },
-        { label: 'ここで止める', key: 'Shift+Space', run: togglePause, disabled: !s().playing },
+        { label: tr('最初から再生', 'Play from start'), key: 'F5', run: () => void playFrom(0) },
+        { label: tr('▶ の位置から再生', 'Play from ▶'), key: 'F6', run: () => void playFrom(s().cursorBeat) },
+        { label: tr('停止（▶ に戻る）', 'Stop (back to ▶)'), key: 'F7', run: stop, disabled: !s().playing },
+        { label: tr('ここで止める', 'Stop here'), key: 'Shift+Space', run: togglePause, disabled: !s().playing },
         '-',
-        { label: '再生位置を追いかける', checked: s().view.follow, run: () => setView({ follow: !s().view.follow }) },
+        { label: tr('再生位置を追いかける', 'Follow playback'), checked: s().view.follow, run: () => setView({ follow: !s().view.follow }) },
       ],
     },
     {
-      label: 'ツール',
+      label: tr('ツール', 'Tools'),
       items: () => [
-        { label: '曲に合わせてクリックでBPMを測る', key: 'T', run: () => openTap(true) },
-        { label: 'テンポと開始位置を合わせる…', run: openTempo },
-        { label: 'ステムとミックス…', run: () => openPage('stems') },
-        { label: '音源ライブラリ…', run: () => openPage('library') },
-        { label: '前の小節をカーソルの小節に複製', key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
-        { label: 'TAB補完：カーソルの所に続きを出す', key: 'Alt+]', run: summon },
+        { label: tr('曲に合わせてクリックでBPMを測る', 'Tap along to measure the BPM'), key: 'T', run: () => openTap(true) },
+        { label: tr('テンポと開始位置を合わせる…', 'Match tempo and start position…'), run: openTempo },
+        { label: tr('ステムとミックス…', 'Stems and mix…'), run: () => openPage('stems') },
+        { label: tr('音源ライブラリ…', 'Sound library…'), run: () => openPage('library') },
+        { label: tr('前の小節をカーソルの小節に複製', 'Duplicate previous measure into cursor measure'), key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
+        { label: tr('TAB補完：カーソルの所に続きを出す', 'Tab completion: suggest what comes next at the cursor'), key: 'Alt+]', run: summon },
         '-',
-        { label: '曲情報（AI取得・サムネイル）…', run: () => openPage('songinfo') },
-        { label: '▶ の小節をAIで生成（小節線の ✨ と同じ）', key: 'Alt+G', run: openMeasureGenAtCursor },
-        { label: 'フレーズ候補（フィル・リズム）…', run: openPhrase },
-        { label: 'AI難易度生成（BASIC〜EXTREME）…', run: () => openPage('ai') },
-        { label: '難易度ガイドライン…', run: () => openPage('guideline') },
+        { label: tr('曲情報（AI取得・サムネイル）…', 'Song info (AI lookup, thumbnails)…'), run: () => openPage('songinfo') },
+        { label: tr('▶ の小節をAIで生成（小節線の ✨ と同じ）', 'Generate the ▶ measure with AI (same as ✨ on bar lines)'), key: 'Alt+G', run: openMeasureGenAtCursor },
+        { label: tr('フレーズ候補（フィル・リズム）…', 'Phrase suggestions (fills, grooves)…'), run: openPhrase },
+        { label: tr('AI難易度生成（BASIC〜EXTREME）…', 'AI difficulty generator (BASIC–EXTREME)…'), run: () => openPage('ai') },
+        { label: tr('難易度ガイドライン…', 'Difficulty guidelines…'), run: () => openPage('guideline') },
         '-',
-        { label: '設定（電子ドラム・キー・遅延補正）…', run: () => openSettings() },
-        { label: 'AIの設定（OpenRouter）…', run: () => openSettings('ai') },
+        { label: tr('設定（電子ドラム・キー・遅延補正）…', 'Settings (e-drums, keys, latency)…'), run: () => openSettings() },
+        { label: tr('AIの設定（OpenRouter）…', 'AI settings (OpenRouter)…'), run: () => openSettings('ai') },
       ],
     },
   ];
 
   return (
     <header ref={barRef} className={`topbar ${fit >= 1 ? 'fit-logo' : ''} ${fit >= 2 ? 'fit-diff' : ''} ${fit >= 3 ? 'fit-ai' : ''} ${fit >= 4 ? 'fit-art' : ''} ${fit >= 5 ? 'fit-title' : ''} ${fit >= 6 ? 'fit-song' : ''} ${fit >= 7 ? 'fit-tools' : ''}`}>
-      <button className="logo" onClick={goHome} title="ホームに戻る（編集中の譜面は自動保存されています）">
+      <button className="logo" onClick={goHome} title={tr('ホームに戻る（編集中の譜面は自動保存されています）', 'Back to home (the open chart is autosaved)')}>
         <span className="logo-mark">D</span>
         <span className="hide-narrow logo-text">DTX Web Editor</span>
       </button>
@@ -201,11 +218,15 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         <div className="song-art">{art ? <img src={art} alt="" /> : '♪'}</div>
         <div className="song-text">
           <div className="song-title ellipsis">
-            {f['TITLE'] || '無題'}
-            {dirty && <span style={{ color: 'var(--amber)', marginLeft: 6 }} title="保存していない変更があります">●</span>}
+            {f['TITLE'] || tr('無題', 'Untitled')}
+            {dirty && (
+              <span style={{ color: 'var(--amber)', marginLeft: 6 }} title={tr('保存していない変更があります', 'Unsaved changes')}>
+                ●
+              </span>
+            )}
           </div>
           <div className="song-sub ellipsis">
-            {[f['ARTIST'] || 'アーティスト未設定', `${f['BPM'] ?? '120'} BPM`, formatTime(length, false), `Lv ${formatLevel(f['DLEVEL'])}`].join(' · ')}
+            {[f['ARTIST'] || tr('アーティスト未設定', 'No artist'), `${f['BPM'] ?? '120'} BPM`, formatTime(length, false), `Lv ${formatLevel(f['DLEVEL'])}`].join(' · ')}
           </div>
         </div>
         {meta.siblings.length > 1 && folder && (
@@ -223,31 +244,34 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       <button
         className="btn ai-gen"
         onClick={() => openPage('ai')}
-        title="AI難易度生成：いま開いている譜面を MASTER として BASIC・ADVANCED・EXTREME を作り、並べて聴き比べる"
-        aria-label="AI難易度生成"
+        title={tr(
+          'AI難易度生成：いま開いている譜面を MASTER として BASIC・ADVANCED・EXTREME を作り、並べて聴き比べる',
+          'AI difficulty generator: use the open chart as MASTER to make BASIC, ADVANCED and EXTREME, then compare them side by side',
+        )}
+        aria-label={tr('AI難易度生成', 'AI difficulty generator')}
       >
         {Icon.sparkle(14)}
-        <span className="ai-gen-label">AI難易度生成</span>
+        <span className="ai-gen-label">{tr('AI難易度生成', 'AI difficulties')}</span>
       </button>
       <div className="topbar-spacer" />
       <MasterMixer />
       <div className="vsep" />
-      <button className="ib" onClick={undo} disabled={!canUndo} title={undoLabel ? `元に戻す: ${undoLabel}（Ctrl+Z）` : '元に戻す（Ctrl+Z）'}>
+      <button className="ib" onClick={undo} disabled={!canUndo} title={undoLabel ? tr(`元に戻す: ${undoLabel}（Ctrl+Z）`, `Undo: ${undoLabel} (Ctrl+Z)`) : tr('元に戻す（Ctrl+Z）', 'Undo (Ctrl+Z)')}>
         {Icon.undo()}
       </button>
-      <button className="ib" onClick={redo} disabled={!canRedo} title={redoLabel ? `やり直す: ${redoLabel}（Ctrl+Y）` : 'やり直す（Ctrl+Y）'}>
+      <button className="ib" onClick={redo} disabled={!canRedo} title={redoLabel ? tr(`やり直す: ${redoLabel}（Ctrl+Y）`, `Redo: ${redoLabel} (Ctrl+Y)`) : tr('やり直す（Ctrl+Y）', 'Redo (Ctrl+Y)')}>
         {Icon.redo()}
       </button>
-      <button className={`ib tb-preview ${previewMode !== 'off' ? 'on' : ''}`} onClick={() => togglePreview('side')} title="NX風プレビュー（P、Shift+P で全画面）">
+      <button className={`ib tb-preview ${previewMode !== 'off' ? 'on' : ''}`} onClick={() => togglePreview('side')} title={tr('NX風プレビュー（P、Shift+P で全画面）', 'NX-style preview (P; Shift+P for full screen)')}>
         {Icon.screen()}
       </button>
       <HistoryButton />
-      <button className="ib" onClick={() => openSettings()} title="設定（電子ドラム・キーボード・遅延補正）">
+      <button className="ib" onClick={() => openSettings()} title={tr('設定（電子ドラム・キーボード・遅延補正）', 'Settings (e-drums, keyboard, latency)')}>
         {Icon.gear()}
       </button>
-      <button className="btn primary" onClick={() => void save()} title={folder?.dir ? `${folder.name}/${meta.fileName} に保存（Ctrl+S）` : '保存（Ctrl+S）'}>
+      <button className="btn primary" onClick={() => void save()} title={folder?.dir ? tr(`${folder.name}/${meta.fileName} に保存（Ctrl+S）`, `Save to ${folder.name}/${meta.fileName} (Ctrl+S)`) : tr('保存（Ctrl+S）', 'Save (Ctrl+S)')}>
         {Icon.save(15)}
-        保存
+        {tr('保存', 'Save')}
       </button>
     </header>
   );

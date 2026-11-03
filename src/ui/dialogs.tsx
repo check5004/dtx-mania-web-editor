@@ -1,4 +1,5 @@
 // 確認・選択・新規作成のダイアログ。Promise で結果を返す。
+import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { NewSongInfo } from '../store/editor';
@@ -69,7 +70,7 @@ export function DialogHost() {
             <p style={{ whiteSpace: 'pre-wrap' }}>{spec.body}</p>
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => close(false)}>
-                {spec.cancel ?? 'やめる'}
+                {spec.cancel ?? tr('やめる', 'Cancel')}
               </button>
               <button className={`btn ${spec.danger ? 'danger' : 'primary'}`} autoFocus onClick={() => close(true)}>
                 {spec.ok}
@@ -91,7 +92,7 @@ export function DialogHost() {
             ))}
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => close(null)}>
-                やめる
+                {tr('やめる', 'Cancel')}
               </button>
             </div>
           </>
@@ -125,7 +126,7 @@ function PromptBody({ spec }: { spec: Extract<Spec, { kind: 'prompt' }> }) {
       <input ref={ref} className="field" value={v} onChange={(e) => setV(e.target.value)} />
       <div className="modal-actions">
         <button type="button" className="btn ghost" onClick={() => close(null)}>
-          やめる
+          {tr('やめる', 'Cancel')}
         </button>
         <button type="submit" className="btn primary" disabled={!v.trim()}>
           {spec.ok}
@@ -151,17 +152,22 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
       }}
     >
       <h2>{spec.title}</h2>
-      <p>あとで「曲情報」タブからいつでも変えられます。BPMは原曲に合わせておくとグリッドが曲にそろいます。</p>
+      <p>
+        {tr(
+          'あとで「曲情報」タブからいつでも変えられます。BPMは原曲に合わせておくとグリッドが曲にそろいます。',
+          'You can change these any time later in the "Song info" tab. Setting the BPM to match the song lines the grid up with it.',
+        )}
+      </p>
       <div className="form-grid">
-        <span className="lbl">曲名</span>
+        <span className="lbl">{tr('曲名', 'Title')}</span>
         <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
-        <span className="lbl">アーティスト</span>
+        <span className="lbl">{tr('アーティスト', 'Artist')}</span>
         <input className="field" value={artist} onChange={(e) => setArtist(e.target.value)} />
         <span className="lbl">BPM</span>
         <input className="field mono" value={bpm} onChange={(e) => setBpm(e.target.value)} inputMode="decimal" />
-        <span className="lbl">原曲（BGM）</span>
+        <span className="lbl">{tr('原曲（BGM）', 'Original (BGM)')}</span>
         <select className="field" value={bgm} onChange={(e) => setBgm(e.target.value)}>
-          <option value="">なし</option>
+          <option value="">{tr('なし', 'None')}</option>
           {spec.audioFiles.map((f) => (
             <option key={f} value={f}>
               {f}
@@ -171,10 +177,10 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
       </div>
       <div className="modal-actions">
         <button type="button" className="btn ghost" onClick={() => close(null)}>
-          やめる
+          {tr('やめる', 'Cancel')}
         </button>
         <button type="submit" className="btn primary" disabled={!valid}>
-          作成
+          {tr('作成', 'Create')}
         </button>
       </div>
     </form>

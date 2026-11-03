@@ -1,5 +1,6 @@
 // 譜面の縦スクロール表示と、マウスでの編集。下から上へ時間が進む（NXと同じ向き）。
 // 右に「原曲の打点」（ドラムの採譜モデルの5種。使えないときは低・中・高の3帯域）と「原曲の波形」の列を出す。
+import { tr, pl, subscribeLang, isJa } from '../i18n';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Onset } from '../audio/analysis';
 import { engine } from '../audio/engine';
@@ -414,6 +415,11 @@ export function ChartCanvas() {
         if (l.hover?.pos) l.hover = { ...l.hover, flam: wantFlam(l.mod) };
         l.dirty = true;
       }),
+      // 言語を切り替えたら、譜面に描いた文字も描き直す
+      subscribeLang(() => {
+        l.dirty = true;
+        l.mini = null;
+      }),
     ];
     // Ctrl（Mac は ⌘）を押す・離すだけでも、置く位置のプレビューを1打とフラムで切り替える
     const onModKey = (e: KeyboardEvent) => {
@@ -825,7 +831,7 @@ export function ChartCanvas() {
       if (views.length === 0) return;
       const at = new Map(views.map((v) => [v.c.id, v.beat]));
       applyVel(
-        `直線でベロシティを変える（${d.v0}→${d.v1}）`,
+        tr(`直線でベロシティを変える（${d.v0}→${d.v1}）`, `Change velocity along a line (${d.v0}→${d.v1})`),
         [...at.keys()],
         (_cur, c) => {
           if (span < 1e-6) return d.v1;
@@ -976,15 +982,16 @@ export function ChartCanvas() {
         }}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
-        aria-label="譜面"
+        aria-label={tr('譜面', 'Chart')}
       />
       {inputMode === 'rec' && (
         <div className={`rec-badge ${playing ? 'on' : ''}`}>
           <span className="rec-dot" />
-          {playing ? '録音中' : '録音の待機中（再生すると記録）'} · {`1/${div}`}に吸着 · ループ毎に重ね録り
+          {playing ? tr('録音中', 'Recording') : tr('録音の待機中（再生すると記録）', 'Armed (recording starts when you play)')} ·{' '}
+          {tr(`1/${div}に吸着 · ループ毎に重ね録り`, `snaps to 1/${div} · overdubs on each loop`)}
         </div>
       )}
-      {inputMode === 'key' && <div className="rec-badge key">キー入力: カーソル位置に置く（↑↓で移動）</div>}
+      {inputMode === 'key' && <div className="rec-badge key">{tr('キー入力: カーソル位置に置く（↑↓で移動）', 'Keys: place at the cursor (↑↓ to move)')}</div>}
       <CompleteBadge anchor={ghostAnchor} sized={sized} />
       <GenBadge anchor={ghostAnchor} sized={sized} />
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
@@ -1002,9 +1009,9 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
   return (
     <div className="popover" style={{ left: x - 200, top: y, width: 300 }} onPointerDown={(e) => e.stopPropagation()}>
       <div className="row" style={{ marginBottom: 6 }}>
-        <b>{model ? '原曲の打点（ドラムの採譜）' : '原曲の打点（低・中・高）'}</b>
+        <b>{model ? tr('原曲の打点（ドラムの採譜）', 'Hits in the original (drum transcription)') : tr('原曲の打点（低・中・高）', 'Hits in the original (low, mid, high)')}</b>
         <span className="grow" />
-        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label="閉じる">
+        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label={tr('閉じる', 'Close')}>
           ✕
         </button>
       </div>
@@ -1012,7 +1019,10 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
         <>
           <OffsetSection onClose={onClose} />
           <p className="lbl" style={{ margin: '0 0 6px', lineHeight: 1.7, color: 'var(--text2)' }}>
-            ドラムの採譜モデルが原曲から聞き取った打点です。横棒が打点（幅は確からしさ）、薄い帯は「その音が鳴っていそうな度合い」です。
+            {tr(
+              'ドラムの採譜モデルが原曲から聞き取った打点です。横棒が打点（幅は確からしさ）、薄い帯は「その音が鳴っていそうな度合い」です。',
+              'Hits that the drum transcription model heard in the original. Each bar is a hit (its width shows confidence); the faint band shows how likely that sound is playing.',
+            )}
           </p>
           <div className="lbl" style={{ lineHeight: 1.8 }}>
             {DRUM_CLASSES.map((k) => (
@@ -1020,42 +1030,57 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
                 <b className="mono" style={{ color: DRUM_COL[k] }}>
                   {k}
                 </b>
-                <span style={{ marginLeft: 8 }}>{CLASS_LABEL[k]}</span>
+                <span style={{ marginLeft: 8 }}>{isJa() ? CLASS_LABEL[k] : CLASS_LABEL_EN[k]}</span>
               </div>
             ))}
           </div>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
-            {ONSET_ACCURACY}右のパネルの「打点の感度」で増やしたり減らしたりできます。
+            {onsetAccuracy()}
+            {tr('右のパネルの「打点の感度」で増やしたり減らしたりできます。', ' You can get more or fewer hits with "Hit sensitivity" in the right panel.')}
           </p>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6, fontSize: 10.5 }}>
-            モデル: {ADTOF.credit}・{ADTOF.license}（非商用）。音はこのブラウザの中だけで解析します。
+            {tr('モデル: ', 'Model: ')}
+            {ADTOF.credit} · {ADTOF.license}
+            {tr('（非商用）。音はこのブラウザの中だけで解析します。', ' (non-commercial). Audio is analyzed only inside this browser.')}
           </p>
         </>
       ) : (
         <>
           <p className="lbl" style={{ margin: '0 0 6px', lineHeight: 1.7, color: 'var(--text2)' }}>
-            原曲を3つの音域に分けて、音が鳴り始めた強さを横棒で出します。太いほど強い打点です。
+            {tr(
+              '原曲を3つの音域に分けて、音が鳴り始めた強さを横棒で出します。太いほど強い打点です。',
+              'Splits the original into three ranges and shows how strongly each sound starts as a bar. Thicker bars are stronger hits.',
+            )}
           </p>
           <div className="lbl" style={{ lineHeight: 1.8 }}>
             <div>
-              <b style={{ color: C.low }}>低</b>　だいたいキック（BD）
+              <b style={{ color: C.low }}>{tr('低', 'Low')}</b> {tr('だいたいキック（BD）', 'mostly kick (BD)')}
             </div>
             <div>
-              <b style={{ color: C.mid }}>中</b>　だいたいスネア・タム
+              <b style={{ color: C.mid }}>{tr('中', 'Mid')}</b> {tr('だいたいスネア・タム', 'mostly snare and toms')}
             </div>
             <div>
-              <b style={{ color: C.high }}>高</b>　だいたいハイハット・シンバル
+              <b style={{ color: C.high }}>{tr('高', 'High')}</b> {tr('だいたいハイハット・シンバル', 'mostly hi-hat and cymbals')}
             </div>
           </div>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
             {dr.enabled
               ? dr.status === 'loading' || dr.status === 'error'
-                ? `${drumStatusText(dr)}。採譜が終わると、ドラムの5種（BD・SD・タム・HH・シンバル）の打点に切り替わります。`
-                : '原曲が読み込まれると、ドラムの採譜モデルで5種の打点に切り替わります。'
-              : 'ドラムの採譜モデルは右のパネルで切ってあります。入れると、ドラムの5種の打点に切り替わります（こちらより正確）。'}
+                ? tr(
+                    `${drumStatusText(dr)}。採譜が終わると、ドラムの5種（BD・SD・タム・HH・シンバル）の打点に切り替わります。`,
+                    `${drumStatusText(dr)}. When transcription finishes, this switches to hits for 5 drum types (BD, SD, toms, HH, cymbals).`,
+                  )
+                : tr('原曲が読み込まれると、ドラムの採譜モデルで5種の打点に切り替わります。', 'Once the original loads, the drum transcription model switches this to hits for 5 drum types.')
+              : tr(
+                  'ドラムの採譜モデルは右のパネルで切ってあります。入れると、ドラムの5種の打点に切り替わります（こちらより正確）。',
+                  'The drum transcription model is turned off in the right panel. Turn it on to see hits for 5 drum types (more accurate than this).',
+                )}
           </p>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
-            波形だけでは埋もれて見えない音を探す目印です。「原曲の波形」の見出しをクリックするとスペクトログラムに切り替わります。
+            {tr(
+              '波形だけでは埋もれて見えない音を探す目印です。「原曲の波形」の見出しをクリックするとスペクトログラムに切り替わります。',
+              'Use these to find sounds that are buried in the waveform. Click the "Original wave" heading to switch to a spectrogram.',
+            )}
           </p>
         </>
       )}
@@ -1067,22 +1092,40 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
 function offsetSummary(r: OffsetReport): string {
   const n = r.pairs.length;
   if (r.verdict === 'start') {
-    return `原曲の打点が、譜面のチップより ${Math.abs(Math.round(r.offset * 1000))}ms ${r.offset > 0 ? '後ろ' : '前'}にあります（${n} 打で測定。頭 ${fmtMs(r.head)}・終わり ${fmtMs(r.tail)}）。曲のどこでも同じだけずれているので、開始位置のずれです。`;
+    const ms = Math.abs(Math.round(r.offset * 1000));
+    return tr(
+      `原曲の打点が、譜面のチップより ${ms}ms ${r.offset > 0 ? '後ろ' : '前'}にあります（${n} 打で測定。頭 ${fmtMs(r.head)}・終わり ${fmtMs(r.tail)}）。曲のどこでも同じだけずれているので、開始位置のずれです。`,
+      `Hits in the original are ${ms}ms ${r.offset > 0 ? 'later' : 'earlier'} than the chart's chips (measured over ${n} ${pl(n, 'hit')}; start ${fmtMs(r.head)}, end ${fmtMs(r.tail)}). The gap is the same throughout the song, so the start position is off.`,
+    );
   }
   if (r.verdict === 'bpm' && r.bpmFit) {
-    return `原曲の打点が、曲の後ろほど${r.tail > r.head ? '遅れて' : '早まって'}いきます（頭 ${fmtMs(r.head)} → 終わり ${fmtMs(r.tail)}、${n} 打で測定）。BPM が少し違います（${r.bpmFit.from} → ${r.bpmFit.bpm}）。`;
+    return tr(
+      `原曲の打点が、曲の後ろほど${r.tail > r.head ? '遅れて' : '早まって'}いきます（頭 ${fmtMs(r.head)} → 終わり ${fmtMs(r.tail)}、${n} 打で測定）。BPM が少し違います（${r.bpmFit.from} → ${r.bpmFit.bpm}）。`,
+      `Hits in the original drift ${r.tail > r.head ? 'later' : 'earlier'} toward the end of the song (start ${fmtMs(r.head)} → end ${fmtMs(r.tail)}, measured over ${n} ${pl(n, 'hit')}). The BPM is slightly off (${r.bpmFit.from} → ${r.bpmFit.bpm}).`,
+    );
   }
   if (r.verdict === 'uneven') {
-    return `場所によってずれ方が違います（${fmtMs(r.lo)}〜${fmtMs(r.hi)}、${n} 打で測定）。テンポが揺れている曲かもしれません。テンポ合わせで、ずれている所の小節の頭を合わせてください。`;
+    return tr(
+      `場所によってずれ方が違います（${fmtMs(r.lo)}〜${fmtMs(r.hi)}、${n} 打で測定）。テンポが揺れている曲かもしれません。テンポ合わせで、ずれている所の小節の頭を合わせてください。`,
+      `The gap varies across the song (${fmtMs(r.lo)} to ${fmtMs(r.hi)}, measured over ${n} ${pl(n, 'hit')}). The tempo may drift. Use Tempo sync to line up the start of the measures that are off.`,
+    );
   }
-  if (r.verdict === 'ok') return `譜面のチップと原曲の打点は合っています（${fmtMs(r.offset)}、${n} 打で測定）。`;
-  if (r.chips < 16) return 'チップがまだ少ないため、ずれは測れません。チップを置いていくと測ります。';
-  return `譜面のチップ ${r.chips} 個のうち、原曲の打点と組にできたのが ${n} 個だけなので、ずれは測れません（ドラムの入っていない原曲のときなど）。`;
+  if (r.verdict === 'ok')
+    return tr(`譜面のチップと原曲の打点は合っています（${fmtMs(r.offset)}、${n} 打で測定）。`, `The chart's chips line up with the hits in the original (${fmtMs(r.offset)}, measured over ${n} ${pl(n, 'hit')}).`);
+  if (r.chips < 16) return tr('チップがまだ少ないため、ずれは測れません。チップを置いていくと測ります。', "There aren't enough chips yet to measure the offset. It's measured as you place chips.");
+  return tr(
+    `譜面のチップ ${r.chips} 個のうち、原曲の打点と組にできたのが ${n} 個だけなので、ずれは測れません（ドラムの入っていない原曲のときなど）。`,
+    `Only ${n} of the chart's ${r.chips} chips could be paired with hits in the original, so the offset can't be measured (for example, when the original has no drums).`,
+  );
 }
 
 /** ステムのずれの説明 */
 function stemLagText(lag: number, name: string): string {
-  return `解析元のステム（${name}）が、原曲より ${Math.abs(Math.round(lag * 1000))}ms ${lag > 0 ? '遅れて' : '早まって'}います。分離ソフトが MP3 の頭の無音を足したまま書き出したときなどに起こります。`;
+  const ms = Math.abs(Math.round(lag * 1000));
+  return tr(
+    `解析元のステム（${name}）が、原曲より ${ms}ms ${lag > 0 ? '遅れて' : '早まって'}います。分離ソフトが MP3 の頭の無音を足したまま書き出したときなどに起こります。`,
+    `The analyzed stem (${name}) is ${ms}ms ${lag > 0 ? 'behind' : 'ahead of'} the original. This happens, for example, when separation software exports an MP3 with the leading silence still added.`,
+  );
 }
 
 /** 「原曲の打点」の ⓘ の上の段：譜面のチップとのずれと、直すボタン（打点がステムからなら、ステムと原曲のずれも） */
@@ -1112,24 +1155,31 @@ function OffsetSection({ onClose }: { onClose: () => void }) {
       {sl && (
         <div style={box(slWarn !== null)}>
           <div className="row" style={{ marginBottom: 4 }}>
-            <b style={{ fontSize: 12 }}>ステムと原曲のずれ</b>
+            <b style={{ fontSize: 12 }}>{tr('ステムと原曲のずれ', 'Stem vs. original')}</b>
             <span className="grow" />
-            {sl.status === 'done' && sl.lag !== null && slWarn === null && <span className="pill ok">合っています</span>}
+            {sl.status === 'done' && sl.lag !== null && slWarn === null && <span className="pill ok">{tr('合っています', 'In sync')}</span>}
             {slWarn !== null && <span className="pill warn">{fmtMs(slWarn)}</span>}
           </div>
           <p className="lbl" style={{ margin: 0, lineHeight: 1.7, color: 'var(--text2)' }}>
             {sl.status === 'running'
-              ? `解析元のステム（${sl.name}）と原曲の音を重ねて、ずれを測っています…`
+              ? tr(`解析元のステム（${sl.name}）と原曲の音を重ねて、ずれを測っています…`, `Comparing the analyzed stem (${sl.name}) with the original to measure the offset…`)
               : sl.lag === null
-                ? `解析元のステム（${sl.name}）と原曲は、重なる音が少なく、ずれを測れませんでした（原曲にその楽器が入っていないときなど）。`
+                ? tr(
+                    `解析元のステム（${sl.name}）と原曲は、重なる音が少なく、ずれを測れませんでした（原曲にその楽器が入っていないときなど）。`,
+                    `The analyzed stem (${sl.name}) and the original share too little sound to measure the offset (for example, when the original doesn't contain that instrument).`,
+                  )
                 : slWarn !== null
                   ? stemLagText(slWarn, sl.name)
-                  : `解析元のステム（${sl.name}）は原曲と合っています（${fmtMs(sl.lag)}）。`}
+                  : tr(`解析元のステム（${sl.name}）は原曲と合っています（${fmtMs(sl.lag)}）。`, `The analyzed stem (${sl.name}) is in sync with the original (${fmtMs(sl.lag)}).`)}
           </p>
           {slWarn !== null && (
             <div className="row" style={{ marginTop: 6 }}>
-              <button className="btn small primary" onClick={() => fixStemLag()} title="ステムの「頭のずれ」を変えて原曲に合わせます（ステムとミックスの画面でも変えられます）">
-                ステムの頭のずれを {fmtMs(-slWarn)} 直す
+              <button
+                className="btn small primary"
+                onClick={() => fixStemLag()}
+                title={tr('ステムの「頭のずれ」を変えて原曲に合わせます（ステムとミックスの画面でも変えられます）', 'Changes the stem\'s "Start offset" to match the original (you can also change it on the Stems & mix page)')}
+              >
+                {tr(`ステムの頭のずれを ${fmtMs(-slWarn)} 直す`, `Shift the stem by ${fmtMs(-slWarn)}`)}
               </button>
             </div>
           )}
@@ -1137,26 +1187,40 @@ function OffsetSection({ onClose }: { onClose: () => void }) {
       )}
       <div style={box(warn && slWarn === null)}>
         <div className="row" style={{ marginBottom: 4 }}>
-          <b style={{ fontSize: 12 }}>譜面とのずれ</b>
+          <b style={{ fontSize: 12 }}>{tr('譜面とのずれ', 'Chart offset')}</b>
           <span className="grow" />
-          {slWarn === null && r.verdict === 'ok' && <span className="pill ok">合っています</span>}
+          {slWarn === null && r.verdict === 'ok' && <span className="pill ok">{tr('合っています', 'In sync')}</span>}
           {slWarn === null && warn && <span className="pill warn">{r.verdict === 'bpm' ? 'BPM' : fmtMs(r.offset)}</span>}
         </div>
         <p className="lbl" style={{ margin: 0, lineHeight: 1.7, color: 'var(--text2)' }}>
           {slWarn !== null && r.verdict !== 'few'
-            ? `ステムの打点はチップより ${fmtMs(r.offset)} ずれていますが、そのうち ${fmtMs(slWarn)} はステムのずれです。原曲と比べた譜面のずれは ${fmtMs(r.offset - slWarn)} です。ステムを直すと採譜し直して、もう一度測ります。`
+            ? tr(
+                `ステムの打点はチップより ${fmtMs(r.offset)} ずれていますが、そのうち ${fmtMs(slWarn)} はステムのずれです。原曲と比べた譜面のずれは ${fmtMs(r.offset - slWarn)} です。ステムを直すと採譜し直して、もう一度測ります。`,
+                `The stem's hits are ${fmtMs(r.offset)} off from the chips, but ${fmtMs(slWarn)} of that is the stem's own offset. Against the original, the chart is ${fmtMs(r.offset - slWarn)} off. Fixing the stem re-runs transcription and measures again.`,
+              )
             : offsetSummary(r)}
         </p>
         {slWarn === null && warn && (
           <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
             {r.verdict === 'start' && (
-              <button className="btn small primary" onClick={() => fixStart()} title="原曲（BGM のチップ）を動かして、譜面のグリッドを原曲に合わせます。テンポ合わせの「開始位置」を動かすのと同じです">
-                開始位置を {fmtMs(r.offset)} 直す
+              <button
+                className="btn small primary"
+                onClick={() => fixStart()}
+                title={tr(
+                  '原曲（BGM のチップ）を動かして、譜面のグリッドを原曲に合わせます。テンポ合わせの「開始位置」を動かすのと同じです',
+                  'Moves the original (the BGM chip) so the chart grid lines up with it. Same as moving "Start position" in Tempo sync',
+                )}
+              >
+                {tr(`開始位置を ${fmtMs(r.offset)} 直す`, `Shift the start by ${fmtMs(r.offset)}`)}
               </button>
             )}
             {r.verdict === 'bpm' && r.bpmFit && (
-              <button className="btn small primary" onClick={() => fixBpm()} title="BPM を直し、原曲（BGM のチップ）の位置も合わせます。チップは同じ拍の位置のままです">
-                BPM を {r.bpmFit.bpm} にして合わせる
+              <button
+                className="btn small primary"
+                onClick={() => fixBpm()}
+                title={tr('BPM を直し、原曲（BGM のチップ）の位置も合わせます。チップは同じ拍の位置のままです', 'Fixes the BPM and repositions the original (the BGM chip). Chips stay on the same beats')}
+              >
+                {tr(`BPM を ${r.bpmFit.bpm} にして合わせる`, `Set BPM to ${r.bpmFit.bpm}`)}
               </button>
             )}
             {r.verdict === 'uneven' && (
@@ -1167,19 +1231,19 @@ function OffsetSection({ onClose }: { onClose: () => void }) {
                   openPage('tempo');
                 }}
               >
-                テンポ合わせを開く
+                {tr('テンポ合わせを開く', 'Open Tempo sync')}
               </button>
             )}
             {r.verdict === 'uneven' && Math.abs(r.offset) >= 0.012 && (
-              <button className="link-btn" onClick={() => fixStart()} title="曲全体のずれの中央値の分だけ、開始位置を動かします">
-                平均の {fmtMs(r.offset)} だけ直す
+              <button className="link-btn" onClick={() => fixStart()} title={tr('曲全体のずれの中央値の分だけ、開始位置を動かします', 'Moves the start position by the median offset across the song')}>
+                {tr(`平均の ${fmtMs(r.offset)} だけ直す`, `Shift by the average (${fmtMs(r.offset)})`)}
               </button>
             )}
           </div>
         )}
         {canOrig && (
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6, fontSize: 10.5 }}>
-            ステム（{dr.name}）の打点で測っています。
+            {tr(`ステム（${dr.name}）の打点で測っています。`, `Measured with hits from the stem (${dr.name}). `)}
             <button
               className="link-btn"
               style={{ fontSize: 10.5 }}
@@ -1187,9 +1251,9 @@ function OffsetSection({ onClose }: { onClose: () => void }) {
                 onClose();
                 chooseAnalysisStem(null);
               }}
-              title="解析元（◉）を原曲にして、原曲から採譜し直します"
+              title={tr('解析元（◉）を原曲にして、原曲から採譜し直します', 'Sets the analysis source (◉) to the original and transcribes it again')}
             >
-              原曲で測る
+              {tr('原曲で測る', 'Measure with the original')}
             </button>
           </p>
         )}
@@ -1198,9 +1262,15 @@ function OffsetSection({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** 採譜の5種の英語の名前（日本語は精度テストのページと同じ CLASS_LABEL） */
+const CLASS_LABEL_EN: Record<DrumClass, string> = { BD: 'Bass drum', SD: 'Snare', TT: 'Toms', HH: 'Hi-hat', CY: 'Cymbals and ride' };
+
 /** 精度テスト（docs/bench.md）で測った当たり具合 */
-const ONSET_ACCURACY =
-  '精度テストでは、本物のドラムの録音入りの曲で、拾った打点の約7割が譜面と同じ位置にあり、譜面の打点の約3分の2を拾えました（BD・SD はよく当たり、タム・シンバルは取りこぼしや取り違えが多め。ハイハットはペダルの小さな音を拾えないことがあります）。';
+const onsetAccuracy = () =>
+  tr(
+    '精度テストでは、本物のドラムの録音入りの曲で、拾った打点の約7割が譜面と同じ位置にあり、譜面の打点の約3分の2を拾えました（BD・SD はよく当たり、タム・シンバルは取りこぼしや取り違えが多め。ハイハットはペダルの小さな音を拾えないことがあります）。',
+    'In our accuracy test on songs with real recorded drums, about 70% of the detected hits matched the chart, and about two thirds of the chart\'s hits were found (BD and SD are reliable; toms and cymbals are more often missed or mixed up, and quiet hi-hat pedal hits can be missed).',
+  );
 
 /** TAB補完の点線（範囲の枠と、点線のチップ。原曲でその音が聞こえないチップはオレンジの枠） */
 function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoMap) {
@@ -1678,7 +1748,7 @@ function pencilApply(l: Local, g: Geom, idx: number, yA: number, yB: number, x: 
     .map((v) => v.c.id);
   if (ids.length === 0) return;
   const val = velFromX(x - g.ox, idx);
-  applyVel('鉛筆でベロシティを変える', ids, () => val, { group, similar: false });
+  applyVel(tr('鉛筆でベロシティを変える', 'Draw velocity with the pencil'), ids, () => val, { group, similar: false });
   void l;
 }
 
@@ -1758,8 +1828,11 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       return at(
         `issue:${hits.map((is) => `${is.kind}${is.ids[0]}`).join(',')}`,
         level,
-        level === 'error' ? '叩けない配置' : '難しい配置',
-        [...hits.map((is) => `${toMeasure(is.m)}小節: ${is.message}`), '一覧は右の「確かめる」。印は「譜面に印」で消せます'],
+        level === 'error' ? tr('叩けない配置', 'Unplayable pattern') : tr('難しい配置', 'Hard pattern'),
+        [
+          ...hits.map((is) => tr(`${toMeasure(is.m)}小節: ${is.message}`, `Measure ${toMeasure(is.m)}: ${is.message}`)),
+          tr('一覧は右の「確かめる」。印は「譜面に印」で消せます', 'See the list under "Check" on the right. Turn off "Mark on chart" to hide the marks'),
+        ],
       );
     }
   }
@@ -1767,37 +1840,48 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
     const { loop, loopMark: mk } = useAssist.getState();
     if (!loop && mk) {
       const [me, other, key] = mk.side === 'a' ? ['A', 'B', 'O'] : ['B', 'A', 'I'];
-      return at(`loop:${mk.side}`, 'hint', `ループの帯（${me} だけ）`, [
-        `${other}（${key} キー・上のバーの ${other}）を決めるとループします`,
-        `${me} の印をドラッグ: 動かす / 右クリック: メニュー（印を消す・ここを ${other} に）`,
-        'ドラッグ: 新しい範囲 / クリック: その小節をループ',
+      return at(`loop:${mk.side}`, 'hint', tr(`ループの帯（${me} だけ）`, `Loop strip (${me} only)`), [
+        tr(`${other}（${key} キー・上のバーの ${other}）を決めるとループします`, `Set ${other} (${key} key, or ${other} in the top bar) to start looping`),
+        tr(`${me} の印をドラッグ: 動かす / 右クリック: メニュー（印を消す・ここを ${other} に）`, `Drag the ${me} marker: move / Right-click: menu (remove marker, set ${other} here)`),
+        tr('ドラッグ: 新しい範囲 / クリック: その小節をループ', 'Drag: new range / Click: loop that measure'),
       ]);
     }
-    return at(loop ? 'loop' : 'loop:none', 'hint', 'ループの帯', loop
-      ? ['ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', '範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', '右クリック: メニュー（ループを消す・ここを A・B に）']
+    return at(loop ? 'loop' : 'loop:none', 'hint', tr('ループの帯', 'Loop strip'), loop
+      ? [
+          tr('ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', 'Drag: new range / Drag the A or B marker: move that end'),
+          tr('範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', 'Drag inside the range: move the whole range / Click: on/off'),
+          tr('右クリック: メニュー（ループを消す・ここを A・B に）', 'Right-click: menu (remove loop, set A or B here)'),
+        ]
       : [
-          'ドラッグしてループ（A–B）の範囲を作ります',
-          'クリックだけならその小節をループ',
-          'I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます',
-          '右クリック: メニュー（ここを A・B に）',
+          tr('ドラッグしてループ（A–B）の範囲を作ります', 'Drag to make a loop (A–B) range'),
+          tr('クリックだけならその小節をループ', 'A single click loops that measure'),
+          tr('I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます', 'You can also set the start and end one at a time with the I and O keys (A and B in the top bar)'),
+          tr('右クリック: メニュー（ここを A・B に）', 'Right-click: menu (set A or B here)'),
         ]);
   }
   if (h.kind === 'end') return endTip(x, y, false);
   if (h.kind === 'gutter') {
-    return at('gutter', 'hint', '小節番号の列', [
-      'クリック・ドラッグ: 再生を始める位置（▶）を置く',
-      'ダブルクリック: セクション名を付ける',
-      '右クリック: 小節のメニュー（生成・ループ・挿入・削除）',
+    return at('gutter', 'hint', tr('小節番号の列', 'Measure numbers'), [
+      tr('クリック・ドラッグ: 再生を始める位置（▶）を置く', 'Click or drag: set where playback starts (▶)'),
+      tr('ダブルクリック: セクション名を付ける', 'Double-click: name the section'),
+      tr('右クリック: 小節のメニュー（生成・ループ・挿入・削除）', 'Right-click: measure menu (generate, loop, insert, delete)'),
     ]);
   }
   if (h.kind === 'genBtn') {
     const gs = useMeasureGen.getState();
     const mine = gs.open && h.m >= gs.from && h.m <= gs.to;
-    return at(`gen:${h.m}:${mine}`, 'hint', `小節 ${toMeasure(h.m)} をAIで生成`, [
-      mine && gs.from === gs.to ? 'クリック: 生成をやめる' : 'クリック: この小節の案を作る（AI・採譜・写す）',
-      gs.open && !mine ? `Shift+クリック: 生成の範囲をここまで広げる（${toMeasure(Math.min(gs.from, h.m))}〜${toMeasure(Math.max(gs.to, h.m))}、4小節まで）` : 'Shift+クリック: 生成の範囲を広げる（4小節まで）',
-      '入れるまで譜面は変わりません。Alt+G で ▶ の小節',
-      '右クリック: 小節のメニュー',
+    return at(`gen:${h.m}:${mine}`, 'hint', tr(`小節 ${toMeasure(h.m)} をAIで生成`, `Generate measure ${toMeasure(h.m)}`), [
+      mine && gs.from === gs.to
+        ? tr('クリック: 生成をやめる', 'Click: stop generating')
+        : tr('クリック: この小節の案を作る（AI・採譜・写す）', 'Click: make ideas for this measure (AI, transcription, copy)'),
+      gs.open && !mine
+        ? tr(
+            `Shift+クリック: 生成の範囲をここまで広げる（${toMeasure(Math.min(gs.from, h.m))}〜${toMeasure(Math.max(gs.to, h.m))}、4小節まで）`,
+            `Shift+click: extend the range to here (${toMeasure(Math.min(gs.from, h.m))}–${toMeasure(Math.max(gs.to, h.m))}, up to 4 measures)`,
+          )
+        : tr('Shift+クリック: 生成の範囲を広げる（4小節まで）', 'Shift+click: extend the range (up to 4 measures)'),
+      tr('入れるまで譜面は変わりません。Alt+G で ▶ の小節', "The chart doesn't change until you apply. Alt+G for the measure at ▶"),
+      tr('右クリック: 小節のメニュー', 'Right-click: measure menu'),
     ]);
   }
   {
@@ -1805,47 +1889,58 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
     const t = gv ? genTargetAt(g, h, x, y, gv) : null;
     if (t?.kind === 'note') {
       const off = gv!.rejected.has(t.id);
-      return at(`gennote:${t.id}:${off}`, 'hint', off ? '外した案のチップ' : '足すチップ（案）', [off ? 'クリック: 戻す' : 'クリック: このチップは入れない']);
+      return at(`gennote:${t.id}:${off}`, 'hint', off ? tr('外した案のチップ', 'Excluded idea chip') : tr('足すチップ（案）', 'Chip to add (idea)'), [
+        off ? tr('クリック: 戻す', 'Click: bring it back') : tr('クリック: このチップは入れない', "Click: don't add this chip"),
+      ]);
     }
     if (t?.kind === 'keep') {
       const kept = gv!.kept.has(t.chipId);
-      return at(`genkeep:${t.chipId}:${kept}`, 'hint', kept ? '残すチップ' : '消えるチップ（置き換え）', [kept ? 'クリック: 案どおり消す' : 'クリック: このチップは残す']);
+      return at(`genkeep:${t.chipId}:${kept}`, 'hint', kept ? tr('残すチップ', 'Chip to keep') : tr('消えるチップ（置き換え）', 'Chip to remove (replace)'), [
+        kept ? tr('クリック: 案どおり消す', 'Click: remove it as suggested') : tr('クリック: このチップは残す', 'Click: keep this chip'),
+      ]);
     }
   }
   const a = useAssist.getState();
   const rx = x - g.ox;
   if (h.kind === 'header' && a.audioCols && rx >= GEO.hitsX && rx < GEO.hitsX + GEO.hitsW) {
     const sl = stemLagWarn();
-    if (sl) return at(`stemlag:${sl.key}`, 'warn', 'ステムと原曲のずれ', [stemLagText(sl.lag!, sl.name), 'クリック: 直し方']);
+    if (sl) return at(`stemlag:${sl.key}`, 'warn', tr('ステムと原曲のずれ', 'Stem vs. original offset'), [stemLagText(sl.lag!, sl.name), tr('クリック: 直し方', 'Click: how to fix')]);
     const r = offsetReport();
     if (r && r.verdict !== 'ok' && r.verdict !== 'few') {
-      return at(`offset:${r.verdict}`, 'warn', '譜面と原曲の打点のずれ', [offsetSummary(r), 'クリック: 直し方']);
+      return at(`offset:${r.verdict}`, 'warn', tr('譜面と原曲の打点のずれ', 'Chart vs. original hits offset'), [offsetSummary(r), tr('クリック: 直し方', 'Click: how to fix')]);
     }
   }
   const inWave = a.audioCols && rx >= GEO.waveX && rx < GEO.waveX + waveColW();
   if (h.kind === 'header' && inWave) {
     const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
     if (z) {
-      return at(`zone:${z.key}:${a.bandFilter}`, 'hint', `${z.label}の帯域`, [
+      return at(`zone:${z.key}:${a.bandFilter}`, 'hint', tr(`${z.label}の帯域`, `${z.label} band`), [
         z.tip,
-        a.bandFilter === z.listen ? 'クリック: 原曲を全体で聴くに戻す' : `クリック: 原曲をこの帯域だけで聴く（${LISTEN_LABEL[z.listen]}）`,
+        a.bandFilter === z.listen
+          ? tr('クリック: 原曲を全体で聴くに戻す', 'Click: go back to hearing the whole original')
+          : tr(`クリック: 原曲をこの帯域だけで聴く（${listenLabel(z.listen)}）`, `Click: hear only this band of the original (${listenLabel(z.listen)})`),
       ]);
     }
-    return at(`wavehead:${a.waveMode}`, 'hint', a.waveMode === 'spec' ? 'スペクトル' : '原曲の波形', [
-      a.waveMode === 'spec' ? 'クリック: 波形に切り替え' : 'クリック: スペクトル（ドラムの帯域ごとの色分け）に切り替え',
-      ...(a.waveMode === 'spec' ? ['下の段の見出しをクリック: その帯域だけ聴く'] : []),
+    return at(`wavehead:${a.waveMode}`, 'hint', a.waveMode === 'spec' ? tr('スペクトル', 'Spectrum') : tr('原曲の波形', 'Original waveform'), [
+      a.waveMode === 'spec' ? tr('クリック: 波形に切り替え', 'Click: switch to the waveform') : tr('クリック: スペクトル（ドラムの帯域ごとの色分け）に切り替え', 'Click: switch to the spectrum (colored by drum band)'),
+      ...(a.waveMode === 'spec' ? [tr('下の段の見出しをクリック: その帯域だけ聴く', 'Click a label in the lower row: hear only that band')] : []),
     ]);
   }
   if (h.kind === 'audio' && inWave && a.waveMode === 'spec' && rx < GEO.waveX + specVisW()) {
     const z = zoneOfFreq(specFreqAt(rx - GEO.waveX));
-    return at(`spec:${z.key}`, 'hint', `スペクトル・${z.label}の帯域`, [
-      '光った帯の下の端が、叩いた瞬間',
-      '紫: キック　橙: 胴鳴り　黄: スネア　水色: HH・シンバル',
-      'クリック: 再生を始める位置（▶）を置く',
-      'ダブルクリック: そこから再生',
+    return at(`spec:${z.key}`, 'hint', tr(`スペクトル・${z.label}の帯域`, `Spectrum: ${z.label} band`), [
+      tr('光った帯の下の端が、叩いた瞬間', 'The bottom edge of a bright band is the moment of the hit'),
+      tr('紫: キック　橙: 胴鳴り　黄: スネア　水色: HH・シンバル', 'Purple: kick · Orange: drum body · Yellow: snare · Light blue: HH and cymbals'),
+      tr('クリック: 再生を始める位置（▶）を置く', 'Click: set where playback starts (▶)'),
+      tr('ダブルクリック: そこから再生', 'Double-click: play from there'),
     ]);
   }
-  if (h.kind === 'audio') return at('audio', 'hint', '原曲の打点・波形', ['クリック: 再生を始める位置（▶）を置く', 'ダブルクリック: そこから再生', '右クリック: メニュー（グリッド・ループなど）']);
+  if (h.kind === 'audio')
+    return at('audio', 'hint', tr('原曲の打点・波形', 'Original hits and waveform'), [
+      tr('クリック: 再生を始める位置（▶）を置く', 'Click: set where playback starts (▶)'),
+      tr('ダブルクリック: そこから再生', 'Double-click: play from there'),
+      tr('右クリック: メニュー（グリッド・ループなど）', 'Right-click: menu (grid, loop, and more)'),
+    ]);
   return null;
 }
 
@@ -1856,16 +1951,17 @@ async function editBpmAt(pos: Pos) {
   const cur = tempo.bpmAt(tempo.beatOf(pos.m, pos.f));
   const had = doc.chips.some((c) => (c.ch === CH.BPM || c.ch === CH.BPM_EX) && c.m === pos.m && c.f.n * pos.f.d === pos.f.n * c.f.d);
   const v = await promptDialog({
-    title: had ? `小節 ${toMeasure(pos.m)} の BPM 変化を変える` : `小節 ${toMeasure(pos.m)} にBPM変化を置く`,
-    body: 'この位置からのBPMを入力してください（#BPMzz と ch08 で書き出します）。',
+    title: had ? tr(`小節 ${toMeasure(pos.m)} の BPM 変化を変える`, `Change the BPM change in measure ${toMeasure(pos.m)}`) : tr(`小節 ${toMeasure(pos.m)} にBPM変化を置く`, `Add a BPM change in measure ${toMeasure(pos.m)}`),
+    body: tr('この位置からのBPMを入力してください（#BPMzz と ch08 で書き出します）。', 'Enter the BPM from this point on (saved as #BPMzz and ch08).'),
     value: String(Math.round(cur * 100) / 100),
-    ok: had ? '変える' : '置く',
+    ok: had ? tr('変える', 'Change') : tr('置く', 'Add'),
   });
   const bpm = v ? Number(v) : NaN;
   if (Number.isFinite(bpm) && bpm > 0) placeBpmChange(pos, bpm);
 }
 
-const END_HOW = { set: '', audio: '原曲の鳴り終わり', video: '参照映像の終わり', chips: '最後のチップのすぐ後' } as const;
+const endHow = (why: 'set' | 'audio' | 'video' | 'chips'): string =>
+  ({ set: '', audio: tr('原曲の鳴り終わり', 'where the original ends'), video: tr('参照映像の終わり', 'end of the reference video'), chips: tr('最後のチップのすぐ後', 'right after the last chip') })[why];
 
 /** 曲の終わり（END）の説明。dragging: ドラッグ中（待たずに出し、動かした先を見せる） */
 function endTip(x: number, y: number, dragging: boolean): Tip {
@@ -1874,15 +1970,26 @@ function endTip(x: number, y: number, dragging: boolean): Tip {
   const m = songEndM(doc);
   const sec = tempo.beatToSec(tempo.measureStart(m));
   const why = songEndReason(doc);
-  const head = `小節 ${toMeasure(m)} の頭 · ${formatTime(sec, false)}${END_HOW[why] ? `（${END_HOW[why]}）` : ''}`;
-  const back = autoEndMeasure(doc) !== null ? '原曲の鳴り終わり' : '最後のチップのすぐ後';
+  const how = endHow(why);
+  const head = tr(`小節 ${toMeasure(m)} の頭 · ${formatTime(sec, false)}${how ? `（${how}）` : ''}`, `Start of measure ${toMeasure(m)} · ${formatTime(sec, false)}${how ? ` (${how})` : ''}`);
+  const toAudio = autoEndMeasure(doc) !== null;
+  const back = toAudio ? endHow('audio') : endHow('chips');
   const lines = dragging
     ? [
         head,
-        m <= minSongEnd(doc) ? '最後のチップより前にはできません' : `${back}の所に来ると、${back === '原曲の鳴り終わり' ? '原曲に合わせる（原曲を差し替えても付いていく）' : 'そこで止まります'}`,
+        m <= minSongEnd(doc)
+          ? tr('最後のチップより前にはできません', "It can't go before the last chip")
+          : toAudio
+            ? tr(`${back}の所に来ると、原曲に合わせる（原曲を差し替えても付いていく）`, 'At the end of the original it snaps to it (and follows if you replace the original)')
+            : tr(`${back}の所に来ると、そこで止まります`, 'It stops right after the last chip'),
       ]
-    : [head, 'NX もここで演奏を終えます（最後の小節線）。DTX にも書き出します', `ドラッグ: 動かす（小節の頭に吸着） / ダブルクリック: ${back}に合わせる`, '右クリック: メニュー（最後のチップのすぐ後・▶ の所に）'];
-  return { key: dragging ? 'end:drag' : `end:${m}:${why}`, x, y, level: 'hint', title: '曲の終わり（END）', lines, now: dragging };
+    : [
+        head,
+        tr('NX もここで演奏を終えます（最後の小節線）。DTX にも書き出します', 'NX also ends the song here (the last bar line). This is saved to the DTX too'),
+        tr(`ドラッグ: 動かす（小節の頭に吸着） / ダブルクリック: ${back}に合わせる`, `Drag: move (snaps to measure starts) / Double-click: set it ${back}`),
+        tr('右クリック: メニュー（最後のチップのすぐ後・▶ の所に）', 'Right-click: menu (right after the last chip, or at ▶)'),
+      ];
+  return { key: dragging ? 'end:drag' : `end:${m}:${why}`, x, y, level: 'hint', title: tr('曲の終わり（END）', 'Song end (END)'), lines, now: dragging };
 }
 
 function ChartTip({ tip }: { tip: Tip }) {
@@ -1917,12 +2024,15 @@ function IssueBadge() {
       className={`issue-float ${errors ? 'error' : 'warn'}`}
       style={{ right: GEO.miniW + 10, top: GEO.head + 8 }}
       onClick={() => gotoNextIssue()}
-      title="無理な配置（同時に叩けない・速すぎる連打など）。クリックで次の場所へ移ってチップを選びます。印にマウスを乗せると中身が出ます。一覧は右の「確かめる」"
+      title={tr(
+        '無理な配置（同時に叩けない・速すぎる連打など）。クリックで次の場所へ移ってチップを選びます。印にマウスを乗せると中身が出ます。一覧は右の「確かめる」',
+        'Impossible patterns (hits that can\'t be played together, rolls that are too fast, and so on). Click to jump to the next one and select its chips. Hover a mark for details. The full list is under "Check" on the right',
+      )}
     >
       <span className="tip-mark">!</span>
-      {errors > 0 && <span>叩けない {errors}</span>}
-      {warns > 0 && <span>難しい {warns}</span>}
-      <span className="lbl">次へ ›</span>
+      {errors > 0 && <span>{tr(`叩けない ${errors}`, `Unplayable ${errors}`)}</span>}
+      {warns > 0 && <span>{tr(`難しい ${warns}`, `Hard ${warns}`)}</span>}
+      <span className="lbl">{tr('次へ ›', 'Next ›')}</span>
     </button>
   );
 }
@@ -2470,7 +2580,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.font = '600 9px system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillStyle = C.amber;
-      ctx.fillText(`フラム 1/${spot.div}`, cx + 21, y + 0.5);
+      ctx.fillText(tr(`フラム 1/${spot.div}`, `Flam 1/${spot.div}`), cx + 21, y + 0.5);
     } else {
       ghostAt(hv.pos, 0.38, false);
     }
@@ -2591,7 +2701,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.fillStyle = C.amber;
       ctx.fillText(badge, bx, 8);
     } else {
-      ctx.fillText('原曲の打点 ⓘ', ox + GEO.hitsX + GEO.hitsW / 2, 8);
+      ctx.fillText(tr('原曲の打点 ⓘ', 'Hits ⓘ'), ox + GEO.hitsX + GEO.hitsW / 2, 8);
     }
     const dr = useDrums.getState();
     if (readyDrums()) {
@@ -2605,13 +2715,17 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     } else if (dr.enabled && dr.status === 'loading') {
       ctx.font = '9px system-ui, sans-serif';
       ctx.fillStyle = C.amber;
-      ctx.fillText(dr.stage === 'run' ? `採譜中 ${Math.round(dr.progress * 100)}%` : '採譜の準備…', ox + GEO.hitsX + GEO.hitsW / 2, 21);
+      ctx.fillText(
+        dr.stage === 'run' ? tr(`採譜中 ${Math.round(dr.progress * 100)}%`, `Scanning ${Math.round(dr.progress * 100)}%`) : tr('採譜の準備…', 'Preparing…'),
+        ox + GEO.hitsX + GEO.hitsW / 2,
+        21,
+      );
     } else {
       const hl = hitLanes(false);
       ctx.font = '600 10px system-ui, sans-serif';
       (['low', 'mid', 'high'] as const).forEach((b, i) => {
         ctx.fillStyle = C[b];
-        ctx.fillText(['低', '中', '高'][i], ox + GEO.hitsX + hl.x(i) + hl.w / 2, 21);
+        ctx.fillText([tr('低', 'Lo'), tr('中', 'Mid'), tr('高', 'Hi')][i], ox + GEO.hitsX + hl.x(i) + hl.w / 2, 21);
       });
     }
     ctx.font = '10px system-ui, sans-serif';
@@ -2620,7 +2734,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     const waveRight = bgaVisible() && bgaX() < fullW() ? Math.max(GEO.waveX + 40, bgaX() - 2) : GEO.waveX + waveColW();
     const narrowWave = waveRight - GEO.waveX < 80;
     if (a.waveMode === 'spec') drawSpecHeader(ctx, ox, waveRight, a);
-    else ctx.fillText(narrowWave ? '波形 ⇄' : '原曲の波形 ⇄', ox + (GEO.waveX + waveRight) / 2, GEO.head / 2);
+    else ctx.fillText(narrowWave ? tr('波形 ⇄', 'Wave ⇄') : tr('原曲の波形 ⇄', 'Original wave ⇄'), ox + (GEO.waveX + waveRight) / 2, GEO.head / 2);
   }
 
   if (velMode) {
@@ -2634,7 +2748,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.fillText(`${def.key}`, cx, GEO.head / 2 - 6);
       ctx.font = '9px system-ui, sans-serif';
       ctx.fillStyle = C.text;
-      ctx.fillText('ベロシティ', cx, GEO.head / 2 + 7);
+      ctx.fillText(tr('ベロシティ', 'Velocity'), cx, GEO.head / 2 + 7);
     });
   }
 
@@ -2674,7 +2788,7 @@ function drawSongEnd(
   cw: number,
   endBeat: number,
   endSec: number,
-  why: keyof typeof END_HOW,
+  why: 'set' | 'audio' | 'video' | 'chips',
   active: boolean,
 ) {
   const { ox } = g;
@@ -2706,17 +2820,18 @@ function drawSongEnd(
   ctx.textBaseline = 'middle';
   ctx.fillText('END', tx + tw / 2, y - 1 + END_TAG_H / 2 + 0.5);
   if (y - 9 > GEO.head + 4) {
-    const label = `曲の終わり ${formatTime(endSec, false)}`;
+    const label = tr(`曲の終わり ${formatTime(endSec, false)}`, `Song end ${formatTime(endSec, false)}`);
     const lx = ox + GEO.laneX + 6;
     ctx.textAlign = 'left';
     ctx.font = '600 10px system-ui, sans-serif';
     ctx.fillStyle = '#E7EBF1';
     ctx.fillText(label, lx, y - 9);
-    if (END_HOW[why]) {
+    const how = endHow(why);
+    if (how) {
       const lw = ctx.measureText(label).width;
       ctx.font = '10px system-ui, sans-serif';
       ctx.fillStyle = '#A3ADBB';
-      ctx.fillText(`· ${END_HOW[why]}`, lx + lw + 6, y - 9);
+      ctx.fillText(`· ${how}`, lx + lw + 6, y - 9);
     }
   }
 }
@@ -2869,7 +2984,7 @@ function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Se
     ctx.lineTo(xb, d.y1);
     ctx.stroke();
     ctx.setLineDash([]);
-    const label = `直線 ${d.v0} → ${d.v1}`;
+    const label = tr(`直線 ${d.v0} → ${d.v1}`, `Line ${d.v0} → ${d.v1}`);
     ctx.font = '10px system-ui, sans-serif';
     const tw = ctx.measureText(label).width + 12;
     const ly = Math.max(GEO.head + 14, Math.min(y0, d.y1) - 12);
@@ -2897,8 +3012,8 @@ function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>,
   const vel = wavVel(doc, v.c.v);
   const x = g.ox + laneCX(v.col) + 22;
   ctx.font = '10px system-ui, sans-serif';
-  const label = 'ベロシティ';
-  const hint = 'Alt+ホイール';
+  const label = tr('ベロシティ', 'Velocity');
+  const hint = tr('Alt+ホイール', 'Alt+wheel');
   ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
   const numW = ctx.measureText(String(vel)).width;
   ctx.font = '10px system-ui, sans-serif';
@@ -2950,18 +3065,18 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
     ctx.textAlign = 'center';
     const msg =
       a.status === 'loading'
-        ? `原曲を解析中… ${Math.round(a.progress * 100)}%`
+        ? tr(`原曲を解析中… ${Math.round(a.progress * 100)}%`, `Analyzing the original… ${Math.round(a.progress * 100)}%`)
         : a.status === 'error'
-          ? `解析できませんでした`
+          ? tr('解析できませんでした', "Couldn't analyze it")
           : bgm
-            ? '原曲のファイルがありません'
-            : '原曲がありません';
+            ? tr('原曲のファイルがありません', 'The original audio file is missing')
+            : tr('原曲がありません', 'No original audio');
     ctx.fillText(msg, 0, 0);
     if (a.status === 'nosource' || a.status === 'none') {
       ctx.fillStyle = C.accent;
-      ctx.fillText('クリックして読み込む', 0, 20);
+      ctx.fillText(tr('クリックして読み込む', 'Click to load it'), 0, 20);
       ctx.fillStyle = C.dim;
-      ctx.fillText('（右の「原曲」からも）', 0, 36);
+      ctx.fillText(tr('（右の「原曲」からも）', '(or from "Original" on the right)'), 0, 36);
     }
     ctx.restore();
     return;
@@ -2995,7 +3110,10 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
   }
   if (a.waveMode === 'spec' && a.spectroStatus !== 'ready') {
     // 作っている途中（見せ方を変えたときは前のスペクトルの上に出す）
-    const label = a.spectroStatus === 'error' ? 'スペクトルを作れませんでした' : `スペクトルを作成中… ${Math.round(a.specProgress * 100)}%`;
+    const label =
+      a.spectroStatus === 'error'
+        ? tr('スペクトルを作れませんでした', "Couldn't build the spectrum")
+        : tr(`スペクトルを作成中… ${Math.round(a.specProgress * 100)}%`, `Building the spectrum… ${Math.round(a.specProgress * 100)}%`);
     ctx.font = '10px system-ui, sans-serif';
     const tw = ctx.measureText(label).width;
     ctx.fillStyle = 'rgba(11,14,19,0.85)';
@@ -3080,7 +3198,8 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
 /** 帯域の見出しの段（見出しの下半分） */
 const SPEC_ZONE_Y = 15;
 
-const LISTEN_LABEL: Record<'low' | 'mid' | 'high', string> = { low: '低域 〜160Hz', mid: '中域 200〜3500Hz', high: '高域 5kHz〜' };
+const listenLabel = (k: 'low' | 'mid' | 'high'): string =>
+  ({ low: tr('低域 〜160Hz', 'Low, up to 160 Hz'), mid: tr('中域 200〜3500Hz', 'Mid, 200–3500 Hz'), high: tr('高域 5kHz〜', 'High, 5 kHz and up') })[k];
 /** 聴く帯域のフィルタが通す周波数（engine の帯域フィルタと同じ） */
 const LISTEN_RANGE: Record<'low' | 'mid' | 'high', [number, number]> = { low: [0, 160], mid: [200, 3500], high: [5000, Infinity] };
 
@@ -3133,7 +3252,7 @@ function drawSpecHeader(ctx: CanvasRenderingContext2D, ox: number, right: number
   ctx.textAlign = 'center';
   ctx.font = '9px system-ui, sans-serif';
   ctx.fillStyle = '#A3ADBB';
-  ctx.fillText('スペクトル ⇄', (x0 + x1) / 2, 8);
+  ctx.fillText(tr('スペクトル ⇄', 'Spectrum ⇄'), (x0 + x1) / 2, 8);
   ctx.font = '600 9px system-ui, sans-serif';
   for (const z of SPEC_ZONES) {
     const za = x0 + specXAt(z.from);
@@ -3388,6 +3507,6 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
   ctx.font = '600 9px "JetBrains Mono", ui-monospace, monospace';
   ctx.fillStyle = C.text;
   ctx.textAlign = 'center';
-  ctx.fillText('全体', x + ML + (GEO.miniW - ML) / 2, GEO.head / 2);
+  ctx.fillText(tr('全体', 'Overview'), x + ML + (GEO.miniW - ML) / 2, GEO.head / 2);
   void sectionAt;
 }

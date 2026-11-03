@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
 import { DRUM_LANES } from '../dtx/model';
-import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { useAssist } from '../store/assist';
 import { drumsAudible, useDrums } from '../store/drums';
 import { openSettings, useEditor } from '../store/editor';
@@ -130,7 +130,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
   const rejected = v ? v.plan.skipped.filter((x) => x.why === 'rejected').length : 0;
   const offLanes = new Set(gs.offLanes);
   const fitPct = cand && cand.fit !== null && cand.source !== 'draft' ? Math.round(cand.fit * 100) : null;
-  const aiTitle = hasKey ? `AI にもう一度作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「小節の生成」のモデルを使います` : NO_KEY_TITLE;
+  const aiTitle = hasKey ? `AI にもう一度作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「小節の生成」のモデルを使います` : noKeyTitle();
 
   return (
     <div ref={boxRef} className="tab-ghost gen-badge" style={style} onPointerDown={stop}>
@@ -163,7 +163,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
             {Icon.sparkle(12)} {gs.ai === 'done' || gs.ai === 'error' ? 'AIでもう一度' : 'AIで作る'}
           </button>
         ) : (
-          <button className="tg-ai" onClick={() => openSettings('ai')} title={NO_KEY_TITLE}>
+          <button className="tg-ai" onClick={() => openSettings('ai')} title={noKeyTitle()}>
             {Icon.sparkle(12)} キーを設定するとAIの案も
           </button>
         )}
