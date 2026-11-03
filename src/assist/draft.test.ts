@@ -96,4 +96,31 @@ describe('draftFromHits', () => {
     const notes = draftFromHits([hit('BD', 4, 0, -0.03), hit('BD', 5, 0), hit('SD', 3, 15)], tempo, 4, 4, style);
     expect(notes.map((n) => [n.ch, n.m, (n.f.n / n.f.d) * 16])).toEqual([[CH.BD, 4, 0]]);
   });
+
+  it('前の小節の最後の拍から頭に寄る打点も頭に置き、範囲の次の小節の頭に寄るものは入れない', () => {
+    // 40ms 早い（拍の頭の前の幅より外なので、前の小節の最後の拍で丸めて頭に寄る）
+    const notes = draftFromHits([hit('SD', 4, 0, -0.04), hit('BD', 5, 0, -0.04)], tempo, 4, 4, style);
+    expect(notes.map((n) => [n.ch, n.m, (n.f.n / n.f.d) * 16])).toEqual([[CH.SD, 4, 0]]);
+  });
+
+  // 小節の頭からの位置 q（4分音符の数）の打点
+  const hitQ = (cls: DraftHit['cls'], m: number, q: number): DraftHit => ({ cls, t: m * 2 + q * 0.5, s: 0.9 });
+  const pos = (notes: { m: number; f: { n: number; d: number } }[]) => notes.map((n) => `${n.f.n}/${n.f.d}`).sort();
+
+  it('3連に聞こえる拍は3連の位置に置く（グリッドの設定に関係なく）', () => {
+    const notes = draftFromHits([hitQ('TT', 4, 2), hitQ('TT', 4, 2 + 1 / 3), hitQ('TT', 4, 2 + 2 / 3), hitQ('BD', 4, 3)], tempo, 4, 4, style);
+    expect(pos(notes.filter((n) => n.ch === CH.HT || n.ch === CH.LT || n.ch === CH.FT))).toEqual(['1/2', '2/3', '7/12']);
+    expect(at(notes, CH.HT)).toEqual([8]);
+    expect(at(notes, CH.BD)).toEqual([12]);
+  });
+
+  it('3連寄りの打点が1つだけなら16分に置く（時刻のぶれで3連にしない）', () => {
+    const notes = draftFromHits([hitQ('SD', 4, 1.32), hitQ('BD', 4, 0)], tempo, 4, 4, style);
+    expect(at(notes, CH.SD)).toEqual([5]);
+  });
+
+  it('32分が続く拍は32分の位置に置く', () => {
+    const notes = draftFromHits([0, 1, 2, 3, 4, 5, 6, 7].map((k) => hitQ('SD', 4, 3 + k / 8)), tempo, 4, 4, style);
+    expect(at(notes, CH.SD)).toEqual([12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5]);
+  });
 });

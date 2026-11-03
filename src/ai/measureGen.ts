@@ -1,8 +1,9 @@
 // 小節の生成（AI）：指定の小節（1〜4小節）のドラムを、原曲の打点と前後の譜面から書いてもらう。
-// 格子（レーン × 16分）での受け渡しと答えの読み方はフレーズ候補（ai/phrase）と同じ。
+// 格子（レーン × 拍ごとの格子。16分・3連・32分を拍ごとに選ぶ）での受け渡しと答えの読み方はフレーズ候補（ai/phrase）と同じ。
 // フレーズ候補との違い：原曲の打点に合わせて「耳コピ」すること、前後の小節で作者が原曲の打点をどう書いているか
 // （シンバルの打点をライドで書く、など）を読み取ってそろえること、作者がもう置いたチップを手がかりにすること。
-import { decodeCandidates, GRID_LANES, isDrumRows, measureGrid, onsetGrid, stepsOf, type OnsetRows, type PhraseCandidate } from './phrase';
+import { beatsLabel } from './beatGrid';
+import { decodeCandidates, GRID_HELP, isDrumRows, measureGrid, measureLayout, onsetGrid, onsetHelp, ROUNDED_NOTE, STEPS_HELP, GRID_LANES, type OnsetRows, type PhraseCandidate } from './phrase';
 import type { DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 
@@ -15,7 +16,8 @@ export interface MeasureGenContext {
   measures: {
     m: number;
     role: 'before' | 'target' | 'after';
-    steps: number;
+    /** 小節の長さ（「4拍」など） */
+    beats: string;
     grid: string[];
     onsets: string[] | null;
     section: string | null;
@@ -67,23 +69,27 @@ export function buildMeasureContext(
     if (!shown) {
       for (let i = 0; i < n; i++) {
         const m = r.src + i;
-        const g = measureGrid(doc, tempo, m);
+        const layout = measureLayout(doc, tempo, m, { onsets: o.onsets, offsetSec: o.offsetSec });
+        const g = measureGrid(doc, tempo, m, layout);
         rounded ||= g.rounded;
-        ms.push({ m, grid: g.lines, onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec) : null });
+        ms.push({ m, grid: g.lines, onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec, layout) : null });
       }
       if (!ms.some((x) => x.grid.length)) continue;
     }
     refs.push({ src: r.src, score: r.score, len: n, shown, measures: ms });
   }
   for (let m = Math.max(0, o.from - span); m <= o.to + span; m++) {
-    const g = measureGrid(doc, tempo, m);
+    const role = m < o.from ? 'before' : m > o.to ? 'after' : 'target';
+    // 生成する小節は、原曲の打点の時刻から拍ごとの細かさ（3連・32分）を選ぶ
+    const layout = measureLayout(doc, tempo, m, { onsets: o.onsets, offsetSec: o.offsetSec, fit: role === 'target' });
+    const g = measureGrid(doc, tempo, m, layout);
     rounded ||= g.rounded;
     measures.push({
       m,
-      role: m < o.from ? 'before' : m > o.to ? 'after' : 'target',
-      steps: stepsOf(tempo, m),
+      role,
+      beats: beatsLabel(layout.beats),
       grid: g.lines,
-      onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec) : null,
+      onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec, layout) : null,
       section: o.sectionOf(m),
     });
   }
@@ -127,7 +133,7 @@ export const MEASURE_SCHEMA = {
                       type: 'object',
                       properties: {
                         lane: { type: 'string', enum: GRID_LANES.map((l) => l.code) },
-                        steps: { type: 'string', description: 'x=打つ, -=休み。小節の16分の数と同じ長さ' },
+                        steps: { type: 'string', description: STEPS_HELP },
                       },
                       required: ['lane', 'steps'],
                       additionalProperties: false,
@@ -155,12 +161,10 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
   const system = [
     'あなたはドラム譜面（DTXMania、電子ドラム）の耳コピを手伝います。',
     `【生成】の${n === 1 ? '小節' : `${n}小節`}のドラムを、原曲に合わせて書いてください。性格の違う案を3つ作ります。`,
-    '譜面は小節ごとに「レーン: 格子」で表します。格子の1文字は16分音符1つ、x は打つ、- は休み。',
+    ...GRID_HELP,
     'レーン: LC=左シンバル HH=ハイハット(閉) HO=ハイハット(開) LP=左ペダル LB=左バスドラム SD=スネア HT=ハイタム BD=バスドラム LT=ロータム FT=フロアタム CY=右シンバル RD=ライド',
-    hasOnsets
-      ? ctx.onsetKind === 'drums'
-        ? '原曲の打点は、ドラムの採譜モデルが原曲から聞き取った BD=バスドラム SD=スネア TT=タム（高さは区別しない） HH=ハイハット CY=シンバル・ライド（区別しない） ごとの確からしさ（0〜9）で、譜面と同じ16分の位置に並んでいます。0 でない所はその音が鳴っている見込みが高い所です。小さな音（ゴーストノート・ペダルのハイハット）は取りこぼすことがあり、まれに関係ない音を拾います。'
-        : '原曲の打点は「低・中・高」の帯域ごとの強さ（0〜9）で、譜面と同じ16分の位置に並んでいます。低はキック、中はスネアやタム、高はシンバルやハイハットの目安です（ほかの楽器の音も混ざります）。'
+    ctx.onsetKind
+      ? onsetHelp(ctx.onsetKind)
       : ctx.drumless
         ? '原曲（BGM）はドラム抜きの音源なので、原曲の打点はありません。前後の小節や似ている小節の流れから、いちばん自然なものを書いてください。'
         : '原曲の打点はありません。前後の小節の流れから、いちばん自然なものを書いてください。',
@@ -172,6 +176,7 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
       : '',
     '案1: いちばんありそうなもの（作者がこの小節に書きそうなもの。原曲の打点を、前後や似ている小節と同じ書き方で書く）。案2: 似ている小節や前後の小節の形をそのまま土台にして、原曲の打点が違う所だけ変えたもの。案3: 別の聞こえ方（フィル・アクセント・シンバルの選び方の違いなど）。',
     '作者がもう置いているチップがあれば、作者が聞き取ったものです。合っていそうなら案に入れてください。',
+    ctx.onsetKind === 'drums' ? '【生成】の小節の拍の細かさは、原曲の打点の時刻に合わせて選んであります（3や6の拍は3連、8の拍は32分に聞こえる所）。3連・32分に聞こえる所は、その細かさで書いてください。' : '',
     '守ること: 手は同時に2つまで、足は左右1つずつ。【生成】の小節だけを書く。',
     '答えは指定の JSON だけで返してください。',
   ]
@@ -185,7 +190,7 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
     for (const s of ctx.style) lines.push(`- ${s}`);
   }
   if (ctx.instruction.trim()) lines.push(`作者のひとこと: ${ctx.instruction.trim()}`);
-  if (ctx.rounded) lines.push('（3連などは近い16分に丸めて表しています）');
+  if (ctx.rounded) lines.push(ROUNDED_NOTE);
   lines.push('');
   if (ctx.refs.length) {
     lines.push('似ている小節（この曲で作者がもう書いた所）:');
@@ -209,7 +214,7 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
     const tag = ms.role === 'target' ? `【生成 index ${ms.m - ctx.from}】` : ms.role === 'before' ? '（前）' : '（後）';
     const sec = ms.section && ms.section !== prevSection ? ` ここから「${ms.section}」` : '';
     prevSection = ms.section;
-    lines.push(`小節 ${ms.m} ${tag} 16分×${ms.steps}${sec}`);
+    lines.push(`小節 ${ms.m} ${tag} ${ms.beats}${sec}`);
     if (ms.role === 'target') lines.push(ms.grid.length ? `作者がもう置いているチップ:\n${ms.grid.join('\n')}` : '作者がもう置いているチップ: なし');
     else lines.push(ms.grid.length ? `譜面:\n${ms.grid.join('\n')}` : '譜面: 空');
     if (ms.onsets) lines.push(`原曲の打点:\n${ms.onsets.join('\n')}`);

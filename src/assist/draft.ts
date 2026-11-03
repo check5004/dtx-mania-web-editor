@@ -4,12 +4,13 @@
 //  - シンバル（CY）: 小節に4つ以上なら「刻み」（作者が刻みに使うレーン。ライドなど）、少なければ「単発」（クラッシュなど）。
 //  - ハイハット（HH）: 16分の位置ごとに、作者がそこをクローズ・オープン・左ペダルのどれで書いているか。
 //  - タム（TT）: 刻みで使うタムがあればそれ。フィルは時間の順に高い方から（ハイ→ロー→フロア）。
-// 位置は16分に吸着する（手元の譜面では3連・32分は全体の2%に満たない）。
+// 位置は拍ごとに、打点の時刻にいちばん合う細かさ（16分・8分3連・16分3連・32分）に吸着する。
 import { classOfChannel, DRUM_CLASSES, type DrumClass } from '../bench/classes';
 import { enforcePlayable, type PhraseNote } from '../ai/phrase';
+import { beatsOfMeasure, cellPos, fitMeasureCells, locateInBeats } from '../ai/beatGrid';
+import { toNum, ZERO } from '../dtx/fraction';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
-import { snapToGrid } from '../edit/ops';
 
 /** 原曲の打点（時刻は譜面の秒） */
 export interface DraftHit {
@@ -112,30 +113,67 @@ function hhChannel(style: Style, pos: number): number {
 
 /**
  * 原曲の打点から小節 from〜to のチップを作る。同時に叩けない組み合わせは直す（enforcePlayable）。
+ * 位置は拍ごとに、打点の時刻にいちばん合う細かさ（16分・8分3連・16分3連・32分。ai/beatGrid の fitMeasureCells）に吸着する。
  * hits は時刻（譜面の秒）の順でなくてもよい。
  */
 export function draftFromHits(hits: readonly DraftHit[], tempo: TempoMap, from: number, to: number, style: Style): PhraseNote[] {
-  // 小節ごと・種類ごとに、吸着した位置
-  const t0 = tempo.beatToSec(tempo.measureStart(from)) - 0.06;
-  const t1 = tempo.beatToSec(tempo.measureStart(to + 1));
-  const by = new Map<number, Map<DrumClass, { m: number; f: PhraseNote['f']; t: number }[]>>();
-  const seen = new Set<string>();
-  for (const h of hits) {
-    if (h.t < t0 || h.t >= t1) continue;
-    const p = snapToGrid(tempo, tempo.secToBeat(h.t), 16);
-    if (p.m < from || p.m > to) continue;
-    const k = `${p.m}|${h.cls}|${p.f.n}/${p.f.d}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    let mm = by.get(p.m);
-    if (!mm) by.set(p.m, (mm = new Map()));
-    let arr = mm.get(h.cls);
-    if (!arr) mm.set(h.cls, (arr = []));
-    arr.push({ m: p.m, f: p.f, t: h.t });
-  }
   const notes: PhraseNote[] = [];
-  for (const [m, mm] of by) {
-    for (const [cls, arr] of mm) {
+  // 前の小節の最後の拍で、次の小節の頭に寄った打点（範囲の1つ前の小節からも受け取る）
+  let carry: DraftHit[] = [];
+  for (let m = Math.max(0, from - 1); m <= to; m++) {
+    const { beats, total } = beatsOfMeasure(tempo, m);
+    const start = tempo.measureStart(m);
+    const len = tempo.measureBeats(m);
+    const spq = 60 / Math.max(1, tempo.bpmAt(start));
+    // 拍ごとの打点（拍の頭からの位置、4分音符の数）
+    const perBeat = beats.map(() => [] as { h: DraftHit; p: number }[]);
+    for (const h of hits) {
+      const q = tempo.secToBeat(h.t) - start;
+      if (q < -0.5 || q >= len) continue;
+      const at = locateInBeats(beats, q);
+      if (at) perBeat[at.i].push({ h, p: at.p });
+    }
+    // 拍ごとに細かさを選んで吸着。種類ごと・位置ごとに1つ
+    const by = new Map<DrumClass, { f: PhraseNote['f']; t: number }[]>();
+    const seen = new Set<string>();
+    const put = (h: DraftHit, f: PhraseNote['f']) => {
+      const key = `${h.cls}|${f.n}/${f.d}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      let arr = by.get(h.cls);
+      if (!arr) by.set(h.cls, (arr = []));
+      arr.push({ f, t: h.t });
+    };
+    for (const h of carry) put(h, ZERO);
+    carry = [];
+    const cells = fitMeasureCells(
+      beats,
+      perBeat.map((arr) => arr.map((x) => ({ p: x.p, s: x.h.s }))),
+      spq,
+    );
+    perBeat.forEach((arr, i) => {
+      if (arr.length === 0) return;
+      const L = cells[i];
+      const cell = toNum(beats[i].dur) / L;
+      for (const { h, p } of arr) {
+        let k = Math.max(0, Math.round(p / cell));
+        let bi = i;
+        let n = L;
+        if (k >= L) {
+          // 拍の終わりに寄った打点は次の拍の頭（小節の最後の拍なら次の小節の頭）
+          if (i + 1 >= beats.length) {
+            carry.push(h);
+            continue;
+          }
+          bi = i + 1;
+          k = 0;
+          n = 1;
+        }
+        put(h, cellPos(beats, total, bi, k, n));
+      }
+    });
+    if (m < from) continue;
+    for (const [cls, arr] of by) {
       arr.sort((a, b) => a.t - b.t);
       if (cls === 'HH') {
         for (const x of arr) notes.push({ ch: hhChannel(style, step16(tempo, m, x.f)), m, f: x.f });

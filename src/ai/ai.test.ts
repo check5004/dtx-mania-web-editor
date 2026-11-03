@@ -78,11 +78,11 @@ describe('OpenRouter', () => {
 });
 
 describe('フレーズ候補', () => {
-  it('小節を16分の格子にする', () => {
+  it('小節を拍ごとの格子にする（16分なら1拍4文字）', () => {
     const d = doc(beat8(1));
     const g = measureGrid(d, buildTempoMap(d), 0);
-    expect(g.lines).toContain('HH: x-x-x-x-x-x-x-x-');
-    expect(g.lines).toContain('BD: x-------x-------');
+    expect(g.lines).toContain('HH: x-x-|x-x-|x-x-|x-x-');
+    expect(g.lines).toContain('BD: x---|----|x---|----');
     expect(g.rounded).toBe(false);
   });
   it('AIの答えを範囲の中のチップにし、叩けない組み合わせをはじく', () => {
