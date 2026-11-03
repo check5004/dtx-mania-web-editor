@@ -5070,7 +5070,148 @@ button.ms.s.on {
 }
 
 .gen-main {
-  padding: 14px 16px 30px;
+  padding: 10px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 並べた譜面（元の譜面・作った難易度）。曲全体を縦にスクロールする */
+.gen-compare {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gen-heads {
+  display: grid;
+  column-gap: 10px;
+  margin-bottom: 6px;
+  flex: none;
+  max-width: 100%;
+}
+
+.gen-heads-gut {
+  align-self: end;
+  font-size: 10.5px;
+  padding-bottom: 4px;
+}
+
+.gen-colhead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gen-colhead:hover {
+  border-color: var(--line3);
+  background: var(--raise);
+}
+
+.gen-colhead.sel {
+  border-color: #2b4b60;
+}
+
+.gen-colhead.on {
+  border-color: var(--accent);
+  background: #121d27;
+  color: var(--text);
+}
+
+.gen-colhead.empty {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.gen-colhead-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.gen-colhead-top b {
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.gen-colhead-lv {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.gen-colhead-sub {
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gen-spk {
+  width: 13px;
+  flex: none;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.gen-ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.gen-warn {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.gen-canvas-wrap {
+  flex: 1;
+  min-height: 220px;
+  position: relative;
+}
+
+.gen-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 6px;
+  touch-action: none;
+}
+
+.gen-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.gen-foot-name {
+  color: var(--text);
+}
+
+.gen-foot-policy {
+  flex: 1;
+  min-width: 0;
 }
 
 .gen-legend {
@@ -5079,6 +5220,7 @@ button.ms.s.on {
   gap: 6px;
   font-size: 11px;
   color: var(--mute);
+  flex: none;
 }
 
 .gen-legend i {
@@ -5099,69 +5241,6 @@ button.ms.s.on {
 
 .gen-legend i.moved {
   background: #ffb547;
-}
-
-.gen-compare {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
-  gap: 6px;
-  align-items: center;
-}
-
-.gen-col-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text2);
-  margin: 0 0 6px 30px;
-}
-
-.gen-col-title.amber {
-  color: var(--amber);
-}
-
-.gen-arrow {
-  color: var(--dim);
-  display: flex;
-  justify-content: center;
-}
-
-.gen-mini {
-  width: 100%;
-  height: min(62vh, 520px);
-  display: block;
-  border: 1px solid var(--line2);
-  border-radius: 8px;
-  background: var(--card);
-}
-
-.gen-mini.edit {
-  cursor: pointer;
-  border-color: var(--amber-line);
-}
-
-.gen-empty {
-  height: min(62vh, 520px);
-  border: 1px dashed var(--line3);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 20px;
-  color: var(--mute);
-  font-size: 12.5px;
-}
-
-.gen-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.gen-stats .mono {
-  font-size: 16px;
-  font-weight: 600;
 }
 
 .gen-right {
@@ -5220,9 +5299,18 @@ button.gen-plan {
   color: var(--amber);
 }
 
+@media (max-width: 1500px) {
+  .gen-body {
+    grid-template-columns: 260px minmax(0, 1fr) 290px;
+  }
+}
+
+/* 狭い画面：判定・方針は並べた譜面の下（スクロールで見る）。並べた譜面は画面の高さを使う */
 @media (max-width: 1200px) {
   .gen-body {
-    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-rows: minmax(420px, 100%) auto;
+    overflow-y: auto;
   }
 
   .gen-right {
@@ -5235,6 +5323,7 @@ button.gen-plan {
 @media (max-width: 760px) {
   .gen-body {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(480px, 100%) auto;
   }
 
   .gen-left {

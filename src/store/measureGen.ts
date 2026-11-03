@@ -21,7 +21,7 @@ import { addGhostBlocker, copyCandidates, heardFit, unheardKeys } from './comple
 import type { Candidate } from '../assist/complete';
 import { bgmSource, tempoOf } from './derived';
 import { drumsAudible, readyDrums, useDrums } from './drums';
-import { edit, prepareSounds, refreshPlayback, setPlayDocTransform, toast, useEditor, wavForChannel } from './editor';
+import { addPlayDocTransform, edit, prepareSounds, refreshPlayback, toast, useEditor, wavForChannel } from './editor';
 import { levelOfField } from './guideline';
 import { closePhrase, usePhrase } from './phrase';
 import { sectionAt, useSidecar } from './sidecar';
@@ -471,7 +471,7 @@ function soundingWav(doc: DtxDoc, ch: number): number {
   return best;
 }
 
-setPlayDocTransform((doc) => {
+addPlayDocTransform((doc) => {
   const v = genView(doc);
   if (!v || (v.plan.add.length === 0 && v.plan.remove.length === 0)) return doc;
   return produce(doc, (d) => applyMerge(d, v.plan, (_d, ch) => soundingWav(doc, ch)));

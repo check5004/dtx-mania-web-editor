@@ -929,13 +929,22 @@ function emit(e: PlaybackEvent) {
   for (const cb of playbackListeners) cb(e);
 }
 
-/** 鳴らす譜面（小節の生成の案を聴くときは、案を入れた譜面。循環を避けるため関数で受け取る） */
-let playDocTransform: ((doc: DtxDoc) => DtxDoc) | null = null;
-export function setPlayDocTransform(fn: ((doc: DtxDoc) => DtxDoc) | null) {
-  playDocTransform = fn;
+/**
+ * 鳴らす譜面を変えるもの（小節の生成の案を聴くときは案を入れた譜面、AI難易度生成では聴く難易度の譜面）。
+ * 循環を避けるため関数で受け取る。足した順にかける。戻り値で外せる
+ */
+const playDocTransforms: ((doc: DtxDoc) => DtxDoc)[] = [];
+export function addPlayDocTransform(fn: (doc: DtxDoc) => DtxDoc): () => void {
+  playDocTransforms.push(fn);
+  return () => {
+    const i = playDocTransforms.indexOf(fn);
+    if (i >= 0) playDocTransforms.splice(i, 1);
+  };
 }
 function heardDoc(doc: DtxDoc): DtxDoc {
-  return playDocTransform ? playDocTransform(doc) : doc;
+  let d = doc;
+  for (const fn of playDocTransforms) d = fn(d);
+  return d;
 }
 
 /** 鳴らす譜面が変わった（案を切り替えた・閉じた）。再生中なら、まだ鳴らしていない所から鳴らし直す */

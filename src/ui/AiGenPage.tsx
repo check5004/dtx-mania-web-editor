@@ -1,19 +1,44 @@
-// AI難易度生成の画面：難易度ごとの生成、MASTER との比較（押して手直し）、AI のレベル判定と方針、set.def への書き出し。
-import { useEffect, useMemo, useRef } from 'react';
+// AI難易度生成の画面：難易度ごとの生成、元の譜面と作った難易度を曲全体で並べて聴き比べる（押して手直し）、
+// AI のレベル判定と方針、set.def への書き出し。再生の操作はエディタと同じ（Space・Shift+Space・▶・ループ・速さ）。
+import { useEffect, useMemo } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
-import { estimateLevel } from '../check/level';
 import { toMeasure } from '../dtx/base36';
-import { DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
-import { buildTempoMap } from '../dtx/timing';
+import { frac } from '../dtx/fraction';
+import { drumChannel, type DtxDoc } from '../dtx/model';
+import { gridStep, snapToGrid } from '../edit/ops';
 import { chartFeatures, FEATURE_DEFS, lastMeasure } from '../gen/features';
-import { DEFAULT_RUNG, describePolicy, DIFFICULTIES, FILL_STYLES, MAX_RUNG, policyFor, type ChipFate } from '../gen/simplify';
-import { slotOf, useInputSettings } from '../input/settings';
+import { DEFAULT_RUNG, describePolicy, DIFFICULTIES, FILL_STYLES, MAX_RUNG, policyFor } from '../gen/simplify';
+import { setLoopPoint, toggleLoop } from '../store/assist';
 import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
-import { goBack, openPage, openSettings } from '../store/editor';
-import { calcLevel, generate, generateAll, initGen, isPassing, setKeep, setTarget, shiftRung, shownLevel, toggleChip, useGen, writeOut, type DiffState } from '../store/gen';
+import { tempoOf } from '../store/derived';
+import { goBack, goToStart, openPage, openSettings, playFrom, setCursorBeat, togglePause, togglePlay, useEditor } from '../store/editor';
+import {
+  calcLevel,
+  generate,
+  generateAll,
+  genShow,
+  initGen,
+  isPassing,
+  listenChoices,
+  selectDiff,
+  setGenView,
+  setKeep,
+  setListen,
+  setTarget,
+  shiftRung,
+  shownLevel,
+  stepListen,
+  useGen,
+  writeOut,
+  type DiffState,
+  type GenFit,
+  type Listen,
+} from '../store/gen';
 import { useGuideline } from '../store/guideline';
 import { useSidecar } from '../store/sidecar';
+import { genViewport, GenCompare } from './GenCompare';
 import { Icon } from './icons';
+import { FollowToggle, LoopControls, PlayControls, SpeedControl } from './Transport';
 
 const KEEP_ITEMS: { k: keyof ReturnType<typeof useGen.getState>['keep']; label: string }[] = [
   { k: 'backbeat', label: '2・4拍のスネア（バックビート）' },
@@ -23,7 +48,140 @@ const KEEP_ITEMS: { k: keyof ReturnType<typeof useGen.getState>['keep']; label: 
   { k: 'openHH', label: 'オープンHHのアクセント' },
 ];
 
-const WIN = 4;
+/** 入力欄で文字を打っているか（チェックボックスは別。Space で再生できるように） */
+function typing(e: KeyboardEvent): boolean {
+  const t = e.target as HTMLElement | null;
+  if (!t) return false;
+  if (t.tagName === 'INPUT') return !['checkbox', 'radio', 'button', 'range'].includes((t as HTMLInputElement).type);
+  return t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
+}
+
+/**
+ * この画面のキー。再生まわりはエディタと同じ（Space・Shift+Space・↑↓ で ▶・Home・I/O/ /）。
+ * ←→ は聴く譜面の切り替え。F5〜F7・Alt+1/2・Ctrl+S はエディタの共通のキーで効く
+ */
+function onGenKey(e: KeyboardEvent) {
+  if (document.querySelector('.modal-back') || typing(e)) return;
+  if (e.ctrlKey || e.metaKey) return;
+  const k = e.key;
+  if (k === 'Escape') {
+    goBack();
+    return;
+  }
+  if (k === ' ') {
+    // Space：再生・停止（止めると ▶ に戻る）。Shift+Space：ここで止める（▶ を止めた所へ）
+    e.preventDefault();
+    if (e.shiftKey) togglePause();
+    else togglePlay();
+    return;
+  }
+  if (e.altKey) return;
+  if (k === 'ArrowLeft' || k === 'ArrowRight') {
+    e.preventDefault();
+    stepListen(k === 'ArrowLeft' ? -1 : 1);
+    return;
+  }
+  if (k === 'ArrowUp' || k === 'ArrowDown') {
+    // ▶ を動かす（エディタと同じ：グリッドの1つぶん、Shift で4拍）
+    e.preventDefault();
+    const s = useEditor.getState();
+    const tempo = tempoOf(s.doc);
+    const step = e.shiftKey ? frac(4) : gridStep(s.view.div);
+    const p = snapToGrid(tempo, Math.max(0, s.cursorBeat), s.view.div);
+    const nb = Math.max(0, tempo.beatOf(p.m, p.f) + ((k === 'ArrowUp' ? 1 : -1) * step.n) / step.d);
+    setCursorBeat(nb);
+    if (nb < genViewport.minBeat || nb > genViewport.maxBeat) genShow(nb);
+    return;
+  }
+  if (k === 'Home') {
+    e.preventDefault();
+    goToStart();
+    genShow(0);
+    return;
+  }
+  if (!e.shiftKey && (e.code === 'KeyI' || e.code === 'KeyO')) {
+    e.preventDefault();
+    setLoopPoint(e.code === 'KeyI' ? 'a' : 'b');
+    return;
+  }
+  if (k === '/' || e.code === 'Slash' || e.code === 'NumpadDivide') {
+    e.preventDefault();
+    toggleLoop();
+  }
+}
+
+/** セクションの頭へ ▶ を移す（再生中ならそこから続けて再生） */
+function jumpToMeasure(m: number) {
+  const b = tempoOf(useEditor.getState().doc).measureStart(m);
+  setCursorBeat(b);
+  genShow(b);
+  if (useEditor.getState().playing) void playFrom(b);
+}
+
+const FITS: { fit: GenFit; label: string; tip: string }[] = [
+  { fit: 'all', label: '曲全体', tip: '曲全体を1画面に並べる（密度の違いを見渡す）' },
+  { fit: 16, label: '16小節', tip: '16小節が画面に収まる大きさ' },
+  { fit: 8, label: '8小節', tip: '8小節が画面に収まる大きさ' },
+  { fit: 4, label: '4小節', tip: '4小節が画面に収まる大きさ' },
+];
+
+const SHORT: Record<Listen, string> = { MASTER: 'MASTER', EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
+
+/** 表示の大きさを変える。曲全体から拡大したときは ▶ の所を見せる */
+function chooseFit(fit: GenFit) {
+  if (useGen.getState().view.fit === 'all' && fit !== 'all') genShow(useEditor.getState().cursorBeat);
+  setGenView({ fit });
+}
+
+/** この画面の再生バー（エディタと同じ部品）＋聴く譜面＋表示の大きさ */
+function GenTransport() {
+  const fit = useGen((s) => s.view.fit);
+  const listen = useGen((s) => s.listen);
+  const masterLabel = useGen((s) => s.masterLabel);
+  const choices = useGen((s) => listenChoices(s).join(','));
+  return (
+    <div className="transport">
+      <PlayControls show={genShow} where="並べた譜面の小節番号の列や空いた所" />
+      <div className="vsep" />
+      <div className="row" style={{ gap: 6 }}>
+        <span className="lbl" style={{ whiteSpace: 'nowrap' }}>
+          聴く
+        </span>
+        <div className="seg small" role="radiogroup" aria-label="聴く譜面">
+          {(['MASTER', ...DIFFICULTIES] as Listen[]).map((x) => (
+            <button
+              key={x}
+              role="radio"
+              aria-checked={listen === x}
+              className={listen === x ? 'on' : ''}
+              disabled={!choices.split(',').includes(x)}
+              onClick={() => setListen(x)}
+              title={x === 'MASTER' ? `元の譜面（${masterLabel}）を聴く（←）` : `${x} を聴く（←→ で切り替え。再生中ならそのまま切り替わります）`}
+            >
+              {x === 'MASTER' ? masterLabel : SHORT[x]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="vsep" />
+      <LoopControls />
+      <SpeedControl />
+      <div className="vsep" />
+      <FollowToggle />
+      <span className="grow" />
+      <span className="lbl" style={{ whiteSpace: 'nowrap' }}>
+        表示
+      </span>
+      <div className="seg small" role="radiogroup" aria-label="表示の大きさ">
+        {FITS.map((f) => (
+          <button key={String(f.fit)} role="radio" aria-checked={fit === f.fit} className={fit === f.fit ? 'on' : ''} onClick={() => chooseFit(f.fit)} title={`${f.tip}。Ctrl+ホイールでも拡大・縮小できます`}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function AiGenPage() {
   const g = useGen();
@@ -35,16 +193,8 @@ export function AiGenPage() {
   const sections = useSidecar((s) => s.sections);
   useEffect(() => {
     initGen();
-    const h = (e: KeyboardEvent) => {
-      if (document.querySelector('.modal-back') || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'Escape') goBack();
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        const s = useGen.getState();
-        useGen.setState({ win: Math.max(0, s.win + (e.key === 'ArrowLeft' ? -WIN : WIN)) });
-      }
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
+    window.addEventListener('keydown', onGenKey);
+    return () => window.removeEventListener('keydown', onGenKey);
   }, []);
   const master = g.master;
   const ds = g.diffs[g.selected];
@@ -81,6 +231,7 @@ export function AiGenPage() {
           採用してset.defに書き出す
         </button>
       </header>
+      <GenTransport />
       <div className="gen-body">
         <aside className="gen-left scroll">
           <div className="lbl">使う基準</div>
@@ -149,55 +300,37 @@ export function AiGenPage() {
             onChange={(e) => useGen.setState({ instruction: e.target.value })}
           />
         </aside>
-        <main className="gen-main scroll">
-          <div className="row" style={{ gap: 10, marginBottom: 8 }}>
-            <b>比較</b>
-            <span className="mono lbl">
-              {toMeasure(g.win)}-{toMeasure(g.win + WIN - 1)}
-              {sectionName(g.spans, g.win)}
-            </span>
-            <button className="btn small ghost" onClick={() => useGen.setState({ win: Math.max(0, g.win - WIN) })} title="前（←）">
-              ‹
-            </button>
-            <button className="btn small ghost" onClick={() => useGen.setState({ win: Math.min(last, g.win + WIN) })} title="次（→）">
-              ›
-            </button>
-            <span className="grow" />
-            <span className="gen-legend">
-              <i className="kept" /> 残したチップ <i className="removed" /> 削ったチップ <i className="moved" /> 移したチップ
+        <main className="gen-main">
+          <GenCompare />
+          <div className="gen-foot">
+            {ds.result ? (
+              <>
+                <b className="gen-foot-name">{ds.diff}</b>
+                <span>簡略化の段</span>
+                <b className="mono" style={{ color: 'var(--text)' }}>
+                  {ds.result.rung}
+                </b>
+                <span>/ {MAX_RUNG}</span>
+                {ds.result.ease > 0 && <span>（4小節のうち{ds.result.ease}小節は次の段）</span>}
+                <button className="btn small ghost" onClick={() => shiftRung(ds.diff, -1)} disabled={ds.result.rung <= 0 && ds.result.ease === 0} title="元の譜面に近づける">
+                  難しく
+                </button>
+                <button className="btn small ghost" onClick={() => shiftRung(ds.diff, 1)} disabled={ds.result.rung >= MAX_RUNG} title="もっと簡単に">
+                  易しく
+                </button>
+                <span className="ellipsis gen-foot-policy" title={describePolicy(policyFor(ds.result.rung))}>
+                  {describePolicy(policyFor(ds.result.rung))}
+                </span>
+              </>
+            ) : (
+              <span className="ellipsis gen-foot-policy">
+                {anyResult ? `${ds.diff} はまだ作っていません。` : '左の「選んだ難易度を作る」で作ると、ここに並びます。'}Space で再生、列の見出しか ←→ で聴く譜面を切り替えます。
+              </span>
+            )}
+            <span className="gen-legend" title="作った難易度の列のチップを押すと、残す・削るを手直しできます（白い点が手直ししたチップ）">
+              <i className="kept" /> 残した <i className="removed" /> 削った <i className="moved" /> 移した
             </span>
           </div>
-          <div className="gen-compare">
-            <div>
-              <div className="gen-col-title">{g.masterLabel}（元の譜面）</div>
-              <MiniChart doc={master} from={g.win} />
-            </div>
-            <div className="gen-arrow">{Icon.chevronRight(18)}</div>
-            <div>
-              <div className="gen-col-title amber">{ds.diff}（{ds.planSource === 'ai' ? 'AI生成' : '自動生成'}・手直し可）</div>
-              {ds.result ? (
-                <MiniChart doc={master} from={g.win} fate={ds.result.fate} overrides={ds.overrides} onToggle={(id) => toggleChip(ds.diff, id)} />
-              ) : (
-                <div className="gen-empty">
-                  {ds.status === 'planning' ? 'AIが方針を考えています…' : ds.status === 'building' ? '作っています…' : ds.status === 'error' ? ds.error : `左の「選んだ難易度を作る」で ${ds.diff} を作ります`}
-                </div>
-              )}
-            </div>
-          </div>
-          {ds.result && <CompareStats master={master} gen={ds.result.doc} />}
-          {ds.result && (
-            <div className="row lbl" style={{ gap: 8, marginTop: 10, whiteSpace: 'nowrap' }}>
-              簡略化の段 <b className="mono" style={{ color: 'var(--text)' }}>{ds.result.rung}</b> / {MAX_RUNG}
-              {ds.result.ease > 0 && <span>（4小節のうち{ds.result.ease}小節は次の段）</span>}
-              <button className="btn small ghost" onClick={() => shiftRung(ds.diff, -1)} disabled={ds.result.rung <= 0 && ds.result.ease === 0} title="元の譜面に近づける">
-                難しく
-              </button>
-              <button className="btn small ghost" onClick={() => shiftRung(ds.diff, 1)} disabled={ds.result.rung >= MAX_RUNG} title="もっと簡単に">
-                易しく
-              </button>
-              <span className="ellipsis">{describePolicy(policyFor(ds.result.rung))}</span>
-            </div>
-          )}
         </main>
         <aside className="gen-right scroll">
           <JudgeCard ds={ds} />
@@ -228,7 +361,7 @@ export function AiGenPage() {
               {ds.plan.sections
                 .filter((s) => s.comment || s.shift || s.fill)
                 .map((s) => (
-                  <button key={s.from} className="card gen-plan" onClick={() => useGen.setState({ win: s.from })}>
+                  <button key={s.from} className="card gen-plan" onClick={() => jumpToMeasure(s.from)} title="このセクションの頭に ▶ を置く（再生中ならそこから続けて再生）">
                     <div className="row">
                       <b>{s.name}</b>
                       <span className="grow" />
@@ -259,11 +392,6 @@ export function AiGenPage() {
   );
 }
 
-function sectionName(spans: { name: string; from: number; to: number }[], m: number): string {
-  const s = spans.find((x) => m >= x.from && m <= x.to);
-  return s ? `（${s.name}）` : '';
-}
-
 function sameGroups(doc: DtxDoc): number {
   const sig = new Map<string, number>();
   const per = new Map<number, string[]>();
@@ -286,7 +414,7 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
   const pass = isPassing(ds, calib);
   const lv = ds.result ? shownLevel(ds, calib) : null;
   return (
-    <div className={`card gen-diff ${on ? 'on' : ''}`} onClick={() => useGen.setState({ selected: ds.diff })} role="button" tabIndex={0}>
+    <div className={`card gen-diff ${on ? 'on' : ''}`} onClick={() => selectDiff(ds.diff)} role="button" tabIndex={0}>
       <div className="row" style={{ gap: 8 }}>
         <input
           type="checkbox"
@@ -412,145 +540,5 @@ function Verdict({ ds }: { ds: DiffState }) {
           <div className="lbl">目標から外れています。「易しく／難しく」で段を動かすか、目標を変えて作り直してください。</div>
         ))}
     </div>
-  );
-}
-
-function CompareStats({ master, gen }: { master: DtxDoc; gen: DtxDoc }) {
-  const a = useMemo(() => estimateLevel(master, buildTempoMap(master)), [master]);
-  const b = useMemo(() => estimateLevel(gen, buildTempoMap(gen)), [gen]);
-  return (
-    <div className="gen-stats">
-      <div className="card">
-        <div className="lbl">ノーツ数</div>
-        <div className="mono">
-          {(a?.notes ?? 0).toLocaleString()} → {(b?.notes ?? 0).toLocaleString()}
-        </div>
-      </div>
-      <div className="card">
-        <div className="lbl">平均密度（ノーツ/秒）</div>
-        <div className="mono">
-          {(a?.avgNps ?? 0).toFixed(1)} → {(b?.avgNps ?? 0).toFixed(1)}
-        </div>
-      </div>
-      <div className="card">
-        <div className="lbl">最大同時打数</div>
-        <div className="mono">
-          {a?.maxChord ?? 0} → {b?.maxChord ?? 0}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** 4小節ぶんの小さな譜面。fate があれば生成側（削った・移したを描き分け、押すと手直し） */
-function MiniChart({ doc, from, fate, overrides, onToggle }: { doc: DtxDoc; from: number; fate?: Map<number, ChipFate>; overrides?: Map<number, 'keep' | 'drop'>; onToggle?: (id: number) => void }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const order = useInputSettings((s) => s.laneOrder);
-  const hits = useRef<{ id: number; x: number; y: number }[]>([]);
-  useEffect(() => {
-    const c = ref.current;
-    if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = c.clientWidth;
-    const H = c.clientHeight;
-    c.width = W * dpr;
-    c.height = H * dpr;
-    const g = c.getContext('2d')!;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H);
-    const tempo = buildTempoMap(doc);
-    const b0 = tempo.measureStart(from);
-    const b1 = tempo.measureStart(from + WIN);
-    const pad = 10;
-    const gut = 30;
-    const laneW = (W - gut - 8) / 10;
-    const y = (beat: number) => H - pad - ((beat - b0) / (b1 - b0)) * (H - pad * 2);
-    const x = (lane: number) => gut + slotOf(lane) * laneW + laneW / 2;
-    // 背景
-    g.fillStyle = '#0d1116';
-    g.fillRect(gut, 0, W - gut - 8, H);
-    for (let i = 0; i <= 10; i++) {
-      g.fillStyle = 'rgba(255,255,255,.035)';
-      g.fillRect(gut + i * laneW, 0, 1, H);
-    }
-    for (let m = from; m <= from + WIN; m++) {
-      const by = y(tempo.measureStart(m));
-      g.fillStyle = 'rgba(255,255,255,.22)';
-      g.fillRect(gut, by, W - gut - 8, 1);
-      if (m < from + WIN) {
-        g.fillStyle = '#5f6978';
-        g.font = '10px "JetBrains Mono", monospace';
-        g.textAlign = 'right';
-        g.fillText(toMeasure(m), gut - 4, by - 2);
-        const beats = tempo.measureBeats(m);
-        for (let k = 1; k < beats; k++) {
-          g.fillStyle = 'rgba(255,255,255,.06)';
-          g.fillRect(gut, y(tempo.measureStart(m) + k), W - gut - 8, 1);
-        }
-      }
-    }
-    const list: { id: number; x: number; y: number }[] = [];
-    const cw = Math.min(26, laneW - 6);
-    for (const ch of doc.chips) {
-      if (ch.m < from || ch.m >= from + WIN) continue;
-      const d = drumChannel(ch.ch);
-      if (!d || d.kind !== 'normal') continue;
-      const beat = tempo.beatOf(ch.m, ch.f);
-      const yy = y(beat);
-      const f = fate?.get(ch.id);
-      let lane = d.lane;
-      let alt = d.alt;
-      if (f?.kind === 'moved') {
-        const nd = drumChannel(f.ch)!;
-        lane = nd.lane;
-        alt = nd.alt;
-      }
-      const def = DRUM_LANES[lane];
-      const color = alt && def.altColor ? def.altColor : def.color;
-      const xx = x(lane);
-      g.beginPath();
-      g.roundRect(xx - cw / 2, yy - 3.5, cw, 7, 2);
-      if (f?.kind === 'removed') {
-        g.setLineDash([3, 2]);
-        g.strokeStyle = 'rgba(200,210,225,.45)';
-        g.lineWidth = 1;
-        g.stroke();
-        g.setLineDash([]);
-      } else {
-        g.fillStyle = color;
-        g.fill();
-        if (f?.kind === 'moved') {
-          g.strokeStyle = '#ffb547';
-          g.lineWidth = 1.6;
-          g.stroke();
-        }
-      }
-      if (overrides?.has(ch.id)) {
-        g.fillStyle = '#fff';
-        g.beginPath();
-        g.arc(xx + cw / 2 + 3, yy - 3, 2, 0, Math.PI * 2);
-        g.fill();
-      }
-      list.push({ id: ch.id, x: xx, y: yy });
-    }
-    hits.current = list;
-  }, [doc, from, fate, overrides, order]);
-  return (
-    <canvas
-      ref={ref}
-      className={`gen-mini ${onToggle ? 'edit' : ''}`}
-      onClick={(e) => {
-        if (!onToggle) return;
-        const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
-        const px = e.clientX - r.left;
-        const py = e.clientY - r.top;
-        let best: { id: number; d: number } | null = null;
-        for (const h of hits.current) {
-          const d = Math.hypot(h.x - px, (h.y - py) * 1.6);
-          if (d < 16 && (!best || d < best.d)) best = { id: h.id, d };
-        }
-        if (best) onToggle(best.id);
-      }}
-    />
   );
 }

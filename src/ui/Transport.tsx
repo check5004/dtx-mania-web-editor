@@ -13,51 +13,22 @@ import { promptDialog } from './dialogs';
 import { TapTempoButton } from './TapTempoPanel';
 import { FlamButton } from './FlamControl';
 
-export function Transport() {
+/** 譜面の表示を ▶ の所へ（エディタの譜面。ほかの画面は自分の表示を動かす関数を渡す） */
+function showInChart(beat: number) {
+  setView({ scrollBeat: Math.max(-0.5, beat - 2), follow: true });
+}
+
+/**
+ * ⏮・▶/■・⏸・再生位置。エディタと AI難易度生成で共通（止めると ▶ に戻る・Shift+Space はここで止める）。
+ * show: 小節番号を入れて移動したときに表示を動かす関数。where: ▶ をほかにどこで置けるか（位置の箱の説明）
+ */
+export function PlayControls({ show = showInChart, where = '譜面の小節番号の列・波形・下のシークバー' }: { show?: (beat: number) => void; where?: string }) {
   const doc = useEditor((s) => s.doc);
   const playing = useEditor((s) => s.playing);
-  const div = useEditor((s) => s.view.div);
-  const follow = useEditor((s) => s.view.follow);
-  const loading = useEditor((s) => s.loading);
-  const velPreset = useVel((s) => s.preset);
-  const velMode = useVel((s) => s.mode);
-  const velPresets = useInputSettings((s) => s.velPresets);
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
-  const { m } = tempo.locate(beat);
-  const loop = useAssist((s) => s.loop);
-  const loopMark = useAssist((s) => s.loopMark);
-  const speed = useAssist((s) => s.speed);
-  const inputMode = useAssist((s) => s.inputMode);
-  const stretching = useAssist((s) => s.stretching);
-  const midi = useMidi((s) => s.status);
-  const midiName = useMidi((s) => s.inputs[0]?.name ?? '');
-
-  const short = (b: number) => {
-    const { m } = tempo.locate(Math.max(0, b));
-    const rel = Math.max(0, b - tempo.measureStart(m));
-    const beatNo = Math.floor(rel + 1e-6) + 1;
-    const frac = rel - Math.floor(rel + 1e-6);
-    return `${toMeasure(m)}.${beatNo}${frac > 1e-3 ? '+' : ''}`;
-  };
-  const changeSpeed = (v: number) => {
-    setSpeed(v);
-    if (useEditor.getState().playing) void playFrom(currentBeat(), { keepStart: true });
-  };
-  // ループの範囲の表示。A だけ・B だけのときは、決まっていない方を「?」にする
-  const half = loop ? null : loopMark;
-  const rangeText = loop ? `${short(loop.a)}–${short(loop.b)}` : half ? (half.side === 'a' ? `${short(half.beat)}–?` : `?–${short(half.beat)}`) : '—';
-  const rangeTip = loop
-    ? 'ループの範囲（A–B）'
-    : half
-      ? half.side === 'a'
-        ? 'A（始まり）だけ決めています。B（O）を押すとループします'
-        : 'B（終わり）だけ決めています。A（I）を押すとループします'
-      : 'ループの範囲はまだありません。A（I）と B（O）を1つずつ決めるとループします';
-  const clearLabel = loop ? 'ループの範囲を消す' : half ? `${half.side === 'a' ? 'A' : 'B'} を消す` : null;
-
   return (
-    <div className="transport">
+    <>
       <button className="ib" title="曲の頭へ（Home）。▶ を曲の頭に置きます" onClick={goToStart}>
         {Icon.toStart()}
       </button>
@@ -80,7 +51,7 @@ export function Transport() {
       </button>
       <button
         className="pos-box"
-        title="再生を始める位置（▶）。クリックで小節番号を入れて移動。譜面の小節番号の列・波形・下のシークバーをクリックしても置けます"
+        title={`再生を始める位置（▶）。クリックで小節番号を入れて移動。${where}をクリックしても置けます`}
         onClick={async () => {
           const v = await promptDialog({ title: '再生を始める位置', body: '小節番号を入れてください（例: 012）。', value: toMeasure(tempo.locate(Math.max(0, beat)).m), ok: '移動' });
           if (!v) return;
@@ -89,13 +60,135 @@ export function Transport() {
           if (!Number.isFinite(m) || m < 0 || m >= 3600) return;
           const b = tempo.measureStart(m);
           setCursorBeat(b);
-          setView({ scrollBeat: Math.max(-0.5, b - 2), follow: true });
+          show(b);
           if (playing) void playFrom(b);
         }}
       >
         <span className="pos-main">{formatPosition(tempo, beat)}</span>
         <span className="pos-sub">{formatTime(tempo.beatToSec(Math.max(0, beat)))}</span>
       </button>
+    </>
+  );
+}
+
+/** ループ再生（A–B）。エディタと AI難易度生成で共通 */
+export function LoopControls() {
+  const doc = useEditor((s) => s.doc);
+  const tempo = tempoOf(doc);
+  const loop = useAssist((s) => s.loop);
+  const loopMark = useAssist((s) => s.loopMark);
+  const short = (b: number) => {
+    const { m } = tempo.locate(Math.max(0, b));
+    const rel = Math.max(0, b - tempo.measureStart(m));
+    const beatNo = Math.floor(rel + 1e-6) + 1;
+    const frac = rel - Math.floor(rel + 1e-6);
+    return `${toMeasure(m)}.${beatNo}${frac > 1e-3 ? '+' : ''}`;
+  };
+  // ループの範囲の表示。A だけ・B だけのときは、決まっていない方を「?」にする
+  const half = loop ? null : loopMark;
+  const rangeText = loop ? `${short(loop.a)}–${short(loop.b)}` : half ? (half.side === 'a' ? `${short(half.beat)}–?` : `?–${short(half.beat)}`) : '—';
+  const rangeTip = loop
+    ? 'ループの範囲（A–B）'
+    : half
+      ? half.side === 'a'
+        ? 'A（始まり）だけ決めています。B（O）を押すとループします'
+        : 'B（終わり）だけ決めています。A（I）を押すとループします'
+      : 'ループの範囲はまだありません。A（I）と B（O）を1つずつ決めるとループします';
+  const clearLabel = loop ? 'ループの範囲を消す' : half ? `${half.side === 'a' ? 'A' : 'B'} を消す` : null;
+
+  return (
+    <div className="loop-ctl" role="group" aria-label="ループ再生">
+      <button
+        className={`loop-toggle ${loop?.on ? 'on' : ''}`}
+        onClick={toggleLoop}
+        aria-pressed={!!loop?.on}
+        title={
+          loop
+            ? 'ループ再生のオン・オフ（/）。範囲は譜面の左端・下の波形・右の全体図の「A・B」の帯をドラッグして変えられます'
+            : half
+              ? `ループ再生（/）。${half.side === 'a' ? 'B（O）' : 'A（I）'}を決めるとループします`
+              : 'ループ再生（/）。範囲が無いときは今の小節（チップを選んでいればその小節）をループします。譜面の左端の帯をドラッグしても作れます'
+        }
+      >
+        {Icon.loop(14)}
+        ループ
+      </button>
+      <button
+        className={`ab-btn ${half?.side === 'b' ? 'next' : ''}`}
+        onClick={() => setLoopPoint('a')}
+        title={half?.side === 'b' ? '今の位置を A（ループの始まり）にしてループする（I）' : '今の位置を A（ループの始まり）にする（I）。B も決めるとループします'}
+      >
+        A
+      </button>
+      <span className={`ab-range mono ${loop?.on ? 'on' : half ? 'half' : ''}`} title={rangeTip}>
+        {rangeText}
+      </span>
+      <button
+        className={`ab-btn ${half?.side === 'a' ? 'next' : ''}`}
+        onClick={() => setLoopPoint('b')}
+        title={half?.side === 'a' ? '今の位置を B（ループの終わり）にしてループする（O）' : '今の位置を B（ループの終わり）にする（O）。A も決めるとループします'}
+      >
+        B
+      </button>
+      {clearLabel && (
+        <button className="ib" style={{ width: 20, height: 24 }} onClick={() => setLoop(null)} title={clearLabel} aria-label={clearLabel}>
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** 再生の速さ。再生中なら今の位置から鳴らし直す（▶ は動かさない） */
+export function SpeedControl() {
+  const speed = useAssist((s) => s.speed);
+  const stretching = useAssist((s) => s.stretching);
+  const changeSpeed = (v: number) => {
+    setSpeed(v);
+    if (useEditor.getState().playing) void playFrom(currentBeat(), { keepStart: true });
+  };
+  return (
+    <label className="row" style={{ gap: 6 }} title="再生の速さ。原曲は音程を変えずに遅くします">
+      <span className="lbl tlabel">速度</span>
+      <select className={`field mono ${speed < 1 ? 'speed-slow' : ''}`} style={{ width: 74 }} value={speed} onChange={(e) => changeSpeed(Number(e.target.value))}>
+        {[1, 0.75, 0.5, 0.25].map((v) => (
+          <option key={v} value={v}>
+            {v * 100}%
+          </option>
+        ))}
+      </select>
+      {stretching && <span className="lbl">準備中…</span>}
+    </label>
+  );
+}
+
+/** 再生位置を追いかける（エディタと共通の設定） */
+export function FollowToggle() {
+  const follow = useEditor((s) => s.view.follow);
+  return (
+    <button className={`ib ${follow ? 'on' : ''}`} onClick={() => setView({ follow: !follow })} title="再生位置を追いかける">
+      {Icon.follow()}
+    </button>
+  );
+}
+
+export function Transport() {
+  const doc = useEditor((s) => s.doc);
+  const div = useEditor((s) => s.view.div);
+  const loading = useEditor((s) => s.loading);
+  const velPreset = useVel((s) => s.preset);
+  const velMode = useVel((s) => s.mode);
+  const velPresets = useInputSettings((s) => s.velPresets);
+  const beat = usePlayBeat();
+  const tempo = tempoOf(doc);
+  const { m } = tempo.locate(beat);
+  const inputMode = useAssist((s) => s.inputMode);
+  const midi = useMidi((s) => s.status);
+  const midiName = useMidi((s) => s.inputs[0]?.name ?? '');
+
+  return (
+    <div className="transport">
+      <PlayControls />
       <div className="vsep" />
       <div className="row" style={{ gap: 4 }}>
         <button className="tbox tempo-link" title="原曲に合わせてBPMと曲の始まりを決める画面を開く" onClick={openTempo}>
@@ -110,56 +203,8 @@ export function Transport() {
         <TapTempoButton />
       </div>
       <div className="vsep" />
-      <div className="loop-ctl" role="group" aria-label="ループ再生">
-        <button
-          className={`loop-toggle ${loop?.on ? 'on' : ''}`}
-          onClick={toggleLoop}
-          aria-pressed={!!loop?.on}
-          title={
-            loop
-              ? 'ループ再生のオン・オフ（/）。範囲は譜面の左端・下の波形・右の全体図の「A・B」の帯をドラッグして変えられます'
-              : half
-                ? `ループ再生（/）。${half.side === 'a' ? 'B（O）' : 'A（I）'}を決めるとループします`
-                : 'ループ再生（/）。範囲が無いときは今の小節（チップを選んでいればその小節）をループします。譜面の左端の帯をドラッグしても作れます'
-          }
-        >
-          {Icon.loop(14)}
-          ループ
-        </button>
-        <button
-          className={`ab-btn ${half?.side === 'b' ? 'next' : ''}`}
-          onClick={() => setLoopPoint('a')}
-          title={half?.side === 'b' ? '今の位置を A（ループの始まり）にしてループする（I）' : '今の位置を A（ループの始まり）にする（I）。B も決めるとループします'}
-        >
-          A
-        </button>
-        <span className={`ab-range mono ${loop?.on ? 'on' : half ? 'half' : ''}`} title={rangeTip}>
-          {rangeText}
-        </span>
-        <button
-          className={`ab-btn ${half?.side === 'a' ? 'next' : ''}`}
-          onClick={() => setLoopPoint('b')}
-          title={half?.side === 'a' ? '今の位置を B（ループの終わり）にしてループする（O）' : '今の位置を B（ループの終わり）にする（O）。A も決めるとループします'}
-        >
-          B
-        </button>
-        {clearLabel && (
-          <button className="ib" style={{ width: 20, height: 24 }} onClick={() => setLoop(null)} title={clearLabel} aria-label={clearLabel}>
-            ✕
-          </button>
-        )}
-      </div>
-      <label className="row" style={{ gap: 6 }} title="再生の速さ。原曲は音程を変えずに遅くします">
-        <span className="lbl tlabel">速度</span>
-        <select className={`field mono ${speed < 1 ? 'speed-slow' : ''}`} style={{ width: 74 }} value={speed} onChange={(e) => changeSpeed(Number(e.target.value))}>
-          {[1, 0.75, 0.5, 0.25].map((v) => (
-            <option key={v} value={v}>
-              {v * 100}%
-            </option>
-          ))}
-        </select>
-        {stretching && <span className="lbl">準備中…</span>}
-      </label>
+      <LoopControls />
+      <SpeedControl />
       <div className="vsep" />
       <label className="row" title="置く位置の細かさ（[ と ] でも変えられます）。ズームは Ctrl+ホイール">
         <span className="lbl tlabel">グリッド</span>
@@ -219,9 +264,7 @@ export function Transport() {
         </button>
       </div>
       <div className="vsep" />
-      <button className={`ib ${follow ? 'on' : ''}`} onClick={() => setView({ follow: !follow })} title="再生位置を追いかける">
-        {Icon.follow()}
-      </button>
+      <FollowToggle />
       <span className="grow" />
       {loading && <span className="pill">{loading}</span>}
       {midi === 'on' && (

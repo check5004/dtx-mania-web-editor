@@ -1,5 +1,6 @@
-// AI 難易度生成：MASTER（いま開いている譜面）から BASIC・ADVANCED・EXTREME を作り、比べて手直しし、set.def と一緒に書き出す。
+// AI 難易度生成：MASTER（いま開いている譜面）から BASIC・ADVANCED・EXTREME を作り、並べて聴き比べて手直しし、set.def と一緒に書き出す。
 // AI は区間ごとの方針だけを決め、配置は gen/simplify のルールで行う。キーが無ければ標準の方針で作る。
+// 再生はエディタと共通（▶・ループ・速さ）で、この画面にいる間は「聴く」譜面（元の譜面か作った難易度）の音を鳴らす。
 import { create } from 'zustand';
 import { cleanPlan, PLAN_SCHEMA, planPrompt, sectionSpans, type DifficultyPlan, type SectionSpan } from '../ai/judge';
 import { AiError } from '../ai/openrouter';
@@ -11,13 +12,14 @@ import { serializeDtx } from '../dtx/serialize';
 import { buildTempoMap } from '../dtx/timing';
 import { setField } from '../edit/ops';
 import { dtxFiles, findFile, parseSetDef, putFile } from '../fs/folder';
+import { stepIn } from '../gen/compareView';
 import { lastMeasure } from '../gen/features';
 import { DEFAULT_KEEP, DEFAULT_RUNG, DIFFICULTIES, generateToTarget, levelOfDoc, MAX_EASE, MAX_RUNG, simplify, targetRange, type Difficulty, type Generated, type MustKeep } from '../gen/simplify';
 import { confirmDialog } from '../ui/dialogs';
 import { hasAiKey, runAi } from './ai';
 import { judgeDoc, type JudgeResult } from './aiLevel';
 import { levelOf } from './check';
-import { songEndMeasure, toast, useEditor } from './editor';
+import { addPlayDocTransform, refreshPlayback, songEndMeasure, stop, toast, useEditor } from './editor';
 import { bandOf, guidelineText, levelOfField, loadGuideline, useGuideline } from './guideline';
 import { useSidecar } from './sidecar';
 
@@ -38,6 +40,19 @@ export interface DiffState {
   cost: number;
 }
 
+/** 再生で鳴らす譜面：元の譜面か、作った難易度 */
+export type Listen = 'MASTER' | Difficulty;
+
+/** 並べた譜面の見え方。fit は「何小節が画面に収まるか」（'all' は曲全体、null は Ctrl+ホイールで決めた px） */
+export type GenFit = 'all' | 4 | 8 | 16 | null;
+export interface GenView {
+  /** 画面のいちばん下に見えている拍 */
+  scrollBeat: number;
+  /** 1拍の高さ（fit が null のとき） */
+  px: number;
+  fit: GenFit;
+}
+
 export interface GenState {
   master: DtxDoc | null;
   masterFile: string;
@@ -47,12 +62,30 @@ export interface GenState {
   calib: number;
   spans: SectionSpan[];
   diffs: Record<Difficulty, DiffState>;
+  /** 右の判定・方針と、易しく・難しくの対象 */
   selected: Difficulty;
+  /** 再生で鳴らす譜面 */
+  listen: Listen;
+  view: GenView;
   keep: MustKeep;
   instruction: string;
-  /** 比べる窓の最初の小節 */
-  win: number;
   busy: boolean;
+}
+
+const VIEW_KEY = 'dtxe.genView.v1';
+const FITS: readonly GenFit[] = ['all', 16, 8, 4, null];
+
+/** 表示の大きさは覚えておく（はじめは曲全体を並べる） */
+function loadView(): GenView {
+  const v: GenView = { scrollBeat: -0.5, px: 26, fit: 'all' };
+  try {
+    const j = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Partial<GenView>;
+    if (FITS.includes(j.fit as GenFit)) v.fit = j.fit as GenFit;
+    if (typeof j.px === 'number' && j.px >= 1 && j.px <= 160) v.px = j.px;
+  } catch {
+    // 覚えられなくても動く
+  }
+  return v;
 }
 
 const emptyDiff = (diff: Difficulty, masterLevel: number): DiffState => ({
@@ -80,9 +113,10 @@ export const useGen = create<GenState>(() => ({
   spans: [],
   diffs: { EXTREME: emptyDiff('EXTREME', 5), ADVANCED: emptyDiff('ADVANCED', 5), BASIC: emptyDiff('BASIC', 5) },
   selected: 'ADVANCED',
+  listen: 'MASTER',
+  view: loadView(),
   keep: { ...DEFAULT_KEEP },
   instruction: '',
-  win: 0,
   busy: false,
 }));
 const get = useGen.getState;
@@ -108,15 +142,6 @@ export function initGen() {
   const found = s.meta.siblings.find((x) => x.file.toLowerCase() === s.meta.fileName.toLowerCase())?.label;
   // set.def にラベルが無いときはファイル名が入っているので MASTER にする
   const label = found && found.toLowerCase() !== base ? found : 'MASTER';
-  // 比べる窓：いちばん密なセクションの頭
-  const tempo = buildTempoMap(doc);
-  let win = 0;
-  let best = -1;
-  for (const sp of spans) {
-    const n = doc.chips.filter((c) => c.m >= sp.from && c.m <= sp.to).length;
-    const secs = Math.max(1, tempo.beatToSec(tempo.measureStart(sp.to + 1)) - tempo.beatToSec(tempo.measureStart(sp.from)));
-    if (n / secs > best) (best = n / secs), (win = sp.from);
-  }
   set({
     master: doc,
     masterFile: s.meta.fileName,
@@ -125,7 +150,9 @@ export function initGen() {
     calib,
     spans,
     diffs: { EXTREME: emptyDiff('EXTREME', masterLevel), ADVANCED: emptyDiff('ADVANCED', masterLevel), BASIC: emptyDiff('BASIC', masterLevel) },
-    win,
+    listen: 'MASTER',
+    // 表示は ▶（再生を始める位置）から。エディタで見ていた所から聴ける
+    view: { ...get().view, scrollBeat: Math.max(-0.5, s.cursorBeat - 2) },
   });
 }
 
@@ -176,6 +203,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
   if (!g.master) return;
   const master = g.master;
   const ds = g.diffs[diff];
+  const hadResult = !!ds.result;
   const useAi = (opts.useAi ?? true) && hasAiKey();
   const title = master.fields['TITLE'] || g.masterFile;
   patchDiff(diff, { status: useAi ? 'planning' : 'building', error: null, judge: null, judgeStale: false, cost: 0 });
@@ -245,6 +273,8 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
       }
     }
     patchDiff(diff, { status: 'done', plan, result, judge, issues: issueCount(result.doc), cost });
+    // 初めて作れたら、選んでいる難易度を聴く（元の譜面を聴いていたときだけ）
+    if (!hadResult && get().selected === diff && get().listen === 'MASTER') set({ listen: diff });
   } catch (e) {
     patchDiff(diff, { status: 'error', error: e instanceof AiError ? e.message : `作れませんでした: ${(e as Error).message}`, cost });
   }
@@ -307,6 +337,75 @@ export function setKeep(patch: Partial<MustKeep>) {
 export function setTarget(diff: Difficulty, center: number) {
   const c = Math.max(1, Math.min(9.5, center));
   patchDiff(diff, { target: { min: Math.max(1, c - 0.3), max: c + 0.3, center: c } });
+}
+
+// ---- 並べて聴く ---------------------------------------------------------------------------
+
+/** 聴ける譜面（元の譜面と、作った難易度）を、並べている順に */
+export function listenChoices(s: GenState = get()): Listen[] {
+  return ['MASTER', ...DIFFICULTIES.filter((d) => s.diffs[d].result)];
+}
+
+/** 再生で鳴らす譜面を変える。作った難易度なら、右の判定・方針もその難易度にする。再生中なら今の位置から鳴らし直す */
+export function setListen(x: Listen) {
+  if (x !== 'MASTER' && !get().diffs[x].result) return;
+  set(x === 'MASTER' ? { listen: x } : { listen: x, selected: x });
+}
+
+/** ←→：聴く譜面を隣の列へ */
+export function stepListen(dir: 1 | -1) {
+  const next = stepIn(listenChoices(), get().listen, dir);
+  if (next) setListen(next);
+}
+
+/** 難易度を選ぶ（左のカード・列の見出し）。作ってあれば、その難易度を聴く */
+export function selectDiff(d: Difficulty) {
+  set((s) => (s.diffs[d].result ? { selected: d, listen: d } : { selected: d }));
+}
+
+/** 鳴らしている譜面（DtxDoc）。元の譜面なら master */
+function heardOf(s: GenState): DtxDoc | null {
+  return s.listen === 'MASTER' ? s.master : (s.diffs[s.listen].result?.doc ?? s.master);
+}
+
+/**
+ * この画面にいる間は、聴く難易度の譜面を鳴らす（作った譜面は元の譜面からドラムのチップを減らしただけなので、
+ * 原曲・テンポ・音の定義は同じ。止める所・ループ・▶ はエディタと共通のまま使える）
+ */
+export function heardGenDoc(doc: DtxDoc): DtxDoc {
+  if (useEditor.getState().page !== 'ai') return doc;
+  const g = get();
+  if (g.listen === 'MASTER' || doc !== g.master) return doc;
+  return g.diffs[g.listen].result?.doc ?? doc;
+}
+addPlayDocTransform(heardGenDoc);
+
+// 聴く譜面を切り替えた・手直しで譜面が変わったら、再生中なら鳴らしていない所から鳴らし直す
+useGen.subscribe((g, prev) => {
+  if (heardOf(g) !== heardOf(prev) && useEditor.getState().page === 'ai') refreshPlayback();
+});
+
+// この画面を離れたら止める（作った譜面の音のまま、ほかの画面で鳴り続けないように。設定・ガイドラインへ移ったときも）
+useEditor.subscribe((s, prev) => {
+  if (prev.page === 'ai' && s.page !== 'ai' && s.playing) stop();
+});
+
+export function setGenView(v: Partial<GenView>) {
+  set((s) => ({ view: { ...s.view, ...v } }));
+}
+
+useGen.subscribe((g, prev) => {
+  if (g.view.fit === prev.view.fit && g.view.px === prev.view.px) return;
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify({ fit: g.view.fit, px: g.view.px }));
+  } catch {
+    // 覚えられなくても動く
+  }
+});
+
+/** その拍が見えるように動かす（下から少し上に置く。エディタの譜面と同じ） */
+export function genShow(beat: number) {
+  setGenView({ scrollBeat: Math.max(-0.5, beat - 2) });
 }
 
 // ---- 書き出し ---------------------------------------------------------------------------
