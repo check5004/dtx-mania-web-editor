@@ -42,6 +42,8 @@ import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
 import { useFind } from '../store/find';
 import { usePhrase } from '../store/phrase';
+import { doubtKey, setGhostRevealer, useComplete, visibleGhost, type Ghost } from '../store/complete';
+import { CompleteBadge, type GhostAnchor } from './CompleteBadge';
 import { gotoNextIssue, issuesOf, useCheck, type Issue } from '../store/check';
 import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
 import { thumb, useThumbs } from './thumbs';
@@ -166,6 +168,22 @@ interface Local {
 const viewport = { h: 600, w: 1000, follow: null as number | null };
 
 /** 譜面で見えている拍の範囲 */
+/** TAB補完の点線（小節 from から len 小節）が見えていなければ、見える所までスクロールする */
+function revealMeasures(from: number, len: number) {
+  const s = useEditor.getState();
+  const tm = tempoOf(s.doc);
+  const b0 = tm.measureStart(from);
+  const b1 = tm.measureStart(from + len);
+  const vis = visibleBeats();
+  // 札の分（上に 40px ほど）も空ける
+  const pad = 44 / s.view.pxPerBeat;
+  if (b0 >= vis.from && b1 + pad <= vis.to) return;
+  const span = vis.to - vis.from;
+  // 点線が下から 3割の所から始まるように（長くて入らなければ点線の頭を見せる）
+  setView({ scrollBeat: Math.max(-1, b1 - b0 + pad > span * 0.7 ? b0 - span * 0.1 : b0 - span * 0.3), follow: false });
+}
+setGhostRevealer(revealMeasures);
+
 export function visibleBeats(): { from: number; to: number } {
   const s = useEditor.getState();
   const scroll = engine.playing && viewport.follow !== null ? viewport.follow : s.view.scrollBeat;
@@ -238,6 +256,24 @@ export function ChartCanvas() {
   const inputMode = useAssist((s) => s.inputMode);
   const playing = useEditor((s) => s.playing);
   const div = useEditor((s) => s.view.div);
+  /** 譜面の枠の大きさが変わった回数（TAB補完の札の位置を直すため） */
+  const [sized, setSized] = useState(0);
+  /** TAB補完の点線の、画面の上での位置 */
+  const ghostAnchor = (from: number, len: number): GhostAnchor => {
+    const l = L.current;
+    const s = useEditor.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    const tm = tempoOf(s.doc);
+    return {
+      left: g.ox + GEO.laneX,
+      top: g.beatToY(tm.measureStart(from + len)),
+      bottom: g.beatToY(tm.measureStart(from)),
+      minY: GEO.head,
+      maxY: l.h - GEO.bottom,
+      w: l.w,
+      h: l.h,
+    };
+  };
 
   useEffect(() => {
     const wrap = wrapRef.current!;
@@ -258,6 +294,7 @@ export function ChartCanvas() {
       viewport.w = l.w;
       l.mini = null;
       l.dirty = true;
+      setSized((n) => n + 1);
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -289,6 +326,9 @@ export function ChartCanvas() {
         l.dirty = true;
       }),
       usePhrase.subscribe(() => {
+        l.dirty = true;
+      }),
+      useComplete.subscribe(() => {
         l.dirty = true;
       }),
     ];
@@ -708,6 +748,7 @@ export function ChartCanvas() {
         </div>
       )}
       {inputMode === 'key' && <div className="rec-badge key">キー入力: カーソル位置に置く（↑↓で移動）</div>}
+      <CompleteBadge anchor={ghostAnchor} sized={sized} />
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
       {tip && !popover && <ChartTip tip={tip} />}
       <IssueBadge />
@@ -741,6 +782,55 @@ export function ChartCanvas() {
       )}
     </div>
   );
+}
+
+/** TAB補完の点線（範囲の枠と、点線のチップ。原曲で聞こえないスネアはオレンジの枠） */
+function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoMap) {
+  const left = g.ox + GEO.laneX;
+  const w = GEO.laneW * DRUM_LANES.length;
+  const yb = g.beatToY(tm.measureStart(gh.from));
+  const yt = g.beatToY(tm.measureStart(gh.from + gh.measures.length));
+  ctx.fillStyle = 'rgba(76,194,255,.05)';
+  ctx.fillRect(left, yt, w, yb - yt);
+  ctx.strokeStyle = 'rgba(76,194,255,.5)';
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, yt + 0.5, w - 1, yb - yt - 1);
+  ctx.setLineDash([]);
+  gh.measures.forEach((notes, i) => {
+    const m = gh.from + i;
+    for (const n of notes) {
+      const info = drumChannel(n.ch);
+      if (!info) continue;
+      const beat = tm.beatOf(m, n.f);
+      if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) continue;
+      const y = g.beatToY(beat);
+      const cx = g.ox + laneCX(info.lane);
+      const lane = DRUM_LANES[info.lane];
+      const color = info.alt && lane.altColor ? lane.altColor : lane.color;
+      roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
+      ctx.fillStyle = color + (info.kind === 'normal' ? '38' : '12');
+      ctx.fill();
+      ctx.setLineDash(info.kind === 'normal' ? [3, 2] : [1, 2]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (info.alt) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx, y, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (gh.doubt.has(doubtKey(m, n))) {
+        // 原曲でこの音が聞こえない（外れのことが多い）
+        roundRect(ctx, cx - 20, y - 8, 40, 16, 5);
+        ctx.strokeStyle = '#FF9F43';
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+      }
+    }
+  });
 }
 
 // ---- 座標 ---------------------------------------------------------------------
@@ -1498,6 +1588,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       }
     }
   }
+
+  // TAB補完：打った小節の続きを点線で
+  const ghost = visibleGhost();
+  if (ghost) drawGhost(ctx, g, ghost, tempoOf(doc));
 
   // 無理な配置の印（小節番号の列）
   if (issueOn) {

@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { deleteMeasures, deleteSelection, insertMeasures, openPage, setMeasureLength, setKind, setSelectionWav, toast, useEditor } from '../store/editor';
 import { judgeCurrent, useAiLevel } from '../store/aiLevel';
 import { makeCandidates, openPhrase } from '../store/phrase';
+import { AMOUNT, setCompleteSettings, useComplete, type CompleteAmount } from '../store/complete';
 import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
 import { chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
@@ -30,6 +31,7 @@ export function RightPanel() {
       <SourceCard />
       <ReferenceCard />
       <AssistCard />
+      <CompleteCard />
       <SelectionCard />
       <MeasureCard />
       <CheckCard />
@@ -86,6 +88,9 @@ function SelectionCard() {
           </div>
           <div>
             <kbd>Ctrl</kbd>+ホイール … ズーム、<kbd>[</kbd> <kbd>]</kbd> … グリッド
+          </div>
+          <div>
+            <kbd>Tab</kbd> … 点線の続き（TAB補完）を入れる
           </div>
         </div>
       </div>
@@ -462,6 +467,66 @@ function AssistCard() {
           <input type="range" min={0} max={1} step={0.05} value={a.sensitivity} onChange={(e) => useAssist.setState({ sensitivity: Number(e.target.value) })} />
           <span className="mono lbl">{Math.round(a.sensitivity * 100)}</span>
         </label>
+      )}
+    </div>
+  );
+}
+
+const AUDIO_NOTE: Record<string, string> = {
+  ready: '原曲の聞こえ方も使って予測しています（2番のサビ＝1番のサビ など）。',
+  loading: '原曲の聞こえ方を調べています…',
+  error: '原曲の聞こえ方を調べられませんでした。譜面だけで予測します。',
+  none: '原曲が無いので、譜面だけで予測します。',
+};
+
+function CompleteCard() {
+  const c = useComplete();
+  return (
+    <div className="card">
+      <div className="row" style={{ marginBottom: 6 }}>
+        <span style={{ fontWeight: 700 }}>TAB補完</span>
+        <span className="grow" />
+        <label className="row lbl" style={{ gap: 6 }}>
+          <input type="checkbox" checked={c.enabled} onChange={(e) => setCompleteSettings({ enabled: e.target.checked })} />
+          使う
+        </label>
+      </div>
+      <p className="lbl" style={{ margin: 0, lineHeight: 1.7 }}>
+        チップを置くと、その先の空いた小節に続きを点線で出します。この曲でもう打った小節を写すので、打つほど当たります。
+      </p>
+      {c.enabled && (
+        <>
+          <div className="form-grid" style={{ marginTop: 8 }}>
+            <span className="lbl">先まで</span>
+            <div className="seg small" style={{ display: 'flex' }}>
+              {[1, 2, 3, 4].map((n) => (
+                <button key={n} className={c.ahead === n ? 'on' : ''} style={{ flex: 1 }} onClick={() => setCompleteSettings({ ahead: n })}>
+                  {n}小節
+                </button>
+              ))}
+            </div>
+            <span className="lbl">出す量</span>
+            <div className="seg small" style={{ display: 'flex' }}>
+              {(Object.keys(AMOUNT) as CompleteAmount[]).map((k) => (
+                <button key={k} className={c.amount === k ? 'on' : ''} style={{ flex: 1 }} title={AMOUNT[k].tip} onClick={() => setCompleteSettings({ amount: k })}>
+                  {AMOUNT[k].label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="lbl" style={{ marginTop: 8, lineHeight: 1.9, color: 'var(--text3)' }}>
+            <div>
+              <kbd>Tab</kbd> … まとめて入れる、<kbd>Shift</kbd>+<kbd>Tab</kbd> … 1小節だけ
+            </div>
+            <div>
+              <kbd>Alt</kbd>+<kbd>]</kbd> <kbd>[</kbd> … 次・前の候補（点線が無いときはカーソルの所に出す）
+            </div>
+            <div>
+              <kbd>Esc</kbd> … 消す。<span style={{ color: '#FF9F43' }}>オレンジの枠</span> … 原曲でスネアが聞こえない所
+            </div>
+          </div>
+          <p className="lbl" style={{ margin: '6px 0 0' }}>{AUDIO_NOTE[c.audio]}</p>
+        </>
       )}
     </div>
   );

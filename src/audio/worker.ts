@@ -1,5 +1,6 @@
 // 原曲の解析とスロー再生用の伸長を、画面を止めないように別スレッドで行う。
 import { analyzeAudio } from './analysis';
+import { computeFrameFeatures } from './features';
 import { renderSpectro, spectroDb, type SpecMode } from './spectro';
 import { wsola } from './stretch';
 
@@ -7,6 +8,7 @@ export type WorkerRequest =
   | { id: number; type: 'load'; key: string; channels: Float32Array[]; sr: number }
   | { id: number; type: 'analyze'; key: string }
   | { id: number; type: 'spectro'; key: string; mode: SpecMode }
+  | { id: number; type: 'features'; key: string }
   | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number };
 
 const store = new Map<string, { channels: Float32Array[]; sr: number }>();
@@ -44,6 +46,12 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       }
       const r = renderSpectro(db.db, db.frames, db.fHi, req.mode);
       post({ id: req.id, ok: true, result: r }, [r.data.buffer as ArrayBuffer]);
+      return;
+    }
+    if (req.type === 'features') {
+      const r = computeFrameFeatures(src.channels, src.sr, (p) => post({ id: req.id, progress: p }));
+      const duration = (src.channels[0]?.length ?? 0) / src.sr;
+      post({ id: req.id, ok: true, result: { frames: r, duration } }, [r.chroma.buffer, r.bands.buffer, r.flux.buffer] as Transferable[]);
       return;
     }
     if (req.type === 'stretch') {

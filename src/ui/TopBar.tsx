@@ -37,6 +37,7 @@ import { togglePreview, usePreview } from '../store/preview';
 import { bgaVisible, hasBga, useBga } from '../store/bga';
 import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
+import { summon } from '../store/complete';
 import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
 import { MasterMixer } from './MixPanel';
@@ -219,6 +220,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: 'ステムとミックス…', run: () => openPage('stems') },
             { label: '音源ライブラリ…', run: () => openPage('library') },
             { label: '前の小節をカーソルの小節に複製', key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
+            { label: 'TAB補完：カーソルの所に続きを出す', key: 'Alt+]', run: summon },
             '-',
             { label: '曲情報（AI取得・サムネイル）…', run: () => openPage('songinfo') },
             { label: 'フレーズ候補（フィル・リズム）…', run: openPhrase },

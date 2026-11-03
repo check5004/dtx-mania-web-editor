@@ -1,5 +1,6 @@
 // 解析ワーカーへの窓口。要求ごとに Promise を返す。
 import type { AnalysisData } from './analysis';
+import type { FrameFeatures } from './features';
 import type { SpecMode, SpectroData } from './spectro';
 
 export type { SpectroData };
@@ -70,6 +71,11 @@ export function analyze(key: string, progress?: (p: number) => void): Promise<An
 /** ドラムの耳コピ向けのスペクトル（同じ音で見せ方だけ変えるときは速い） */
 export function spectrogram(key: string, mode: SpecMode, progress?: (p: number) => void): Promise<SpectroData> {
   return call<SpectroData>({ type: 'spectro', key, mode }, [], progress);
+}
+
+/** 小節どうしの聞こえ方を比べるための特徴（TAB補完の「曲の構造」） */
+export function features(key: string, progress?: (p: number) => void): Promise<{ frames: FrameFeatures; duration: number }> {
+  return call<{ frames: FrameFeatures; duration: number }>({ type: 'features', key }, [], progress);
 }
 
 export function stretch(key: string, rate: number, from: number, to: number): Promise<StretchChunk> {

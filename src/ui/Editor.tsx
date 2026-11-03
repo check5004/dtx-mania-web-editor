@@ -47,6 +47,7 @@ import { NxPreview } from './NxPreview';
 import { togglePreview, usePreview } from '../store/preview';
 import { gotoResult, openFind, useFind } from '../store/find';
 import { toggleBgmMute, toggleDrumMute } from '../store/stems';
+import { acceptGhost, dismissGhost, stepGhost, useComplete } from '../store/complete';
 import { TopBar } from './TopBar';
 import { effectiveColumns, useLayout } from '../store/layout';
 import { PanelRail, VSplitter } from './Splitter';
@@ -56,6 +57,16 @@ function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   if (!t) return false;
   return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
+}
+
+/** Alt+] ・Alt+[ の向き（Mac の Option では文字が変わるので、キーの位置でも見る） */
+function bracketDir(e: KeyboardEvent): 1 | -1 | 0 {
+  const k = e.key;
+  if (k === ']' || k === '‘' || k === '’' || k === '」') return 1;
+  if (k === '[' || k === '“' || k === '”' || k === '「') return -1;
+  if (e.code === 'BracketRight') return 1;
+  if (e.code === 'BracketLeft') return -1;
+  return 0;
 }
 
 function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
@@ -96,6 +107,21 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     if (!useFind.getState().open) openFind();
     else gotoResult(useFind.getState().index + (e.shiftKey ? -1 : 1));
     return;
+  }
+  // TAB補完：Tab で点線をまとめて入れる（Shift+Tab は1小節だけ）。
+  // TAB補完を使うときは、点線が無くても Tab でボタンへ移らない（続けて押したときに操作が効かなくならないように）
+  if (k === 'Tab' && !mod && !e.altKey) {
+    if (acceptGhost(e.shiftKey ? 1 : undefined) || useComplete.getState().enabled) e.preventDefault();
+    return;
+  }
+  // Alt+] ・Alt+[：次・前の候補（点線が無ければ、カーソルの小節に呼び出す）
+  if (e.altKey && !mod) {
+    const dir = bracketDir(e);
+    if (dir !== 0) {
+      e.preventDefault();
+      stepGhost(dir);
+      return;
+    }
   }
   if (mod) {
     switch (k.toLowerCase()) {
@@ -215,6 +241,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
         usePreview.setState({ mode: 'side' });
         return;
       }
+      if (dismissGhost()) return;
       if (useVel.getState().mode) {
         toggleVelMode(false);
         return;

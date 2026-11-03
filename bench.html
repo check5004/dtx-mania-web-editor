@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>耳コピ精度テスト</title>
-    <meta name="description" content="手元のDTX曲から正解付きのテスト曲を作り、打点の自動推定の精度をF値で測ります。" />
+    <meta name="description" content="手元のDTX曲から正解付きのテスト曲を作り、打点の自動推定とTAB補完の精度を測ります。" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Crect x='1' y='1' width='20' height='20' rx='6' fill='%234CC2FF'/%3E%3Crect x='5' y='13' width='4' height='3' rx='1' fill='%230B0E13'/%3E%3Crect x='9' y='8' width='4' height='3' rx='1' fill='%230B0E13'/%3E%3Crect x='13' y='4' width='4' height='3' rx='1' fill='%230B0E13'/%3E%3C/svg%3E" />
     <style>
       :root {
@@ -75,6 +75,15 @@
         </div>
       </div>
       <div id="out"></div>
+      <h1 style="margin-top: 36px">TAB補完（先の小節の予測）</h1>
+      <p>エディタの TAB補完が、打ってある小節から先の1〜4小節をどれだけ当てるかを測ります。上で選んだ曲フォルダの譜面を全部（難易度ごとに）使い、原曲（BGM と、あればドラムの録音）の聞こえ方も使います。</p>
+      <div class="card">
+        <div class="row">
+          <button id="runComplete" disabled>TAB補完を測る</button>
+          <span class="lbl">1曲あたり数秒〜十数秒。結果は上の「結果を JSON で保存」にも入ります。</span>
+        </div>
+      </div>
+      <div id="outComplete"></div>
     </main>
     <script type="module" src="/src/bench/main.ts"></script>
   </body>

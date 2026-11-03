@@ -5101,3 +5101,112 @@ button.gen-plan {
     display: none;
   }
 }
+
+/* ---- TAB補完の札（点線の上） ---- */
+.tab-ghost {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 3px 4px 3px 3px;
+  border-radius: 8px;
+  border: 1px dashed rgba(76, 194, 255, 0.6);
+  background: rgba(10, 22, 31, 0.95);
+  color: var(--text2);
+  font-size: 11.5px;
+  line-height: 1.3;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.tab-ghost .tg-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.tab-ghost .tg-info {
+  padding: 0 4px 1px;
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.tab-ghost.empty .tg-msg {
+  padding-left: 5px;
+}
+
+.tab-ghost button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.tab-ghost button:hover:not(:disabled) {
+  filter: brightness(1.25);
+}
+
+.tab-ghost button:disabled {
+  opacity: 0.5;
+}
+
+.tab-ghost .tg-accept {
+  background: #0f3247;
+  border-color: #2a6b8f;
+  color: #d6f0ff;
+  font-weight: 600;
+}
+
+.tab-ghost .tg-accept kbd {
+  color: #d6f0ff;
+  background: #164a69;
+  border-color: #2f7aa3;
+}
+
+.tab-ghost .tg-info b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tab-ghost .tg-doubt {
+  color: #ff9f43;
+  white-space: nowrap;
+}
+
+.tab-ghost .tg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text3);
+}
+
+.tab-ghost .tg-step button,
+.tab-ghost .tg-x {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.tab-ghost .tg-x {
+  background: transparent;
+  border-color: transparent;
+  color: var(--mute);
+}
+
+.tab-ghost .tg-err {
+  color: #ff8a8f;
+  white-space: nowrap;
+}
+
+.tab-ghost .tg-ai {
+  color: #cdbcff;
+}

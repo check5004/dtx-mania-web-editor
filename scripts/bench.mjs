@@ -4,6 +4,7 @@
 // 使い方:
 //   npm run bench -- <曲フォルダ か 曲フォルダの入ったフォルダ> [...] [--full 曲名] [--mix drums,chips,stem,full,nodrums] [--tol 0.05] [--out bench-results]
 //   --full は BGM がドラム入りの原曲そのものの曲（何度でも指定できる）。
+//   --complete を付けると、打点の推定の代わりに TAB補完（先の小節の予測）を測る。
 // 必要なもの: Playwright と Chromium（npx playwright install chromium）。
 import { createRequire } from 'node:module';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
@@ -25,9 +26,11 @@ const full = [];
 let mixes;
 let tol = 0.05;
 let out = 'bench-results';
+let complete = false;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--full') full.push(args[++i]);
+  else if (a === '--complete') complete = true;
   else if (a === '--mix') mixes = args[++i].split(',');
   else if (a === '--tol') tol = Number(args[++i]);
   else if (a === '--out') out = args[++i];
@@ -64,22 +67,31 @@ try {
       await page.locator('#pick').setInputFiles(d);
       const names = await page.evaluate(() => window.__bench.songs());
       console.log(`${d}: ${names.join(', ')}`);
-      const r = await page.evaluate((opts) => window.__bench.run(opts), { mixes, full, tol, wav: false });
+      const r = complete ? await page.evaluate(() => window.__bench.runComplete()) : await page.evaluate((opts) => window.__bench.run(opts), { mixes, full, tol, wav: false });
       results.push(...r.results);
       skipped.push(...r.skipped);
     }
   } finally {
     clearInterval(timer);
   }
-  const pooled = await page.evaluate((r) => window.__bench.pool(r), results);
   const at = new Date().toISOString();
   mkdirSync(out, { recursive: true });
   const stamp = at.slice(0, 19).replace(/[:T]/g, '-');
-  writeFileSync(join(out, `bench-${stamp}.json`), JSON.stringify({ at, tol, results, pooled, skipped }, null, 1));
-  const md = report({ at, tol, results, pooled, skipped });
-  writeFileSync(join(out, `bench-${stamp}.md`), md);
-  console.log('\n' + md);
-  console.log(`書き出しました: ${join(out, `bench-${stamp}.{json,md}`)}`);
+  if (complete) {
+    const pooled = await page.evaluate((r) => window.__bench.poolComplete(r), results);
+    writeFileSync(join(out, `complete-${stamp}.json`), JSON.stringify({ at, results, pooled, skipped }, null, 1));
+    const md = completeReport({ at, results, pooled, skipped });
+    writeFileSync(join(out, `complete-${stamp}.md`), md);
+    console.log('\n' + md);
+    console.log(`書き出しました: ${join(out, `complete-${stamp}.{json,md}`)}`);
+  } else {
+    const pooled = await page.evaluate((r) => window.__bench.pool(r), results);
+    writeFileSync(join(out, `bench-${stamp}.json`), JSON.stringify({ at, tol, results, pooled, skipped }, null, 1));
+    const md = report({ at, tol, results, pooled, skipped });
+    writeFileSync(join(out, `bench-${stamp}.md`), md);
+    console.log('\n' + md);
+    console.log(`書き出しました: ${join(out, `bench-${stamp}.{json,md}`)}`);
+  }
 } finally {
   await browser.close();
   await server.close();
@@ -104,5 +116,24 @@ function report({ at, tol, results, pooled, skipped }) {
     }
   }
   if (skipped.length) s += `\n## 作れなかったテスト曲\n\n${skipped.map((x) => `- ${x.song}・${mixLabel[x.mix]}：${x.why}`).join('\n')}\n`;
+  return s;
+}
+
+function completeReport({ at, results, pooled, skipped }) {
+  const pct = (x) => (x === null || x === undefined ? '–' : `${Math.round(x * 100)}%`);
+  const f2 = (x) => (x === null || x === undefined ? '–' : x.toFixed(2));
+  const songs = new Set(results.map((r) => r.song)).size;
+  let s = `# TAB補完の精度 ${at.slice(0, 10)}\n\n${songs} 曲 ${results.length} 譜面（原曲あり ${results.filter((r) => r.audio).length}）。各セルは「出した小節のうちそのまま正解」（出した割合）。\n\n`;
+  s += `| 方式 | 譜面 | +1 | +2 | +3 | +4 | 次の小節の F (適合/再現) | 手間の減り |\n|---|---|---|---|---|---|---|---|\n`;
+  for (const m of pooled) {
+    const o = m.offsets;
+    s += `| ${m.label} | ${m.charts} | ${o.map((x) => `${pct(x.exactRate)} (${pct(x.coverage)})`).join(' | ')} | ${f2(o[0].f)} (${f2(o[0].precision)}/${f2(o[0].recall)}) | ${pct(o[0].saved)} |\n`;
+  }
+  const cal = pooled.find((m) => m.id === 'audio') ?? pooled.find((m) => m.id === 'context');
+  if (cal) {
+    s += `\n## 見込みごとのそのまま正解の割合（${cal.label}）\n\n| 見込み | 数 | そのまま正解 | F の平均 |\n|---|---|---|---|\n`;
+    for (const b of cal.calib) s += `| ${b.lo.toFixed(1)}〜${b.hi.toFixed(1)} | ${b.n} | ${pct(b.exact)} | ${f2(b.f)} |\n`;
+  }
+  if (skipped.length) s += `\n## 測らなかった譜面\n\n${skipped.map((x) => `- ${x}`).join('\n')}\n`;
   return s;
 }
