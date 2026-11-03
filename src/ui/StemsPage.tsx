@@ -21,6 +21,7 @@ import {
   removeStem,
   setChartTrack,
   setListen,
+  setStemKind,
   soloOnly,
   stemAudible,
   stemInfo,
@@ -36,6 +37,7 @@ import { confirmDialog } from './dialogs';
 import { formatPosition, formatTime } from './format';
 import { useCanvas, usePlayBeat, useSongSpan } from './hooks';
 import { Icon } from './icons';
+import { StemTrackPopover } from './StemTrackPopover';
 
 const RULER_H = 40;
 const ROW_H = 96;
@@ -132,7 +134,7 @@ export function StemsPage() {
             <span>
               <b>ここにファイルをまとめてドロップしてステムを追加</b>
               <span className="lbl" style={{ display: 'block', marginTop: 4 }}>
-                ステム分離ソフトで作ったファイルを読み込みます。drums・bass・vocals・other などの名前から種類を自動で判定し、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/
+                ステム分離ソフトで作ったファイルを読み込みます。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/
                 にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。
               </span>
             </span>
@@ -239,14 +241,32 @@ function TrackHead({ t }: { t: StemTrack }) {
   const status = useStems((s) => s.status[t.file]);
   useEditor((s) => s.mix);
   const [open, setOpen] = useState(false);
+  // 名前と種類を変える小窓
+  const [pop, setPop] = useState<DOMRect | null>(null);
+  const openPop = (e: React.MouseEvent<HTMLElement>) => {
+    const el = e.currentTarget.closest('.track-head');
+    if (el) setPop(el.getBoundingClientRect());
+  };
   const info = stemKindInfo(t.kind);
   const off = !stemAudible(t);
   return (
-    <div className="track-head" style={{ height: ROW_H, borderLeftColor: info.color, opacity: off ? 0.6 : 1 }}>
+    <div
+      className="track-head"
+      style={{ height: ROW_H, borderLeftColor: info.color, opacity: off ? 0.6 : 1 }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openPop(e);
+      }}
+    >
       <div className="row" style={{ gap: 6 }}>
-        <b className="ellipsis" style={{ fontSize: 13.5 }}>
-          {t.name}
-        </b>
+        <span className="trk-title">
+          <b className="ellipsis" style={{ fontSize: 13.5 }} onDoubleClick={openPop} title={`${t.name}（ダブルクリックで名前と種類を変える）`}>
+            {t.name}
+          </b>
+          <button className={`ib trk-edit ${pop ? 'open' : ''}`} onClick={openPop} title="名前と種類を変える（名前のダブルクリック・右クリックでも）" aria-label={`${t.name}の名前と種類を変える`}>
+            {Icon.pencil(12)}
+          </button>
+        </span>
         <button className="ib tiny" onClick={() => setOpen(!open)} title="種類・頭のずれ・削除" aria-expanded={open}>
           {Icon.gear(13)}
         </button>
@@ -271,7 +291,7 @@ function TrackHead({ t }: { t: StemTrack }) {
       </div>
       {open ? (
         <div className="track-edit">
-          <select className="field" value={t.kind} onChange={(e) => updateStem(t.file, { kind: e.target.value as StemTrack['kind'], name: STEM_KINDS.find((k) => k.kind === e.target.value)!.label })}>
+          <select className="field" value={t.kind} onChange={(e) => setStemKind(t.file, e.target.value as StemTrack['kind'])} aria-label={`${t.name}の種類`}>
             {STEM_KINDS.map((k) => (
               <option key={k.kind} value={k.kind}>
                 {k.label}
@@ -321,6 +341,7 @@ function TrackHead({ t }: { t: StemTrack }) {
           {comparePan ? 'L10' : panLabel(t.pan)}
         </span>
       </div>
+      {pop && <StemTrackPopover file={t.file} anchor={pop} onClose={() => setPop(null)} />}
     </div>
   );
 }

@@ -218,6 +218,12 @@ export const Icon = {
       <circle cx="8" cy="8" r="2" />
     </Svg>
   ),
+  pencil: (s?: number) => (
+    <Svg size={s}>
+      <path d="M10.6 2.9l2.5 2.5-7.4 7.4-3.2.7.7-3.2z" />
+      <path d="M9.2 4.3l2.5 2.5" />
+    </Svg>
+  ),
   close: (s?: number) => (
     <Svg size={s}>
       <path d="m4 4 8 8M12 4l-8 8" />

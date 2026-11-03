@@ -1,6 +1,7 @@
 // 作業ファイル（.dtxe.json）の中身。DTXには書けない補助情報（セクションのメモ、YouTube、拍アンカー）。
 // NX はこのファイルを読まないので、無くても譜面は遊べる。
 import { create } from 'zustand';
+import { renameOldOtherStems } from '../audio/stemNames';
 
 export interface SectionMark {
   /** この小節から始まる */
@@ -238,6 +239,8 @@ export function parseSidecar(text: string): SidecarData | null {
           solo: !!t.solo,
           offsetMs: n(t.offsetMs, 0, -60000, 60000),
         }));
+      // 前の版で種類が分からず「その他」になっていたステムは、ファイル名から付け直す
+      out.stems = renameOldOtherStems(out.stems);
     }
     if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
     if (j.mix && typeof j.mix === 'object') {

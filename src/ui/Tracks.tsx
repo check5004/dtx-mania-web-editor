@@ -28,6 +28,7 @@ import {
 import { formatTime } from './format';
 import { songLength, usePlayBeat, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
+import { StemTrackPopover } from './StemTrackPopover';
 
 /** トラックの見出しの幅 */
 export const HEAD_W = 344;
@@ -666,6 +667,8 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
   const waveMode = useAssist((s) => s.waveMode);
   const specSource = useAssist((s) => s.specSource);
   const srcKey = useAssist((s) => s.src?.key ?? null);
+  // 名前と種類を変える小窓（ステムのトラックだけ）
+  const [edit, setEdit] = useState<DOMRect | null>(null);
   const tall = h >= 42;
   const on = rowAudible(row);
   const solo = anySolo();
@@ -701,11 +704,37 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
     else updateStem(row.id, p);
   };
   const why = !on && !muted ? (solo && !soloed ? '（他のトラックがソロ）' : mix.bgmMute && row.type !== 'chart' ? '（曲の音をまとめて消しています）' : '') : '';
+  const isStem = row.type === 'stem';
+  const openEdit = (e: React.MouseEvent<HTMLElement>) => {
+    const el = e.currentTarget.closest('.trk');
+    if (el) setEdit(el.getBoundingClientRect());
+  };
 
   return (
-    <div className={`trk ${on ? '' : 'off'}`} style={{ height: h, borderLeftColor: row.color }} title={why ? `鳴っていません${why}` : undefined}>
+    <div
+      className={`trk ${on ? '' : 'off'}`}
+      style={{ height: h, borderLeftColor: row.color }}
+      title={why ? `鳴っていません${why}` : undefined}
+      onContextMenu={
+        isStem
+          ? (e) => {
+              e.preventDefault();
+              openEdit(e);
+            }
+          : undefined
+      }
+    >
       <div className="trk-name">
-        <b className="ellipsis">{row.name}</b>
+        <span className="trk-title">
+          <b className="ellipsis" onDoubleClick={isStem ? openEdit : undefined} title={isStem ? `${row.name}（ダブルクリックで名前と種類を変える）` : undefined}>
+            {row.name}
+          </b>
+          {isStem && (
+            <button className={`ib trk-edit ${edit ? 'open' : ''}`} onClick={openEdit} title="名前と種類を変える（名前のダブルクリック・右クリックでも）" aria-label={`${row.name}の名前と種類を変える`}>
+              {Icon.pencil(11)}
+            </button>
+          )}
+        </span>
         {tall && (
           <span className="sub ellipsis" title={row.sub}>
             {row.sub}
@@ -776,6 +805,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
       ) : (
         <span className="trk-spec pad" />
       )}
+      {edit && isStem && <StemTrackPopover file={row.id} anchor={edit} onClose={() => setEdit(null)} />}
     </div>
   );
 }

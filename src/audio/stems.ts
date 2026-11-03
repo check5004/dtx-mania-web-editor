@@ -1,46 +1,8 @@
 // ステム（原曲を楽器ごとに分けた音）の下ごしらえと書き出し。
-import type { StemKind } from '../store/sidecar';
 import { encodeWav } from './kit';
 
-export const STEM_KINDS: { kind: StemKind; label: string; color: string }[] = [
-  { kind: 'drums', label: 'ドラム', color: '#F0965A' },
-  { kind: 'bass', label: 'ベース', color: '#A08CF0' },
-  { kind: 'vocals', label: 'ボーカル', color: '#5BD69A' },
-  { kind: 'guitar', label: 'ギター', color: '#4FA3E0' },
-  { kind: 'piano', label: 'ピアノ', color: '#E57BC4' },
-  { kind: 'other', label: 'その他', color: '#D6C85A' },
-];
-
-export function stemKindInfo(kind: StemKind) {
-  return STEM_KINDS.find((k) => k.kind === kind) ?? STEM_KINDS[STEM_KINDS.length - 1];
-}
-
-const KIND_WORDS: [StemKind, RegExp][] = [
-  ['drums', /(drum|drums|ドラム|perc|kit)/i],
-  ['bass', /(bass|ベース)/i],
-  ['vocals', /(vocal|vocals|voice|vox|ボーカル|歌)/i],
-  ['guitar', /(guitar|gtr|ギター)/i],
-  ['piano', /(piano|keys|keyboard|ピアノ|キーボード)/i],
-  ['other', /(other|inst|instrumental|accompaniment|その他)/i],
-];
-
-/** ファイル名から種類を決める（drums.wav、song (Drums).wav、song_drums.flac、曲_ドラム_mixed.mp3 など） */
-export function detectStemKind(fileName: string): StemKind {
-  // Mac や Google ドライブの zip から来た名前は濁点が分かれている（ド＝ト＋゛）ので、合わせてから見る
-  const base = fileName.normalize('NFC').replace(/\.[^.]+$/, '');
-  // UVR などの「(Drums)」「[Drums]」「_drums」を先に見る
-  const tagged = /[([_\-. ]([A-Za-z]+)[)\]]?\s*$/.exec(base)?.[1] ?? '';
-  for (const [k, re] of KIND_WORDS) if (tagged && re.test(tagged)) return k;
-  for (const [k, re] of KIND_WORDS) if (re.test(base)) return k;
-  return 'other';
-}
-
-/** 表示名（種類のラベル。同じ種類が2本目以降なら番号を付ける） */
-export function stemDisplayName(kind: StemKind, existing: string[]): string {
-  const label = stemKindInfo(kind).label;
-  if (!existing.includes(label)) return label;
-  for (let i = 2; ; i++) if (!existing.includes(`${label}${i}`)) return `${label}${i}`;
-}
+// 種類と名前の決め方は stemNames.ts（ここからも使えるようにしておく）
+export { STEM_KINDS, detectStemKind, guessStems, isKindLabel, stemDisplayName, stemKindInfo, uniqueStemName, type StemGuess } from './stemNames';
 
 /** stems/ の中のファイル名（安全な名前にして、重なれば番号を付ける） */
 export function stemFilePath(fileName: string, existing: string[]): string {

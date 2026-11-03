@@ -1,0 +1,359 @@
+// ステムのファイル名から、種類（ドラム・ベース…）とトラックの名前を決める。
+// 分離ソフト（Demucs・UVR・Moises など）や人が付けたいろいろな名前に合わせる：
+//   drums.wav・Song (Drums).wav・1_Song_(No Drums).wav・曲_ドラム_mixed.mp3・ﾄﾞﾗﾑ.wav・01_Dr.wav・BassDrum.wav
+// まとめて読み込んだときは、どのファイルにも付いている部分（曲名・_mixed など）を除いた残りを名前にする
+// （back number - 水平線_弦楽器_mixed.mp3 → 弦楽器）。
+import type { StemKind, StemTrack } from '../store/sidecar';
+
+export const STEM_KINDS: { kind: StemKind; label: string; color: string }[] = [
+  { kind: 'drums', label: 'ドラム', color: '#F0965A' },
+  { kind: 'bass', label: 'ベース', color: '#A08CF0' },
+  { kind: 'vocals', label: 'ボーカル', color: '#5BD69A' },
+  { kind: 'guitar', label: 'ギター', color: '#4FA3E0' },
+  { kind: 'piano', label: 'ピアノ', color: '#E57BC4' },
+  { kind: 'other', label: 'その他', color: '#D6C85A' },
+];
+
+export function stemKindInfo(kind: StemKind) {
+  return STEM_KINDS.find((k) => k.kind === kind) ?? STEM_KINDS[STEM_KINDS.length - 1];
+}
+
+// ---- 文字をそろえる ---------------------------------------------------------------
+
+/** 見せる形：分かれた濁点（Mac・Google ドライブの zip）・半角カナ・全角英数をそろえる */
+export function tidyName(s: string): string {
+  return s.replace(/゛/g, '゙').replace(/゜/g, '゚').normalize('NFKC');
+}
+
+const kata = (s: string) => s.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+
+interface Folded {
+  /** 比べる形：英字は小文字、ひらがなはカタカナ、camelCase の境目（SongDrums）に空白 */
+  s: string;
+  /** s の各文字の、見せる形での位置（最後に長さ） */
+  at: number[];
+}
+
+function fold(t: string): Folded {
+  let s = '';
+  const at: number[] = [];
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    const up = c >= 65 && c <= 90;
+    if (up && i > 0) {
+      const p = t.charCodeAt(i - 1);
+      if (p >= 97 && p <= 122) {
+        s += ' ';
+        at.push(i);
+      }
+    }
+    s += String.fromCharCode(up ? c + 32 : c >= 0x3041 && c <= 0x3096 ? c + 0x60 : c);
+    at.push(i);
+  }
+  at.push(t.length);
+  return { s, at };
+}
+
+// 区切り（ー はカタカナの一部なので入れない）
+const SEP = String.raw`\s_\-.,()\[\]{}【】「」『』〔〕〈〉《》・/\\+&~〜'"!#@;=|–—―`;
+const TOKEN = new RegExp(`[^${SEP}]+`, 'g');
+const ONLY_SEP_DIGITS = new RegExp(`^[${SEP}\\d]*$`);
+const AFTER_WORD = new RegExp(`^[${SEP}]*(\\d{1,2})?[${SEP}]*$`);
+const TRAILING_NUM = /^[ _-]?(\d{1,2})(?!\d)/;
+
+// ---- 楽器の名前の表 -----------------------------------------------------------------
+
+interface Word {
+  re: RegExp;
+  kind: StemKind;
+  /** 名前（null ならファイル名に書いてあるまま） */
+  label: string | null;
+  /** 短くて別の意味もある略語（Dr・Ba・Vo など）。ほかに当たる語が無いときだけ使う */
+  weak: boolean;
+}
+
+const B = '(?<![a-z])';
+const E = '(?![a-z])';
+/** 英語の語（前後が英字でない） */
+const en = (src: string, kind: StemKind, label: string, weak = false): Word => ({ re: new RegExp(`${B}(?:${src})${E}`, 'g'), kind, label, weak });
+/** 英語の語の頭（drums・drumkit・vocals のように後ろに英字が続いてよい） */
+const head = (src: string, kind: StemKind, label: string): Word => ({ re: new RegExp(`${B}(?:${src})[a-z]*`, 'g'), kind, label, weak: false });
+/** 日本語の語（後ろに続くカタカナも含める：ドラムス・ドラムセット）。ひらがなで書いてもよい */
+const ja = (src: string, kind: StemKind, label: string | null = null, weak = false): Word => ({ re: new RegExp(`(?:${kata(src)})[ァ-ヺー]*`, 'g'), kind, label, weak });
+
+const WORDS: Word[] = [
+  // 「〜抜き」はその楽器ではない（ドラム抜きの BGM など）
+  en('(?:no|without|minus)[ _-]?drums?|drum[ _-]?less|nodrums?', 'other', 'ドラム抜き'),
+  ja('ドラム(?:抜き?|ぬき|なし|無し?|レス|オフ)|ノードラム', 'other'),
+  en('(?:no|without|minus|off)[ _-]?(?:vocals?|vox)|vocal[ _-]?less|novocals?', 'other', 'ボーカル抜き'),
+  ja('(?:ボーカル|ヴォーカル)(?:抜き?|ぬき|なし|無し?|レス|オフ)|オフ[ _-]?(?:ボーカル|ヴォーカル)', 'other'),
+  en('(?:no|without|minus)[ _-]?bass|bass[ _-]?less|nobass', 'other', 'ベース抜き'),
+  ja('ベース(?:抜き?|ぬき|なし|無し?|レス)', 'other'),
+  // ドラム（キック・スネアなど、パーツごとのステムもドラム）
+  en('bass[ _-]?drums?', 'drums', 'キック'),
+  head('kick', 'drums', 'キック'),
+  en('bd|kd', 'drums', 'キック', true),
+  head('snare', 'drums', 'スネア'),
+  en('sd|snr', 'drums', 'スネア', true),
+  en('hi[ _-]?hats?', 'drums', 'ハイハット'),
+  en('hh|hats?', 'drums', 'ハイハット', true),
+  head('cymbal', 'drums', 'シンバル'),
+  en('toms|(?:floor|rack|hi|mid|low)[ _-]?toms?', 'drums', 'タム'),
+  en('tom', 'drums', 'タム', true),
+  en('overheads?|ohs', 'drums', 'オーバーヘッド'),
+  head('perc', 'drums', 'パーカッション'),
+  head('drum', 'drums', 'ドラム'),
+  en('drs?|kits?', 'drums', 'ドラム', true),
+  ja('バスドラム|バスドラ|ベースドラム|キック|スネア|ハイハット|シンバル|パーカッション|打楽器|太鼓|ドラム', 'drums'),
+  { re: /(?<![ァ-ヺー])タム(?![ァ-ヺー])/g, kind: 'drums', label: null, weak: true },
+  // ベース
+  en('bass[ _-]?guitars?|contra[ _-]?bass|double[ _-]?bass', 'bass', 'ベース'),
+  { re: /(?<![a-z])bass(?!oon)[a-z]*/g, kind: 'bass', label: 'ベース', weak: false },
+  en('ba|bs', 'bass', 'ベース', true),
+  ja('ベースギター|エレキベース|ウッドベース|シンセベース|ベース', 'bass'),
+  // ボーカル
+  en('(?:lead|main|ld)[ _-]?(?:vocals?|vox|voc)', 'vocals', 'リードボーカル'),
+  en('(?:backing|back|backup|bg)[ _-]?(?:vocals?|vox|voc)|bgvs?|bvox|harmon(?:y|ies)|choirs?|chorus', 'vocals', 'コーラス'),
+  en('a[ _-]?cap+el+a', 'vocals', 'アカペラ'),
+  head('vocal', 'vocals', 'ボーカル'),
+  en('vox|voc|voices?|singing|singer', 'vocals', 'ボーカル'),
+  en('vo|vc', 'vocals', 'ボーカル', true),
+  en('rap', 'vocals', 'ラップ', true),
+  ja('リードボーカル|メインボーカル|コーラス|ハモリ|アカペラ|ボーカル|ヴォーカル|ボイス|ヴォイス|歌', 'vocals'),
+  ja('うた|声|ラップ', 'vocals', null, true),
+  // ギター
+  head('guitar', 'guitar', 'ギター'),
+  en('gtrs?', 'guitar', 'ギター'),
+  en('gts?', 'guitar', 'ギター', true),
+  ja('エレキギター|アコースティックギター|アコギ|エレアコ|エレキ|ギター', 'guitar'),
+  // ピアノ・キーボード
+  en('e[ _.-]?pianos?|electric[ _-]?pianos?|rhodes|wurli(?:tzer)?', 'piano', 'エレピ'),
+  head('piano', 'piano', 'ピアノ'),
+  en('keys|keyboards?|kbd', 'piano', 'キーボード'),
+  en('organs?', 'piano', 'オルガン'),
+  en('pno|pf|key', 'piano', 'ピアノ', true),
+  ja('ピアノ|キーボード|鍵盤|エレピ|オルガン', 'piano'),
+  // その他（ストリングス・ブラス・シンセなどもここ）
+  en('others?', 'other', 'その他'),
+  en('rest|misc', 'other', 'その他', true),
+  en('accompaniments?|accomp', 'other', '伴奏'),
+  en('inst(?:rumentals?|s)?|instr', 'other', 'インスト'),
+  en('karaoke', 'other', 'カラオケ'),
+  en('strings?', 'other', 'ストリングス'),
+  en('violins?|violas?', 'other', 'バイオリン'),
+  en('cellos?', 'other', 'チェロ'),
+  en('orchestral?|orch', 'other', 'オーケストラ'),
+  en('brass|horns?|trumpets?|trombones?', 'other', 'ブラス'),
+  en('sax(?:ophones?)?', 'other', 'サックス'),
+  en('winds?|woodwinds?|flutes?|clarinets?', 'other', '管楽器'),
+  head('synth', 'other', 'シンセ'),
+  en('s?fx|effects?|sound[ _-]?effects?', 'other', '効果音'),
+  en('se', 'other', '効果音', true),
+  ja('その他|伴奏|インスト|カラオケ|オケ|弦楽器|ストリングス|バイオリン|ヴァイオリン|チェロ|オーケストラ|管楽器|金管|木管|ブラス|ホーン|サックス|トランペット|フルート|シンセ|効果音|エフェクト', 'other'),
+  ja('弦', 'other', null, true),
+];
+
+interface Hit {
+  a: number;
+  b: number;
+  w: Word;
+}
+
+/** 楽器の語を探す（重なったら長いほう、同じ長さなら表の前のほう） */
+function findWords(s: string): Hit[] {
+  const hits: Hit[] = [];
+  WORDS.forEach((w) => {
+    for (const m of s.matchAll(w.re)) if (m[0].length) hits.push({ a: m.index!, b: m.index! + m[0].length, w });
+  });
+  hits.sort((p, q) => q.b - q.a - (p.b - p.a) || WORDS.indexOf(p.w) - WORDS.indexOf(q.w));
+  const kept: Hit[] = [];
+  for (const h of hits) if (!kept.some((k) => k.a < h.b && h.a < k.b)) kept.push(h);
+  return kept.sort((p, q) => p.a - q.a);
+}
+
+/** 決め手の語：最後に出てくるもの（曲名は前、楽器は後ろに付くことが多い）。略語はほかに無いときだけ */
+function pick(hits: Hit[]): Hit | null {
+  const strong = hits.filter((h) => !h.w.weak);
+  const use = strong.length ? strong : hits;
+  return use.length ? use[use.length - 1] : null;
+}
+
+/** 語が楽器の語か（strong: はっきり楽器、weak: Dr・Gt などの略語） */
+function wordClass(tok: string): 'strong' | 'weak' | null {
+  const hits = findWords(tok);
+  return hits.some((h) => !h.w.weak) ? 'strong' : hits.length ? 'weak' : null;
+}
+
+// ---- 名前を決める -----------------------------------------------------------------
+
+interface Prep {
+  tidy: string;
+  f: Folded;
+  toks: { s: string; a: number; b: number }[];
+}
+
+function prep(fileName: string): Prep {
+  const base = (fileName.split(/[\\/]/).pop() ?? fileName).replace(/\.[a-z0-9]{1,5}$/i, '');
+  const tidy = tidyName(base);
+  const f = fold(tidy);
+  const toks = [...f.s.matchAll(TOKEN)].map((m) => ({ s: m[0], a: m.index!, b: m.index! + m[0].length }));
+  return { tidy, f, toks };
+}
+
+/**
+ * どのファイルにも同じに付いている、頭の語の数と終わりの語の数。楽器の語は残す。
+ * 略語（Dr・Gt）は、残りにはっきりした楽器の語があるときだけ除く（Dr. Stone - drums は除き、Song_Gt Lead は残す）
+ */
+function commonEnds(list: Prep[]): [number, number] {
+  const min = Math.min(...list.map((p) => p.toks.length));
+  const strip = (at: (p: Prep) => number, rest: (p: Prep, i: number) => Prep['toks']) => {
+    const s = list[0].toks[at(list[0])].s;
+    if (!list.every((p) => p.toks[at(p)].s === s)) return false;
+    const c = wordClass(s);
+    if (c === 'strong') return false;
+    return c === null || list.every((p) => rest(p, at(p)).some((t) => wordClass(t.s) === 'strong'));
+  };
+  let L = 0;
+  while (
+    L < min - 1 &&
+    strip(
+      () => L,
+      (p, i) => p.toks.slice(i + 1),
+    )
+  )
+    L++;
+  let T = 0;
+  while (
+    L + T < min - 1 &&
+    strip(
+      (p) => p.toks.length - 1 - T,
+      (p, i) => p.toks.slice(L, i),
+    )
+  )
+    T++;
+  return [L, T];
+}
+
+/** 同じ分け方で作ったファイルらしいか（頭か終わりの語が同じ） */
+function related(p: Prep, q: Prep): boolean {
+  if (!p.toks.length || !q.toks.length || p.f.s === q.f.s) return false;
+  return p.toks[0].s === q.toks[0].s || p.toks[p.toks.length - 1].s === q.toks[q.toks.length - 1].s;
+}
+
+/** 語の名前（表の名前か、書いてあるまま）とすぐ後ろの番号（ボーカル1・Vocals 2） */
+function wordName(p: Prep, off: number, h: Hit, num: boolean): string {
+  const label = h.w.label ?? p.tidy.slice(p.f.at[off + h.a], p.f.at[off + h.b]);
+  const n = num ? TRAILING_NUM.exec(p.f.s.slice(off + h.b)) : null;
+  return label + (n ? String(Number(n[1])) : '');
+}
+
+const NOISE = /^(?:mixed|mix|mixdown|stems?|tracks?|master(?:ed)?|final|separated|split|extracted|isolated|h?t?demucs(?:_ft|_6s)?|spleeter|uvr|mdx(?:net)?|output|audio|copy|コピー|\d{1,3})$/;
+
+/** 楽器の語が無いときの名前：ファイル名から曲名・アーティスト名と _mixed などを除く */
+function plainName(p: Prep, hints: string[]): string {
+  let s = p.tidy;
+  for (const h of hints) {
+    const t = tidyName(h).trim();
+    if (t.length >= 2) s = s.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
+  }
+  const toks = s.split(new RegExp(`[${SEP}]+`)).filter(Boolean);
+  const kept = toks.filter((t) => !NOISE.test(t.toLowerCase()));
+  return (kept.length ? kept : toks).join(' ').trim() || p.tidy.trim() || 'ステム';
+}
+
+function guessOne(p: Prep, others: Prep[], hints: string[]): StemGuess {
+  const whole = pick(findWords(p.f.s));
+  if (others.length && p.toks.length) {
+    const [L, T] = commonEnds([p, ...others]);
+    if (L + T > 0) {
+      // 共通の部分を除いた残り（水平線_ドラム_mixed → ドラム）
+      const pa = p.toks[L].a;
+      const pb = p.toks[p.toks.length - 1 - T].b;
+      const sub = p.f.s.slice(pa, pb);
+      const h = pick(findWords(sub));
+      if (h && ONLY_SEP_DIGITS.test(sub.slice(0, h.a)) && AFTER_WORD.test(sub.slice(h.b))) return { kind: h.w.kind, name: wordName(p, pa, h, true) };
+      const text = p.tidy
+        .slice(p.f.at[pa], p.f.at[pb])
+        .replace(new RegExp(`^\\d{1,3}[${SEP}]+(?=\\S)`), '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return { kind: (h ?? whole)?.w.kind ?? 'other', name: text || plainName(p, hints) };
+    }
+  }
+  if (whole) return { kind: whole.w.kind, name: wordName(p, 0, whole, true) };
+  return { kind: 'other', name: plainName(p, hints) };
+}
+
+export interface StemGuess {
+  kind: StemKind;
+  name: string;
+}
+
+export interface GuessOptions {
+  /** もう読み込んであるステムのファイル（共通の部分を見つけるのに使う） */
+  existing?: string[];
+  /** もう使っている名前（重なれば番号を付ける） */
+  taken?: string[];
+  /** 曲名・アーティスト名（楽器の語が無いとき、名前から除く） */
+  hints?: string[];
+}
+
+/** ファイル名から種類と名前を決める（まとめて読み込むファイルを一度に渡す） */
+export function guessStems(fileNames: string[], o: GuessOptions = {}): StemGuess[] {
+  const items = fileNames.map(prep);
+  const pool = [...items, ...(o.existing ?? []).map(prep)];
+  const taken = [...(o.taken ?? [])];
+  const hints = (o.hints ?? []).filter(Boolean);
+  return items.map((p) => {
+    const g = guessOne(
+      p,
+      pool.filter((q) => q !== p && related(p, q)),
+      hints,
+    );
+    g.name = uniqueStemName(g.name, taken);
+    taken.push(g.name);
+    return g;
+  });
+}
+
+/** ファイル名から種類を決める */
+export function detectStemKind(fileName: string): StemKind {
+  return guessStems([fileName])[0].kind;
+}
+
+/** ほかのトラックと重ならない名前（重なれば ドラム2・ボーカル1-2 のように番号を付ける） */
+export function uniqueStemName(name: string, taken: string[]): string {
+  const used = new Set(taken.map((t) => t.toLowerCase()));
+  if (!used.has(name.toLowerCase())) return name;
+  const sep = /\d$/.test(name) ? '-' : '';
+  for (let i = 2; ; i++) if (!used.has(`${name}${sep}${i}`.toLowerCase())) return `${name}${sep}${i}`;
+}
+
+/** 表示名（種類のラベル。同じ種類が2本目以降なら番号を付ける） */
+export function stemDisplayName(kind: StemKind, existing: string[]): string {
+  return uniqueStemName(stemKindInfo(kind).label, existing);
+}
+
+/** 種類のラベルをそのまま使った名前か（その他・ドラム2 など。種類を変えたら名前も変えてよい） */
+export function isKindLabel(name: string): boolean {
+  return STEM_KINDS.some((k) => new RegExp(`^${k.label}\\d*(?:-\\d+)?$`).test(name));
+}
+
+/**
+ * 前の版で種類が分からず「その他」「その他2」…になっていたステムを、ファイル名から付け直す
+ * （Mac・Google ドライブの zip の「ドラム」が読めなかった v0.10.1 まで。弦楽器のように表に無い語も名前にする）。
+ * 自分で付けた名前は変えない。
+ */
+export function renameOldOtherStems(stems: StemTrack[]): StemTrack[] {
+  const old = stems.filter((t) => t.kind === 'other' && /^その他\d*$/.test(t.name));
+  if (!old.length) return stems;
+  const rest = stems.filter((t) => !old.includes(t));
+  const g = guessStems(
+    old.map((t) => t.file),
+    { existing: rest.map((t) => t.file), taken: rest.map((t) => t.name) },
+  );
+  return stems.map((t) => {
+    const i = old.indexOf(t);
+    return i < 0 ? t : { ...t, kind: g[i].kind, name: g[i].name };
+  });
+}

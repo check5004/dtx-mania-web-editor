@@ -152,7 +152,8 @@ export function syncAnalysis() {
   setDrumSource({ key: got.key, buf: got.buf, name });
   const cur = aget();
   if (cur.src?.key === got.key && (cur.status === 'ready' || cur.status === 'loading')) {
-    if (cur.src.wav !== bgm.wav) aset({ src: { ...cur.src, wav: bgm.wav } });
+    // 同じ音のまま名前だけ変わったとき（ステムの名前を変えた）も表示を合わせる
+    if (cur.src.wav !== bgm.wav || cur.src.name !== name) aset({ src: { ...cur.src, wav: bgm.wav, name } });
     return;
   }
   if (running === got.key) return;

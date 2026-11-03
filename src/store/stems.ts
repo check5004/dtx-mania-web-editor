@@ -2,7 +2,7 @@
 // ステムは BGM チップ（ch01）の位置から鳴らす。ステムがあるときは、その BGM の代わりにステムを鳴らす（ステムの合計＝原曲）。
 import { create } from 'zustand';
 import { engine, STEM_BASE, type StemStrip } from '../audio/engine';
-import { computePeaks, detectStemKind, encodeAudio, renderMix, shiftBuffer, stemDisplayName, stemFilePath } from '../audio/stems';
+import { computePeaks, encodeAudio, guessStems, isKindLabel, renderMix, shiftBuffer, stemFilePath, stemKindInfo, uniqueStemName, type StemGuess } from '../audio/stems';
 import { toBase36x2 } from '../dtx/base36';
 import { CH } from '../dtx/model';
 import { frac } from '../dtx/fraction';
@@ -11,7 +11,7 @@ import { AUDIO_EXT, findFile, folderFromFiles, putFile, type SongFolder } from '
 import { setAnalysisProvider, syncAnalysis, useAssist, type AnalysisSource } from './assist';
 import { bgmSource, setPlaybackTransform, tempoOf, wavPath } from './derived';
 import { edit, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
-import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemTrack } from './sidecar';
+import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
 
 interface Loaded {
   key: string;
@@ -273,9 +273,14 @@ export async function importStems(files: File[]): Promise<number> {
   const added: StemTrack[] = [];
   let memory = 0;
   let reused = 0;
+  // 種類と名前はファイル名から（一緒に読み込むファイル・もうあるステムと共通の部分は名前から除く）
+  const guesses = guessStems(
+    audio.map((f) => f.name),
+    { existing: list.map((t) => t.file), taken: list.map((t) => t.name), hints: songHints() },
+  );
   sset({ busy: 'ステムをコピーしています…' });
   try {
-    for (const f of audio) {
+    for (const [i, f] of audio.entries()) {
       // 曲フォルダの stems/ にもう同じファイルがあれば、コピーせずにそれを使う
       const same = findFile(folder, `stems/${f.name}`);
       let path: string;
@@ -286,8 +291,8 @@ export async function importStems(files: File[]): Promise<number> {
         path = stemFilePath(f.name, [...list.map((t) => t.file), ...[...folder.files.values()].map((x) => x.path)]);
         if ((await putFile(folder, path, f)) === 'memory') memory++;
       }
-      const kind = detectStemKind(f.name);
-      const t: StemTrack = { file: path, name: stemDisplayName(kind, list.map((x) => x.name)), kind, gain: 1, pan: 0, mute: false, solo: false, offsetMs: 0 };
+      const { kind, name } = guesses[i];
+      const t: StemTrack = { file: path, name, kind, gain: 1, pan: 0, mute: false, solo: false, offsetMs: 0 };
       list.push(t);
       added.push(t);
     }
@@ -305,9 +310,9 @@ export async function importStems(files: File[]): Promise<number> {
   await syncStems();
   checkLengths();
   toast(
-    `ステムを ${added.length} 本読み込みました${memory ? '（曲フォルダへは保存するときに書き出します）' : reused === added.length ? '（曲フォルダの stems/ にあるファイルを使います）' : '（曲フォルダの stems/ にコピー）'}`,
+    `ステムを ${added.length} 本読み込みました：${added.map((t) => t.name).join('・')}${memory ? '（曲フォルダへは保存するときに書き出します）' : reused === added.length ? '（曲フォルダの stems/ にあるファイルを使います）' : '（曲フォルダの stems/ にコピー）'}。名前と種類はトラックの ✎ で変えられます`,
     'ok',
-    6000,
+    7000,
   );
   return added.length;
 }
@@ -367,6 +372,61 @@ export function removeStem(file: string) {
   if (tracks().length === 0) setMix({ origMute: false });
   if (useSidecar.getState().analysisStem === file) setAnalysisStem(tracks().find((t) => t.kind === 'drums')?.file ?? null);
   void syncStems();
+}
+
+/** トラックの名前を変える（空なら変えない。ほかのトラックと同じなら番号を付ける）。付けた名前を返す */
+export function renameStem(file: string, name: string): string | null {
+  const t = tracks().find((x) => x.file === file);
+  const v = name.replace(/\s+/g, ' ').trim();
+  if (!t || !v) return null;
+  if (v === t.name) return v;
+  const next = uniqueStemName(
+    v,
+    tracks()
+      .filter((x) => x.file !== file)
+      .map((x) => x.name),
+  );
+  updateStem(file, { name: next });
+  // 解析元の表示（波形・打点: ドラム）も新しい名前に
+  syncAnalysis();
+  return next;
+}
+
+/**
+ * 種類を変える（色・「ゲームと同じ」などの聞こえ方・BGM用の書き出しに効く）。
+ * 名前が種類のまま（その他2 など）なら、名前も新しい種類にする。自分で付けた名前は残す
+ */
+export function setStemKind(file: string, kind: StemKind) {
+  const t = tracks().find((x) => x.file === file);
+  if (!t || t.kind === kind) return;
+  const patch: Partial<StemTrack> = { kind };
+  if (isKindLabel(t.name)) {
+    patch.name = uniqueStemName(
+      stemKindInfo(kind).label,
+      tracks()
+        .filter((x) => x.file !== file)
+        .map((x) => x.name),
+    );
+  }
+  updateStem(file, patch);
+  // 種類で決まること（聞こえ方のプリセットのミュート・解析元の自動の選び方）をやり直す
+  const listen = sget().listen;
+  if (listen === 'drums' && !tracks().some((x) => x.kind === 'drums')) setListen('all');
+  else if (listen !== 'custom') setListen(listen);
+  syncAnalysis();
+}
+
+/** 曲名・アーティスト名（ステムの名前から除く） */
+function songHints(): string[] {
+  const f = useEditor.getState().doc.fields;
+  return [f['TITLE'] ?? '', f['ARTIST'] ?? ''].filter(Boolean);
+}
+
+/** ファイル名から決めた種類と名前（「ファイル名から付け直す」用。ほかのトラックと共通の部分は除く） */
+export function stemGuessFromFile(file: string): StemGuess | null {
+  const others = tracks().filter((x) => x.file !== file);
+  if (others.length === tracks().length) return null;
+  return guessStems([file], { existing: others.map((x) => x.file), taken: others.map((x) => x.name), hints: songHints() })[0];
 }
 
 export function chooseAnalysisStem(file: string | null) {
