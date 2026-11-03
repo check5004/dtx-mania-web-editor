@@ -155,10 +155,17 @@ function hitLanes(model: boolean): { n: number; w: number; x: (i: number) => num
 }
 
 type Drag =
-  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean; flam?: boolean }
-  | { type: 'rubber'; x0: number; y0: number; x1: number; y1: number; additive: boolean; base: number[] }
-  | { type: 'velPencil'; idx: number; group: string; lastY: number }
-  | { type: 'velLine'; idx: number; y0: number; v0: number; y1: number; v1: number }
+  /** 押した所（x0・y0 は画面、b0 は譜面の拍）。動かさずに離せば置く、動かせば範囲選択 */
+  | { type: 'pending'; x0: number; y0: number; b0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean; flam?: boolean }
+  /**
+   * 範囲選択。押した角は譜面の上の位置（rx0: 譜面の左端からの x、b0: 拍）で持ち、スクロールしても譜面に付いてくる。
+   * もう一方の角（x1・y1）はマウス（画面）
+   */
+  | { type: 'rubber'; rx0: number; b0: number; x1: number; y1: number; additive: boolean; base: number[] }
+  /** lastBeat: 前に塗った所（拍。スクロールしても譜面の同じ所） */
+  | { type: 'velPencil'; idx: number; group: string; lastBeat: number }
+  /** 直線。始め（b0）は拍で持ち、終わり（y1）はマウス */
+  | { type: 'velLine'; idx: number; b0: number; v0: number; y1: number; v1: number }
   | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean }
   | { type: 'erase'; ids: Set<number> }
   /** 右ボタンを押している：動かさずに離せばメニュー、チップの上からなぞれば消す（erase へ） */
@@ -432,7 +439,7 @@ export function ChartCanvas() {
     unsubs.push(unsubVel);
 
     let raf = 0;
-    const loop = () => {
+    const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       const playing = engine.playing;
       if (!playing && l.followScroll !== null) {
@@ -440,7 +447,7 @@ export function ChartCanvas() {
         setView({ scrollBeat: l.followScroll });
         l.followScroll = null;
       }
-      autoScrollWhileDragging(l);
+      autoScrollWhileDragging(l, now);
       if (!l.dirty && !playing) return;
       l.dirty = false;
       draw(ctx, l);
@@ -467,12 +474,15 @@ export function ChartCanvas() {
       if (e.ctrlKey || e.metaKey) {
         const beat = g.yToBeat(e.offsetY);
         zoom(Math.exp(-e.deltaY * 0.0022), beat, l.h - GEO.bottom - e.offsetY);
+        dragFollowsView(l);
         return;
       }
       const dy = e.deltaMode === 1 ? e.deltaY * 32 : e.deltaMode === 2 ? e.deltaY * l.h : e.deltaY;
       const base = engine.playing && l.followScroll !== null ? l.followScroll : s.view.scrollBeat;
       l.followScroll = null;
       setView({ scrollBeat: Math.max(-2, base - dy / s.view.pxPerBeat), follow: false });
+      // ドラッグ中なら、マウスの下に来た譜面の位置でドラッグを続ける（範囲選択の押した角は譜面に付いてくる）
+      dragFollowsView(l);
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => {
@@ -548,6 +558,7 @@ export function ChartCanvas() {
     if (e.button !== 0 && e.button !== 2) return;
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
     l.pointer = { x, y };
+    armAutoScroll(x, y);
     if (e.button === 2) {
       // 右ボタン：動かさずに離したら、右クリックした物のメニュー（チップ・何もない所・小節番号・ループの帯・END）。
       // チップの上から押したままなぞると、なぞったチップを消す（以前の右ドラッグ）
@@ -560,13 +571,13 @@ export function ChartCanvas() {
       const tool = useVel.getState().tool;
       if (tool === 'pencil') {
         const group = `vel-pencil-${Date.now()}`;
-        l.drag = { type: 'velPencil', idx: h.idx, group, lastY: y };
+        l.drag = { type: 'velPencil', idx: h.idx, group, lastBeat: g.yToBeat(y) };
         pencilApply(l, g, h.idx, y, y, x, group);
         return;
       }
       if (tool === 'line') {
         const val = velFromX(x - g.ox, h.idx);
-        l.drag = { type: 'velLine', idx: h.idx, y0: y, v0: val, y1: y, v1: val };
+        l.drag = { type: 'velLine', idx: h.idx, b0: g.yToBeat(y), v0: val, y1: y, v1: val };
         return;
       }
       if (h.kind === 'velChip') {
@@ -578,7 +589,7 @@ export function ChartCanvas() {
         return;
       }
       const additive = e.ctrlKey || e.metaKey || e.shiftKey;
-      l.drag = { type: 'rubber', x0: x, y0: y, x1: x, y1: y, additive, base: additive ? s.selection : [] };
+      l.drag = { type: 'rubber', rx0: x - g.ox, b0: g.yToBeat(y), x1: x, y1: y, additive, base: additive ? s.selection : [] };
       return;
     }
     if (h.kind === 'end') {
@@ -649,6 +660,8 @@ export function ChartCanvas() {
         type: 'pending',
         x0: x,
         y0: y,
+        // 範囲選択になったときの押した角（スクロールしても譜面のこの位置から）
+        b0: g.yToBeat(y),
         lane: h.kind === 'lane' ? h.lane : -1,
         alt: e.shiftKey,
         pos,
@@ -668,6 +681,7 @@ export function ChartCanvas() {
     const g = geom(l, currentScroll(l), s.view.pxPerBeat);
     const d = l.drag;
     l.dirty = true;
+    if (d) pointerMovedFromPress(x, y);
     if (!d) {
       const h = hitTest(l, g, x, y);
       if (h && h.kind === 'lane') {
@@ -717,7 +731,8 @@ export function ChartCanvas() {
     if (d.type === 'pending') {
       if (Math.hypot(x - d.x0, y - d.y0) > 4) {
         const additive = e.ctrlKey || e.metaKey || e.shiftKey;
-        l.drag = { type: 'rubber', x0: d.x0, y0: d.y0, x1: x, y1: y, additive, base: additive ? s.selection : [] };
+        // 押した所から（その間にスクロールしていても、押した譜面の位置から）
+        l.drag = { type: 'rubber', rx0: d.x0 - g.ox, b0: d.b0, x1: x, y1: y, additive, base: additive ? s.selection : [] };
       }
       return;
     }
@@ -727,8 +742,8 @@ export function ChartCanvas() {
       return;
     }
     if (d.type === 'velPencil') {
-      pencilApply(l, g, d.idx, d.lastY, y, x, d.group);
-      d.lastY = y;
+      pencilApply(l, g, d.idx, g.beatToY(d.lastBeat), y, x, d.group);
+      d.lastBeat = g.yToBeat(y);
       return;
     }
     if (d.type === 'velLine') {
@@ -778,11 +793,7 @@ export function ChartCanvas() {
       return;
     }
     if (d.type === 'move') {
-      const tempo = tempoOf(s.doc);
-      const target = snapToGrid(tempo, Math.max(0, g.yToBeat(y) - d.grab), s.view.div);
-      d.dBeat = sub(posToBeatFrac(tempo, target), d.anchorBeat);
-      d.dLane = d.anchor.col >= 0 ? Math.round((x - d.x0) / GEO.laneW) : 0;
-      if (d.dBeat.n !== 0 || d.dLane !== 0) d.moved = true;
+      moveTo(d, g, x, y);
       canvasRef.current!.style.cursor = 'grabbing';
     }
   };
@@ -805,7 +816,7 @@ export function ChartCanvas() {
     if (d.type === 'velLine') {
       const g = geom(l, currentScroll(l), s.view.pxPerBeat);
       const lane = useVel.getState().lanes[d.idx];
-      const bA = g.yToBeat(d.y0);
+      const bA = d.b0;
       const bB = g.yToBeat(d.y1);
       const lo = Math.min(bA, bB);
       const hi = Math.max(bA, bB);
@@ -826,8 +837,7 @@ export function ChartCanvas() {
     }
     if (d.type === 'rubber') {
       const g = geom(l, currentScroll(l), s.view.pxPerBeat);
-      const ids = chipsInRect(l, g, d.x0, d.y0, d.x1, d.y1);
-      useEditor.setState({ selection: [...new Set([...d.base, ...ids])] });
+      useEditor.setState({ selection: rubberSelection(l, g, d) });
       return;
     }
     if (d.type === 'erase') {
@@ -1566,6 +1576,71 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   return { kind: 'lane', lane: col };
 }
 
+/**
+ * 範囲選択の四角（画面の座標）。押した角は譜面の上の位置から出すので、スクロールやズームをしても譜面に付いてくる。
+ * マウスの角は譜面の見えている高さまで（端での自動スクロール中も、見えていないチップは選ばない）
+ */
+function rubberRect(l: Local, g: Geom, d: Extract<Drag, { type: 'rubber' }>): [number, number, number, number] {
+  return [g.ox + d.rx0, g.beatToY(d.b0), d.x1, Math.max(GEO.head, Math.min(l.h, d.y1))];
+}
+
+/** 範囲選択を離したときに選ぶチップ（Shift・Ctrl で足すときは前の選択も） */
+function rubberSelection(l: Local, g: Geom, d: Extract<Drag, { type: 'rubber' }>): number[] {
+  const [x0, y0, x1, y1] = rubberRect(l, g, d);
+  return [...new Set([...d.base, ...chipsInRect(l, g, x0, y0, x1, y1)])];
+}
+
+/** チップを動かすドラッグ：マウスの位置（画面）と今の譜面の表示から、動かす量を決める */
+function moveTo(d: Extract<Drag, { type: 'move' }>, g: Geom, x: number, y: number) {
+  const s = useEditor.getState();
+  const tempo = tempoOf(s.doc);
+  const target = snapToGrid(tempo, Math.max(0, g.yToBeat(y) - d.grab), s.view.div);
+  d.dBeat = sub(posToBeatFrac(tempo, target), d.anchorBeat);
+  d.dLane = d.anchor.col >= 0 ? Math.round((x - d.x0) / GEO.laneW) : 0;
+  if (d.dBeat.n !== 0 || d.dLane !== 0) d.moved = true;
+}
+
+/**
+ * ドラッグ中に、マウスは止まったまま譜面だけが動いた（ホイール・ズーム・端での自動スクロール）：
+ * マウスの下に来た譜面の位置で、ドラッグを合わせ直す。範囲選択と直線は描くときにマウスから出すので要らない。
+ * クリックとして扱う所（まだ動かしていないチップ・ループの帯）は、ここでは動かさない
+ */
+function dragFollowsView(l: Local) {
+  const d = l.drag;
+  const p = l.pointer;
+  if (!d || !p) return;
+  const s = useEditor.getState();
+  const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+  const beat = g.yToBeat(p.y);
+  switch (d.type) {
+    case 'move':
+      if (d.moved) moveTo(d, g, p.x, p.y);
+      break;
+    case 'loop':
+      if (d.where === 'chart' && d.ld.moved) dragLoop(d.ld, Math.max(0, beat), LOOP_DIV, true);
+      break;
+    case 'erase': {
+      const h = hitTest(l, g, p.x, p.y);
+      if (h?.kind === 'chip') d.ids.add(h.view.c.id);
+      break;
+    }
+    case 'end':
+      dragSongEnd(Math.max(0, beat - d.grab), d.group);
+      break;
+    case 'cursor': {
+      const tempo = tempoOf(s.doc);
+      const pos = snapToGrid(tempo, Math.max(0, beat), s.view.div);
+      setCursorBeat(tempo.beatOf(pos.m, pos.f));
+      break;
+    }
+    case 'velPencil':
+      pencilApply(l, g, d.idx, g.beatToY(d.lastBeat), p.y, p.x, d.group);
+      d.lastBeat = beat;
+      break;
+  }
+  l.dirty = true;
+}
+
 function chipsInRect(l: Local, g: Geom, x0: number, y0: number, x1: number, y1: number): number[] {
   const s = useEditor.getState();
   const xa = Math.min(x0, x1);
@@ -1852,20 +1927,53 @@ function IssueBadge() {
   );
 }
 
-function autoScrollWhileDragging(l: Local) {
+/**
+ * 端での自動スクロール。at: 前にスクロールした時刻（画面の更新の速さによらず同じ速さにする）。
+ * 押した所から 4px 以上動かしてから始める（端の近くでクリックしただけで譜面が流れないように）
+ */
+const autoScroll = { at: 0, x0: 0, y0: 0, armed: false };
+
+function armAutoScroll(x: number, y: number) {
+  autoScroll.x0 = x;
+  autoScroll.y0 = y;
+  autoScroll.armed = false;
+}
+
+function pointerMovedFromPress(x: number, y: number) {
+  if (!autoScroll.armed && Math.hypot(x - autoScroll.x0, y - autoScroll.y0) > 4) autoScroll.armed = true;
+}
+
+/** ドラッグで譜面の上端・下端に寄せたら、その向きへスクロールする（端から遠いほど速い） */
+function autoScrollWhileDragging(l: Local, now: number) {
   const d = l.drag;
-  if (!d || !l.pointer || (d.type !== 'move' && d.type !== 'rubber' && d.type !== 'erase' && d.type !== 'end' && !(d.type === 'loop' && d.where === 'chart'))) return;
-  const s = useEditor.getState();
-  const { y } = l.pointer;
+  const on =
+    d &&
+    l.pointer &&
+    autoScroll.armed &&
+    (d.type === 'move' ||
+      d.type === 'rubber' ||
+      d.type === 'erase' ||
+      d.type === 'end' ||
+      d.type === 'velLine' ||
+      d.type === 'velPencil' ||
+      (d.type === 'loop' && d.where === 'chart'));
   let v = 0;
-  if (y < GEO.head + 24) v = (GEO.head + 24 - y) / 6;
-  else if (y > l.h - 16) v = -(y - (l.h - 16)) / 6;
-  if (v === 0) return;
-  const scrollBeat = Math.max(-2, s.view.scrollBeat + (v / s.view.pxPerBeat) * 4);
-  setView({ scrollBeat });
-  // END はマウスを止めていても、スクロールに合わせて動かす
-  if (d.type === 'end') dragSongEnd(Math.max(0, geom(l, scrollBeat, s.view.pxPerBeat).yToBeat(y) - d.grab), d.group);
-  l.dirty = true;
+  if (on) {
+    const { y } = l.pointer!;
+    if (y < GEO.head + 24) v = (GEO.head + 24 - y) / 6;
+    else if (y > l.h - 16) v = -(y - (l.h - 16)) / 6;
+  }
+  if (v === 0) {
+    autoScroll.at = 0;
+    return;
+  }
+  // 60fps のときの1コマ分を 1 として、前のコマからの時間で掛ける（120Hz の画面で倍速にならないように）
+  const frames = autoScroll.at ? Math.min(3, (now - autoScroll.at) / (1000 / 60)) : 1;
+  autoScroll.at = now;
+  const s = useEditor.getState();
+  setView({ scrollBeat: Math.max(-2, s.view.scrollBeat + (v / s.view.pxPerBeat) * 4 * frames) });
+  // マウスを止めていても、動かしているチップ・END・ループの端・範囲選択がスクロールに付いてくる
+  dragFollowsView(l);
 }
 
 // ---- 描画 ---------------------------------------------------------------------
@@ -2072,8 +2180,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     }
   }
 
-  const sel = new Set(s.selection);
   const d = l.drag;
+  // 範囲選択の間は、離したら選ばれるチップを選んだ色で見せる（押した角が画面の外に出ていても分かるように）
+  const sel = new Set(d?.type === 'rubber' ? rubberSelection(l, g, d) : s.selection);
   const erasing = d?.type === 'erase' ? d.ids : null;
   const moving = d?.type === 'move' && d.moved && d.dBeat ? d : null;
   const visible = viewsInRange(views, g.minBeat - 0.5, g.maxBeat + 0.5);
@@ -2368,15 +2477,16 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.globalAlpha = 1;
   }
 
-  // 範囲選択
+  // 範囲選択（押した角は譜面に付いてくる）
   if (d?.type === 'rubber') {
-    const xa = Math.min(d.x0, d.x1);
-    const ya = Math.min(d.y0, d.y1);
+    const [rx0, ry0, rx1, ry1] = rubberRect(l, g, d);
+    const xa = Math.min(rx0, rx1);
+    const ya = Math.min(ry0, ry1);
     ctx.fillStyle = 'rgba(76,194,255,.08)';
-    ctx.fillRect(xa, ya, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
+    ctx.fillRect(xa, ya, Math.abs(rx1 - rx0), Math.abs(ry1 - ry0));
     ctx.strokeStyle = 'rgba(76,194,255,.7)';
     ctx.lineWidth = 1;
-    ctx.strokeRect(xa + 0.5, ya + 0.5, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
+    ctx.strokeRect(xa + 0.5, ya + 0.5, Math.abs(rx1 - rx0), Math.abs(ry1 - ry0));
   }
   // 曲の終わり（END）。その先は暗く
   const endBeat = endBeatOf(doc);
@@ -2749,18 +2859,20 @@ function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Se
     const x = g.ox + velLaneX(d.idx) + VEL_PAD;
     const xa = x + (bw * d.v0) / 100;
     const xb = x + (bw * d.v1) / 100;
+    // 始めは譜面に付いてくる（スクロールで画面の外に出ることもある）
+    const y0 = g.beatToY(d.b0);
     ctx.setLineDash([4, 3]);
     ctx.strokeStyle = C.amber;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(xa, d.y0);
+    ctx.moveTo(xa, y0);
     ctx.lineTo(xb, d.y1);
     ctx.stroke();
     ctx.setLineDash([]);
     const label = `直線 ${d.v0} → ${d.v1}`;
     ctx.font = '10px system-ui, sans-serif';
     const tw = ctx.measureText(label).width + 12;
-    const ly = Math.min(d.y0, d.y1) - 12;
+    const ly = Math.max(GEO.head + 14, Math.min(y0, d.y1) - 12);
     roundRect(ctx, x - 2, ly - 8, tw, 16, 4);
     ctx.fillStyle = '#1E1A12';
     ctx.fill();
