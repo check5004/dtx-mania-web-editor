@@ -1,7 +1,7 @@
 // AI に頼む処理と、その初期設定（2026-11-02 時点の OpenRouter の一覧から選んだ）。
 import type { Effort, OrModel } from './openrouter';
 
-export type AiTask = 'songinfo' | 'phrase' | 'level' | 'difficulty' | 'guideline';
+export type AiTask = 'songinfo' | 'phrase' | 'measure' | 'level' | 'difficulty' | 'guideline';
 
 export interface TaskDef {
   id: AiTask;
@@ -39,6 +39,17 @@ export const TASKS: readonly TaskDef[] = [
     effort: 'low',
     why: '安くて速い',
     est: { in: 2200, out: 1300 },
+  },
+  {
+    id: 'measure',
+    label: '小節の生成',
+    sends: '前後4小節と似ている小節のチップ・原曲の打点の数値・前後の小節で使っているレーンの割合',
+    needs: { json: true },
+    model: 'openai/gpt-6.1-terra',
+    effort: 'low',
+    // 2026-11-03 隠した17小節の精度テストで GPT-6 Luna より当たり（作者の譜面との一致 0.86 対 0.74）、速い（約6秒 対 約20秒）
+    why: '耳コピの精度テストで安いモデルより当たり、速い（約6秒）',
+    est: { in: 3000, out: 600 },
   },
   {
     id: 'level',

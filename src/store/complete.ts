@@ -18,7 +18,7 @@ import type { DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { hasAiKey, NO_KEY_TITLE, runAi } from './ai';
 import { aiOnsets, useAssist } from './assist';
-import { readyDrums, useDrums } from './drums';
+import { drumsAudible, readyDrums, useDrums } from './drums';
 import { drumHits, type DrumHit } from '../transcribe/peaks';
 import type { DrumActivations } from '../transcribe/model';
 import { bgmSource, tempoOf } from './derived';
@@ -134,11 +134,17 @@ export interface Ghost {
 
 export const doubtKey = (m: number, n: { ch: number; f: Frac }) => `${m}|${noteKey(n.ch, n.f)}`;
 
+/** 点線を出さない間（小節の生成を開いている間など。循環を避けるため関数で受け取る） */
+const blockers: (() => boolean)[] = [];
+export function addGhostBlocker(fn: () => boolean) {
+  blockers.push(fn);
+}
+
 /** 点線を出せる画面か（譜面の画面で、止まっていて、ほかの候補やベロシティの編集を開いていない） */
 function canShow(): boolean {
   const s = useEditor.getState();
   if (s.screen !== 'editor' || s.page !== 'chart' || s.playing) return false;
-  return !usePhrase.getState().open && !useVel.getState().mode;
+  return !usePhrase.getState().open && !useVel.getState().mode && !blockers.some((b) => b());
 }
 
 /** 今出している点線。出していなければ null */
@@ -220,6 +226,59 @@ function heardOf(doc: DtxDoc, tempo: TempoMap): HeardDrums | null {
 }
 
 const doubtMemo = new WeakMap<Candidate, { ev: Evidence; tempo: TempoMap; off: number; out: ReadonlySet<string> }>();
+
+/** 原曲で聞こえない（BD・SD・TT の）チップ。doubtKey の集まり。照合ができなければ空 */
+export function unheardKeys(doc: DtxDoc, notes: readonly { ch: number; m: number; f: Frac }[]): ReadonlySet<string> {
+  // ドラム抜きの BGM では、どのチップも「聞こえない」になってしまうので照合しない
+  if (drumsAudible() === false) return EMPTY;
+  const ev = evidence();
+  const bgm = bgmSource(doc);
+  if (!ev || !bgm) return EMPTY;
+  const tempo = tempoOf(doc);
+  const out = new Set<string>();
+  for (const n of notes) if (unheard(ev, n.ch, tempo.beatToSec(tempo.beatOf(n.m, n.f)) - bgm.sec)) out.add(doubtKey(n.m, n));
+  return out;
+}
+
+/**
+ * 小節 from〜to に notes を打ったとき、原曲で聞こえるドラム（採譜の BD・SD・TT）とどれだけ合うか（0〜1、小節の平均）。
+ * 採譜ができていない・原曲の外なら null
+ */
+export function heardFit(doc: DtxDoc, notes: readonly { ch: number; m: number; f: Frac }[], from: number, to: number): number | null {
+  if (drumsAudible() === false) return null;
+  const tempo = tempoOf(doc);
+  const heard = heardOf(doc, tempo);
+  if (!heard) return null;
+  let sum = 0;
+  let n = 0;
+  for (let m = from; m <= to; m++) {
+    const a = heard.agree(
+      notes.filter((x) => x.m === m),
+      m,
+    );
+    if (a === null) continue;
+    sum += a;
+    n++;
+  }
+  return n ? sum / n : null;
+}
+
+/**
+ * 小節 at から len 小節に、この曲でもう打った小節を写す候補（小節の生成の「写す」）。
+ * TAB補完と同じ点数の付け方で、範囲にもうチップがあっても予測する。点数の高い順に max 個まで
+ */
+export function copyCandidates(doc: DtxDoc, at: number, len: number, max = 2): Candidate[] {
+  const tempo = tempoOf(doc);
+  const audio = structureAudio(doc, tempo);
+  const heard = audio ? heardOf(doc, tempo) : null;
+  const contents = measureContents(doc);
+  const chart: ChartSource = {
+    contents,
+    barLen: (m) => tempo.barLen(m),
+    canCopy: (m) => m >= 0 && (m < at || m >= at + len) && contents.has(m),
+  };
+  return predictChain(chart, { at, len, audio, heard, alternatives: max, minNext: 0 });
+}
 
 function doubtOf(cand: Candidate, doc: DtxDoc): ReadonlySet<string> {
   const ev = evidence();

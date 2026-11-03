@@ -37,6 +37,7 @@ import { togglePreview, usePreview } from '../store/preview';
 import { bgaVisible, hasBga, useBga } from '../store/bga';
 import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
+import { openMeasureGenAtCursor } from '../store/measureGen';
 import { summon } from '../store/complete';
 import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
@@ -223,6 +224,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: 'TAB補完：カーソルの所に続きを出す', key: 'Alt+]', run: summon },
             '-',
             { label: '曲情報（AI取得・サムネイル）…', run: () => openPage('songinfo') },
+            { label: '▶ の小節をAIで生成（小節線の ✨ と同じ）', key: 'Alt+G', run: openMeasureGenAtCursor },
             { label: 'フレーズ候補（フィル・リズム）…', run: openPhrase },
             { label: 'AI難易度生成（BASIC〜EXTREME）…', run: () => openPage('ai') },
             { label: '難易度ガイドライン…', run: () => openPage('guideline') },

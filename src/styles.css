@@ -5210,3 +5210,166 @@ button.gen-plan {
 .tab-ghost .tg-ai {
   color: #cdbcff;
 }
+
+/* ---- 小節の生成（✨） ---- */
+
+.gen-badge {
+  border-color: rgba(255, 199, 104, 0.6);
+  background: rgba(23, 19, 10, 0.96);
+}
+
+.gen-badge .gen-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 3px;
+  color: var(--amber);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.gen-badge .gen-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}
+
+.gen-badge .gen-tab {
+  gap: 4px;
+  padding: 0 6px;
+}
+
+.gen-badge .gen-tab.ai {
+  color: #d9ccff;
+}
+
+.gen-badge .gen-tab.on {
+  background: #3b2f12;
+  border-color: var(--amber);
+  color: #ffe6b3;
+  font-weight: 600;
+}
+
+.gen-badge .gen-tab .gen-fit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text3);
+}
+
+.gen-badge .gen-tab.on .gen-fit {
+  color: #e9cf96;
+}
+
+.gen-badge .gen-tab.loading {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px dashed #6f5b9e;
+  border-radius: 5px;
+  color: #cdbcff;
+  animation: gen-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gen-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.gen-badge .gen-note-btn {
+  color: var(--text3);
+}
+
+.gen-badge .gen-note .field {
+  height: 24px;
+  width: 300px;
+  max-width: 100%;
+  font-size: 11.5px;
+}
+
+.gen-badge .tg-info b {
+  color: #ffe2a8;
+}
+
+.gen-badge .gen-reason {
+  color: var(--text3);
+}
+
+.gen-badge .tg-accept {
+  background: #3b2f12;
+  border-color: #8f6d2b;
+  color: #ffe6b3;
+}
+
+.gen-badge .tg-accept kbd {
+  color: #ffe6b3;
+  background: #5a4519;
+  border-color: #8f6d2b;
+}
+
+.gen-badge .gen-count .plus {
+  color: var(--ok);
+}
+
+.gen-badge .gen-count .minus {
+  color: #ff8a8f;
+}
+
+.gen-badge .gen-mode {
+  padding: 1px;
+  border-radius: 6px;
+}
+
+.gen-badge .gen-mode button {
+  height: 20px;
+  border: 0;
+  background: transparent;
+  color: var(--mute);
+}
+
+.gen-badge .gen-mode button.on {
+  background: #2a3442;
+  color: var(--text);
+}
+
+.gen-badge .gen-lanes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.gen-badge .gen-lane {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--lane);
+  border-color: color-mix(in srgb, var(--lane) 50%, transparent);
+}
+
+.gen-badge .gen-lane.off {
+  color: var(--dim);
+  border-color: var(--line3);
+  background: transparent;
+  text-decoration: line-through;
+}
+
+.gen-badge .gen-hint {
+  font-size: 10.5px;
+}
+
+.gen-badge .gen-hint kbd {
+  font-size: 9.5px;
+}
+
+.gen-badge .gen-hint .link-btn {
+  font-size: 10.5px;
+}
+
+.gen-badge .gen-live {
+  color: var(--ok);
+}

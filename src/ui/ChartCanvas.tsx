@@ -43,6 +43,9 @@ import { useFind } from '../store/find';
 import { usePhrase } from '../store/phrase';
 import { doubtKey, setGhostRevealer, useComplete, visibleGhost, type Ghost } from '../store/complete';
 import { CompleteBadge, type GhostAnchor } from './CompleteBadge';
+import { genView, openMeasureGen, toggleGenKeep, toggleGenNote, useMeasureGen, type GenView } from '../store/measureGen';
+import { noteId } from '../edit/merge';
+import { GenBadge } from './GenBadge';
 import { gotoNextIssue, issuesOf, useCheck, type Issue } from '../store/check';
 import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
 import { thumb, useThumbs } from './thumbs';
@@ -61,16 +64,18 @@ export const GEO = {
   bottom: 28,
   /** ループの帯（いちばん左。ドラッグでループの範囲） */
   loopW: 14,
+  /** 小節の生成の ✨ の列（ループの帯の右。小節線ごとにボタン） */
+  genW: 18,
   gutterW: 36,
-  bpmX: 50,
+  bpmX: 68,
   bpmW: 44,
-  laneX: 98,
+  laneX: 116,
   laneW: 40,
-  bgmX: 502,
+  bgmX: 520,
   bgmW: 28,
-  hitsX: 534,
+  hitsX: 552,
   hitsW: 64,
-  waveX: 602,
+  waveX: 620,
   waveW: 108,
   miniW: 86,
   /** 全体図の左のループの帯 */
@@ -81,6 +86,12 @@ export const GEO = {
 };
 
 const BASE_W = GEO.bgmX + GEO.bgmW;
+
+/** 小節番号の列の左端（✨ の列の右） */
+const GUT_X = GEO.loopW + GEO.genW;
+/** ✨ のボタンの中心（譜面の左端から）と、小節線からの当たりの幅 */
+const GEN_CX = GEO.loopW + GEO.genW / 2;
+const GEN_HIT = 9;
 
 /** スペクトルを出すときの列の最大幅（画面に余裕があれば広げる） */
 const SPEC_W_MAX = 196;
@@ -151,6 +162,8 @@ interface Hover {
   alt: boolean;
   /** 小節番号の列・波形の上：クリックで再生を始める位置（拍） */
   start?: number;
+  /** ✨ の上：生成する小節 */
+  gen?: number;
 }
 
 /** 譜面の上に出す説明（警告の中身・操作のヒント） */
@@ -343,6 +356,9 @@ export function ChartCanvas() {
       useComplete.subscribe(() => {
         l.dirty = true;
       }),
+      useMeasureGen.subscribe(() => {
+        l.dirty = true;
+      }),
       useDrums.subscribe(() => {
         l.dirty = true;
       }),
@@ -439,6 +455,24 @@ export function ChartCanvas() {
     if (h.kind === 'section') {
       setPopover({ m: h.m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, y - 10) });
       return;
+    }
+    // ✨：小節の生成（Shift で範囲を広げる）
+    if (h.kind === 'genBtn') {
+      if (e.button === 0) openMeasureGen(h.m, { extend: e.shiftKey });
+      return;
+    }
+    // 生成の案：点線をクリックで外す・戻す、消えるチップ（赤い ×）をクリックで残す
+    {
+      const gv = e.button === 0 && !e.ctrlKey && !e.metaKey ? genView() : null;
+      const t = gv ? genTargetAt(g, h, x, y, gv) : null;
+      if (t?.kind === 'note') {
+        toggleGenNote(t.id);
+        return;
+      }
+      if (t?.kind === 'keep') {
+        toggleGenKeep(t.chipId);
+        return;
+      }
     }
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
     l.pointer = { x, y };
@@ -558,13 +592,19 @@ export function ChartCanvas() {
         const tempo = tempoOf(s.doc);
         const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
         l.hover = { x, y, lane: -1, pos: null, alt: false, start: tempo.beatOf(p.m, p.f) };
+      } else if (h && h.kind === 'genBtn') {
+        l.hover = { x, y, lane: -1, pos: null, alt: false, gen: h.m };
       } else {
         l.hover = h && h.kind !== 'mini' && h.kind !== 'miniLoop' && h.kind !== 'vel' && h.kind !== 'velChip' ? { x, y, lane: -1, pos: null, alt: false } : null;
       }
       showTip(tipFor(l, g, h, x, y));
       const tool = useVel.getState().tool;
-      const cur =
-        h?.kind === 'vel' || h?.kind === 'velChip'
+      const gv = genView();
+      const onGen = gv ? genTargetAt(g, h, x, y, gv) : null;
+      if (onGen && l.hover) l.hover = { ...l.hover, pos: null };
+      const cur = onGen || h?.kind === 'genBtn'
+        ? 'pointer'
+        : h?.kind === 'vel' || h?.kind === 'velChip'
           ? tool === 'pencil' || tool === 'line'
             ? 'crosshair'
             : h.kind === 'velChip'
@@ -764,6 +804,7 @@ export function ChartCanvas() {
       )}
       {inputMode === 'key' && <div className="rec-badge key">キー入力: カーソル位置に置く（↑↓で移動）</div>}
       <CompleteBadge anchor={ghostAnchor} sized={sized} />
+      <GenBadge anchor={ghostAnchor} sized={sized} />
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
       {tip && !popover && <ChartTip tip={tip} />}
       <IssueBadge />
@@ -892,6 +933,135 @@ function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoM
   });
 }
 
+/** 4つの角の星（✨ の形） */
+function sparkPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r);
+  ctx.quadraticCurveTo(cx + r * 0.18, cy - r * 0.18, cx + r, cy);
+  ctx.quadraticCurveTo(cx + r * 0.18, cy + r * 0.18, cx, cy + r);
+  ctx.quadraticCurveTo(cx - r * 0.18, cy + r * 0.18, cx - r, cy);
+  ctx.quadraticCurveTo(cx - r * 0.18, cy - r * 0.18, cx, cy - r);
+  ctx.closePath();
+}
+
+/** 小節線ごとの ✨（押すとその線から上の小節を生成）。詰まって見えるほど縮めたときは、指している所だけ */
+function drawGenButtons(ctx: CanvasRenderingContext2D, g: Geom, tempo: TempoMap, firstM: number, lastM: number, H: number, hoverM: number | undefined) {
+  const gs = useMeasureGen.getState();
+  const cx = g.ox + GEN_CX;
+  for (let m = firstM; m <= lastM + 1 && m < 3600; m++) {
+    const y = g.beatToY(tempo.measureStart(m));
+    if (y < GEO.head + 7 || y > H - 2) continue;
+    const active = gs.open && m >= gs.from && m <= gs.to;
+    const hover = hoverM === m;
+    const tall = y - g.beatToY(tempo.measureStart(m + 1)) >= 22;
+    if (!tall && !hover && !active) continue;
+    roundRect(ctx, cx - 7.5, y - 7.5, 15, 15, 4);
+    ctx.fillStyle = active ? '#FFC768' : hover ? 'rgba(255,199,104,.22)' : '#121820';
+    ctx.fill();
+    ctx.strokeStyle = active || hover ? '#FFC768' : 'rgba(255,199,104,.32)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    sparkPath(ctx, cx, y, 4.6);
+    ctx.fillStyle = active ? '#1A1305' : hover ? '#FFD891' : 'rgba(255,199,104,.6)';
+    ctx.fill();
+  }
+}
+
+/** 生成する範囲の枠（案がまだ無いときも） */
+function drawGenRange(ctx: CanvasRenderingContext2D, g: Geom, tm: TempoMap) {
+  const gs = useMeasureGen.getState();
+  const left = g.ox + GEO.laneX;
+  const w = GEO.laneW * DRUM_LANES.length;
+  const yb = g.beatToY(tm.measureStart(gs.from));
+  const yt = g.beatToY(tm.measureStart(gs.to + 1));
+  ctx.fillStyle = 'rgba(255,199,104,.045)';
+  ctx.fillRect(left, yt, w, yb - yt);
+  ctx.strokeStyle = 'rgba(255,199,104,.6)';
+  ctx.setLineDash([5, 3]);
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(left + 0.5, yt + 0.5, w - 1, yb - yt - 1);
+  ctx.setLineDash([]);
+}
+
+/**
+ * 小節の生成の案：足すチップは点線（原曲で聞こえない BD・SD・TT はオレンジの枠）、外したチップは薄い点線、
+ * 消えるチップには赤い ×、置き換えでも残すチップには緑の枠
+ */
+function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm: TempoMap, views: readonly ChipView[]) {
+  drawGenRange(ctx, g, tm);
+  const at = (n: { ch: number; m: number; f: Frac }) => {
+    const info = drumChannel(n.ch);
+    if (!info) return null;
+    const beat = tm.beatOf(n.m, n.f);
+    if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) return null;
+    const lane = DRUM_LANES[info.lane];
+    return { info, y: g.beatToY(beat), cx: g.ox + laneCX(info.lane), color: info.alt && lane.altColor ? lane.altColor : lane.color };
+  };
+  // 外したチップ（クリックで戻せる）
+  for (const sk of gv.plan.skipped) {
+    if (sk.why !== 'rejected') continue;
+    const p = at(sk.note);
+    if (!p) continue;
+    roundRect(ctx, p.cx - 17, p.y - 5, 34, 10, 3);
+    ctx.globalAlpha = 0.4;
+    ctx.setLineDash([2, 3]);
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+  // 足すチップ
+  for (const n of gv.plan.add) {
+    const p = at(n);
+    if (!p) continue;
+    roundRect(ctx, p.cx - 17, p.y - 5, 34, 10, 3);
+    ctx.fillStyle = p.color + '44';
+    ctx.fill();
+    ctx.setLineDash([3, 2]);
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (p.info.alt) {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.cx, p.y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (gv.doubt.has(doubtKey(n.m, n))) {
+      roundRect(ctx, p.cx - 20, p.y - 8, 40, 16, 5);
+      ctx.strokeStyle = '#FF9F43';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+    }
+  }
+  // 消えるチップと、残すチップ
+  if (gv.plan.remove.length === 0 && gv.kept.size === 0) return;
+  const rm = new Set(gv.plan.remove);
+  for (const v of views) {
+    if (v.col < 0 || (!rm.has(v.c.id) && !gv.kept.has(v.c.id))) continue;
+    if (v.beat < g.minBeat - 0.5 || v.beat > g.maxBeat + 0.5) continue;
+    const y = g.beatToY(v.beat);
+    const cx = g.ox + laneCX(v.col);
+    if (rm.has(v.c.id)) {
+      ctx.strokeStyle = '#FF5A61';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 5, y - 4.5);
+      ctx.lineTo(cx + 5, y + 4.5);
+      ctx.moveTo(cx + 5, y - 4.5);
+      ctx.lineTo(cx - 5, y + 4.5);
+      ctx.stroke();
+    } else {
+      roundRect(ctx, cx - 19, y - 7, 38, 14, 4);
+      ctx.strokeStyle = '#5BD69A';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+  }
+}
+
 // ---- 座標 ---------------------------------------------------------------------
 
 interface Geom {
@@ -929,6 +1099,7 @@ type Hit =
   | { kind: 'chip'; view: ChipView }
   | { kind: 'lane'; lane: number }
   | { kind: 'gutter' }
+  | { kind: 'genBtn'; m: number }
   | { kind: 'section'; m: number }
   | { kind: 'bpm' }
   | { kind: 'bgm' }
@@ -941,10 +1112,11 @@ type Hit =
   | { kind: 'vel'; idx: number; lane: number }
   | { kind: 'velChip'; idx: number; lane: number; view: ChipView };
 
-function colAt(g: Geom, x: number): number | 'gutter' | 'audio' | 'loop' | null {
+function colAt(g: Geom, x: number): number | 'gutter' | 'gen' | 'audio' | 'loop' | null {
   const rx = x - g.ox;
   if (rx < 0) return null;
   if (rx < GEO.loopW) return 'loop';
+  if (rx < GUT_X) return 'gen';
   if (rx < GEO.bpmX) return 'gutter';
   if (rx < GEO.laneX) return COL_BPM;
   if (rx < GEO.laneX + GEO.laneW * 10) return laneAt(Math.floor((rx - GEO.laneX) / GEO.laneW)) ?? null;
@@ -965,6 +1137,47 @@ function sectionTagAt(g: Geom, x: number, y: number): number | null {
     if (y <= ty - 2 && y >= ty - 18) return sec.m;
   }
   return null;
+}
+
+/** ✨ の列で、近い小節線の小節（その線から上の小節）。近くに線が無ければ null */
+function genButtonAt(g: Geom, y: number): number | null {
+  const tempo = tempoOf(useEditor.getState().doc);
+  const { m } = tempo.locate(Math.max(0, g.yToBeat(y)));
+  let best: number | null = null;
+  let bestD = GEN_HIT + 1;
+  for (const mm of [m, m + 1]) {
+    if (mm >= 3600) continue;
+    const d = Math.abs(g.beatToY(tempo.measureStart(mm)) - y);
+    if (d < bestD) {
+      best = mm;
+      bestD = d;
+    }
+  }
+  return bestD <= GEN_HIT ? best : null;
+}
+
+/** 生成の案の点線・消えるチップの上か（クリックで外す・残す） */
+function genTargetAt(g: Geom, h: Hit | null, x: number, y: number, gv: GenView): { kind: 'note'; id: string } | { kind: 'keep'; chipId: number } | null {
+  if (!h) return null;
+  if (h.kind === 'chip' && (gv.plan.remove.includes(h.view.c.id) || gv.kept.has(h.view.c.id))) return { kind: 'keep', chipId: h.view.c.id };
+  if (h.kind !== 'lane' && h.kind !== 'chip') return null;
+  const col = colAt(g, x);
+  if (typeof col !== 'number' || col < 0) return null;
+  const tm = tempoOf(useEditor.getState().doc);
+  let best: string | null = null;
+  let bestD = 8;
+  const consider = (n: { ch: number; m: number; f: Frac }) => {
+    const info = drumChannel(n.ch);
+    if (!info || info.lane !== col) return;
+    const d = Math.abs(g.beatToY(tm.beatOf(n.m, n.f)) - y);
+    if (d < bestD) {
+      best = noteId(n);
+      bestD = d;
+    }
+  };
+  for (const n of gv.plan.add) consider(n);
+  for (const sk of gv.plan.skipped) if (sk.why === 'rejected') consider(sk.note);
+  return best ? { kind: 'note', id: best } : null;
 }
 
 function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
@@ -997,6 +1210,10 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   const col = colAt(g, x);
   if (col === null) return null;
   if (col === 'loop') return { kind: 'loop' };
+  if (col === 'gen') {
+    const m = genButtonAt(g, y);
+    return m === null ? { kind: 'gutter' } : { kind: 'genBtn', m };
+  }
   if (col === 'gutter') return { kind: 'gutter' };
   if (col === 'audio') return { kind: 'audio' };
   const s = useEditor.getState();
@@ -1128,7 +1345,7 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
     let hits: Issue[] = [];
     if (h.kind === 'chip') {
       hits = issuesOf(s.doc).filter((is) => is.ids.includes(h.view.c.id));
-    } else if (x - g.ox < GEO.loopW + 24) {
+    } else if (x - g.ox >= GUT_X && x - g.ox < GUT_X + 24) {
       hits = issuesOf(s.doc).filter((is) => Math.abs(g.beatToY(is.beat) - y) <= 8);
     }
     if (hits.length) {
@@ -1156,6 +1373,27 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ', 'I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます']);
   }
   if (h.kind === 'gutter') return at('gutter', 'hint', '小節番号の列', ['クリック・ドラッグ: 再生を始める位置（▶）を置く', 'ダブルクリック: セクション名を付ける']);
+  if (h.kind === 'genBtn') {
+    const gs = useMeasureGen.getState();
+    const mine = gs.open && h.m >= gs.from && h.m <= gs.to;
+    return at(`gen:${h.m}:${mine}`, 'hint', `小節 ${toMeasure(h.m)} をAIで生成`, [
+      mine && gs.from === gs.to ? 'クリック: 生成をやめる' : 'クリック: この小節の案を作る（AI・採譜・写す）',
+      gs.open && !mine ? `Shift+クリック: 生成の範囲をここまで広げる（${toMeasure(Math.min(gs.from, h.m))}〜${toMeasure(Math.max(gs.to, h.m))}、4小節まで）` : 'Shift+クリック: 生成の範囲を広げる（4小節まで）',
+      '入れるまで譜面は変わりません。Alt+G で ▶ の小節',
+    ]);
+  }
+  {
+    const gv = genView();
+    const t = gv ? genTargetAt(g, h, x, y, gv) : null;
+    if (t?.kind === 'note') {
+      const off = gv!.rejected.has(t.id);
+      return at(`gennote:${t.id}:${off}`, 'hint', off ? '外した案のチップ' : '足すチップ（案）', [off ? 'クリック: 戻す' : 'クリック: このチップは入れない']);
+    }
+    if (t?.kind === 'keep') {
+      const kept = gv!.kept.has(t.chipId);
+      return at(`genkeep:${t.chipId}:${kept}`, 'hint', kept ? '残すチップ' : '消えるチップ（置き換え）', [kept ? 'クリック: 案どおり消す' : 'クリック: このチップは残す']);
+    }
+  }
   const a = useAssist.getState();
   const rx = x - g.ox;
   const inWave = a.audioCols && rx >= GEO.waveX && rx < GEO.waveX + waveColW();
@@ -1361,7 +1599,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     // 似た小節（カーソルの小節と同じパターン）
     if (same.has(m) || pinned.has(m)) {
       ctx.fillStyle = pinned.has(m) ? 'rgba(255,199,104,.85)' : 'rgba(76,194,255,.7)';
-      ctx.fillRect(ox + GEO.loopW + 4, yEnd + 2, 3, y - yEnd - 4);
+      ctx.fillRect(ox + GUT_X + 4, yEnd + 2, 3, y - yEnd - 4);
     }
     if (y >= GEO.head - 2 && y <= H + 2) {
       ctx.fillStyle = C.measure;
@@ -1378,6 +1616,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.fillText(meterLabel(bl), ox + GEO.bpmX + 4, y - 18);
     }
   }
+
+  // 小節の生成の ✨（小節線ごと）
+  drawGenButtons(ctx, g, tempo, firstM, lastM, H, l.hover?.gen);
 
   // セクション（左端の色の帯と、始まりの札）
   if (side.sections.length) {
@@ -1588,10 +1829,13 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   // フレーズ候補：範囲の今のチップは薄く、候補は点線で
   const ph = usePhrase.getState();
   const phCand = ph.open ? (ph.cands[ph.index] ?? null) : null;
+  // 小節の生成：入れると消えるチップは薄く（× は後で描く）
+  const gv = genView(doc);
+  const genRemove = gv && gv.plan.remove.length ? new Set(gv.plan.remove) : null;
   for (const v of visible) {
     if (erasing?.has(v.c.id)) continue;
     const selected = sel.has(v.c.id);
-    const replaced = phCand && v.col >= 0 && v.kind === 'normal' && v.c.m >= ph.from && v.c.m <= ph.to;
+    const replaced = (phCand && v.col >= 0 && v.kind === 'normal' && v.c.m >= ph.from && v.c.m <= ph.to) || genRemove?.has(v.c.id);
     drawChip(v, v.beat, v.col, replaced ? 0.22 : moving && selected ? 0.25 : 1, selected && !moving);
   }
   if (ph.open) {
@@ -1639,6 +1883,16 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   // TAB補完：打った小節の続きを点線で
   const ghost = visibleGhost();
   if (ghost) drawGhost(ctx, g, ghost, tempoOf(doc));
+  // 小節の生成：案の点線と、いまの譜面との違い
+  if (gv) drawGenPreview(ctx, g, gv, tempo, visible);
+  else if (useMeasureGen.getState().open) drawGenRange(ctx, g, tempo);
+  // ✨ を指しているときは、生成する小節を薄く示す
+  if (l.hover?.gen !== undefined && !d) {
+    const ya = g.beatToY(tempo.measureStart(l.hover.gen + 1));
+    const yb = g.beatToY(tempo.measureStart(l.hover.gen));
+    ctx.fillStyle = 'rgba(255,199,104,.06)';
+    ctx.fillRect(ox + GEO.laneX, ya, GEO.laneW * DRUM_LANES.length, yb - ya);
+  }
 
   // 無理な配置の印（小節番号の列）
   if (issueOn) {
@@ -1653,7 +1907,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       const color = is.level === 'error' ? '#FF5A61' : '#FFB547';
       ctx.fillStyle = color;
       ctx.beginPath();
-      const tx = ox + GEO.loopW + 10;
+      const tx = ox + GUT_X + 10;
       ctx.moveTo(tx, y - 6);
       ctx.lineTo(tx + 7, y + 5);
       ctx.lineTo(tx - 7, y + 5);

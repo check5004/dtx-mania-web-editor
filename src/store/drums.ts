@@ -113,6 +113,26 @@ export function readyDrums(): DrumActivations | null {
   return d.enabled && d.status === 'ready' && d.data && d.key !== null && d.key === source?.key ? d.data : null;
 }
 
+/**
+ * 原曲にドラムが聞こえるとみなす、採譜したバスドラム・スネアの1分あたりの数。
+ * 2026-11-03 の手元の曲で、ドラム入りの原曲は 300 前後、ドラム抜きの BGM（bgm_d.ogg）は 2 だった
+ */
+const AUDIBLE_PER_MIN = 20;
+let audibleMemo: { data: DrumActivations; v: boolean } | null = null;
+
+/** 原曲にドラムが聞こえるか（ドラム抜きの BGM なら false）。採譜がまだなら null */
+export function drumsAudible(): boolean | null {
+  const data = readyDrums();
+  if (!data) return null;
+  if (audibleMemo?.data === data) return audibleMemo.v;
+  const dur = data.frames / data.fps;
+  let n = 0;
+  for (const h of drumHits(data, 0.5)) if (h.cls === 'BD' || h.cls === 'SD') n++;
+  const v = dur > 0 && (n / dur) * 60 >= AUDIBLE_PER_MIN;
+  audibleMemo = { data, v };
+  return v;
+}
+
 export type DrumHitsByClass = Record<DrumClass, DrumHit[]>;
 
 let hitsMemo: { data: DrumActivations; sens: number; out: DrumHitsByClass } | null = null;

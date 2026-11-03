@@ -756,6 +756,23 @@ function emit(e: PlaybackEvent) {
   for (const cb of playbackListeners) cb(e);
 }
 
+/** 鳴らす譜面（小節の生成の案を聴くときは、案を入れた譜面。循環を避けるため関数で受け取る） */
+let playDocTransform: ((doc: DtxDoc) => DtxDoc) | null = null;
+export function setPlayDocTransform(fn: ((doc: DtxDoc) => DtxDoc) | null) {
+  playDocTransform = fn;
+}
+function heardDoc(doc: DtxDoc): DtxDoc {
+  return playDocTransform ? playDocTransform(doc) : doc;
+}
+
+/** 鳴らす譜面が変わった（案を切り替えた・閉じた）。再生中なら、まだ鳴らしていない所から鳴らし直す */
+export function refreshPlayback() {
+  if (!engine.playing) return;
+  const doc = get().doc;
+  const end = Math.max(songEndSec(doc), engine.currentSec() ?? 0);
+  engine.replaceEvents(playbackEvents(heardDoc(doc)), clickTimes(doc, 0, end + OPEN_END_SEC));
+}
+
 let playToken = 0;
 
 /** ループがオンなら範囲の外からは再生しない（A から始める）。範囲の終わり B ちょうども外 */
@@ -786,7 +803,7 @@ export async function playFrom(beat: number, opts: { keepStart?: boolean } = {})
   if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
   const endSec = playEndSec(doc, startSec);
   const rate = a.speed;
-  const events = playbackEvents(doc);
+  const events = playbackEvents(heardDoc(doc));
   const longs = new Map<number, number>();
   for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
   if (rate < 0.999 && longs.size > 0) {
@@ -823,7 +840,7 @@ useEditor.subscribe((s, prev) => {
   trackSimilar(s.doc, prev.doc, s.meta !== prev.meta);
   if (!engine.playing) return;
   const end = Math.max(songEndSec(s.doc), engine.currentSec() ?? 0);
-  engine.replaceEvents(playbackEvents(s.doc), clickTimes(s.doc, 0, end + OPEN_END_SEC));
+  engine.replaceEvents(playbackEvents(heardDoc(s.doc)), clickTimes(s.doc, 0, end + OPEN_END_SEC));
   if (s.doc.barLengths !== prev.doc.barLengths || s.doc.fields !== prev.doc.fields) applyLoopToEngine();
 });
 

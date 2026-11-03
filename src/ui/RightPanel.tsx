@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { deleteMeasures, deleteSelection, insertMeasures, openPage, setMeasureLength, setKind, setSelectionWav, toast, useEditor } from '../store/editor';
 import { judgeCurrent, useAiLevel } from '../store/aiLevel';
 import { makeCandidates, openPhrase } from '../store/phrase';
+import { openMeasureGen } from '../store/measureGen';
 import { AMOUNT, setCompleteSettings, useComplete, type CompleteAmount } from '../store/complete';
 import { drumStatusText, setDrumsEnabled, useDrums } from '../store/drums';
 import { ADTOF } from '../transcribe/model';
@@ -293,6 +294,16 @@ function MeasureCard() {
       </div>
       <div className="row" style={{ gap: 6, marginTop: 8 }}>
         <span className="ai-spark">{Icon.sparkle(12)}</span>
+        <button
+          className="btn small grow"
+          onClick={() => openMeasureGen(m)}
+          title="この小節のドラムの案を作ります（AI・採譜・写す）。譜面の小節線の左の ✨ や Alt+G と同じ。入れるまで譜面は変わりません"
+        >
+          この小節をAIで生成
+        </button>
+      </div>
+      <div className="row" style={{ gap: 6, marginTop: 6 }}>
+        <span className="ai-spark" style={{ visibility: 'hidden' }}>{Icon.sparkle(12)}</span>
         <button className="btn small grow" onClick={() => phraseNow('fill')} title="選んだ範囲（なければカーソルの小節）にフィルの候補を3つ点線で出します">
           フィルの候補
         </button>

@@ -48,6 +48,7 @@ import { togglePreview, usePreview } from '../store/preview';
 import { gotoResult, openFind, useFind } from '../store/find';
 import { toggleBgmMute, toggleDrumMute } from '../store/stems';
 import { acceptGhost, dismissGhost, stepGhost, useComplete } from '../store/complete';
+import { openMeasureGenAtCursor } from '../store/measureGen';
 import { TopBar } from './TopBar';
 import { effectiveColumns, useLayout } from '../store/layout';
 import { PanelRail, VSplitter } from './Splitter';
@@ -112,6 +113,12 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
   // TAB補完を使うときは、点線が無くても Tab でボタンへ移らない（続けて押したときに操作が効かなくならないように）
   if (k === 'Tab' && !mod && !e.altKey) {
     if (acceptGhost(e.shiftKey ? 1 : undefined) || useComplete.getState().enabled) e.preventDefault();
+    return;
+  }
+  // Alt+G：▶ の小節を AI で生成（小節線の ✨ と同じ）
+  if (e.altKey && !mod && e.code === 'KeyG') {
+    e.preventDefault();
+    openMeasureGenAtCursor();
     return;
   }
   // Alt+] ・Alt+[：次・前の候補（点線が無ければ、カーソルの小節に呼び出す）
