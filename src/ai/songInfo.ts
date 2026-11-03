@@ -124,6 +124,8 @@ export async function itunesSearch(term: string, opts: { country?: string; limit
   let data: { results?: ItunesResult[] };
   try {
     const r = await fetch(url, { signal: opts.signal });
+    // 混み合うと 403 を返すことがある。そのときは JSONP で読み直す
+    if (!r.ok) throw new Error(`iTunes ${r.status}`);
     data = await r.json();
   } catch (e) {
     if (opts.signal?.aborted) throw e;
