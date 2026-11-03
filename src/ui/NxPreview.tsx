@@ -282,7 +282,7 @@ export function NxPreview({ full = false }: { full?: boolean }) {
         <canvas ref={cv} aria-label="NX風プレビュー" />
       </div>
       <div className="nx-foot lbl">
-        {Icon.play(11)} Space で再生・停止。止めているときはカーソルの位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。
+        {Icon.play(11)} Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。
       </div>
     </div>
   );

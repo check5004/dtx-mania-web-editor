@@ -21,6 +21,7 @@ import {
   selectAll,
   setView,
   stop,
+  togglePause,
   undo,
   useEditor,
   zoom,
@@ -203,8 +204,9 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
           label="再生"
           items={() => [
             { label: '最初から再生', key: 'F5', run: () => void playFrom(0) },
-            { label: 'カーソル位置から再生', key: 'F6', run: () => void playFrom(s().cursorBeat) },
-            { label: '停止', key: 'F7', run: stop },
+            { label: '▶ の位置から再生', key: 'F6', run: () => void playFrom(s().cursorBeat) },
+            { label: '停止（▶ に戻る）', key: 'F7', run: stop, disabled: !s().playing },
+            { label: 'ここで止める', key: 'Shift+Space', run: togglePause, disabled: !s().playing },
             '-',
             { label: `再生位置を追いかける${s().view.follow ? '  ✓' : ''}`, run: () => setView({ follow: !s().view.follow }) },
           ]}

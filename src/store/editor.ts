@@ -757,51 +757,76 @@ function emit(e: PlaybackEvent) {
 }
 
 let playToken = 0;
+/** 再生を始める途中（音の読み込み・スロー再生の準備中）の数 */
+let starting = 0;
 
-export async function playFrom(beat: number) {
+/** 再生を始める途中なら true。止めたのではなく、位置や速さを変えて再生し直している */
+export function playStarting(): boolean {
+  return starting > 0;
+}
+
+/** ループがオンなら範囲の外からは再生しない（A から始める）。範囲の終わり B ちょうども外 */
+function loopedStart(beat: number): number {
+  const l = useAssist.getState().loop;
+  if (!l || !l.on || l.b <= l.a) return beat;
+  return beat < l.a - 1e-6 || beat > l.b - 1e-6 ? l.a : beat;
+}
+
+/**
+ * beat から再生する。始めた位置を ▶（再生を始める位置）にするので、止めるとそこへ戻る。
+ * keepStart: 速さ・ステム・テンポを変えたときの鳴らし直し。▶ は動かさない
+ */
+export async function playFrom(beat: number, opts: { keepStart?: boolean } = {}) {
   engine.ensure();
-  stop();
+  halt();
   const token = ++playToken;
-  await prepareSounds();
-  if (token !== playToken) return;
-  const doc = get().doc;
-  const tempo = tempoOf(doc);
-  const a = useAssist.getState();
-  const loop = loopSec(doc, a.loop);
-  let startSec = tempo.beatToSec(Math.max(0, beat));
-  // ループ中は範囲の外から始めない
-  if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
-  const endSec = playEndSec(doc, startSec);
-  const rate = a.speed;
-  const events = playbackEvents(doc);
-  const longs = new Map<number, number>();
-  for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
-  if (rate < 0.999 && longs.size > 0) {
-    set({ loading: 'スロー再生の準備中…' });
-    try {
-      await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
-    } catch (e) {
-      toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
-    } finally {
-      set({ loading: null });
-    }
+  const startBeat = loopedStart(Math.max(0, beat));
+  if (!opts.keepStart) set({ cursorBeat: startBeat });
+  starting++;
+  try {
+    await prepareSounds();
     if (token !== playToken) return;
+    const doc = get().doc;
+    const tempo = tempoOf(doc);
+    const a = useAssist.getState();
+    const loop = loopSec(doc, a.loop);
+    let startSec = tempo.beatToSec(startBeat);
+    // ループ中は範囲の外から始めない（準備の間にループが変わったときのため秒でも確かめる）
+    if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
+    const endSec = playEndSec(doc, startSec);
+    const rate = a.speed;
+    const events = playbackEvents(doc);
+    const longs = new Map<number, number>();
+    for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
+    if (rate < 0.999 && longs.size > 0) {
+      set({ loading: 'スロー再生の準備中…' });
+      try {
+        await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
+      } catch (e) {
+        toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
+      } finally {
+        set({ loading: null });
+      }
+      if (token !== playToken) return;
+    }
+    engine.play({
+      events,
+      clicks: clickTimes(doc, 0, endSec + 2),
+      startSec,
+      endSec,
+      rate,
+      loop,
+      onEnd: () => {
+        set({ playing: false });
+        emit({ type: 'stop' });
+      },
+      onLoop: () => emit({ type: 'loop', startSec: loop?.from ?? 0 }),
+    });
+    set({ playing: true, view: { ...get().view, follow: true } });
+    emit({ type: 'play', startSec, rate });
+  } finally {
+    starting--;
   }
-  engine.play({
-    events,
-    clicks: clickTimes(doc, 0, endSec + 2),
-    startSec,
-    endSec,
-    rate,
-    loop,
-    onEnd: () => {
-      set({ playing: false });
-      emit({ type: 'stop' });
-    },
-    onLoop: () => emit({ type: 'loop', startSec: loop?.from ?? 0 }),
-  });
-  set({ playing: true, view: { ...get().view, follow: true } });
-  emit({ type: 'play', startSec, rate });
 }
 
 // 再生中に譜面が変わったら、まだ鳴らしていない所から新しい譜面で鳴らす
@@ -814,26 +839,49 @@ useEditor.subscribe((s, prev) => {
   if (s.doc.barLengths !== prev.doc.barLengths || s.doc.fields !== prev.doc.fields) applyLoopToEngine();
 });
 
-export function stop() {
+/** 鳴っている音を止める。▶ は動かさない。鳴っていたら true */
+function halt(): boolean {
   playToken++;
   const was = engine.playing;
   engine.stop();
   set({ playing: false });
   if (was) emit({ type: 'stop' });
+  return was;
 }
 
-/** 再生を止めて、止めた位置を次に再生を始める位置（カーソル）にする */
-export function pause() {
-  if (!get().playing) return;
-  const beat = currentBeat();
-  stop();
-  set({ cursorBeat: Math.max(0, beat) });
+/**
+ * 停止（Space・■・F7）。再生位置は ▶（再生を始めた位置）に戻る。DAW の「停止時に開始位置に戻る」と同じ。
+ * ループ中に ▶ が範囲の外にあるとき（聴きながらループを作ったときなど）は、次の再生が始まる A に ▶ を移す
+ */
+export function stop() {
+  if (!halt()) return;
+  const c = get().cursorBeat;
+  const to = loopedStart(c);
+  if (to !== c) set({ cursorBeat: to });
 }
 
-/** 再生・一時停止（Space）。一時停止した位置から続きを再生する */
+/** 再生・停止（Space）。止めると ▶ の位置に戻る */
 export function togglePlay() {
-  if (get().playing) pause();
+  if (get().playing) stop();
   else void playFrom(get().cursorBeat);
+}
+
+/** ここで止める（Shift+Space）。止めた位置を ▶ にするので、次はそこから続けて再生する。止まっていれば ▶ から再生 */
+export function togglePause() {
+  if (!get().playing) {
+    void playFrom(get().cursorBeat);
+    return;
+  }
+  const beat = Math.max(0, currentBeat());
+  halt();
+  set({ cursorBeat: beat });
+}
+
+/** 曲の頭へ（⏮・Home）。▶ を曲の頭に置き、再生中ならそこから再生し直す */
+export function goToStart() {
+  setCursorBeat(0);
+  setView({ scrollBeat: -0.5 });
+  if (get().playing) void playFrom(0);
 }
 
 /** 今の再生位置（拍）。止まっていればカーソル位置 */
@@ -849,10 +897,10 @@ export function setMix(m: Partial<Mix>) {
   set({ mix: engine.mix });
 }
 
-/** 鳴らす音（ステムなど）が変わったとき、再生中なら今の位置から鳴らし直す */
+/** 鳴らす音（ステムなど）が変わったとき、再生中なら今の位置から鳴らし直す（▶ は動かさない） */
 export function restartIfPlaying() {
   if (!get().playing) return;
-  void playFrom(currentBeat());
+  void playFrom(currentBeat(), { keepStart: true });
 }
 
 // ---- 新規 ---------------------------------------------------------------------

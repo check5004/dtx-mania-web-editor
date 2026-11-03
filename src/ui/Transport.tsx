@@ -2,7 +2,7 @@ import { toMeasure } from '../dtx/base36';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { setInputMode, setLoop, setLoopPoint, setSpeed, toggleLoop, useAssist, type InputMode } from '../store/assist';
 import { tempoOf } from '../store/derived';
-import { currentBeat, openTempo, playFrom, setCursorBeat, setView, stop, togglePlay, useEditor } from '../store/editor';
+import { currentBeat, goToStart, openTempo, playFrom, setCursorBeat, setView, togglePause, togglePlay, useEditor } from '../store/editor';
 import { useInputSettings } from '../input/settings';
 import { setPreset, toggleVelMode, useVel, VEL_PRESET_NAMES } from '../store/velocity';
 import { useMidi } from '../input/midi';
@@ -40,27 +40,30 @@ export function Transport() {
   };
   const changeSpeed = (v: number) => {
     setSpeed(v);
-    if (useEditor.getState().playing) void playFrom(currentBeat());
+    if (useEditor.getState().playing) void playFrom(currentBeat(), { keepStart: true });
   };
 
   return (
     <div className="transport">
-      <button
-        className="ib"
-        title="曲の頭へ"
-        onClick={() => {
-          setCursorBeat(0);
-          setView({ scrollBeat: -0.5 });
-          if (playing) void playFrom(0);
-        }}
-      >
+      <button className="ib" title="曲の頭へ（Home）。▶ を曲の頭に置きます" onClick={goToStart}>
         {Icon.toStart()}
       </button>
-      <button className="play-btn" onClick={togglePlay} title={playing ? '一時停止（Space）。止めた所から続きを再生できます' : '▶ の位置から再生（Space / F6）'}>
-        {playing ? Icon.pause(18) : Icon.play(18)}
+      <button
+        className="play-btn"
+        onClick={togglePlay}
+        title={playing ? '停止（Space / F7）。再生位置は ▶ に戻ります' : '▶ の位置から再生（Space / F6）。止めると ▶ に戻ります'}
+        aria-label={playing ? '停止' : '再生'}
+      >
+        {playing ? Icon.stop(18) : Icon.play(18)}
       </button>
-      <button className="ib" onClick={stop} title="停止（F7）。再生を始めた位置に戻ります" disabled={!playing}>
-        {Icon.stop()}
+      <button
+        className="ib"
+        onClick={togglePause}
+        title="ここで止める（Shift+Space）。止めた所に ▶ を移すので、次はそこから続けて再生します"
+        aria-label="ここで止める"
+        disabled={!playing}
+      >
+        {Icon.pause()}
       </button>
       <button
         className="pos-box"

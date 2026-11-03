@@ -115,7 +115,7 @@ function keepPlaying(change: () => void) {
   change();
   if (ref !== null) {
     const doc = useEditor.getState().doc;
-    void playFrom(Math.max(0, tempoOf(doc).secToBeat(songTimeOf(ref))));
+    void playFrom(Math.max(0, tempoOf(doc).secToBeat(songTimeOf(ref))), { keepStart: true });
   }
 }
 

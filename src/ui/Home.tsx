@@ -169,7 +169,7 @@ export function Home() {
             </div>
             <div>
               <b>聴く</b>
-              <kbd>F5</kbd> 最初から、<kbd>F6</kbd> カーソル位置から、<kbd>F7</kbd> 停止。<kbd>Space</kbd>で再生と停止。
+              <kbd>Space</kbd>で再生と停止。止めると青い ▶（再生を始める位置）に戻ります。<kbd>Shift</kbd>+<kbd>Space</kbd>はその場で止めます。<kbd>F5</kbd> 最初から、<kbd>F6</kbd> ▶ から、<kbd>F7</kbd> 停止。
             </div>
             <div>
               <b>保存</b>

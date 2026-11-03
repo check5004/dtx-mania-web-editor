@@ -6,7 +6,7 @@ import { toBase36x2, toMeasure } from '../dtx/base36';
 import { drumChannel } from '../dtx/model';
 import { toggleLoop, useAssist } from '../store/assist';
 import { bgmSource, tempoOf } from '../store/derived';
-import { backToChart, playFrom, setCursorBeat, setMix, stop, togglePlay, useEditor } from '../store/editor';
+import { backToChart, goToStart, playFrom, setCursorBeat, setMix, togglePause, togglePlay, useEditor } from '../store/editor';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
   chooseAnalysisStem,
@@ -156,21 +156,25 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
   const loopLabel = loop ? `${toMeasure(tempo.locate(loop.a).m)}–${toMeasure(tempo.locate(Math.max(loop.a, loop.b - 1e-6)).m)}` : null;
   return (
     <div className="transport">
-      <button
-        className="ib"
-        title="曲の頭へ"
-        onClick={() => {
-          setCursorBeat(0);
-          if (playing) void playFrom(0);
-        }}
-      >
+      <button className="ib" title="曲の頭へ。▶ を曲の頭に置きます" onClick={goToStart}>
         {Icon.toStart()}
       </button>
-      <button className="play-btn" onClick={togglePlay} title={playing ? '一時停止（Space）' : '再生（Space）'}>
-        {playing ? Icon.pause(18) : Icon.play(18)}
+      <button
+        className="play-btn"
+        onClick={togglePlay}
+        title={playing ? '停止（Space）。再生位置は ▶ に戻ります' : '▶ の位置から再生（Space）。止めると ▶ に戻ります'}
+        aria-label={playing ? '停止' : '再生'}
+      >
+        {playing ? Icon.stop(18) : Icon.play(18)}
       </button>
-      <button className="ib" onClick={stop} title="停止（再生を始めた位置に戻ります）" disabled={!playing}>
-        {Icon.stop()}
+      <button
+        className="ib"
+        onClick={togglePause}
+        title="ここで止める（Shift+Space）。止めた所に ▶ を移すので、次はそこから続けて再生します"
+        aria-label="ここで止める"
+        disabled={!playing}
+      >
+        {Icon.pause()}
       </button>
       <div className="pos-box">
         <span className="pos-main">{formatPosition(tempo, beat)}</span>

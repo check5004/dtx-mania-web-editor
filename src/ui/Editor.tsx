@@ -11,6 +11,7 @@ import {
   cutSelection,
   deleteSelection,
   duplicatePrevMeasure,
+  goToStart,
   moveSelection,
   paste,
   playFrom,
@@ -19,6 +20,7 @@ import {
   setCursorBeat,
   setView,
   stop,
+  togglePause,
   togglePlay,
   undo,
   useEditor,
@@ -84,7 +86,8 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
   }
   if (s.page === 'stems' && k === ' ') {
     e.preventDefault();
-    togglePlay();
+    if (e.shiftKey) togglePause();
+    else togglePlay();
     return;
   }
   if (s.page !== 'chart') return;
@@ -197,8 +200,10 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
   const keyMode = useAssist.getState().inputMode === 'key';
   switch (k) {
     case ' ':
+      // Space：再生・停止（止めると ▶ に戻る）。Shift+Space：ここで止める（▶ を止めた所へ）
       e.preventDefault();
-      togglePlay();
+      if (e.shiftKey) togglePause();
+      else togglePlay();
       return;
     case 'Delete':
     case 'Backspace':
@@ -246,8 +251,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       return;
     }
     case 'Home':
-      setCursorBeat(0);
-      setView({ scrollBeat: -0.5 });
+      goToStart();
       return;
   }
 }

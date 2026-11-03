@@ -30,6 +30,7 @@ import {
   placeBpmChange,
   placeChip,
   playFrom,
+  playStarting,
   setCursorBeat,
   setView,
   useEditor,
@@ -302,7 +303,8 @@ export function ChartCanvas() {
       raf = requestAnimationFrame(loop);
       const playing = engine.playing;
       if (!playing && l.followScroll !== null) {
-        setView({ scrollBeat: l.followScroll });
+        // 位置を変えて再生し直すときは表示をそのままに。止めたときは ▶ に戻った再生位置を見せる
+        setView({ scrollBeat: playStarting() ? l.followScroll : scrollAfterStop(l, l.followScroll) });
         l.followScroll = null;
       }
       autoScrollWhileDragging(l);
@@ -760,6 +762,21 @@ function currentScroll(l: Local): number {
   return l.followScroll ?? useEditor.getState().view.scrollBeat;
 }
 
+/** 再生位置を追いかけるとき、再生位置の線を置く高さ（譜面の下から、見えている高さの割合） */
+const FOLLOW_AT = 0.22;
+
+/**
+ * 止めたあとの表示。止めると再生位置は ▶ に戻るので、▶ が見えていなければ
+ * 再生位置の線があった高さに ▶ が来るようにする（見えていれば動かさない）
+ */
+function scrollAfterStop(l: Local, follow: number): number {
+  const s = useEditor.getState();
+  const span = (l.h - GEO.head - GEO.bottom) / s.view.pxPerBeat;
+  const c = s.cursorBeat;
+  if (c >= follow + span * 0.04 && c <= follow + span * 0.96) return follow;
+  return Math.max(-2, c - span * FOLLOW_AT);
+}
+
 function geom(l: Local, scroll: number, px: number): Geom {
   const ox = Math.max(8, Math.floor((l.w - GEO.miniW - chartWidth()) / 2));
   const base = l.h - GEO.bottom;
@@ -1116,7 +1133,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   if (sec !== null) {
     playBeat = tempo.secToBeat(sec);
     if (s.view.follow) {
-      scroll = playBeat - ((l.h - GEO.head - GEO.bottom) * 0.22) / px;
+      scroll = playBeat - ((l.h - GEO.head - GEO.bottom) * FOLLOW_AT) / px;
       l.followScroll = scroll;
     }
   }
