@@ -1,4 +1,5 @@
-// 設定画面: 電子ドラム（MIDI）、キーボード、入力の遅れの補正。ブラウザに保存する。
+// 設定画面: 言語、電子ドラム（MIDI）、キーボード、入力の遅れの補正。ブラウザに保存する。
+import { tr, pl, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
 import { DRUM_LANES } from '../dtx/model';
@@ -19,16 +20,20 @@ import {
   type LaneTarget,
 } from '../input/settings';
 import { goBack, openPage, useEditor } from '../store/editor';
+import { velPresetNames } from '../store/velocity';
 import { AiSettings } from './AiSettings';
 import { Icon } from './icons';
+import { LangSwitch } from './LangSwitch';
 
-type Section = 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai';
+type Section = 'lang' | 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai';
 
-const TARGETS: { t: LaneTarget; key: string; name: string; color: string }[] = DRUM_LANES.flatMap((l, i) => {
-  const main = { t: { lane: i, alt: false }, key: l.key, name: l.mainName, color: l.color };
-  if (l.alt === undefined || !l.altName) return [main];
-  return [main, { t: { lane: i, alt: true }, key: l.key === 'HH' ? 'HHO' : 'LBD', name: l.altName, color: l.altColor ?? l.color }];
-});
+/** MIDI の割り当て先（名前は今の言語で） */
+const targets = (): { t: LaneTarget; key: string; name: string; color: string }[] =>
+  DRUM_LANES.flatMap((l, i) => {
+    const main = { t: { lane: i, alt: false }, key: l.key, name: l.mainName, color: l.color };
+    if (l.alt === undefined || !l.altName) return [main];
+    return [main, { t: { lane: i, alt: true }, key: l.key === 'HH' ? 'HHO' : 'LBD', name: l.altName, color: l.altColor ?? l.color }];
+  });
 
 export function SettingsPage() {
   const [sec, setSec] = useState<Section>(() => (useEditor.getState().settingsSection as Section | undefined) ?? 'midi');
@@ -46,33 +51,36 @@ export function SettingsPage() {
     <div className="tempo-page">
       <header className="tempo-head">
         <button className="btn small ghost" onClick={goBack}>
-          {Icon.back(14)} {useEditor.getState().returnPage && useEditor.getState().returnPage !== 'chart' ? '戻る' : 'エディタに戻る'}
+          {Icon.back(14)} {useEditor.getState().returnPage && useEditor.getState().returnPage !== 'chart' ? tr('戻る', 'Back') : tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
-        <h1>設定</h1>
-        <span className="lbl">このブラウザに保存します</span>
+        <h1>{tr('設定', 'Settings')}</h1>
+        <span className="lbl">{tr('このブラウザに保存します', 'Saved in this browser')}</span>
       </header>
       <div className="settings-body">
         <nav className="settings-nav">
           {(
             [
-              ['midi', '電子ドラム（MIDI）'],
-              ['keys', 'キーボード'],
-              ['lanes', 'レーンの並び'],
-              ['latency', '入力の遅れの補正'],
-              ['velocity', 'ベロシティ'],
-              ['ai', 'AI（OpenRouter）'],
+              // 言語はどちらの言語の画面でも見つけられるように、両方の名前を出す i18n-ignore
+              ['lang', tr('言語（Language）', 'Language (言語)')],
+              ['midi', tr('電子ドラム（MIDI）', 'Electronic drums (MIDI)')],
+              ['keys', tr('キーボード', 'Keyboard')],
+              ['lanes', tr('レーンの並び', 'Lane order')],
+              ['latency', tr('入力の遅れの補正', 'Input latency')],
+              ['velocity', tr('ベロシティ', 'Velocity')],
+              ['ai', tr('AI（OpenRouter）', 'AI (OpenRouter)')],
             ] as const
           ).map(([k, label]) => (
             <button key={k} className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>
               {label}
             </button>
           ))}
-          <button className="sub" onClick={() => openPage('guideline')} title="手元の曲から作る、レベルの基準">
-            難易度ガイドライン
+          <button className="sub" onClick={() => openPage('guideline')} title={tr('手元の曲から作る、レベルの基準', 'Level guidelines built from your local songs')}>
+            {tr('難易度ガイドライン', 'Difficulty guidelines')}
           </button>
         </nav>
         <main className="settings-main scroll">
+          {sec === 'lang' && <LanguageSettings />}
           {sec === 'midi' && <MidiSettings />}
           {sec === 'keys' && <KeySettings />}
           {sec === 'lanes' && <LaneOrderSettings />}
@@ -80,6 +88,23 @@ export function SettingsPage() {
           {sec === 'velocity' && <VelocitySettings />}
           {sec === 'ai' && <AiSettings />}
         </main>
+      </div>
+    </div>
+  );
+}
+
+function LanguageSettings() {
+  return (
+    <div className="settings-col">
+      <h2>{tr('言語', 'Language')}</h2>
+      <div className="card">
+        <LangSwitch />
+        <p className="lbl" style={{ margin: '10px 0 0', lineHeight: 1.7 }}>
+          {tr(
+            '画面の文字と、AI が返す文（曲情報のメモ、難易度生成の方針や判定の理由、フレーズの名前など）をこの言語にします。保存した譜面・曲名・ファイル名は変わりません。',
+            "Sets the language for the screens and for the text the AI writes for you (song info notes, plans and level reasons in the difficulty generator, phrase names, and so on). Saved charts, song titles and file names don't change.",
+          )}
+        </p>
       </div>
     </div>
   );
@@ -98,36 +123,37 @@ function MidiSettings() {
 
   return (
     <div className="settings-col">
-      <h2>電子ドラム（MIDI）</h2>
+      <h2>{tr('電子ドラム（MIDI）', 'Electronic drums (MIDI)')}</h2>
       <div className="card row" style={{ flexWrap: 'wrap' }}>
         {Icon.midi(16)}
         <span className="grow">
           {midi.status === 'on'
-            ? `${midi.inputs.map((i) => i.name).join('、')} を接続中`
+            ? tr(`${midi.inputs.map((i) => i.name).join('、')} を接続中`, `Connected: ${midi.inputs.map((i) => i.name).join(', ')}`)
             : midi.status === 'none'
-              ? 'MIDI機器が見つかりません。USBでつないでから「つなぐ」を押してください。'
+              ? tr('MIDI機器が見つかりません。USBでつないでから「つなぐ」を押してください。', 'No MIDI device found. Connect it over USB, then press "Connect".')
               : midi.status === 'unsupported'
-                ? 'このブラウザは Web MIDI に対応していません（Chrome・Edge などで使えます）。'
+                ? tr('このブラウザは Web MIDI に対応していません（Chrome・Edge などで使えます）。', "This browser doesn't support Web MIDI (it works in Chrome, Edge and others).")
                 : midi.status === 'denied'
-                  ? 'MIDIの利用が許可されませんでした。アドレスバーのサイト設定から許可してください。'
-                  : 'まだつないでいません。'}
+                  ? tr('MIDIの利用が許可されませんでした。アドレスバーのサイト設定から許可してください。', "MIDI access wasn't allowed. Allow it from the site settings in the address bar.")
+                  : tr('まだつないでいません。', 'Not connected yet.')}
         </span>
         {midi.status !== 'unsupported' && (
           <button className="btn small primary" onClick={() => void enableMidi()}>
-            {midi.status === 'on' ? 'もう一度探す' : '電子ドラムをつなぐ'}
+            {midi.status === 'on' ? tr('もう一度探す', 'Search again') : tr('電子ドラムをつなぐ', 'Connect')}
           </button>
         )}
       </div>
       {midi.last && (
         <div className="lbl">
-          最後に来たノート: <span className="mono">{midi.last.note}</span>（{noteName(midi.last.note)}）ベロシティ <span className="mono">{midi.last.velocity}</span> →{' '}
-          {midi.last.target ? TARGETS.find((x) => x.t.lane === midi.last!.target!.lane && x.t.alt === midi.last!.target!.alt)?.name : '割り当てなし'}
+          {tr('最後に来たノート: ', 'Last note: ')}
+          <span className="mono">{midi.last.note}</span> ({noteName(midi.last.note)}) {tr('ベロシティ', 'velocity')} <span className="mono">{midi.last.velocity}</span> →{' '}
+          {midi.last.target ? targets().find((x) => x.t.lane === midi.last!.target!.lane && x.t.alt === midi.last!.target!.alt)?.name : tr('割り当てなし', 'Not assigned')}
         </div>
       )}
 
       <div className="card">
         <div className="row" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
-          <span className="lbl">プロファイル（機器ごと・モードごと）</span>
+          <span className="lbl">{tr('プロファイル（機器ごと・モードごと）', 'Profile (per device or mode)')}</span>
           <select className="field" style={{ width: 220, height: 28 }} value={st.profileId} onChange={(e) => useInputSettings.setState({ profileId: e.target.value })}>
             {st.profiles.map((p) => (
               <option key={p.id} value={p.id}>
@@ -136,31 +162,36 @@ function MidiSettings() {
             ))}
           </select>
           <button className="btn small" onClick={() => addProfile(prof)}>
-            複製
+            {tr('複製', 'Duplicate')}
           </button>
           <button className="btn small" onClick={() => addProfile()}>
-            新しいプロファイル
+            {tr('新しいプロファイル', 'New profile')}
           </button>
           <button className="btn small ghost danger" onClick={() => removeProfile(prof.id)} disabled={st.profiles.length <= 1}>
-            削除
+            {tr('削除', 'Delete')}
           </button>
         </div>
         <label className="row" style={{ marginBottom: 10 }}>
           <span className="lbl" style={{ width: 60 }}>
-            名前
+            {tr('名前', 'Name')}
           </span>
           <input className="field" style={{ height: 28, maxWidth: 320 }} value={prof.name} onChange={(e) => updateProfile(prof.id, { name: e.target.value })} />
         </label>
         <label className="row" style={{ alignItems: 'flex-start' }}>
           <input type="checkbox" checked={prof.ignoreVelocity} onChange={(e) => updateProfile(prof.id, { ignoreVelocity: e.target.checked })} style={{ marginTop: 3 }} />
           <span>
-            ベロシティを無視して、すべて最大で入力する
+            {tr('ベロシティを無視して、すべて最大で入力する', 'Ignore velocity and enter every hit at maximum')}
             <br />
-            <span className="lbl">叩いたベロシティに関係なく、試し打ちの音を最大の音量で鳴らします（DTXのチップにはベロシティがありません）。</span>
+            <span className="lbl">
+              {tr(
+                '叩いたベロシティに関係なく、試し打ちの音を最大の音量で鳴らします（DTXのチップにはベロシティがありません）。',
+                'Plays test hits at full volume no matter how hard you hit (DTX chips have no velocity).',
+              )}
+            </span>
           </span>
         </label>
         <label className="slider-row" style={{ gridTemplateColumns: '150px minmax(0,1fr) 36px', marginTop: 8 }}>
-          <span className="lbl">これより弱い入力は無視</span>
+          <span className="lbl">{tr('これより弱い入力は無視', 'Ignore hits softer than')}</span>
           <input type="range" min={0} max={60} value={prof.minVelocity} onChange={(e) => updateProfile(prof.id, { minVelocity: Number(e.target.value) })} />
           <span className="mono lbl">{prof.minVelocity}</span>
         </label>
@@ -170,15 +201,15 @@ function MidiSettings() {
         <table className="map-grid">
           <thead>
             <tr>
-              <th>レーン</th>
-              <th>名前</th>
-              <th>割り当て（ノート番号）</th>
-              <th>最後のベロシティ</th>
+              <th>{tr('レーン', 'Lane')}</th>
+              <th>{tr('名前', 'Name')}</th>
+              <th>{tr('割り当て（ノート番号）', 'Assigned notes')}</th>
+              <th>{tr('最後のベロシティ', 'Last velocity')}</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {TARGETS.map((x) => {
+            {targets().map((x) => {
               const learning = midi.learn && midi.learn.lane === x.t.lane && midi.learn.alt === x.t.alt;
               const v = lastFor(x.t);
               return (
@@ -193,7 +224,7 @@ function MidiSettings() {
                         <span key={n} className="note-chip">
                           <span className="mono">{n}</span>
                           <span className="lbl">{noteName(n)}</span>
-                          <button onClick={() => setNote(prof.id, n, null)} aria-label={`ノート ${n} を外す`}>
+                          <button onClick={() => setNote(prof.id, n, null)} aria-label={tr(`ノート ${n} を外す`, `Remove note ${n}`)}>
                             ✕
                           </button>
                         </span>
@@ -209,7 +240,7 @@ function MidiSettings() {
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <button className={`btn small ${learning ? 'primary' : ''}`} onClick={() => startLearn(learning ? null : x.t)}>
-                      {learning ? 'パッドを叩いて…' : '覚える'}
+                      {learning ? tr('パッドを叩いて…', 'Hit a pad…') : tr('覚える', 'Learn')}
                     </button>
                   </td>
                 </tr>
@@ -218,34 +249,37 @@ function MidiSettings() {
           </tbody>
         </table>
       </div>
-      <p className="lbl">1つのレーンに複数のノートを割り当てられます（ボウ・エッジ・リムなど）。「覚える」を押してからパッドを叩くと追加します。</p>
+      <p className="lbl">{tr('1つのレーンに複数のノートを割り当てられます（ボウ・エッジ・リムなど）。「覚える」を押してからパッドを叩くと追加します。', 'You can assign several notes to one lane (bow, edge, rim, and so on). Press "Learn", then hit a pad to add it.')}</p>
 
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          ハイハットのクローズ／オープンの判定
+          {tr('ハイハットのクローズ／オープンの判定', 'Hi-hat closed/open detection')}
           <span className="grow" />
           <span className="lbl">
-            今のペダル: CC4 = <span className="mono">{midi.pedal}</span> → {midi.pedal >= prof.hhClosedAt ? 'クローズ' : 'オープン'}
+            {tr('今のペダル: ', 'Pedal now: ')}CC4 = <span className="mono">{midi.pedal}</span> → {midi.pedal >= prof.hhClosedAt ? tr('クローズ', 'closed') : tr('オープン', 'open')}
           </span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label className="row">
             <input type="radio" checked={prof.hhMode === 'note'} onChange={() => updateProfile(prof.id, { hhMode: 'note' })} />
-            ノート番号で決める（上の割り当てのまま。多くの電子ドラムはオープンとクローズで別のノートを送ります）
+            {tr('ノート番号で決める（上の割り当てのまま。多くの電子ドラムはオープンとクローズで別のノートを送ります）', 'By note number (as assigned above; most electronic kits send different notes for open and closed)')}
           </label>
           <label className="row">
             <input type="radio" checked={prof.hhMode === 'pedal'} onChange={() => updateProfile(prof.id, { hhMode: 'pedal' })} />
-            叩いた瞬間のペダル（CC4）で決める
+            {tr('叩いた瞬間のペダル（CC4）で決める', 'By the pedal position (CC4) at the moment of the hit')}
           </label>
           {prof.hhMode === 'pedal' && (
             <label className="slider-row" style={{ gridTemplateColumns: '130px minmax(0,1fr) 50px' }}>
-              <span className="lbl">クローズとみなす値</span>
+              <span className="lbl">{tr('クローズとみなす値', 'Closed at')}</span>
               <input type="range" min={1} max={127} value={prof.hhClosedAt} onChange={(e) => updateProfile(prof.id, { hhClosedAt: Number(e.target.value) })} />
-              <span className="mono lbl">{prof.hhClosedAt} 以上</span>
+              <span className="mono lbl">{tr(`${prof.hhClosedAt} 以上`, `${prof.hhClosedAt}+`)}</span>
             </label>
           )}
           <p className="lbl" style={{ margin: 0 }}>
-            HHパッドを叩いた瞬間のペダルの状態で、HH（ch11）かHHオープン（ch18）に振り分けます。ペダルを踏んだ音（44番）は左ペダル（ch1B）に入ります。
+            {tr(
+              'HHパッドを叩いた瞬間のペダルの状態で、HH（ch11）かHHオープン（ch18）に振り分けます。ペダルを踏んだ音（44番）は左ペダル（ch1B）に入ります。',
+              'Each HH pad hit goes to HH (ch11) or HH open (ch18) depending on the pedal at that moment. Pedal chicks (note 44) go to the left pedal (ch1B).',
+            )}
           </p>
         </div>
       </div>
@@ -270,8 +304,8 @@ function KeySettings() {
   const keyOf = (lane: number) => Object.entries(keys).find(([, v]) => v === lane)?.[0];
   return (
     <div className={`settings-col ${capture !== null ? 'capturing' : ''}`}>
-      <h2>キーボード</h2>
-      <p className="lbl">キー入力モードと録音で使うレーンの割り当てです。マウス入力のときは試し打ちになります。</p>
+      <h2>{tr('キーボード', 'Keyboard')}</h2>
+      <p className="lbl">{tr('キー入力モードと録音で使うレーンの割り当てです。マウス入力のときは試し打ちになります。', 'Lane keys for Keys input mode and recording. In Mouse mode they play test hits.')}</p>
       <div className="key-grid">
         {DRUM_LANES.map((l, i) => {
           const k = keyOf(i);
@@ -288,23 +322,30 @@ function KeySettings() {
       </div>
       <div className="row">
         <button className="btn small" onClick={() => useInputSettings.setState({ keys: { ...DEFAULT_KEYS } })}>
-          初期の割り当てに戻す
+          {tr('初期の割り当てに戻す', 'Reset to defaults')}
         </button>
-        {capture !== null && <span className="lbl">割り当てるキーを押してください（Escでやめる）</span>}
+        {capture !== null && <span className="lbl">{tr('割り当てるキーを押してください（Escでやめる）', 'Press the key to assign (Esc to cancel)')}</span>}
       </div>
-      <p className="lbl" style={{ lineHeight: 1.8 }}>
-        <kbd>Shift</kbd>＋キーで HHオープン・左バスドラム。<kbd>↑</kbd>
-        <kbd>↓</kbd> でカーソル移動、<kbd>[</kbd> <kbd>]</kbd> でグリッド変更、<kbd>Ctrl</kbd>＋<kbd>D</kbd> で前の小節を複製。
-      </p>
+      {isJa() ? (
+        <p className="lbl" style={{ lineHeight: 1.8 }}>
+          <kbd>Shift</kbd>＋キーで HHオープン・左バスドラム。<kbd>↑</kbd>
+          <kbd>↓</kbd> でカーソル移動、<kbd>[</kbd> <kbd>]</kbd> でグリッド変更、<kbd>Ctrl</kbd>＋<kbd>D</kbd> で前の小節を複製。
+        </p>
+      ) : (
+        <p className="lbl" style={{ lineHeight: 1.8 }}>
+          <kbd>Shift</kbd>+key for HH open and left bass drum. <kbd>↑</kbd> <kbd>↓</kbd> move the cursor, <kbd>[</kbd> <kbd>]</kbd> change the grid, and <kbd>Ctrl</kbd>+<kbd>D</kbd>{' '}
+          duplicates the previous measure.
+        </p>
+      )}
     </div>
   );
 }
 
-const LANE_PRESETS: { name: string; order: number[] }[] = [
-  { name: 'NXの標準（LC HH LP SD HT BD LT FT CY RD）', order: DEFAULT_LANE_ORDER },
-  { name: 'ライドを右シンバルの左に（… FT RD CY）', order: [0, 1, 2, 3, 4, 5, 6, 7, 9, 8] },
-  { name: '左ペダルをスネアの右に（LC HH SD LP …）', order: [0, 1, 3, 2, 4, 5, 6, 7, 8, 9] },
-  { name: '左右反転', order: [...DEFAULT_LANE_ORDER].reverse() },
+const lanePresets = (): { id: string; name: string; order: number[] }[] => [
+  { id: 'nx', name: tr('NXの標準（LC HH LP SD HT BD LT FT CY RD）', 'NX default (LC HH LP SD HT BD LT FT CY RD)'), order: DEFAULT_LANE_ORDER },
+  { id: 'ride', name: tr('ライドを右シンバルの左に（… FT RD CY）', 'Ride left of the right cymbal (… FT RD CY)'), order: [0, 1, 2, 3, 4, 5, 6, 7, 9, 8] },
+  { id: 'lp', name: tr('左ペダルをスネアの右に（LC HH SD LP …）', 'Left pedal right of the snare (LC HH SD LP …)'), order: [0, 1, 3, 2, 4, 5, 6, 7, 8, 9] },
+  { id: 'mirror', name: tr('左右反転', 'Mirrored'), order: [...DEFAULT_LANE_ORDER].reverse() },
 ];
 
 function LaneOrderSettings() {
@@ -319,8 +360,13 @@ function LaneOrderSettings() {
   };
   return (
     <div className="settings-col">
-      <h2>レーンの並び</h2>
-      <p className="lbl">譜面のレーンを左からどの順に並べるかです。NXのレーンの表示設定に合わせると、ゲームと同じ見た目で書けます。DTXの中身（チャンネル）は変わりません。</p>
+      <h2>{tr('レーンの並び', 'Lane order')}</h2>
+      <p className="lbl">
+        {tr(
+          '譜面のレーンを左からどの順に並べるかです。NXのレーンの表示設定に合わせると、ゲームと同じ見た目で書けます。DTXの中身（チャンネル）は変わりません。',
+          "The left-to-right order of the chart's lanes. Match NX's lane display setting to chart with the same look as the game. The DTX contents (channels) don't change.",
+        )}
+      </p>
       <div className="card">
         <div className="lane-order">
           {order.map((lane, slot) => {
@@ -330,7 +376,7 @@ function LaneOrderSettings() {
                 <button
                   className="lane-slot-name mono"
                   style={{ color: l.color }}
-                  title="クリックで選び、もう一つのレーンをクリックすると入れ替えます"
+                  title={tr('クリックで選び、もう一つのレーンをクリックすると入れ替えます', 'Click to select, then click another lane to swap them')}
                   onClick={() => {
                     if (pick === null) return setPick(slot);
                     if (pick !== slot) {
@@ -345,10 +391,10 @@ function LaneOrderSettings() {
                 </button>
                 <span className="lbl">{l.name}</span>
                 <div className="row" style={{ gap: 2 }}>
-                  <button className="ib tiny" onClick={() => move(slot, -1)} disabled={slot === 0} aria-label={`${l.name}を左へ`}>
+                  <button className="ib tiny" onClick={() => move(slot, -1)} disabled={slot === 0} aria-label={tr(`${l.name}を左へ`, `Move ${l.name} left`)}>
                     ‹
                   </button>
-                  <button className="ib tiny" onClick={() => move(slot, 1)} disabled={slot === 9} aria-label={`${l.name}を右へ`}>
+                  <button className="ib tiny" onClick={() => move(slot, 1)} disabled={slot === 9} aria-label={tr(`${l.name}を右へ`, `Move ${l.name} right`)}>
                     ›
                   </button>
                 </div>
@@ -356,22 +402,24 @@ function LaneOrderSettings() {
             );
           })}
         </div>
-        <p className="lbl" style={{ margin: '10px 0 0' }}>レーン名をクリックして、もう一つのレーン名をクリックすると入れ替わります。‹ › で一つずつ動かせます。</p>
+        <p className="lbl" style={{ margin: '10px 0 0' }}>
+          {tr('レーン名をクリックして、もう一つのレーン名をクリックすると入れ替わります。‹ › で一つずつ動かせます。', 'Click a lane name, then another, to swap them. ‹ › move a lane one step.')}
+        </p>
       </div>
       <div className="card">
-        <b style={{ fontSize: 13 }}>よく使う並び</b>
+        <b style={{ fontSize: 13 }}>{tr('よく使う並び', 'Common orders')}</b>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-          {LANE_PRESETS.map((p) => {
+          {lanePresets().map((p) => {
             const on = p.order.every((v, i) => order[i] === v);
             return (
-              <button key={p.name} className={`btn small ${on ? 'primary' : ''}`} style={{ justifyContent: 'flex-start' }} onClick={() => setLaneOrder(p.order)}>
+              <button key={p.id} className={`btn small ${on ? 'primary' : ''}`} style={{ justifyContent: 'flex-start' }} onClick={() => setLaneOrder(p.order)}>
                 {on ? '✓ ' : ''}
                 {p.name}
               </button>
             );
           })}
         </div>
-        <p className="lbl" style={{ margin: '10px 0 0' }}>NXの設定画面の並びと違うときは、上で並べ替えてください。</p>
+        <p className="lbl" style={{ margin: '10px 0 0' }}>{tr('NXの設定画面の並びと違うときは、上で並べ替えてください。', "If it doesn't match the order in NX's settings, rearrange it above.")}</p>
       </div>
     </div>
   );
@@ -389,16 +437,19 @@ function VelocitySettings() {
   };
   return (
     <div className="settings-col">
-      <h2>ベロシティ</h2>
+      <h2>{tr('ベロシティ', 'Velocity')}</h2>
       <p className="lbl" style={{ lineHeight: 1.7 }}>
-        DTXには音ごとのベロシティが無いので、ベロシティは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav のベロシティ100は #WAV07、ベロシティ35は #WAV0F）。保存した譜面はそのまま NX で遊べます。
+        {tr(
+          'DTXには音ごとのベロシティが無いので、ベロシティは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav のベロシティ100は #WAV07、ベロシティ35は #WAV0F）。保存した譜面はそのまま NX で遊べます。',
+          "DTX has no per-note velocity, so velocity is saved as WAVs that share a sound but differ in #VOLUME (e.g. snare.wav at velocity 100 is #WAV07, and at velocity 35 is #WAV0F). Saved charts play as is in NX.",
+        )}
       </p>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          置くベロシティ（操作バーの 強・中・弱、キー 1・2・3）
+          {tr('置くベロシティ（操作バーの 強・中・弱、キー 1・2・3）', 'Placing velocity (Hard, Mid and Soft in the toolbar, keys 1, 2, 3)')}
         </div>
         <div className="row" style={{ gap: 14 }}>
-          {['強', '中', '弱'].map((name, i) => (
+          {velPresetNames().map((name, i) => (
             <label key={name} className="row" style={{ gap: 6 }}>
               <span>{name}</span>
               <input className="field mono" style={{ width: 64 }} type="number" min={1} max={100} value={presets[i]} onChange={(e) => setPreset(i, e.target.value)} />
@@ -406,19 +457,19 @@ function VelocitySettings() {
           ))}
         </div>
         <p className="lbl" style={{ margin: '8px 0 0' }}>
-          Alt を押しながら置くと「弱」になります。初期値は 100・70・35 です。
+          {tr('Alt を押しながら置くと「弱」になります。初期値は 100・70・35 です。', 'Hold Alt while placing for "Soft". The defaults are 100, 70 and 35.')}
         </p>
       </div>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          ベロシティの刻み
+          {tr('ベロシティの刻み', 'Velocity steps')}
         </div>
         <div className="seg">
           {(
             [
-              [5, '5刻み（おすすめ）'],
-              [10, '10刻み'],
-              [1, 'まとめない'],
+              [5, tr('5刻み（おすすめ）', 'Steps of 5 (recommended)')],
+              [10, tr('10刻み', 'Steps of 10')],
+              [1, tr('まとめない', "Don't round")],
             ] as const
           ).map(([v, label]) => (
             <button key={v} className={step === v ? 'on' : ''} onClick={() => useInputSettings.setState({ velStep: v })}>
@@ -427,19 +478,19 @@ function VelocitySettings() {
           ))}
         </div>
         <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
-          ベロシティを刻みにまとめると、使う WAV 番号が少なくて済みます。WAV 番号は 01〜ZZ の 1295 個までです。
+          {tr('ベロシティを刻みにまとめると、使う WAV 番号が少なくて済みます。WAV 番号は 01〜ZZ の 1295 個までです。', 'Rounding velocity to steps uses fewer WAV numbers. There are 1295 WAV numbers, from 01 to ZZ.')}
         </p>
       </div>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          電子ドラムのベロシティの変換
+          {tr('電子ドラムのベロシティの変換', 'Electronic drum velocity curve')}
         </div>
         <div className="seg">
           {(
             [
-              ['soft', 'やわらかめ'],
-              ['normal', '標準'],
-              ['hard', 'かため'],
+              ['soft', tr('やわらかめ', 'Soft')],
+              ['normal', tr('標準', 'Normal')],
+              ['hard', tr('かため', 'Hard')],
             ] as const
           ).map(([v, label]) => (
             <button key={v} className={curve === v ? 'on' : ''} onClick={() => useInputSettings.setState({ velCurve: v })}>
@@ -448,7 +499,10 @@ function VelocitySettings() {
           ))}
         </div>
         <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
-          叩いたベロシティ（0〜127）を 1〜100 にするときのカーブです。やわらかめは弱く叩いても強めに入ります。電子ドラムの設定で「ベロシティを無視」をオンにすると、すべて 100 で入ります。
+          {tr(
+            '叩いたベロシティ（0〜127）を 1〜100 にするときのカーブです。やわらかめは弱く叩いても強めに入ります。電子ドラムの設定で「ベロシティを無視」をオンにすると、すべて 100 で入ります。',
+            'The curve that maps hit velocity (0–127) to 1–100. Soft enters fairly strong values even for light hits. Turn on "Ignore velocity" in the electronic drum settings to enter everything at 100.',
+          )}
         </p>
       </div>
     </div>
@@ -514,13 +568,16 @@ function LatencySettings() {
 
   return (
     <div className="settings-col">
-      <h2>入力の遅れの補正</h2>
+      <h2>{tr('入力の遅れの補正', 'Input latency')}</h2>
       <p className="lbl" style={{ lineHeight: 1.7 }}>
-        録音で置いた位置が、いつも少し後ろ（または前）にずれるときに合わせます。スピーカーまでの遅れはブラウザが分かる分を自動で引いているので、ここでは残りのずれを補正します。
+        {tr(
+          '録音で置いた位置が、いつも少し後ろ（または前）にずれるときに合わせます。スピーカーまでの遅れはブラウザが分かる分を自動で引いているので、ここでは残りのずれを補正します。',
+          'Use this when recorded hits always land a little late (or early). Output latency that the browser knows about is already subtracted automatically; this corrects whatever is left.',
+        )}
       </p>
       <div className="card row">
         <span className="lbl" style={{ width: 120 }}>
-          録音の補正
+          {tr('録音の補正', 'Recording offset')}
         </span>
         <button className="btn small" onClick={() => useInputSettings.setState({ latencyMs: latency - 1 })}>
           −1
@@ -530,35 +587,42 @@ function LatencySettings() {
           {latency} ms
         </span>
         <button className="btn small" onClick={() => useInputSettings.setState({ latencyMs: latency + 1 })}>
-          ＋1
+          +1
         </button>
         <span className="grow" />
         <button className="btn small" onClick={() => useInputSettings.setState({ latencyMs: 0 })}>
-          0 に戻す
+          {tr('0 に戻す', 'Reset to 0')}
         </button>
       </div>
       <div className="card">
         <div className="section-title" style={{ marginBottom: 8 }}>
-          測定
+          {tr('測定', 'Measure')}
         </div>
         <p className="lbl" style={{ margin: '0 0 8px', lineHeight: 1.7 }}>
-          クリックが16回鳴ります。最初の4回で拍をつかみ、残りに合わせて何かのキーか電子ドラムを叩いてください。
+          {tr(
+            'クリックが16回鳴ります。最初の4回で拍をつかみ、残りに合わせて何かのキーか電子ドラムを叩いてください。',
+            'A click plays 16 times. Get the beat during the first 4, then hit any key or drum pad along with the rest.',
+          )}
         </p>
         <div className="row">
           <button className="btn small primary" onClick={start} disabled={test.running}>
-            {test.running ? `測定中…（${test.taps.length} 回）` : '測定を始める'}
+            {test.running ? tr(`測定中…（${test.taps.length} 回）`, `Measuring… (${test.taps.length} ${pl(test.taps.length, 'hit')})`) : tr('測定を始める', 'Start measuring')}
           </button>
           {test.result !== null && (
             <>
               <span>
-                ずれ <b className="mono">{test.result > 0 ? '+' : ''}{test.result} ms</b>
+                {tr('ずれ', 'Offset')}{' '}
+                <b className="mono">
+                  {test.result > 0 ? '+' : ''}
+                  {test.result} ms
+                </b>
               </span>
               <button className="btn small" onClick={() => useInputSettings.setState({ latencyMs: test.result! })}>
-                この値にする
+                {tr('この値にする', 'Use this value')}
               </button>
             </>
           )}
-          {!test.running && test.result === null && test.taps.length > 0 && <span className="lbl">うまく測れませんでした。もう一度どうぞ。</span>}
+          {!test.running && test.result === null && test.taps.length > 0 && <span className="lbl">{tr('うまく測れませんでした。もう一度どうぞ。', "Couldn't measure it. Please try again.")}</span>}
         </div>
       </div>
     </div>

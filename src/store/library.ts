@@ -1,4 +1,5 @@
 // 音源ライブラリ：既存曲からの取り込み、楽器の自動判定、重複のまとめ、曲名キット、似た音、バックアップ。
+import { tr, pl, isJa } from '../i18n';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { create } from 'zustand';
 import { scanCharts } from './guideline';
@@ -62,7 +63,11 @@ export const useLibrary = create<LibraryState>(() => ({
 const lget = useLibrary.getState;
 const lset = useLibrary.setState;
 
+// 音色タグはサンプルに日本語のまま保存する（言語を切り替えても同じタグ）。表示だけ tagLabel で訳す i18n-ignore
 export const TAG_PRESETS = ['ロック', 'メタル', 'ジャズ', 'エレクトロ', '明るい', 'ドライ', '太い', 'ルーム', 'ゲート'];
+const TAG_EN: Record<string, string> = { ロック: 'Rock', メタル: 'Metal', ジャズ: 'Jazz', エレクトロ: 'Electro', 明るい: 'Bright', ドライ: 'Dry', 太い: 'Fat', ルーム: 'Room', ゲート: 'Gated' };
+/** 音色タグの表示（自分で付けたタグはそのまま） */
+export const tagLabel = (t: string): string => (isJa() ? t : (TAG_EN[t] ?? t));
 
 // ---- 読み込み -------------------------------------------------------------------
 
@@ -109,7 +114,7 @@ export async function requestPersist(): Promise<boolean> {
 function registerSample(s: SampleMeta) {
   registerVirtual({
     file: s.file,
-    origin: s.sources[0] ? `${s.sources[0].song}${s.sources[0].artist ? ` / ${s.sources[0].artist}` : ''}` : 'ライブラリ',
+    origin: s.sources[0] ? `${s.sources[0].song}${s.sources[0].artist ? ` / ${s.sources[0].artist}` : ''}` : tr('ライブラリ', 'Library'),
     sampleId: s.id,
     load: () => sampleBuffer(s.id),
     bytes: async () => {
@@ -182,7 +187,7 @@ export async function grantFolders() {
 export async function auditionSound(item: LibItem): Promise<AuditionSound | null> {
   const buf = item.builtin ? await loadBuiltin(item.builtin.kit, item.builtin.lane) : await sampleBuffer(item.id);
   if (buf) return { buf, volume: 90 };
-  toast(item.ref ? '参照モードの曲フォルダを読む許可が必要です（ライブラリの左下）' : '音を読めませんでした', 'warn');
+  toast(item.ref ? tr('参照モードの曲フォルダを読む許可が必要です（ライブラリの左下）', 'Permission to read the reference-mode song folder is needed (bottom left of the library)') : tr('音を読めませんでした', "Couldn't read the sound"), 'warn');
   return null;
 }
 
@@ -215,8 +220,8 @@ export function loadBuiltinItems(): Promise<void> {
           inst: instOfChannel(lane.ch) ?? 'other',
           instAuto: false,
           conf: 1,
-          reason: `標準キット（${kit.name}）の${lane.label}`,
-          sources: [{ song: `標準キット（${kit.name}）`, artist: '', file: '', folder: '' }],
+          reason: tr(`標準キット（${kit.name}）の${lane.label}`, `${lane.label} of the built-in kit (${kit.name})`),
+          sources: [{ song: tr(`標準キット（${kit.name}）`, `Built-in kit (${kit.name})`), artist: '', file: '', folder: '' }],
           tags: [],
           fav: false,
           dur: buf.duration,
@@ -250,7 +255,7 @@ export function filteredItems(s: LibraryState = lget()): LibItem[] {
     if (s.song && !it.sources.some((x) => x.song === s.song)) return false;
     if (s.tag && !it.tags.includes(s.tag)) return false;
     if (q) {
-      const hay = [it.name, it.file, ...it.tags, ...it.sources.map((x) => `${x.song} ${x.artist}`)].join(' ').toLowerCase();
+      const hay = [it.name, it.file, ...it.tags, ...it.tags.map((t) => TAG_EN[t] ?? ''), ...it.sources.map((x) => `${x.song} ${x.artist}`)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -290,7 +295,7 @@ async function updateSample(id: string, patch: Partial<SampleMeta>) {
   lset({ samples: lget().samples.map((x) => (x.id === id ? next : x)) });
 }
 
-export const setInst = (id: string, inst: Inst) => updateSample(id, { inst, instAuto: false, reason: '手で直した' });
+export const setInst = (id: string, inst: Inst) => updateSample(id, { inst, instAuto: false, reason: tr('手で直した', 'Set by hand') });
 export const toggleFav = (id: string) => updateSample(id, { fav: !lget().samples.find((x) => x.id === id)?.fav });
 export const setTags = (id: string, tags: string[]) => updateSample(id, { tags });
 
@@ -355,7 +360,7 @@ export async function pickAndImport(mode: 'copy' | 'ref', fallbackInput?: HTMLIn
   if (window.showDirectoryPicker) {
     try {
       const dir = await window.showDirectoryPicker({ id: 'dtx-library', mode: 'read' });
-      lset({ importing: { label: 'フォルダを読んでいます…', done: 0, total: 0 } });
+      lset({ importing: { label: tr('フォルダを読んでいます…', 'Reading the folder…'), done: 0, total: 0 } });
       const folder = await folderFromHandle(dir);
       let refId: string | undefined;
       if (mode === 'ref') {
@@ -367,11 +372,11 @@ export async function pickAndImport(mode: 'copy' | 'ref', fallbackInput?: HTMLIn
       await importFolder(folder, refId);
     } catch (e) {
       lset({ importing: null });
-      if (!(e instanceof DOMException && e.name === 'AbortError')) toast(`取り込めませんでした: ${(e as Error).message}`, 'error');
+      if (!(e instanceof DOMException && e.name === 'AbortError')) toast(tr(`取り込めませんでした: ${(e as Error).message}`, `Couldn't import: ${(e as Error).message}`), 'error');
     }
     return;
   }
-  if (mode === 'ref') toast('参照モードは Chrome・Edge で使えます。このブラウザでは音声ごと取り込みます', 'info', 6000);
+  if (mode === 'ref') toast(tr('参照モードは Chrome・Edge で使えます。このブラウザでは音声ごと取り込みます', 'Reference mode works in Chrome and Edge. In this browser the audio is copied'), 'info', 6000);
   fallbackInput?.click();
 }
 
@@ -384,7 +389,7 @@ export async function importFolder(folder: SongFolder, refFolderId?: string) {
   const groups = groupSongs(folder);
   if (groups.length === 0) {
     lset({ importing: null });
-    toast('DTXファイルが見つかりませんでした（曲フォルダか、その親フォルダを選んでください）', 'warn', 6000);
+    toast(tr('DTXファイルが見つかりませんでした（曲フォルダか、その親フォルダを選んでください）', 'No DTX files found (choose a song folder or its parent folder)'), 'warn', 6000);
     return;
   }
   const existing = new Map(lget().samples.map((s) => [s.id, s]));
@@ -394,7 +399,7 @@ export async function importFolder(folder: SongFolder, refFolderId?: string) {
   let added = 0;
   let merged = 0;
   let done = 0;
-  lset({ importing: { label: '曲を読んでいます…', done: 0, total: groups.length } });
+  lset({ importing: { label: tr('曲を読んでいます…', 'Reading songs…'), done: 0, total: groups.length } });
   for (const g of groups) {
     // 同じフォルダの難易度違いはまとめて1曲として数える
     let title = '';
@@ -496,7 +501,7 @@ export async function importFolder(folder: SongFolder, refFolderId?: string) {
       kits.push(kit);
     }
     songs.push(title);
-    lset({ importing: { label: `${title} を取り込みました`, done: ++done, total: groups.length } });
+    lset({ importing: { label: tr(`${title} を取り込みました`, `Imported ${title}`), done: ++done, total: groups.length } });
   }
   // 難易度ガイドラインの集計にも加える（音は使わず譜面だけ）
   void scanCharts(folder, { quiet: true }).catch(() => undefined);
@@ -527,7 +532,13 @@ export async function exportZip() {
   }
   const zip = zipSync(files, { level: 0 });
   downloadBytes(`dtx-library-${new Date().toISOString().slice(0, 10)}.zip`, zip, 'application/zip');
-  toast(`ライブラリを書き出しました（${s.samples.length} 音・音声 ${n} 個・キット ${s.kits.length}）`, 'ok');
+  toast(
+    tr(
+      `ライブラリを書き出しました（${s.samples.length} 音・音声 ${n} 個・キット ${s.kits.length}）`,
+      `Exported the library (${s.samples.length} ${pl(s.samples.length, 'sound')}, ${n} audio ${pl(n, 'file')}, ${s.kits.length} ${pl(s.kits.length, 'kit')})`,
+    ),
+    'ok',
+  );
 }
 
 export async function importZip(file: File) {
@@ -546,8 +557,8 @@ export async function importZip(file: File) {
     for (const k of j.kits ?? []) if (k?.id) await db.putKit(k);
     loading = null;
     await loadLibrary();
-    toast(`バックアップから ${added} 音を戻しました`, 'ok');
+    toast(tr(`バックアップから ${added} 音を戻しました`, `Restored ${added} ${pl(added, 'sound')} from the backup`), 'ok');
   } catch (e) {
-    toast(`バックアップを読めませんでした: ${(e as Error).message}`, 'error');
+    toast(tr(`バックアップを読めませんでした: ${(e as Error).message}`, `Couldn't read the backup: ${(e as Error).message}`), 'error');
   }
 }

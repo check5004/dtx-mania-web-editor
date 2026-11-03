@@ -1,16 +1,17 @@
 // ライブラリの音の解析：レーンでの使われ方から楽器を決める、一覧の波形、似た音を探す特徴量。
+import { tr, withTr } from '../i18n';
 import { fft } from '../audio/dsp';
 import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
 import type { Inst } from './db';
 
 export const INSTS: { id: Inst; label: string; color: string }[] = [
-  { id: 'kick', label: 'キック', color: '#9C84E0' },
-  { id: 'snare', label: 'スネア', color: '#FFD54F' },
-  { id: 'hihat', label: 'ハイハット', color: '#4FC3F7' },
-  { id: 'tom', label: 'タム', color: '#66BB6A' },
-  { id: 'crash', label: 'クラッシュ', color: '#FF5C8A' },
-  { id: 'ride', label: 'ライド', color: '#80DEEA' },
-  { id: 'other', label: 'その他', color: '#8B95A4' },
+  withTr({ id: 'kick', color: '#9C84E0' } as { id: Inst; label: string; color: string }, { label: ['キック', 'Kick'] }),
+  withTr({ id: 'snare', color: '#FFD54F' } as { id: Inst; label: string; color: string }, { label: ['スネア', 'Snare'] }),
+  withTr({ id: 'hihat', color: '#4FC3F7' } as { id: Inst; label: string; color: string }, { label: ['ハイハット', 'Hi-hat'] }),
+  withTr({ id: 'tom', color: '#66BB6A' } as { id: Inst; label: string; color: string }, { label: ['タム', 'Tom'] }),
+  withTr({ id: 'crash', color: '#FF5C8A' } as { id: Inst; label: string; color: string }, { label: ['クラッシュ', 'Crash'] }),
+  withTr({ id: 'ride', color: '#80DEEA' } as { id: Inst; label: string; color: string }, { label: ['ライド', 'Ride'] }),
+  withTr({ id: 'other', color: '#8B95A4' } as { id: Inst; label: string; color: string }, { label: ['その他', 'Other'] }),
 ];
 
 export const instInfo = (i: Inst) => INSTS.find((x) => x.id === i) ?? INSTS[INSTS.length - 1];
@@ -73,7 +74,7 @@ export function classifyUsage(usage: ReadonlyMap<number, number>, name: string):
     byLane.set(lane, (byLane.get(lane) ?? 0) + n);
   }
   const hint = instFromName(name);
-  if (total === 0) return hint ? { inst: hint, conf: 0.5, reason: 'ファイル名から' } : { inst: 'other', conf: 0, reason: '譜面で使われていない' };
+  if (total === 0) return hint ? { inst: hint, conf: 0.5, reason: tr('ファイル名から', 'From the file name') } : { inst: 'other', conf: 0, reason: tr('譜面で使われていない', 'Not used in the chart') };
   let best: Inst = 'other';
   let bn = 0;
   for (const [k, n] of byInst) if (n > bn) (best = k), (bn = n);
@@ -81,8 +82,9 @@ export function classifyUsage(usage: ReadonlyMap<number, number>, name: string):
   let ln = 0;
   for (const [k, n] of byLane) if (n > ln) (lane = k), (ln = n);
   const conf = bn / total;
-  if (conf < 0.6 && hint && hint !== best) return { inst: hint, conf: 0.55, reason: `ファイル名から（${lane}レーンで${Math.round((ln / total) * 100)}%使用）` };
-  return { inst: best, conf, reason: `${lane}レーンで${Math.round((ln / total) * 100)}%使用` };
+  const pct = Math.round((ln / total) * 100);
+  if (conf < 0.6 && hint && hint !== best) return { inst: hint, conf: 0.55, reason: tr(`ファイル名から（${lane}レーンで${pct}%使用）`, `From the file name (${pct}% of uses in the ${lane} lane)`) };
+  return { inst: best, conf, reason: tr(`${lane}レーンで${pct}%使用`, `${pct}% of uses in the ${lane} lane`) };
 }
 
 /** モノラルにする */

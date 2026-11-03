@@ -1,4 +1,6 @@
 // ステムとミックスの画面：トラックを縦に並べた DTM 風の再生、解析元の選択、書き出しと DTX への登録。
+import { tr, pl } from '../i18n';
+import { useLang } from '../i18n/useLang';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
 import { STEM_KINDS, stemKindInfo } from '../audio/stems';
@@ -85,24 +87,29 @@ export function StemsPage() {
     <div className="stems-page" onDragOver={(e) => (e.preventDefault(), e.stopPropagation(), setDrag(true))} onDragLeave={() => setDrag(false)} onDrop={drop}>
       <header className="tempo-head">
         <button className="btn small ghost" onClick={backToChart}>
-          {Icon.back(14)} エディタに戻る
+          {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
-        <h1>ステムとミックス</h1>
+        <h1>{tr('ステムとミックス', 'Stems & mix')}</h1>
         <span className="lbl ellipsis" style={{ minWidth: 0 }}>
-          {doc.fields['TITLE'] || '無題'} · ステム {stems.length}本{stems.length ? ` · ${formatTime(stemsDuration(), false)}` : ''}
+          {doc.fields['TITLE'] || tr('無題', 'Untitled')} · {tr(`ステム ${stems.length}本`, `${stems.length} ${pl(stems.length, 'stem')}`)}
+          {stems.length ? ` · ${formatTime(stemsDuration(), false)}` : ''}
           {sr ? ` · ${(sr / 1000).toFixed(1)} kHz` : ''}
           {busy ? ` · ${busy}` : ''}
         </span>
         <span className="grow" />
-        <span className="lbl hide-narrow">再生位置・ループはエディタと共通です</span>
+        <span className="lbl hide-narrow">{tr('再生位置・ループはエディタと共通です', 'Playback position and loop are shared with the editor')}</span>
         {!showSep && (
-          <button className="btn small" onClick={() => useSeparate.setState({ panelOpen: true })} title="原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分ける">
-            {Icon.layers(14)} 原曲から分解
+          <button
+            className="btn small"
+            onClick={() => useSeparate.setState({ panelOpen: true })}
+            title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分ける', 'Split the original into drums and no-drums (or per instrument) inside the browser')}
+          >
+            {Icon.layers(14)} {tr('原曲から分解', 'Split the original')}
           </button>
         )}
         <button className="btn small" onClick={() => fileInput.current?.click()}>
-          {Icon.plus(14)} ステムを追加
+          {Icon.plus(14)} {tr('ステムを追加', 'Add stems')}
         </button>
         <input
           ref={fileInput}
@@ -124,9 +131,9 @@ export function StemsPage() {
           <div className="stems-grid">
             <div className="stems-list">
               <div className="stems-list-head" style={{ height: RULER_H }}>
-                <b>トラック</b>
+                <b>{tr('トラック', 'Tracks')}</b>
                 <span className="grow" />
-                <span className="lbl">M ミュート · S ソロ · ◉ 解析に使う</span>
+                <span className="lbl">{tr('M ミュート · S ソロ · ◉ 解析に使う', 'M mute · S solo · ◉ use for analysis')}</span>
               </div>
               {stems.map((t) => (
                 <TrackHead key={t.file} t={t} />
@@ -144,10 +151,12 @@ export function StemsPage() {
           >
             <span className="ic">{Icon.wave(22)}</span>
             <span>
-              <b>ここにファイルをまとめてドロップしてステムを追加</b>
+              <b>{tr('ここにファイルをまとめてドロップしてステムを追加', 'Drop files here to add stems')}</b>
               <span className="lbl" style={{ display: 'block', marginTop: 4 }}>
-                ステム分離ソフトで作ったファイルを読み込みます（上の「原曲から分解」ならブラウザの中で作れます）。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/
-                にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。
+                {tr(
+                  'ステム分離ソフトで作ったファイルを読み込みます（上の「原曲から分解」ならブラウザの中で作れます）。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/ にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。',
+                  'Loads files made with stem separation software ("Split the original" above can make them inside the browser). The type and name are set automatically from words in the file name such as drums, Dr, (No Drums), bass, vocals or strings (change them with ✎ on each track), and differences in length and sample rate are checked. Files are copied to stems/ in the song folder and recorded in the work file (.dtxe.json). NX doesn\'t read this folder, so it won\'t get in the way when you play. Load the unsplit original from "Original" in the right panel of the chart screen (with stems only, the waveform is made from the drums or the first track).',
+                )}
               </span>
             </span>
           </div>
@@ -178,22 +187,26 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
       : null;
   return (
     <div className="transport">
-      <button className="ib" title="曲の頭へ。▶ を曲の頭に置きます" onClick={goToStart}>
+      <button className="ib" title={tr('曲の頭へ。▶ を曲の頭に置きます', 'To the start. Puts ▶ at the start of the song')} onClick={goToStart}>
         {Icon.toStart()}
       </button>
       <button
         className="play-btn"
         onClick={togglePlay}
-        title={playing ? '停止（Space）。次はまた ▶ から再生します（表示は止めた所のまま）' : '▶ の位置から再生（Space）。止めると再生位置は ▶ に戻ります'}
-        aria-label={playing ? '停止' : '再生'}
+        title={
+          playing
+            ? tr('停止（Space）。次はまた ▶ から再生します（表示は止めた所のまま）', 'Stop (Space). Playback starts from ▶ again next time (the view stays where you stopped)')
+            : tr('▶ の位置から再生（Space）。止めると再生位置は ▶ に戻ります', 'Play from ▶ (Space). Stopping returns the playback position to ▶')
+        }
+        aria-label={playing ? tr('停止', 'Stop') : tr('再生', 'Play')}
       >
         {playing ? Icon.stop(18) : Icon.play(18)}
       </button>
       <button
         className="ib"
         onClick={togglePause}
-        title="ここで止める（Shift+Space）。止めた所に ▶ を移すので、次はそこから続けて再生します"
-        aria-label="ここで止める"
+        title={tr('ここで止める（Shift+Space）。止めた所に ▶ を移すので、次はそこから続けて再生します', 'Stop here (Shift+Space). Moves ▶ to where you stopped, so playback continues from there next time')}
+        aria-label={tr('ここで止める', 'Stop here')}
         disabled={!playing}
       >
         {Icon.pause()}
@@ -207,16 +220,22 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
         onClick={toggleLoop}
         title={
           loop
-            ? 'ループのオン・オフ（範囲は譜面画面の左端・下の波形・全体図の「A・B」の帯をドラッグして決めます）'
+            ? tr(
+                'ループのオン・オフ（範囲は譜面画面の左端・下の波形・全体図の「A・B」の帯をドラッグして決めます）',
+                'Loop on/off (set the range by dragging the A–B strip at the left edge of the chart screen, the waveform below, or the overview)',
+              )
             : loopMark
-              ? `${loopMark.side === 'a' ? 'A（始まり）' : 'B（終わり）'}だけ決めています。譜面画面で${loopMark.side === 'a' ? ' B（O）' : ' A（I）'}も決めるとループします`
-              : 'ループ再生（範囲が無ければ今の小節）'
+              ? tr(
+                  `${loopMark.side === 'a' ? 'A（始まり）' : 'B（終わり）'}だけ決めています。譜面画面で${loopMark.side === 'a' ? ' B（O）' : ' A（I）'}も決めるとループします`,
+                  `Only ${loopMark.side === 'a' ? 'A (start)' : 'B (end)'} is set. Set ${loopMark.side === 'a' ? 'B (O)' : 'A (I)'} on the chart screen too to loop`,
+                )
+              : tr('ループ再生（範囲が無ければ今の小節）', 'Loop playback (the current measure if no range is set)')
         }
       >
-        {Icon.loop(14)} ループ {loopLabel && <span className="mono">{loopLabel}</span>}
+        {Icon.loop(14)} {tr('ループ', 'Loop')} {loopLabel && <span className="mono">{loopLabel}</span>}
       </button>
       <div className="vsep" />
-      <span className="lbl">聞こえ方</span>
+      <span className="lbl">{tr('聞こえ方', 'Listen')}</span>
       <div className="seg">
         {LISTEN_PRESETS.map((p) => (
           <button key={p.id} className={listen === p.id ? 'on' : ''} disabled={p.id === 'drums' && !hasDrums} onClick={() => setListen(p.id)} title={stems.length ? p.hint : p.hintNoStems}>
@@ -225,13 +244,13 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
         ))}
       </div>
       <span className="grow" />
-      <span className="lbl">ズーム</span>
+      <span className="lbl">{tr('ズーム', 'Zoom')}</span>
       <div className="seg small">
         {(
           [
-            ['all', '曲全体'],
-            [16, '16小節'],
-            [4, '4小節'],
+            ['all', tr('曲全体', 'Whole song')],
+            [16, tr('16小節', '16 bars')],
+            [4, tr('4小節', '4 bars')],
           ] as const
         ).map(([z, label]) => (
           <button key={z} className={zoom === z ? 'on' : ''} onClick={() => setZoom(z)}>
@@ -272,14 +291,19 @@ function TrackHead({ t }: { t: StemTrack }) {
     >
       <div className="row" style={{ gap: 6 }}>
         <span className="trk-title">
-          <b className="ellipsis" style={{ fontSize: 13.5 }} onDoubleClick={openPop} title={`${t.name}（ダブルクリックで名前と種類を変える）`}>
+          <b className="ellipsis" style={{ fontSize: 13.5 }} onDoubleClick={openPop} title={tr(`${t.name}（ダブルクリックで名前と種類を変える）`, `${t.name} (double-click to change the name and type)`)}>
             {t.name}
           </b>
-          <button className={`ib trk-edit ${pop ? 'open' : ''}`} onClick={openPop} title="名前と種類を変える（名前のダブルクリック・右クリックでも）" aria-label={`${t.name}の名前と種類を変える`}>
+          <button
+            className={`ib trk-edit ${pop ? 'open' : ''}`}
+            onClick={openPop}
+            title={tr('名前と種類を変える（名前のダブルクリック・右クリックでも）', 'Change the name and type (or double-click or right-click the name)')}
+            aria-label={tr(`${t.name}の名前と種類を変える`, `Change the name and type of ${t.name}`)}
+          >
             {Icon.pencil(12)}
           </button>
         </span>
-        <button className="ib tiny" onClick={() => setOpen(!open)} title="種類・頭のずれ・削除" aria-expanded={open}>
+        <button className="ib tiny" onClick={() => setOpen(!open)} title={tr('種類・頭のずれ・削除', 'Type, start offset, remove')} aria-expanded={open}>
           {Icon.gear(13)}
         </button>
         <span className="grow" />
@@ -288,30 +312,30 @@ function TrackHead({ t }: { t: StemTrack }) {
           onClick={() => chooseAnalysisStem(analysis === t.file && !eff?.auto ? null : t.file)}
           title={
             analysis === t.file && eff?.auto
-              ? '原曲のファイルが無いので、このトラックから波形・原曲の打点を作っています（クリックで固定）'
-              : '波形・原曲の打点・BPM推定をこのトラックから作る'
+              ? tr('原曲のファイルが無いので、このトラックから波形・原曲の打点を作っています（クリックで固定）', 'There is no original file, so the waveform and hits are made from this track (click to pin it)')
+              : tr('波形・原曲の打点・BPM推定をこのトラックから作る', 'Make the waveform, hits and BPM estimate from this track')
           }
-          aria-label={`${t.name}を解析に使う`}
+          aria-label={tr(`${t.name}を解析に使う`, `Use ${t.name} for analysis`)}
           aria-pressed={analysis === t.file}
         />
-        <button className={`ms m ${t.mute ? 'on' : ''}`} onClick={() => updateStem(t.file, { mute: !t.mute })} aria-label={`${t.name}をミュート`}>
+        <button className={`ms m ${t.mute ? 'on' : ''}`} onClick={() => updateStem(t.file, { mute: !t.mute })} aria-label={tr(`${t.name}をミュート`, `Mute ${t.name}`)}>
           M
         </button>
-        <button className={`ms s ${t.solo ? 'on' : ''}`} onClick={(e) => (e.altKey ? soloOnly(t.file) : updateStem(t.file, { solo: !t.solo }))} aria-label={`${t.name}をソロ`} title="ソロ（Alt+クリックでこのトラックだけ）">
+        <button className={`ms s ${t.solo ? 'on' : ''}`} onClick={(e) => (e.altKey ? soloOnly(t.file) : updateStem(t.file, { solo: !t.solo }))} aria-label={tr(`${t.name}をソロ`, `Solo ${t.name}`)} title={tr('ソロ（Alt+クリックでこのトラックだけ）', 'Solo (Alt+click for this track only)')}>
           S
         </button>
       </div>
       {open ? (
         <div className="track-edit">
-          <select className="field" value={t.kind} onChange={(e) => setStemKind(t.file, e.target.value as StemTrack['kind'])} aria-label={`${t.name}の種類`}>
+          <select className="field" value={t.kind} onChange={(e) => setStemKind(t.file, e.target.value as StemTrack['kind'])} aria-label={tr(`${t.name}の種類`, `Type of ${t.name}`)}>
             {STEM_KINDS.map((k) => (
               <option key={k.kind} value={k.kind}>
                 {k.label}
               </option>
             ))}
           </select>
-          <label className="row lbl" style={{ gap: 4 }} title="頭のずれ（ミリ秒）。正なら遅らせます">
-            ずれ
+          <label className="row lbl" style={{ gap: 4 }} title={tr('頭のずれ（ミリ秒）。正なら遅らせます', 'Start offset (milliseconds). Positive delays it')}>
+            {tr('ずれ', 'Offset')}
             <input
               className="field mono"
               type="number"
@@ -325,9 +349,17 @@ function TrackHead({ t }: { t: StemTrack }) {
           </label>
           <button
             className="ib tiny"
-            title="このステムを外す（ファイルは消しません）"
+            title={tr('このステムを外す（ファイルは消しません）', "Remove this stem (the file isn't deleted)")}
             onClick={async () => {
-              if (await confirmDialog({ title: `${t.name}を外しますか？`, body: '曲フォルダの stems/ のファイルは消さずに残します。', ok: '外す', danger: true })) removeStem(t.file);
+              if (
+                await confirmDialog({
+                  title: tr(`${t.name}を外しますか？`, `Remove ${t.name}?`),
+                  body: tr('曲フォルダの stems/ のファイルは消さずに残します。', 'The file in stems/ in the song folder is kept.'),
+                  ok: tr('外す', 'Remove'),
+                  danger: true,
+                })
+              )
+                removeStem(t.file);
             }}
           >
             {Icon.trash(13)}
@@ -336,20 +368,35 @@ function TrackHead({ t }: { t: StemTrack }) {
       ) : (
         <div className="track-file mono ellipsis" title={t.file}>
           {t.file.replace(/^stems\//, '')}
-          {status === 'missing' && <span style={{ color: 'var(--danger)' }}> · 見つかりません</span>}
-          {status === 'error' && <span style={{ color: 'var(--danger)' }}> · 読めません</span>}
-          {status === 'loading' && <span> · 読み込み中…</span>}
-          {t.offsetMs !== 0 && <span> · ずれ {t.offsetMs} ms</span>}
+          {status === 'missing' && <span style={{ color: 'var(--danger)' }}> · {tr('見つかりません', 'not found')}</span>}
+          {status === 'error' && <span style={{ color: 'var(--danger)' }}> · {tr('読めません', "can't read")}</span>}
+          {status === 'loading' && <span> · {tr('読み込み中…', 'loading…')}</span>}
+          {t.offsetMs !== 0 && (
+            <span>
+              {' '}
+              · {tr('ずれ', 'offset')} {t.offsetMs} ms
+            </span>
+          )}
         </div>
       )}
       <div className="row track-knobs">
-        <input type="range" min={0} max={1.5} step={0.01} value={t.gain} style={{ accentColor: info.color }} onChange={(e) => updateStem(t.file, { gain: Number(e.target.value) })} aria-label={`${t.name}の音量`} />
+        <input type="range" min={0} max={1.5} step={0.01} value={t.gain} style={{ accentColor: info.color }} onChange={(e) => updateStem(t.file, { gain: Number(e.target.value) })} aria-label={tr(`${t.name}の音量`, `Volume of ${t.name}`)} />
         <span className="mono lbl" style={{ width: 52 }}>
           {db(t.gain)}
         </span>
-        <span className="lbl">パン</span>
-        <input type="range" min={-1} max={1} step={0.05} value={t.pan} className="pan" onChange={(e) => updateStem(t.file, { pan: Number(e.target.value) })} onDoubleClick={() => updateStem(t.file, { pan: 0 })} aria-label={`${t.name}のパン`} />
-        <span className="mono lbl" style={{ width: 22 }} title={comparePan ? '聴き比べ中は左に振ります' : undefined}>
+        <span className="lbl">{tr('パン', 'Pan')}</span>
+        <input
+          type="range"
+          min={-1}
+          max={1}
+          step={0.05}
+          value={t.pan}
+          className="pan"
+          onChange={(e) => updateStem(t.file, { pan: Number(e.target.value) })}
+          onDoubleClick={() => updateStem(t.file, { pan: 0 })}
+          aria-label={tr(`${t.name}のパン`, `Pan of ${t.name}`)}
+        />
+        <span className="mono lbl" style={{ width: 22 }} title={comparePan ? tr('聴き比べ中は左に振ります', 'Panned left while comparing') : undefined}>
           {comparePan ? 'L10' : panLabel(t.pan)}
         </span>
       </div>
@@ -369,36 +416,47 @@ function ChartHead() {
   return (
     <div className="track-head" style={{ height: ROW_H, borderLeftColor: 'var(--accent)' }}>
       <div className="row" style={{ gap: 6 }}>
-        <b style={{ fontSize: 13.5, whiteSpace: 'nowrap' }}>譜面の音</b>
-        <span className="pill" style={{ height: 18, fontSize: 10 }} title="エディタで置いたチップの音。参考に鳴らすだけで、書き出しには含めません">
-          参考・書き出さない
+        <b style={{ fontSize: 13.5, whiteSpace: 'nowrap' }}>{tr('譜面の音', 'Chart sounds')}</b>
+        <span className="pill" style={{ height: 18, fontSize: 10 }} title={tr('エディタで置いたチップの音。参考に鳴らすだけで、書き出しには含めません', "Sounds of the chips placed in the editor. They play for reference only and aren't exported")}>
+          {tr('参考・書き出さない', 'Reference · not exported')}
         </span>
         <span className="grow" />
         <button
           className={`ms m ${mix.drumMute ? 'on' : ''}`}
           onClick={() => setChartTrack({ mute: !mix.drumMute })}
-          aria-label="譜面の音をミュート"
+          aria-label={tr('譜面の音をミュート', 'Mute chart sounds')}
         >
           M
         </button>
         <button
           className={`ms s ${soloChart ? 'on' : ''}`}
           onClick={(e) => (e.altKey ? soloOnly('chart') : setChartTrack({ solo: !soloChart }))}
-          aria-label="譜面の音をソロ"
+          aria-label={tr('譜面の音をソロ', 'Solo chart sounds')}
         >
           S
         </button>
       </div>
       <div className="track-file mono ellipsis">
-        {meta.fileName} · {toMeasure(tempo.locate(Math.max(0, beat)).m)} / {toMeasure(lastM)} 小節まで
+        {meta.fileName} · {toMeasure(tempo.locate(Math.max(0, beat)).m)} / {toMeasure(lastM)}
+        {tr(' 小節まで', ' measures')}
       </div>
       <div className="row track-knobs">
-        <input type="range" min={0} max={1} step={0.01} value={mix.drums} onChange={(e) => setMix({ drums: Number(e.target.value) })} aria-label="譜面の音の音量" />
+        <input type="range" min={0} max={1} step={0.01} value={mix.drums} onChange={(e) => setMix({ drums: Number(e.target.value) })} aria-label={tr('譜面の音の音量', 'Chart sound volume')} />
         <span className="mono lbl" style={{ width: 52 }}>
           {db(mix.drums)}
         </span>
-        <span className="lbl">パン</span>
-        <input type="range" min={-1} max={1} step={0.05} value={mix.drumPan} className="pan" onChange={(e) => setMix({ drumPan: Number(e.target.value) })} onDoubleClick={() => setMix({ drumPan: 0 })} aria-label="譜面の音のパン" />
+        <span className="lbl">{tr('パン', 'Pan')}</span>
+        <input
+          type="range"
+          min={-1}
+          max={1}
+          step={0.05}
+          value={mix.drumPan}
+          className="pan"
+          onChange={(e) => setMix({ drumPan: Number(e.target.value) })}
+          onDoubleClick={() => setMix({ drumPan: 0 })}
+          aria-label={tr('譜面の音のパン', 'Chart sound pan')}
+        />
         <span className="mono lbl" style={{ width: 22 }}>
           {panLabel(mix.drumPan)}
         </span>
@@ -424,6 +482,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
   const anchor = bgmSource(doc)?.sec ?? 0;
   const mix = useEditor((s) => s.mix);
   const audible = stems.map((t) => (stemAudible(t) ? 1 : 0)).join('');
+  const lang = useLang();
   const dragging = useRef(false);
 
   // 見せる範囲（秒）。ズーム中は再生位置の入っている数小節（ページ送り）。
@@ -451,7 +510,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
     (ctx, W) => {
       const dpr = window.devicePixelRatio || 1;
       const X = (sec: number) => ((sec - win.from) / (win.to - win.from)) * W;
-      const key = [doc, W, H, win.from, win.to, version, stems, sections, colors, analysis, dpr, audible];
+      const key = [doc, W, H, win.from, win.to, version, stems, sections, colors, analysis, dpr, audible, lang];
       if (!cache.current || cache.current.key.some((v, i) => v !== key[i])) {
         const off = cache.current?.canvas ?? document.createElement('canvas');
         off.width = Math.floor(W * dpr);
@@ -528,10 +587,15 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
             }
             c.globalAlpha = 1;
           }
-          const note = analysis === t.file ? '解析元: 波形・原曲の打点・BPM推定に使います' : (() => {
-            const inf = stemInfo(t.file);
-            return inf && inf.shortBy > 0.01 ? `他より ${inf.shortBy.toFixed(2)} 秒短い → 末尾を無音で埋めてそろえます` : '';
-          })();
+          const note =
+            analysis === t.file
+              ? tr('解析元: 波形・原曲の打点・BPM推定に使います', 'Analysis source: used for the waveform, hits and BPM estimate')
+              : (() => {
+                  const inf = stemInfo(t.file);
+                  return inf && inf.shortBy > 0.01
+                    ? tr(`他より ${inf.shortBy.toFixed(2)} 秒短い → 末尾を無音で埋めてそろえます`, `${inf.shortBy.toFixed(2)} s shorter than the others → the end is padded with silence`)
+                    : '';
+                })();
           if (note) {
             c.font = '11px system-ui, sans-serif';
             c.fillStyle = analysis === t.file ? '#CBB8FF' : '#FFC768';
@@ -544,7 +608,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
         c.fillRect(0, top, W, ROW_H);
         c.font = '11px system-ui, sans-serif';
         c.fillStyle = '#8B95A4';
-        c.fillText('譜面の密度（エディタで置いたチップ）', 10, top + 13);
+        c.fillText(tr('譜面の密度（エディタで置いたチップ）', 'Chart density (chips placed in the editor)'), 10, top + 13);
         const bins = Math.max(1, Math.floor(W / 4));
         const counts = new Array(bins).fill(0);
         for (const ch of doc.chips) {
@@ -598,7 +662,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
       ctx.fillStyle = playing ? '#FFB547' : '#4CC2FF';
       ctx.fillRect(Math.round(x) - 1, RULER_H - 18, 2, H);
     },
-    [doc, stems, sections, colors, analysis, version, loop, loopMark, playing, beat, win, H, audible, mix],
+    [doc, stems, sections, colors, analysis, version, loop, loopMark, playing, beat, win, H, audible, mix, lang],
   );
 
   const seek = (clientX: number, commit: boolean) => {
@@ -626,7 +690,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
           dragging.current = false;
           seek(e.clientX, true);
         }}
-        aria-label="ステムの波形（クリックで再生位置を動かす）"
+        aria-label={tr('ステムの波形（クリックで再生位置を動かす）', 'Stem waveforms (click to move the playback position)')}
       />
     </div>
   );
@@ -634,11 +698,16 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
 
 // ---- 書き出し -------------------------------------------------------------------
 
-const MODES: { id: ExportMode; title: string; body: string; badge?: string }[] = [
-  { id: 'bgm', title: 'BGM用（ドラム抜き）', badge: 'おすすめ', body: 'ドラム以外を1本にまとめます。NXでは譜面のドラム音が鳴るので、BGMはドラム抜きが基本です。' },
-  { id: 'all', title: '全部を1本に', body: '原曲と同じ音になります。試聴用（#PREVIEW）や確認に。' },
-  { id: 'selected', title: '選んだステムを1本に', body: '下で選んだステムだけをまとめます。' },
-  { id: 'each', title: '選んだステムを1本ずつ', body: 'ステムごとに別のファイルにします。DTXには登録しません。' },
+const modes = (): { id: ExportMode; title: string; body: string; badge?: string }[] => [
+  {
+    id: 'bgm',
+    title: tr('BGM用（ドラム抜き）', 'For BGM (no drums)'),
+    badge: tr('おすすめ', 'Recommended'),
+    body: tr('ドラム以外を1本にまとめます。NXでは譜面のドラム音が鳴るので、BGMはドラム抜きが基本です。', 'Mixes everything except the drums into one file. NX plays the chart\'s drum sounds, so BGM usually has no drums.'),
+  },
+  { id: 'all', title: tr('全部を1本に', 'Everything in one file'), body: tr('原曲と同じ音になります。試聴用（#PREVIEW）や確認に。', 'Sounds the same as the original. For the preview (#PREVIEW) or checking.') },
+  { id: 'selected', title: tr('選んだステムを1本に', 'Selected stems in one file'), body: tr('下で選んだステムだけをまとめます。', 'Mixes only the stems you select below.') },
+  { id: 'each', title: tr('選んだステムを1本ずつ', 'Each selected stem separately'), body: tr('ステムごとに別のファイルにします。DTXには登録しません。', "Writes a separate file for each stem. They aren't added to the DTX.") },
 ];
 
 function defaultInclude(mode: ExportMode, stems: StemTrack[]): string[] {
@@ -682,22 +751,29 @@ function ExportPanel() {
   const files = mode === 'each' ? included.length : 1;
   const register: ExportOptions['register'] = mode === 'bgm' ? 'bgm' : mode === 'all' ? (previewReg ? 'preview' : 'none') : mode === 'selected' ? selReg : 'none';
   const bgm = bgmSource(doc);
-  const bgmAt = bgm ? `${toMeasure(tempoOf(doc).locate(bgm.beat).m)}小節 +${(bgm.sec - tempoOf(doc).beatToSec(tempoOf(doc).measureStart(tempoOf(doc).locate(bgm.beat).m))).toFixed(3)} 秒` : '001小節';
-  const outName = mode === 'each' ? `${name.replace(/\{名前\}/g, '…')}.${format}` : name;
+  const bgmM = bgm ? tempoOf(doc).locate(bgm.beat).m : 1;
+  const bgmOff = bgm ? (bgm.sec - tempoOf(doc).beatToSec(tempoOf(doc).measureStart(bgmM))).toFixed(3) : '';
+  const bgmAt = bgm ? tr(`${toMeasure(bgmM)}小節 +${bgmOff} 秒`, `measure ${toMeasure(bgmM)} +${bgmOff} s`) : tr('001小節', 'measure 001');
+  const outName = mode === 'each' ? `${name.replace(/\{(名前|name)\}/g, '…')}.${format}` : name;
   const canRun = !busy && included.length > 0 && !!r && dur > 0.1 && name.trim() !== '';
   const summary =
     mode === 'bgm'
-      ? `ドラム以外の ${included.length}本 → ${outName}`
+      ? tr(`ドラム以外の ${included.length}本 → ${outName}`, `${included.length} non-drum ${pl(included.length, 'stem')} → ${outName}`)
       : mode === 'all'
-        ? `全部の ${included.length}本 → ${outName}`
+        ? tr(`全部の ${included.length}本 → ${outName}`, `All ${included.length} ${pl(included.length, 'stem')} → ${outName}`)
         : mode === 'selected'
-          ? `選んだ ${included.length}本 → ${outName}`
-          : `${included.length}本を別々のファイルに（${outName}）`;
+          ? tr(`選んだ ${included.length}本 → ${outName}`, `${included.length} selected ${pl(included.length, 'stem')} → ${outName}`)
+          : tr(`${included.length}本を別々のファイルに（${outName}）`, `${included.length} ${pl(included.length, 'stem')} as separate files (${outName})`);
   const run = async () => {
-    const targets = mode === 'each' ? included.map((t) => `${name.replace(/\{名前\}/g, t.name)}.${format}`) : [name];
+    const targets = mode === 'each' ? included.map((t) => `${name.replace(/\{(名前|name)\}/g, t.name)}.${format}`) : [name];
     const exists = targets.filter(fileExists);
     if (exists.length) {
-      const ok = await confirmDialog({ title: `${exists.join('、')} を上書きしますか？`, body: '曲フォルダに同じ名前のファイルがあります。', ok: '上書き', danger: true });
+      const ok = await confirmDialog({
+        title: tr(`${exists.join('、')} を上書きしますか？`, `Overwrite ${exists.join(', ')}?`),
+        body: tr('曲フォルダに同じ名前のファイルがあります。', 'A file with the same name is already in the song folder.'),
+        ok: tr('上書き', 'Overwrite'),
+        danger: true,
+      });
       if (!ok) return;
     }
     await exportStems({ mode, include, useTrackSettings: useTrack, normalize, range: mode === 'bgm' ? 'song' : range, format, fileName: name, register });
@@ -706,9 +782,9 @@ function ExportPanel() {
   if (stems.length === 0) {
     return (
       <aside className="stems-export scroll">
-        <div className="section-title">書き出し</div>
+        <div className="section-title">{tr('書き出し', 'Export')}</div>
         <p className="lbl" style={{ lineHeight: 1.7 }}>
-          ステムを読み込むと、BGM用（ドラム抜き）などを書き出してDTXに登録できます。
+          {tr('ステムを読み込むと、BGM用（ドラム抜き）などを書き出してDTXに登録できます。', 'Once stems are loaded, you can export files such as a no-drums BGM and add them to the DTX.')}
         </p>
       </aside>
     );
@@ -718,12 +794,12 @@ function ExportPanel() {
     <aside className="stems-export">
       <div className="scroll stems-export-body">
         <div className="row" style={{ marginBottom: 10 }}>
-          <b style={{ fontSize: 15 }}>書き出し</b>
+          <b style={{ fontSize: 15 }}>{tr('書き出し', 'Export')}</b>
           <span className="grow" />
-          <span className="lbl">曲フォルダに保存</span>
+          <span className="lbl">{tr('曲フォルダに保存', 'Saved to the song folder')}</span>
         </div>
         <div className="mode-cards">
-          {MODES.map((m) => (
+          {modes().map((m) => (
             <button key={m.id} className={`mode-card ${mode === m.id ? 'on' : ''}`} onClick={() => setMode(m.id)} aria-pressed={mode === m.id}>
               <span className={`radio-dot ${mode === m.id ? 'on' : ''}`} />
               <span>
@@ -737,10 +813,11 @@ function ExportPanel() {
 
         <div className="card export-card">
           <div className="row" style={{ marginBottom: 8 }}>
-            <b style={{ fontSize: 12.5 }}>含めるステム</b>
+            <b style={{ fontSize: 12.5 }}>{tr('含めるステム', 'Stems to include')}</b>
             <span className="grow" />
             <span className="mono lbl">
-              {included.length} / {stems.length}本
+              {included.length} / {stems.length}
+              {tr('本', '')}
             </span>
           </div>
           <div className="inc-grid">
@@ -759,23 +836,23 @@ function ExportPanel() {
           </div>
           <label className="row lbl" style={{ marginTop: 8 }}>
             <input type="checkbox" checked={useTrack} onChange={(e) => setUseTrack(e.target.checked)} />
-            トラックの音量とパンをそのまま使う
+            {tr('トラックの音量とパンをそのまま使う', "Use each track's volume and pan")}
           </label>
           <label className="row lbl" style={{ marginTop: 4 }}>
             <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
-            音割れしないよう全体を下げる（ピーク −1 dB）
+            {tr('音割れしないよう全体を下げる（ピーク −1 dB）', 'Lower the overall level to avoid clipping (peak −1 dB)')}
           </label>
         </div>
 
         <div className="card export-card">
           <div className="kv">
-            <span className="lbl">範囲</span>
+            <span className="lbl">{tr('範囲', 'Range')}</span>
             <div className="seg full small">
               {(
                 [
-                  ['song', '曲全体'],
-                  ['loop', 'ループ範囲'],
-                  ['selection', '選択範囲'],
+                  ['song', tr('曲全体', 'Whole song')],
+                  ['loop', tr('ループ範囲', 'Loop range')],
+                  ['selection', tr('選択範囲', 'Selection')],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -790,12 +867,12 @@ function ExportPanel() {
             </div>
           </div>
           {mode === 'bgm' ? (
-            <p className="lbl note">BGMは曲全体を書き出します（譜面と同じ所から鳴らすため）。</p>
+            <p className="lbl note">{tr('BGMは曲全体を書き出します（譜面と同じ所から鳴らすため）。', 'BGM is exported for the whole song (so it plays from the same point as the chart).')}</p>
           ) : range !== 'song' ? (
-            <p className="lbl note">前後を1秒ずつフェードします。</p>
+            <p className="lbl note">{tr('前後を1秒ずつフェードします。', 'Fades 1 second at each end.')}</p>
           ) : null}
           <div className="kv">
-            <span className="lbl">形式</span>
+            <span className="lbl">{tr('形式', 'Format')}</span>
             <div className="seg full small">
               <button className={format === 'ogg' ? 'on' : ''} onClick={() => setFormat('ogg')}>
                 OGG
@@ -806,39 +883,44 @@ function ExportPanel() {
             </div>
           </div>
           <p className="lbl note">
-            {format === 'ogg' ? 'OGG Vorbis 品質6（約192 kbps）· 44.1 kHz。NXで読めて容量が小さい形式です。' : 'WAV 16bit · 44.1 kHz。音質は落ちませんが容量が大きくなります。'}
+            {format === 'ogg'
+              ? tr('OGG Vorbis 品質6（約192 kbps）· 44.1 kHz。NXで読めて容量が小さい形式です。', 'OGG Vorbis quality 6 (about 192 kbps) · 44.1 kHz. NX can read it, and files are small.')
+              : tr('WAV 16bit · 44.1 kHz。音質は落ちませんが容量が大きくなります。', "WAV 16-bit · 44.1 kHz. No quality loss, but files are large.")}
           </p>
           <div className="kv">
-            <span className="lbl">ファイル名</span>
+            <span className="lbl">{tr('ファイル名', 'File name')}</span>
             <input className="field mono" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          {mode === 'each' && <p className="lbl note">{'{名前}'} はステムの名前になります（例: stems_ドラム.ogg）。</p>}
+          {mode === 'each' && <p className="lbl note">{tr('{名前} はステムの名前になります（例: stems_ドラム.ogg）。', '{name} becomes the stem name (e.g. stems_Drums.ogg).')}</p>}
           <div className="kv" style={{ alignItems: 'flex-start' }}>
             <span className="lbl" style={{ paddingTop: 4 }}>
-              DTXへの登録
+              {tr('DTXへの登録', 'Add to DTX')}
             </span>
             <div style={{ flex: 1 }}>
               {mode === 'bgm' && (
                 <p className="lbl" style={{ margin: '4px 0 0', lineHeight: 1.6, color: 'var(--text2)' }}>
-                  BGMとして登録（#WAV{bgm ? toBase36x2(bgm.wav) : '01'} · ch01）。開始位置はテンポ画面で決めた位置（{bgmAt}）に置きます。
+                  {tr(
+                    `BGMとして登録（#WAV${bgm ? toBase36x2(bgm.wav) : '01'} · ch01）。開始位置はテンポ画面で決めた位置（${bgmAt}）に置きます。`,
+                    `Added as BGM (#WAV${bgm ? toBase36x2(bgm.wav) : '01'} · ch01). It starts at the position set on the Tempo page (${bgmAt}).`,
+                  )}
                 </p>
               )}
               {mode === 'all' && (
                 <label className="row lbl" style={{ marginTop: 4 }}>
                   <input type="checkbox" checked={previewReg} onChange={(e) => setPreviewReg(e.target.checked)} />
-                  選曲画面の試聴（#PREVIEW）にする
+                  {tr('選曲画面の試聴（#PREVIEW）にする', 'Use as the song select preview (#PREVIEW)')}
                 </label>
               )}
               {mode === 'selected' && (
                 <select className="field" value={selReg} onChange={(e) => setSelReg(e.target.value as typeof selReg)}>
-                  <option value="none">登録しない</option>
-                  <option value="bgm">BGMとして登録</option>
-                  <option value="preview">選曲画面の試聴（#PREVIEW）にする</option>
+                  <option value="none">{tr('登録しない', "Don't add")}</option>
+                  <option value="bgm">{tr('BGMとして登録', 'Add as BGM')}</option>
+                  <option value="preview">{tr('選曲画面の試聴（#PREVIEW）にする', 'Use as the song select preview (#PREVIEW)')}</option>
                 </select>
               )}
               {mode === 'each' && (
                 <p className="lbl" style={{ margin: '4px 0 0' }}>
-                  登録しません。
+                  {tr('登録しません。', "Not added to the DTX.")}
                 </p>
               )}
             </div>
@@ -847,11 +929,16 @@ function ExportPanel() {
       </div>
       <div className="stems-export-foot">
         <div className="lbl" style={{ color: 'var(--text2)', lineHeight: 1.6 }}>
-          {summary} · {formatTime(dur, false)} · 約 {((bytes * files) / 1e6).toFixed(1)} MB
-          {register === 'bgm' ? ` · BGM（#WAV${bgm ? toBase36x2(bgm.wav) : '01'}）に登録` : register === 'preview' ? ' · #PREVIEW に設定' : ''}
+          {summary} · {formatTime(dur, false)} · {tr('約', '~')}
+          {((bytes * files) / 1e6).toFixed(1)} MB
+          {register === 'bgm'
+            ? tr(` · BGM（#WAV${bgm ? toBase36x2(bgm.wav) : '01'}）に登録`, ` · added as BGM (#WAV${bgm ? toBase36x2(bgm.wav) : '01'})`)
+            : register === 'preview'
+              ? tr(' · #PREVIEW に設定', ' · set as #PREVIEW')
+              : ''}
         </div>
         <button className="btn primary big" disabled={!canRun} onClick={() => void run()}>
-          {Icon.download(15)} {busy ?? '書き出す'}
+          {Icon.download(15)} {busy ?? tr('書き出す', 'Export')}
         </button>
       </div>
     </aside>

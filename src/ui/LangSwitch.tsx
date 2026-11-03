@@ -5,6 +5,7 @@ import { useLang } from '../i18n/useLang';
 export function LangSwitch({ small }: { small?: boolean }) {
   const lang = useLang();
   return (
+    // どちらの言語でも読めるように、両方の名前を出す i18n-ignore
     <div className={`seg lang-switch ${small ? 'small' : ''}`} role="group" aria-label="Language / 言語" title="Language / 言語">
       {(['en', 'ja'] as Lang[]).map((l) => (
         <button key={l} className={lang === l ? 'on' : ''} aria-pressed={lang === l} onClick={() => setLang(l)} lang={l}>

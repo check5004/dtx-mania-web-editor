@@ -1,4 +1,5 @@
 // AI に頼む処理と、その初期設定（2026-11-02 時点の OpenRouter の一覧から選んだ）。
+import { tr, withTr } from '../i18n';
 import type { Effort, OrModel } from './openrouter';
 
 export type AiTask = 'songinfo' | 'phrase' | 'measure' | 'level' | 'difficulty' | 'guideline';
@@ -18,71 +19,75 @@ export interface TaskDef {
   per?: string;
 }
 
+type TaskTexts = { label: [string, string]; sends: [string, string]; why: [string, string]; per?: [string, string] };
+/** 処理の定義。表示する文（label・sends・why・per）は言語で変わる */
+const task = (def: Omit<TaskDef, 'label' | 'sends' | 'why' | 'per'>, texts: TaskTexts): TaskDef => withTr({ ...def } as TaskDef, texts);
+
 export const TASKS: readonly TaskDef[] = [
-  {
-    id: 'songinfo',
-    label: '曲情報の取得',
-    sends: '原曲のファイル名・タグ（曲名・アーティスト・アルバム・年）・曲の長さ・曲名・アーティスト名・YouTubeの動画タイトル',
-    needs: { json: true, web: true },
-    model: 'anthropic/claude-haiku-5.5',
-    effort: 'low',
-    why: 'Web検索と道具の呼び出しに対応していて安い。何度か検索して確かめる',
-    // 検索して確かめる流れで 4〜5 回やりとりする（前の結果を毎回送り直す）
-    est: { in: 24000, out: 2500, web: 3 },
-  },
-  {
-    id: 'phrase',
-    label: 'フレーズ候補',
-    sends: '前後4小節のチップと原曲の打点の数値',
-    needs: { json: true },
-    model: 'openai/gpt-6-luna',
-    effort: 'low',
-    why: '安くて速い',
-    est: { in: 2200, out: 1300 },
-  },
-  {
-    id: 'measure',
-    label: '小節の生成',
-    sends: '前後4小節と似ている小節のチップ・原曲の打点の数値・前後の小節で使っているレーンの割合',
-    needs: { json: true },
-    model: 'openai/gpt-6.1-terra',
-    effort: 'low',
+  task(
+    {
+      id: 'songinfo',
+      needs: { json: true, web: true },
+      model: 'anthropic/claude-haiku-5.5',
+      effort: 'low',
+      // 検索して確かめる流れで 4〜5 回やりとりする（前の結果を毎回送り直す）
+      est: { in: 24000, out: 2500, web: 3 },
+    },
+    {
+      label: ['曲情報の取得', 'Song info lookup'],
+      sends: [
+        '原曲のファイル名・タグ（曲名・アーティスト・アルバム・年）・曲の長さ・曲名・アーティスト名・YouTubeの動画タイトル',
+        "The original's file name and tags (title, artist, album, year), song length, title, artist name and YouTube video title",
+      ],
+      why: ['Web検索と道具の呼び出しに対応していて安い。何度か検索して確かめる', 'Supports web search and tool calls, and is cheap. It searches a few times to verify'],
+    },
+  ),
+  task(
+    { id: 'phrase', needs: { json: true }, model: 'openai/gpt-6-luna', effort: 'low', est: { in: 2200, out: 1300 } },
+    {
+      label: ['フレーズ候補', 'Phrase ideas'],
+      sends: ['前後4小節のチップと原曲の打点の数値', 'Chips in the 4 measures before and after, and hit-strength numbers from the original'],
+      why: ['安くて速い', 'Cheap and fast'],
+    },
+  ),
+  task(
     // 2026-11-03 隠した17小節の精度テストで GPT-6 Luna より当たり（作者の譜面との一致 0.86 対 0.74）、速い（約6秒 対 約20秒）
-    why: '耳コピの精度テストで安いモデルより当たり、速い（約6秒）',
-    est: { in: 3000, out: 600 },
-  },
-  {
-    id: 'level',
-    label: 'レベル判定',
-    sends: 'ガイドライン・譜面の特徴量・似た譜面5つ',
-    needs: { json: true, reasoning: true },
-    model: 'openai/gpt-6.1-terra',
-    effort: 'medium',
-    why: '推論が強く、料金は中くらい',
-    est: { in: 4000, out: 1500 },
-  },
-  {
-    id: 'difficulty',
-    label: '難易度生成の方針',
-    sends: 'セクションごとの特徴量・ガイドライン・必ず残すもの',
-    needs: { json: true, reasoning: true },
-    model: 'anthropic/claude-sonnet-5.5',
-    effort: 'high',
-    why: '音楽的な判断の質を優先',
-    est: { in: 6000, out: 3500 },
-    per: ' / 1難易度',
-  },
-  {
-    id: 'guideline',
-    label: 'ガイドラインの下書き',
-    sends: 'レベル帯ごとの出現率と代表譜面の特徴量',
-    needs: { json: true, reasoning: true },
-    model: 'anthropic/claude-sonnet-5.5',
-    effort: 'high',
-    why: 'たまにしか使わないので質を優先',
-    est: { in: 9000, out: 7000 },
-    per: ' / 全レベル帯',
-  },
+    { id: 'measure', needs: { json: true }, model: 'openai/gpt-6.1-terra', effort: 'low', est: { in: 3000, out: 600 } },
+    {
+      label: ['小節の生成', 'Measure generation'],
+      sends: [
+        '前後4小節と似ている小節のチップ・原曲の打点の数値・前後の小節で使っているレーンの割合',
+        'Chips in the 4 measures before and after and in similar measures, hit-strength numbers from the original, and lane usage nearby',
+      ],
+      why: ['耳コピの精度テストで安いモデルより当たり、速い（約6秒）', 'More accurate than cheaper models in our transcription test, and fast (about 6 s)'],
+    },
+  ),
+  task(
+    { id: 'level', needs: { json: true, reasoning: true }, model: 'openai/gpt-6.1-terra', effort: 'medium', est: { in: 4000, out: 1500 } },
+    {
+      label: ['レベル判定', 'Level check'],
+      sends: ['ガイドライン・譜面の特徴量・似た譜面5つ', 'Guidelines, chart features and 5 similar charts'],
+      why: ['推論が強く、料金は中くらい', 'Strong reasoning at a moderate price'],
+    },
+  ),
+  task(
+    { id: 'difficulty', needs: { json: true, reasoning: true }, model: 'anthropic/claude-sonnet-5.5', effort: 'high', est: { in: 6000, out: 3500 } },
+    {
+      label: ['難易度生成の方針', 'Difficulty plan'],
+      sends: ['セクションごとの特徴量・ガイドライン・必ず残すもの', 'Features per section, guidelines and what to always keep'],
+      why: ['音楽的な判断の質を優先', 'Prioritizes the quality of musical judgment'],
+      per: [' / 1難易度', ' / difficulty'],
+    },
+  ),
+  task(
+    { id: 'guideline', needs: { json: true, reasoning: true }, model: 'anthropic/claude-sonnet-5.5', effort: 'high', est: { in: 9000, out: 7000 } },
+    {
+      label: ['ガイドラインの下書き', 'Guideline draft'],
+      sends: ['レベル帯ごとの出現率と代表譜面の特徴量', 'Pattern rates per level band and features of representative charts'],
+      why: ['たまにしか使わないので質を優先', 'Used rarely, so quality comes first'],
+      per: [' / 全レベル帯', ' / all level bands'],
+    },
+  ),
 ];
 
 export const taskDef = (id: AiTask) => TASKS.find((t) => t.id === id)!;
@@ -168,6 +173,6 @@ export function formatUsd(x: number | null | undefined): string {
 /** 100万トークンあたりの料金 */
 export function perMillion(x: number): string {
   const v = x * 1e6;
-  if (v === 0) return '無料';
+  if (v === 0) return tr('無料', 'Free');
   return `$${v < 1 ? v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : v.toFixed(2).replace(/\.00$/, '')}`;
 }

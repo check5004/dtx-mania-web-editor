@@ -1,5 +1,6 @@
 // 曲情報を調べる流れ：手がかり（原曲のタグ・ファイル名・長さ）を集め、AI のエージェント（キーがあれば）か、
 // タグと iTunes だけ（キーが無くても）で、曲名・アーティストなどの案と、公式の YouTube・ジャケットの候補を出す。
+import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { AiError, chat } from '../ai/openrouter';
 import { bestStoreMatch, fileStem, isGenericName, normKey, runSongAgent, searchTerms, titleIsFileName, type AgentStep, type AgentTools, type SongClues, type YtPick } from '../ai/songAgent';
@@ -15,7 +16,7 @@ import { useEditor } from './editor';
 import { useSidecar } from './sidecar';
 
 export type InfoField = 'TITLE' | 'ARTIST' | 'GENRE' | 'COMMENT' | 'PANEL';
-export type SuggestSource = 'AI' | 'タグ' | 'iTunes';
+export type SuggestSource = 'AI' | 'tag' | 'iTunes';
 
 export interface Suggestion {
   value: string;
@@ -127,7 +128,8 @@ async function loadClues(k: string) {
   const fileName = path ? (path.split(/[\\/]/).pop() ?? path) : null;
   // ファイルを落として作った譜面のフォルダ名は、ファイル名か曲名の写しなので手がかりにしない
   const fn = s.folder?.name ?? '';
-  const copied = !fn || fn === '新しい曲' || normKey(fn) === normKey(fileStem(fileName ?? '')) || normKey(fn) === normKey(s.doc.fields['TITLE'] ?? '');
+  // 既定のフォルダ名はどちらの言語でも i18n-ignore
+  const copied = !fn || fn === '新しい曲' || fn === 'New song' || normKey(fn) === normKey(fileStem(fileName ?? '')) || normKey(fn) === normKey(s.doc.fields['TITLE'] ?? '');
   const clues: SongClues = {
     fileName,
     folderName: copied ? null : fn,
@@ -165,7 +167,7 @@ export function stopLookup() {
   abort = null;
 }
 
-const thumb = (id: string): ArtCandidate => ({ url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`, label: 'YouTube のサムネイル', source: 'youtube', w: 1280, h: 720 });
+const thumb = (id: string): ArtCandidate => ({ url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`, label: tr('YouTube のサムネイル', 'YouTube thumbnail'), source: 'youtube', w: 1280, h: 720 });
 
 /** ブラウザで使う道具 */
 const browserTools: AgentTools = {
@@ -223,8 +225,14 @@ export async function lookupSong(useAiAgent: boolean): Promise<void> {
   local({
     kind: 'clue',
     state: 'ok',
-    text: t ? `タグ: ${[t.title, t.artist, t.album, t.year].filter(Boolean).join(' / ')}` : clues.fileName ? `ファイル名: ${clues.fileName}（タグなし）` : '原曲のファイルなし。譜面の曲名から調べます',
-    detail: clues.durationSec ? `曲の長さ ${Math.floor(clues.durationSec / 60)}:${String(Math.round(clues.durationSec % 60)).padStart(2, '0')}` : undefined,
+    text: t
+      ? tr(`タグ: ${[t.title, t.artist, t.album, t.year].filter(Boolean).join(' / ')}`, `Tags: ${[t.title, t.artist, t.album, t.year].filter(Boolean).join(' / ')}`)
+      : clues.fileName
+        ? tr(`ファイル名: ${clues.fileName}（タグなし）`, `File name: ${clues.fileName} (no tags)`)
+        : tr('原曲のファイルなし。譜面の曲名から調べます', "No original audio file. Looking up the chart's title"),
+    detail: clues.durationSec
+      ? tr(`曲の長さ ${Math.floor(clues.durationSec / 60)}:${String(Math.round(clues.durationSec % 60)).padStart(2, '0')}`, `Length ${Math.floor(clues.durationSec / 60)}:${String(Math.round(clues.durationSec % 60)).padStart(2, '0')}`)
+      : undefined,
   });
   const withAi = useAiAgent && hasAiKey(useAi.getState());
   try {
@@ -233,7 +241,7 @@ export async function lookupSong(useAiAgent: boolean): Promise<void> {
     let hits: StoreHit[] = [];
     let term = '';
     for (const tm of terms.slice(0, 2)) {
-      const id = local({ kind: 'itunes', state: 'run', text: `iTunes で「${tm}」を検索` });
+      const id = local({ kind: 'itunes', state: 'run', text: tr(`iTunes で「${tm}」を検索`, `Searching iTunes for "${tm}"`) });
       try {
         hits = await itunesSearch(tm, { signal: ac.signal });
       } catch (e) {
@@ -242,14 +250,26 @@ export async function lookupSong(useAiAgent: boolean): Promise<void> {
       }
       term = tm;
       const best = bestStoreMatch(hits, clues);
-      local({ kind: 'itunes', state: hits.length ? 'ok' : 'fail', text: `iTunes で「${tm}」を検索 — ${hits.length}件`, detail: best ? `合う曲: ${best.hit.title} / ${best.hit.artist}（${best.hit.year}）` : hits.length ? '長さや名前の合う曲はありません' : undefined }, id);
+      local(
+        {
+          kind: 'itunes',
+          state: hits.length ? 'ok' : 'fail',
+          text: tr(`iTunes で「${tm}」を検索 — ${hits.length}件`, `Searched iTunes for "${tm}" — ${hits.length} ${pl(hits.length, 'result')}`),
+          detail: best
+            ? tr(`合う曲: ${best.hit.title} / ${best.hit.artist}（${best.hit.year}）`, `Match: ${best.hit.title} / ${best.hit.artist} (${best.hit.year})`)
+            : hits.length
+              ? tr('長さや名前の合う曲はありません', 'No song matches the length or name')
+              : undefined,
+        },
+        id,
+      );
       if (best) break;
     }
-    if (!terms.length) local({ kind: 'warn', state: 'info', text: '曲名もファイル名も無いので、iTunes では探せません' });
+    if (!terms.length) local({ kind: 'warn', state: 'info', text: tr('曲名もファイル名も無いので、iTunes では探せません', "There's no title or file name, so iTunes can't be searched") });
     const best = bestStoreMatch(hits, clues);
 
     if (!withAi) {
-      if (useAiAgent) local({ kind: 'warn', state: 'info', text: 'AI のキーを設定すると、Web検索で公式の YouTube や曲の情報も探します' });
+      if (useAiAgent) local({ kind: 'warn', state: 'info', text: tr('AI のキーを設定すると、Web検索で公式の YouTube や曲の情報も探します', 'Set an AI key to also search the web for the official YouTube video and song info') });
       set({ status: 'done', result: localResult(clues, best?.hit ?? null, hits), steps: [...steps] });
       return;
     }
@@ -291,11 +311,11 @@ export async function lookupSong(useAiAgent: boolean): Promise<void> {
     }
   } catch (e) {
     if (ac.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
-      local({ kind: 'warn', state: 'info', text: '止めました' });
+      local({ kind: 'warn', state: 'info', text: tr('止めました', 'Stopped') });
       set({ status: get().result ? 'done' : 'idle', steps: [...steps] });
       return;
     }
-    set({ status: 'error', error: e instanceof AiError ? e.message : `失敗しました: ${(e as Error).message}`, steps: [...steps] });
+    set({ status: 'error', error: e instanceof AiError ? e.message : tr(`失敗しました: ${(e as Error).message}`, `Failed: ${(e as Error).message}`), steps: [...steps] });
   } finally {
     if (abort === ac) abort = null;
   }
@@ -307,7 +327,7 @@ function pushArt(list: ArtCandidate[], c: ArtCandidate | null | undefined) {
 
 function embedded(): ArtCandidate | null {
   const p = get().picture;
-  return p ? { url: p, big: p, label: '原曲のファイルに入っていたジャケット', source: 'file' } : null;
+  return p ? { url: p, big: p, label: tr('原曲のファイルに入っていたジャケット', "Cover art embedded in the original's file"), source: 'file' } : null;
 }
 
 /** タグと iTunes だけの案 */
@@ -319,9 +339,9 @@ function localResult(c: SongClues, hit: StoreHit | null, hits: StoreHit[]): Look
   // iTunes の正式表記を先に（タグは省略や誤字があることがある）。合う曲が無ければタグ
   put('TITLE', hit?.title.replace(/\s*[(（](?:feat|ft)\.?[^)）]*[)）]\s*$/i, ''), 'iTunes');
   put('ARTIST', hit?.artist, 'iTunes');
-  put('TITLE', c.tags?.title, 'タグ');
-  put('ARTIST', c.tags?.artist ?? c.tags?.albumArtist, 'タグ');
-  put('GENRE', c.tags?.genre, 'タグ');
+  put('TITLE', c.tags?.title, 'tag');
+  put('ARTIST', c.tags?.artist ?? c.tags?.albumArtist, 'tag');
+  put('GENRE', c.tags?.genre, 'tag');
   put('GENRE', hit?.genre, 'iTunes');
   const art: ArtCandidate[] = [];
   const jacket = embedded() ?? hit?.art ?? null;
@@ -336,7 +356,14 @@ function localResult(c: SongClues, hit: StoreHit | null, hits: StoreHit[]): Look
     titleAlt: '',
     year: c.tags?.year || hit?.year || '',
     confidence: null,
-    notes: hit ? '' : titleIsFileName(c) && !c.tags ? 'タグが無く、ファイル名からは曲を特定できませんでした。曲名とアーティストを入れるか、AI のキーを設定すると Web 検索で探します。' : '',
+    notes: hit
+      ? ''
+      : titleIsFileName(c) && !c.tags
+        ? tr(
+            'タグが無く、ファイル名からは曲を特定できませんでした。曲名とアーティストを入れるか、AI のキーを設定すると Web 検索で探します。',
+            "There are no tags, and the song couldn't be identified from the file name. Enter the title and artist, or set an AI key to search the web.",
+          )
+        : '',
     youtube: [],
     jacket,
     art,
@@ -370,18 +397,18 @@ function aiResult(c: SongClues, out: Awaited<ReturnType<typeof runSongAgent>>, h
   if (a.jacket && out.itunes.has(a.jacket)) jacket = out.itunes.get(a.jacket)!.art;
   else if (a.jacket && out.images.has(a.jacket)) {
     const im = out.images.get(a.jacket)!;
-    jacket = { url: im.url, big: im.url, label: 'Web で見つけた画像', source: 'web', w: im.w, h: im.h };
+    jacket = { url: im.url, big: im.url, label: tr('Web で見つけた画像', 'Image found on the web'), source: 'web', w: im.w, h: im.h };
   }
   jacket ??= base.jacket;
   const art: ArtCandidate[] = [];
   pushArt(art, jacket);
   pushArt(art, embedded());
   for (const y of youtube) pushArt(art, thumb(y.id));
-  for (const im of out.images.values()) pushArt(art, { url: im.url, big: im.url, label: 'Web で見つけた画像', source: 'web', w: im.w, h: im.h });
+  for (const im of out.images.values()) pushArt(art, { url: im.url, big: im.url, label: tr('Web で見つけた画像', 'Image found on the web'), source: 'web', w: im.w, h: im.h });
   for (const x of base.art) pushArt(art, x);
   const sources = [...out.citations];
   for (const x of a.sources) if (!sources.some((y) => y.url === x.url)) sources.push(x);
-  for (const y of youtube) if (!sources.some((x) => youtubeId(x.url) === y.id)) sources.push({ url: y.url, title: `${y.title}（YouTube）` });
+  for (const y of youtube) if (!sources.some((x) => youtubeId(x.url) === y.id)) sources.push({ url: y.url, title: tr(`${y.title}（YouTube）`, `${y.title} (YouTube)`) });
   return {
     ai: true,
     fields,
