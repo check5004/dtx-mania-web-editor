@@ -18,8 +18,11 @@ import {
   paste,
   playFrom,
   redo,
+  resetSongEnd,
   selectAll,
   setView,
+  songEndAtCursor,
+  songEndAtLastChip,
   stop,
   togglePause,
   undo,
@@ -181,6 +184,10 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             { label: 'カーソルの小節の前に小節を挿入', run: () => insertMeasures(cursorM()) },
             { label: 'カーソルの小節を削除して詰める', run: () => deleteCursorMeasure() },
             { label: '小節をまとめて挿入・削除…', run: () => void bulkMeasures() },
+            '-',
+            { label: '曲の終わり（END）を ▶ の所にする', run: songEndAtCursor },
+            { label: 'END を最後のチップのすぐ後にする', run: songEndAtLastChip },
+            { label: 'END を原曲の鳴り終わりに合わせる', run: resetSongEnd, disabled: s().doc.endMeasure === undefined },
           ]}
         />
         <Menu

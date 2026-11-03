@@ -6,7 +6,10 @@ import { builtinFile, virtualSound } from '../audio/sounds';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
+import { endMeasureOf, moveEndDecorations, naturalEndMeasure, solidEndMeasure } from '../dtx/end';
 import { CH, DRUM_LANES, drumChannel, emptyDoc, type DtxDoc, type HeaderLine, type ParseWarning } from '../dtx/model';
+import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
+import { audibleEnd } from '../audio/dsp';
 import {
   freeWavNumber,
   makeClip,
@@ -713,34 +716,177 @@ export async function previewFile(path: string, gain = 1): Promise<boolean> {
   return true;
 }
 
+// ---- 曲の終わり -------------------------------------------------------------------
+// END の線。NX はここ（最後のチップの次の小節線）で演奏を終える。決めていなければ原曲の鳴り終わり（dtx/end.ts）。
+
+const audibleCache = new Map<string, number>();
+
+/** 読み込んだ音の鳴り終わり（秒。末尾のほぼ無音は数えない）。読み込んでいなければ 0 */
+function audibleSec(no: number): number {
+  const got = engine.buffer(no);
+  if (!got) return 0;
+  let v = audibleCache.get(got.key);
+  if (v === undefined) {
+    v = audibleEnd(got.buf);
+    if (audibleCache.size > 64) audibleCache.clear();
+    audibleCache.set(got.key, v);
+  }
+  return v;
+}
+
 /**
- * 曲の終わり（秒）。チップ・原曲（BGM）・参照映像のうち一番遅いもの。
- * 譜面が空でも、原曲や映像の長さぶんは曲があるものとして扱う。
+ * 原曲（BGM・ステム）が鳴り終わる、譜面の秒。分からなければ 0。
+ * 参照映像（YouTube）は入れない（MV やライブは前後が長く、ずれも所ごとに違うので、曲の長さには使えない）
  */
-export function songEndSec(doc: DtxDoc): number {
-  const ev = playbackEvents(doc);
+export function audioEndSec(doc: DtxDoc): number {
   let end = 0;
-  for (const e of ev) end = Math.max(end, e.sec + (e.bus === 'bgm' || e.bus === 'stem' ? engine.duration(e.wav) : 0.5));
-  const t = tempoOf(doc);
-  const views = chipViews(doc);
-  if (views.length) end = Math.max(end, t.beatToSec(views[views.length - 1].beat) + 1);
-  const bgm = bgmSource(doc);
+  for (const e of playbackEvents(doc)) if (e.bus === 'bgm' || e.bus === 'stem') end = Math.max(end, e.sec + audibleSec(e.wav));
+  if (end > 0) return end;
   // 音を読み込む前でも、解析が済んでいれば原曲の長さが分かる
+  const bgm = bgmSource(doc);
   const a = useAssist.getState();
-  if (bgm && a.data && a.src?.wav === bgm.wav) end = Math.max(end, bgm.sec + a.data.duration);
-  const video = get().refVideoSec;
-  if (video > 0) end = Math.max(end, (bgm?.sec ?? 0) + video - (useSidecar.getState().youtube?.offset ?? 0));
+  if (bgm && a.data && a.src?.wav === bgm.wav) end = bgm.sec + a.data.duration;
   return end;
+}
+
+/** 拍 beat がある小節の次の小節（その小節の頭からほんの少し（1/50 小節）しか出ていなければ、その小節） */
+function measureAfter(t: TempoMap, beat: number): number {
+  const { m, pos } = t.locate(beat);
+  return Math.max(1, pos <= 0.02 ? m : m + 1);
+}
+
+/** 曲の終わりを決めていないときの終わり（小節）。原曲が鳴り終わる小節。原曲の無い譜面は参照映像の終わり。分からなければ null */
+export function autoEndMeasure(doc: DtxDoc): number | null {
+  let sec = audioEndSec(doc);
+  if (sec <= 0 && !bgmSource(doc)) {
+    // 原曲ファイルが無く YouTube だけを聴いて作っているときは、映像の終わりまで（動画の秒 = 譜面の秒 + ずれ）
+    const video = get().refVideoSec;
+    if (video > 0) sec = video - (useSidecar.getState().youtube?.offset ?? 0);
+  }
+  if (sec <= 0) return null;
+  const t = tempoOf(doc);
+  return Math.min(MAX_MEASURES - 1, measureAfter(t, t.secToBeat(sec)));
+}
+
+/** 曲の終わり（END の線）の小節。最後のチップより前にはならない。何も分からなければ 0 */
+export function songEndMeasure(doc: DtxDoc): number {
+  return endMeasureOf(doc, doc.endMeasure === undefined ? autoEndMeasure(doc) : null);
+}
+
+/**
+ * 曲の終わりがどう決まっているか。
+ * set: 決めた位置（読み込んだ譜面の終わりも） / audio: 原曲の鳴り終わり / video: 参照映像の終わり / chips: 最後のチップのすぐ後
+ */
+export function songEndReason(doc: DtxDoc): 'set' | 'audio' | 'video' | 'chips' {
+  const natural = naturalEndMeasure(doc);
+  if (doc.endMeasure !== undefined) return doc.endMeasure >= natural ? 'set' : 'chips';
+  const auto = autoEndMeasure(doc);
+  if (auto === null || auto < natural) return 'chips';
+  return audioEndSec(doc) > 0 ? 'audio' : 'video';
+}
+
+/** 曲の終わり（秒）。END の線（NX が演奏を終える所）。何も分からなければ 0 */
+export function songEndSec(doc: DtxDoc): number {
+  const m = songEndMeasure(doc);
+  if (m <= 0) return 0;
+  const t = tempoOf(doc);
+  return t.beatToSec(t.measureStart(m));
+}
+
+/** 曲の終わりと原曲の鳴り終わりの遅い方（秒）。全体図・下のトラックの幅、END より後から再生したときに止める所 */
+export function contentEndSec(doc: DtxDoc): number {
+  return Math.max(songEndSec(doc), audioEndSec(doc));
+}
+
+/** 書き出す譜面。曲の終わりを決めていなければ、いま見えている終わり（原曲の鳴り終わり）を書き込む（NX でも同じ所で終わるように） */
+export function withSongEnd(doc: DtxDoc): DtxDoc {
+  if (doc.endMeasure !== undefined) return doc;
+  const m = songEndMeasure(doc);
+  return m > naturalEndMeasure(doc) ? { ...doc, endMeasure: m } : doc;
+}
+
+/** 曲の終わりにできる一番前の小節（最後のチップの次の小節。小節線の表示を切り替える C2 は一緒に動かすので数えない） */
+export function minSongEnd(doc: DtxDoc): number {
+  return Math.max(1, solidEndMeasure(doc));
+}
+
+/**
+ * 曲の終わりを m 小節の頭にする。null なら原曲の鳴り終わりに合わせる（自動。原曲を差し替えても付いていく）。
+ * 最後のチップより前にはできない（C2 の小節線の飾りは一緒に動かす）。動かした先の小節を返す。
+ * group: ドラッグで続けて動かすときは Undo 1回で戻せるようにまとめる
+ */
+export function setSongEnd(m: number | null, opts: { group?: string } = {}): number {
+  const doc = get().doc;
+  const from = songEndMeasure(doc);
+  const auto = m === null;
+  const want = auto ? (autoEndMeasure(doc) ?? naturalEndMeasure(doc)) : Math.round(m);
+  const to = Math.max(minSongEnd(doc), Math.min(MAX_MEASURES - 1, want));
+  if (to === from && (auto ? doc.endMeasure === undefined : doc.endMeasure === to)) return to;
+  const label = auto ? '曲の終わりを原曲に合わせる' : `曲の終わりを小節 ${toMeasure(to)} の頭にする`;
+  edit(
+    label,
+    (d) => {
+      if (from > 0) moveEndDecorations(d as DtxDoc, from, to);
+      if (auto) delete d.endMeasure;
+      else d.endMeasure = to;
+    },
+    { group: opts.group },
+  );
+  return to;
+}
+
+/** 拍 beat にいちばん近い小節の頭（曲の終わりにできる範囲で） */
+export function endMeasureNear(doc: DtxDoc, beat: number): number {
+  const { m, pos } = tempoOf(doc).locate(Math.max(0, beat));
+  return Math.max(minSongEnd(doc), Math.min(MAX_MEASURES - 1, pos >= 0.5 ? m + 1 : m));
+}
+
+/** END の線のドラッグ：拍 beat に近い小節の頭へ。原曲の鳴り終わりの所に来たら自動（原曲に合わせる）にする */
+export function dragSongEnd(beat: number, group: string): number {
+  const doc = get().doc;
+  const m = endMeasureNear(doc, beat);
+  return setSongEnd(m === autoEndMeasure(doc) ? null : m, { group });
+}
+
+const END_WHAT = { audio: '原曲の鳴り終わり', video: '参照映像の終わり', chips: '最後のチップのすぐ後', set: '' } as const;
+
+/** 決めた曲の終わりをやめて、自動（原曲の鳴り終わり。原曲が無ければ最後のチップのすぐ後）に戻す */
+export function resetSongEnd() {
+  const doc = get().doc;
+  if (doc.endMeasure === undefined) {
+    toast(`曲の終わりはいま自動（${END_WHAT[songEndReason(doc)] || '原曲の鳴り終わり'}）です。END の札をドラッグすると動かせます`);
+    return;
+  }
+  const m = setSongEnd(null);
+  toast(`曲の終わりを${END_WHAT[songEndReason(get().doc)] || '自動'}（小節 ${toMeasure(m)} の頭）に合わせました`);
+}
+
+/** 曲の終わりを ▶ の所にする（▶ のある小節の次の小節の頭。▶ が小節の頭ならそこ） */
+export function songEndAtCursor() {
+  const s = get();
+  const want = measureAfter(tempoOf(s.doc), Math.max(0, s.cursorBeat));
+  const m = setSongEnd(want);
+  toast(m > want ? `最後のチップより前にはできないので、小節 ${toMeasure(m)} の頭を曲の終わりにしました` : `曲の終わりを小節 ${toMeasure(m)} の頭にしました`);
+}
+
+/** 曲の終わりを最後のチップのすぐ後（その次の小節の頭）にする。原曲の後ろの余白を切るとき */
+export function songEndAtLastChip() {
+  const m = setSongEnd(minSongEnd(get().doc));
+  toast(`曲の終わりを最後のチップのすぐ後（小節 ${toMeasure(m)} の頭）にしました`);
 }
 
 /** 曲の長さが何も分からない（チップも原曲も映像も無い）ときに流し続ける長さ */
 export const OPEN_END_SEC = 600;
 
-/** 再生を止める位置。何も無い譜面でも、止めるまで流し続ける（BPM合わせや曲の頭を探すため） */
+/**
+ * 再生を止める位置。曲の終わり（END）で止める。END より後から始めたときは原曲の鳴り終わりまで。
+ * 何も無い譜面でも、止めるまで流し続ける（BPM合わせや曲の頭を探すため）
+ */
 export function playEndSec(doc: DtxDoc, startSec: number): number {
   const end = songEndSec(doc);
   if (end <= 0) return startSec + OPEN_END_SEC;
-  return Math.max(end, startSec + 1);
+  if (startSec < end - 0.01) return end;
+  return Math.max(contentEndSec(doc), startSec + 1);
 }
 
 type PlaybackEvent = { type: 'play'; startSec: number; rate: number } | { type: 'stop' } | { type: 'loop'; startSec: number };
@@ -774,6 +920,8 @@ export function refreshPlayback() {
 }
 
 let playToken = 0;
+/** いまの再生を始めた位置（秒）。曲の終わりが動いたら止める所を直すため */
+let playStartSec = 0;
 
 /** ループがオンなら範囲の外からは再生しない（A から始める）。範囲の終わり B ちょうども外 */
 function loopedStart(beat: number): number {
@@ -802,6 +950,7 @@ export async function playFrom(beat: number, opts: { keepStart?: boolean } = {})
   // ループ中は範囲の外から始めない（準備の間にループが変わったときのため秒でも確かめる）
   if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
   const endSec = playEndSec(doc, startSec);
+  playStartSec = startSec;
   const rate = a.speed;
   const events = playbackEvents(heardDoc(doc));
   const longs = new Map<number, number>();
@@ -841,6 +990,8 @@ useEditor.subscribe((s, prev) => {
   if (!engine.playing) return;
   const end = Math.max(songEndSec(s.doc), engine.currentSec() ?? 0);
   engine.replaceEvents(playbackEvents(heardDoc(s.doc)), clickTimes(s.doc, 0, end + OPEN_END_SEC));
+  // 曲の終わりを動かした・終わりより後にチップを置いたときは、止める所も合わせる
+  engine.setEndSec(playEndSec(s.doc, playStartSec));
   if (s.doc.barLengths !== prev.doc.barLengths || s.doc.fields !== prev.doc.fields) applyLoopToEngine();
 });
 

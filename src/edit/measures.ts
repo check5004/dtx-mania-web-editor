@@ -34,6 +34,8 @@ export function opInsertMeasures(d: Draft<DtxDoc>, m: number, n: number): boolea
   // 入れた小節のあとは元の m 小節目なので、同じ長さが続くなら書かなくてよい
   if (next[m + n] !== undefined && next[m + n] === effectiveBarLen(next, m + n - 1)) delete next[m + n];
   d.barLengths = next;
+  // 曲の終わりも後ろへ（終わりの小節の前に入れたときも、曲が延びる）
+  if (d.endMeasure !== undefined && d.endMeasure >= m) d.endMeasure = Math.min(MAX_MEASURES - 1, d.endMeasure + n);
   return true;
 }
 
@@ -89,6 +91,12 @@ export function opDeleteMeasures(d: Draft<DtxDoc>, m: number, n: number): Delete
   if (effectiveBarLen(next, m) !== lenAfter) next[m] = lenAfter;
   if (next[m] !== undefined && next[m] === effectiveBarLen(next, m - 1) && m > 0) delete next[m];
   d.barLengths = next;
+  // 曲の終わりも詰める（消した範囲の中にあれば、消したところ）
+  if (d.endMeasure !== undefined) {
+    if (d.endMeasure >= end) d.endMeasure -= n;
+    else if (d.endMeasure > m) d.endMeasure = m;
+    if (d.endMeasure < 1) delete d.endMeasure;
+  }
   return res;
 }
 

@@ -8,7 +8,7 @@ import { anchorsFromDoc, applyPlan, evaluatePlan, normalizeAnchors, type PlanRes
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import { useAssist } from './assist';
 import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
-import { edit, playEndSec, songEndSec, stop as stopChart, toast, useEditor } from './editor';
+import { contentEndSec, edit, OPEN_END_SEC, stop as stopChart, toast, useEditor } from './editor';
 import { setAnchors, useSidecar } from './sidecar';
 
 export interface TempoUiState {
@@ -101,7 +101,7 @@ export function initTempo() {
   if (saved.length) {
     anchors = normalizeAnchors(saved);
   } else if (bgm) {
-    anchors = anchorsFromDoc(tempo, bgm.sec, songEndSec(doc));
+    anchors = anchorsFromDoc(tempo, bgm.sec, contentEndSec(doc));
     // 新しい譜面（ドラムが無く、BPMも変わらない）なら推定から案を作る
     if (!hasDrums(doc) && tempo.events.length <= 1 && a.data?.tempo.length) {
       const est = estimatePlan();
@@ -280,7 +280,9 @@ export function playPlan(fromAudioSec: number) {
   const bgm = bgmSource(doc);
   const off = bgm?.sec ?? 0;
   const startSec = Math.max(0, fromAudioSec + off);
-  const end = playEndSec(doc, startSec);
+  // テンポ合わせは原曲に合わせるので、曲の終わり（END）ではなく原曲の鳴り終わりまで流す
+  const content = contentEndSec(doc);
+  const end = content > startSec + 1 ? content : startSec + OPEN_END_SEC;
   const events = playbackEvents(doc).filter((e) => e.bus === 'bgm' || e.bus === 'stem');
   engine.setForceClick(true);
   engine.play({

@@ -7,7 +7,7 @@ import { SPEC_F_HI, SPEC_F_LO, specFreq, specPos, type SpectroData } from '../au
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
-import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import { bgaChannel, CH, DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import {
@@ -26,13 +26,18 @@ import {
 } from '../store/assist';
 import { bgmSource, COL_BGA, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
 import {
+  autoEndMeasure,
   deleteChips,
+  dragSongEnd,
+  minSongEnd,
   moveSelection,
   placeBpmChange,
   placeChip,
   playFrom,
+  resetSongEnd,
   setCursorBeat,
   setView,
+  songEndReason,
   useEditor,
   zoom,
 } from '../store/editor';
@@ -53,8 +58,8 @@ import { drumHitsByClass, drumStatusText, readyDrums, useDrums } from '../store/
 import { DRUM_CLASSES, CLASS_LABEL, type DrumClass } from '../bench/classes';
 import { ADTOF } from '../transcribe/model';
 import { promptDialog } from './dialogs';
-import { songLength } from './hooks';
-import { chipBpmLabel, meterLabel } from './format';
+import { songEndM, songSpan } from './hooks';
+import { chipBpmLabel, formatTime, meterLabel } from './format';
 import { SectionPopover } from './SectionPopover';
 import { SPEC_ZONES, zoneLut, type SpecZone } from './specColors';
 import { pickBgmFile } from '../app/fileActions';
@@ -152,7 +157,9 @@ type Drag =
   | { type: 'erase'; ids: Set<number> }
   | { type: 'cursor' }
   | { type: 'loop'; ld: LoopDrag; y0: number; where: 'chart' | 'mini' }
-  | { type: 'mini' };
+  | { type: 'mini' }
+  /** 曲の終わり（END）の線。grab: 掴んだ所と線の差（拍） */
+  | { type: 'end'; group: string; grab: number };
 
 interface Hover {
   x: number;
@@ -174,6 +181,8 @@ interface Tip {
   level: 'error' | 'warn' | 'hint';
   title: string;
   lines: string[];
+  /** 操作のヒントでも待たずに出す（ドラッグ中の位置など） */
+  now?: boolean;
 }
 
 interface Local {
@@ -257,12 +266,13 @@ export function ChartCanvas() {
   const [popover, setPopover] = useState<{ m: number; x: number; y: number } | null>(null);
   const [help, setHelp] = useState<{ x: number; y: number } | null>(null);
   const [tip, setTipState] = useState<Tip | null>(null);
-  const tipRef = useRef<{ key: string | null; timer: number }>({ key: null, timer: 0 });
-  /** 説明を出す。警告はすぐ、操作のヒントは少し止まってから */
+  const tipRef = useRef<{ key: string | null; timer: number; next: Tip | null }>({ key: null, timer: 0, next: null });
+  /** 説明を出す。警告はすぐ、操作のヒントは少し止まってから。同じ説明なら位置と中身だけ変える */
   const showTip = (t: Tip | null) => {
     const r = tipRef.current;
+    r.next = t;
     if ((t?.key ?? null) === r.key) {
-      if (t) setTipState((cur) => (cur && cur.key === t.key ? { ...cur, x: t.x, y: t.y } : cur));
+      if (t) setTipState((cur) => (cur && cur.key === t.key ? t : cur));
       return;
     }
     r.key = t?.key ?? null;
@@ -271,9 +281,9 @@ export function ChartCanvas() {
       setTipState(null);
       return;
     }
-    if (t.level === 'hint') {
+    if (t.level === 'hint' && !t.now) {
       setTipState(null);
-      r.timer = window.setTimeout(() => setTipState(t), 650);
+      r.timer = window.setTimeout(() => setTipState(r.next), 650);
     } else {
       setTipState(t);
     }
@@ -502,6 +512,13 @@ export function ChartCanvas() {
       l.drag = { type: 'rubber', x0: x, y0: y, x1: x, y1: y, additive, base: additive ? s.selection : [] };
       return;
     }
+    if (h.kind === 'end') {
+      // 曲の終わり（END）の札：ドラッグで動かす（Undo 1回で戻せるように、ドラッグ中の変更はまとめる）
+      if (e.button !== 0) return;
+      const eb = endBeatOf(s.doc);
+      l.drag = { type: 'end', group: `song-end-${Date.now()}`, grab: eb === null ? 0 : g.yToBeat(y) - eb };
+      return;
+    }
     if (e.button === 2) {
       if (h.kind === 'loop' || h.kind === 'miniLoop') {
         setLoop(null);
@@ -612,6 +629,8 @@ export function ChartCanvas() {
               : 'default'
           : h?.kind === 'chip'
           ? 'grab'
+          : h?.kind === 'end'
+          ? 'ns-resize'
           : h?.kind === 'section'
             ? 'pointer'
             : h?.kind === 'loop' || h?.kind === 'miniLoop'
@@ -666,6 +685,11 @@ export function ChartCanvas() {
     }
     if (d.type === 'mini') {
       scrollFromMini(l, y);
+      return;
+    }
+    if (d.type === 'end') {
+      dragSongEnd(Math.max(0, g.yToBeat(y) - d.grab), d.group);
+      showTip(endTip(x, y, true));
       return;
     }
     if (d.type === 'move') {
@@ -732,6 +756,10 @@ export function ChartCanvas() {
       endLoopDrag(d.ld);
       return;
     }
+    if (d.type === 'end') {
+      showTip(null);
+      return;
+    }
     if (d.type === 'move') {
       if (d.moved && d.dBeat) {
         moveSelection(d.dBeat, d.dLane);
@@ -749,6 +777,12 @@ export function ChartCanvas() {
     const y = e.nativeEvent.offsetY;
     const g = geom(l, currentScroll(l), s.view.pxPerBeat);
     const h = hitTest(l, g, x, y);
+    if (h?.kind === 'end') {
+      // END の札のダブルクリック：決めた終わりをやめて、原曲の鳴り終わりに合わせる
+      showTip(null);
+      resetSongEnd();
+      return;
+    }
     if (h?.kind === 'gutter') {
       // 小節番号のダブルクリック：その小節からセクションを始める（カーソルと同じく吸着した位置の小節）
       const { m } = snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div);
@@ -1110,7 +1144,9 @@ type Hit =
   | { kind: 'mini' }
   | { kind: 'miniLoop' }
   | { kind: 'vel'; idx: number; lane: number }
-  | { kind: 'velChip'; idx: number; lane: number; view: ChipView };
+  | { kind: 'velChip'; idx: number; lane: number; view: ChipView }
+  /** 曲の終わり（END）の札 */
+  | { kind: 'end' };
 
 function colAt(g: Geom, x: number): number | 'gutter' | 'gen' | 'audio' | 'loop' | null {
   const rx = x - g.ox;
@@ -1180,9 +1216,29 @@ function genTargetAt(g: Geom, h: Hit | null, x: number, y: number, gv: GenView):
   return best ? { kind: 'note', id: best } : null;
 }
 
+/** 曲の終わり（END の線）の拍。分からなければ null */
+function endBeatOf(doc: DtxDoc): number | null {
+  const m = songEndM(doc);
+  return m > 0 ? tempoOf(doc).measureStart(m) : null;
+}
+
+/** END の札の高さ（線から下へ下げる） */
+const END_TAG_H = 13;
+
+/** 曲の終わり（END）の札の上か（小節番号の列で、線のすぐ上から札の下まで） */
+function endHandleAt(g: Geom, x: number, y: number): boolean {
+  const rx = x - g.ox;
+  if (rx < GUT_X || rx >= GEO.bpmX) return false;
+  const eb = endBeatOf(useEditor.getState().doc);
+  if (eb === null) return false;
+  const ey = g.beatToY(eb);
+  return y >= ey - 5 && y <= ey + END_TAG_H + 2;
+}
+
 function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   if (x >= l.w - GEO.miniW) return x < l.w - GEO.miniW + GEO.miniLoopW && y >= GEO.head ? { kind: 'miniLoop' } : { kind: 'mini' };
   if (y < GEO.head) return { kind: 'header' };
+  if (endHandleAt(g, x, y)) return { kind: 'end' };
   const vs = useVel.getState();
   if (vs.mode) {
     const rx = x - g.ox;
@@ -1292,9 +1348,9 @@ function colCenter(col: number): number {
 function miniEnd(): number {
   const s = useEditor.getState();
   let end = Math.max(docStats(s.doc).lastBeat + 16, 64);
-  // 譜面が空でも、原曲・映像の長さぶんは見せる
-  const len = songLength(s.doc);
-  if (len > 0) end = Math.max(end, tempoOf(s.doc).secToBeat(len) + 4);
+  // 譜面が空でも、曲の終わり（END）と原曲の鳴り終わりまでは見せる
+  const span = songSpan(s.doc);
+  if (span > 0) end = Math.max(end, tempoOf(s.doc).secToBeat(span) + 4);
   return end;
 }
 
@@ -1372,6 +1428,7 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       ? ['ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', '範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', '右クリック: ループを消す']
       : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ', 'I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます']);
   }
+  if (h.kind === 'end') return endTip(x, y, false);
   if (h.kind === 'gutter') return at('gutter', 'hint', '小節番号の列', ['クリック・ドラッグ: 再生を始める位置（▶）を置く', 'ダブルクリック: セクション名を付ける']);
   if (h.kind === 'genBtn') {
     const gs = useMeasureGen.getState();
@@ -1423,6 +1480,26 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
   return null;
 }
 
+const END_HOW = { set: '', audio: '原曲の鳴り終わり', video: '参照映像の終わり', chips: '最後のチップのすぐ後' } as const;
+
+/** 曲の終わり（END）の説明。dragging: ドラッグ中（待たずに出し、動かした先を見せる） */
+function endTip(x: number, y: number, dragging: boolean): Tip {
+  const doc = useEditor.getState().doc;
+  const tempo = tempoOf(doc);
+  const m = songEndM(doc);
+  const sec = tempo.beatToSec(tempo.measureStart(m));
+  const why = songEndReason(doc);
+  const head = `小節 ${toMeasure(m)} の頭 · ${formatTime(sec, false)}${END_HOW[why] ? `（${END_HOW[why]}）` : ''}`;
+  const back = autoEndMeasure(doc) !== null ? '原曲の鳴り終わり' : '最後のチップのすぐ後';
+  const lines = dragging
+    ? [
+        head,
+        m <= minSongEnd(doc) ? '最後のチップより前にはできません' : `${back}の所に来ると、${back === '原曲の鳴り終わり' ? '原曲に合わせる（原曲を差し替えても付いていく）' : 'そこで止まります'}`,
+      ]
+    : [head, 'NX もここで演奏を終えます（最後の小節線）。DTX にも書き出します', `ドラッグ: 動かす（小節の頭に吸着） / ダブルクリック: ${back}に合わせる`];
+  return { key: dragging ? 'end:drag' : `end:${m}:${why}`, x, y, level: 'hint', title: '曲の終わり（END）', lines, now: dragging };
+}
+
 function ChartTip({ tip }: { tip: Tip }) {
   const left = Math.min(tip.x + 16, viewport.w - 300);
   const top = Math.min(tip.y + 16, viewport.h - 30 - tip.lines.length * 18);
@@ -1467,14 +1544,17 @@ function IssueBadge() {
 
 function autoScrollWhileDragging(l: Local) {
   const d = l.drag;
-  if (!d || !l.pointer || (d.type !== 'move' && d.type !== 'rubber' && d.type !== 'erase' && !(d.type === 'loop' && d.where === 'chart'))) return;
+  if (!d || !l.pointer || (d.type !== 'move' && d.type !== 'rubber' && d.type !== 'erase' && d.type !== 'end' && !(d.type === 'loop' && d.where === 'chart'))) return;
   const s = useEditor.getState();
   const { y } = l.pointer;
   let v = 0;
   if (y < GEO.head + 24) v = (GEO.head + 24 - y) / 6;
   else if (y > l.h - 16) v = -(y - (l.h - 16)) / 6;
   if (v === 0) return;
-  setView({ scrollBeat: Math.max(-2, s.view.scrollBeat + (v / s.view.pxPerBeat) * 4) });
+  const scrollBeat = Math.max(-2, s.view.scrollBeat + (v / s.view.pxPerBeat) * 4);
+  setView({ scrollBeat });
+  // END はマウスを止めていても、スクロールに合わせて動かす
+  if (d.type === 'end') dragSongEnd(Math.max(0, geom(l, scrollBeat, s.view.pxPerBeat).yToBeat(y) - d.grab), d.group);
   l.dirty = true;
 }
 
@@ -1957,6 +2037,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.lineWidth = 1;
     ctx.strokeRect(xa + 0.5, ya + 0.5, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
   }
+  // 曲の終わり（END）。その先は暗く
+  const endBeat = endBeatOf(doc);
+  if (endBeat !== null) drawSongEnd(ctx, g, H, cw, endBeat, tempo.beatToSec(endBeat), songEndReason(doc), d?.type === 'end');
+
   // ループ（帯・A と B の印・線）
   drawLoop(ctx, g, H, cw, a);
 
@@ -2090,6 +2174,86 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   }
 
   drawMinimap(ctx, l, g, playBeat, a);
+}
+
+let hatchPat: CanvasPattern | null = null;
+
+/** 曲の終わりより先に重ねる斜線 */
+function hatch(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  if (hatchPat) return hatchPat;
+  const c = document.createElement('canvas');
+  c.width = 10;
+  c.height = 10;
+  const m = c.getContext('2d');
+  if (!m) return null;
+  m.strokeStyle = 'rgba(255,255,255,.045)';
+  m.lineWidth = 1;
+  m.beginPath();
+  for (const o of [-10, 0, 10]) {
+    m.moveTo(o, 10);
+    m.lineTo(o + 10, 0);
+  }
+  m.stroke();
+  hatchPat = ctx.createPattern(c, 'repeat');
+  return hatchPat;
+}
+
+/**
+ * 曲の終わり（END）：その先（上）を暗くして斜線、白い線、小節番号の列に「END」の札（線から下げる。ドラッグで動かす）、
+ * 線の上に時刻と、どう決まっているか
+ */
+function drawSongEnd(
+  ctx: CanvasRenderingContext2D,
+  g: Geom,
+  H: number,
+  cw: number,
+  endBeat: number,
+  endSec: number,
+  why: keyof typeof END_HOW,
+  active: boolean,
+) {
+  const { ox } = g;
+  const y = Math.round(g.beatToY(endBeat));
+  // ループの帯と ✨ の列はそのまま（小節番号の列から右）
+  const left = ox + GUT_X;
+  const w = cw - GUT_X;
+  const bottom = Math.min(H, y - 1);
+  if (bottom > GEO.head) {
+    ctx.fillStyle = 'rgba(4,6,9,.55)';
+    ctx.fillRect(left, GEO.head, w, bottom - GEO.head);
+    const pat = hatch(ctx);
+    if (pat) {
+      ctx.fillStyle = pat;
+      ctx.fillRect(left, GEO.head, w, bottom - GEO.head);
+    }
+  }
+  if (y < GEO.head - END_TAG_H || y > H + 2) return;
+  ctx.fillStyle = active ? '#FFFFFF' : 'rgba(231,235,241,.88)';
+  ctx.fillRect(left, y - 1, w, 2);
+  const tx = ox + GUT_X + 2;
+  const tw = GEO.bpmX - GUT_X - 4;
+  roundRect(ctx, tx, y - 1, tw, END_TAG_H, 2);
+  ctx.fillStyle = active ? '#FFFFFF' : '#E7EBF1';
+  ctx.fill();
+  ctx.fillStyle = '#0B0E13';
+  ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('END', tx + tw / 2, y - 1 + END_TAG_H / 2 + 0.5);
+  if (y - 9 > GEO.head + 4) {
+    const label = `曲の終わり ${formatTime(endSec, false)}`;
+    const lx = ox + GEO.laneX + 6;
+    ctx.textAlign = 'left';
+    ctx.font = '600 10px system-ui, sans-serif';
+    ctx.fillStyle = '#E7EBF1';
+    ctx.fillText(label, lx, y - 9);
+    if (END_HOW[why]) {
+      const lw = ctx.measureText(label).width;
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillStyle = '#A3ADBB';
+      ctx.fillText(`· ${END_HOW[why]}`, lx + lw + 6, y - 9);
+    }
+  }
 }
 
 /** 再生を始める位置の印（小節番号の列の左） */
@@ -2678,6 +2842,17 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
     l.mini = { canvas: c, doc, h: l.h, endBeat: end, sections: side.sections };
   }
   ctx.drawImage(l.mini.canvas, x, 0, GEO.miniW, l.h);
+  // 曲の終わり（END）。その先は暗く
+  const eb = endBeatOf(doc);
+  if (eb !== null) {
+    const ye = Math.round(bottom - (eb / end) * (bottom - top));
+    if (ye > GEO.head) {
+      ctx.fillStyle = 'rgba(4,6,9,.55)';
+      ctx.fillRect(x + ML + 1, GEO.head, GEO.miniW - ML - 1, ye - GEO.head);
+    }
+    ctx.fillStyle = 'rgba(231,235,241,.9)';
+    ctx.fillRect(x + ML + 1, ye - 1, GEO.miniW - ML - 1, 1);
+  }
   // ループの範囲（左の帯に範囲と A・B の印）。A だけ・B だけのときは、その印と点線
   const miniTab = (ty: number, label: string, col: string) => {
     ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';

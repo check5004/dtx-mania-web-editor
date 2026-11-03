@@ -390,7 +390,7 @@ function HeaderTab() {
   const apply = () => {
     if (draft === null) return;
     const { doc: parsed } = parseDtx(draft);
-    if (parsed.chips.length > 0 || Object.keys(parsed.barLengths).length > 0) {
+    if (parsed.chips.length > 0 || Object.keys(parsed.barLengths).length > 0 || parsed.endMeasure !== undefined) {
       toast('チップの行（#00111: など）はヘッダには書けません。譜面で置いてください', 'error', 6000);
       return;
     }

@@ -40,6 +40,11 @@ export interface DtxDoc {
   /** 小節長の変更（ch02）。小節番号 → 倍率。NXでは次の変更まで続く */
   barLengths: Record<number, number>;
   nextId: number;
+  /**
+   * 曲の終わり（この小節の頭で NX が演奏を終える）。無ければ自動（原曲の鳴り終わり）。
+   * NX は最後のチップの次の小節線で終わるので、最後のチップより前にはならない。dtx/end.ts
+   */
+  endMeasure?: number;
 }
 
 export interface ParseWarning {
@@ -72,6 +77,8 @@ export const CH = {
   LBD: 0x1c,
   FILLIN_SOUND: 0x1f,
   FILLIN: 0x53,
+  /** 小節線・拍線を出す（01）・消す（02） */
+  LINE_DISPLAY: 0xc2,
 } as const;
 
 export type ChipKind = 'normal' | 'hidden' | 'nochip';

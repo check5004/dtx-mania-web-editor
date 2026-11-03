@@ -34,7 +34,7 @@ import {
 } from '../store/stems';
 import { confirmDialog } from './dialogs';
 import { formatPosition, formatTime } from './format';
-import { useCanvas, usePlayBeat, useSongLength } from './hooks';
+import { useCanvas, usePlayBeat, useSongSpan } from './hooks';
 import { Icon } from './icons';
 
 const RULER_H = 40;
@@ -50,7 +50,7 @@ export function StemsPage() {
   const stems = useSidecar((s) => s.stems);
   const busy = useStems((s) => s.busy);
   useStems((s) => s.version);
-  const length = useSongLength(doc);
+  const span = useSongSpan(doc);
   const fileInput = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
   const [zoom, setZoom] = useState<Zoom>('all');
@@ -63,7 +63,7 @@ export function StemsPage() {
     return () => window.removeEventListener('keydown', h);
   }, []);
 
-  const total = Math.max(length, stemsDuration() + (bgmSource(doc)?.sec ?? 0), 10);
+  const total = Math.max(span, stemsDuration() + (bgmSource(doc)?.sec ?? 0), 10);
   const sr = stems.length ? stemInfo(stems[0].file)?.sampleRate : undefined;
 
   const drop = (e: React.DragEvent) => {

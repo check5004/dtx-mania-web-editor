@@ -1,6 +1,7 @@
 // DTXテキストの読み込み。行の解釈は NX の CDTX.cs（tRead_FromString とその下の行解析）に合わせる。
 import { parseBase36x2, parseHex2, parseMeasure, parseNxNumber } from './base36';
 import { frac } from './fraction';
+import { takeEndMarker } from './end';
 import { CH, type Chip, type DtxDoc, type HeaderLine, type ParseWarning } from './model';
 
 export interface ParsedLine {
@@ -151,6 +152,8 @@ export function parseDtx(text: string): ParseResult {
   });
 
   const doc: DtxDoc = { header, fields, chips, barLengths, nextId };
+  // 曲の終わり（書き出した印を戻す。無ければ NX と同じ終わりに決める）
+  takeEndMarker(doc);
   if (ifDepth > 0) warnings.push({ line: lines.length, message: '#IF に対応する #ENDIF がありません' });
   return { doc, warnings, hasRandom };
 }

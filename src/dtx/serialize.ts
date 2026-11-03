@@ -1,5 +1,6 @@
 // DTXテキストへの書き出し。ヘッダは読み込んだ順に、チップは小節ごとに最小の分割数で書き出す。
 import { toBase36x2, toHex2, toMeasure } from './base36';
+import { endMarker } from './end';
 import { cmp, lcm } from './fraction';
 import { CH, type Chip, type DtxDoc, type HeaderLine } from './model';
 
@@ -55,10 +56,12 @@ function lineData(ch: number, bucket: LineBucket): string {
   return slots.join('');
 }
 
-export function serializeChips(doc: Pick<DtxDoc, 'chips' | 'barLengths'>): string[] {
+export function serializeChips(doc: Pick<DtxDoc, 'chips' | 'barLengths' | 'endMeasure'>): string[] {
   const out: string[] = [];
   const byMeasure = new Map<number, Map<number, Chip[]>>();
-  for (const c of doc.chips) {
+  // 曲の終わりが最後のチップより後なら、終わりまで続ける印（dtx/end.ts）
+  const marker = endMarker(doc);
+  for (const c of marker ? [...doc.chips, marker] : doc.chips) {
     let mm = byMeasure.get(c.m);
     if (!mm) byMeasure.set(c.m, (mm = new Map()));
     let list = mm.get(c.ch);

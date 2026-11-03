@@ -9,6 +9,7 @@ import { tempoOf } from '../store/derived';
 import { togglePlay, useEditor } from '../store/editor';
 import { togglePreview, usePreview } from '../store/preview';
 import { formatLevel } from './format';
+import { songEndM } from './hooks';
 import { Icon } from './icons';
 import { thumb, useThumbs } from './thumbs';
 
@@ -22,11 +23,21 @@ interface Note {
   ch: number;
 }
 
-const noteCache = new WeakMap<object, { notes: Note[]; bars: { sec: number; m: number }[]; beats: number[] }>();
+interface Line {
+  sec: number;
+  /** 小節線・拍線の表示（C2）で消していなければ true */
+  show: boolean;
+}
 
-function notesOf(doc: ReturnType<typeof useEditor.getState>['doc']) {
+const noteCache = new WeakMap<object, { endM: number; notes: Note[]; bars: (Line & { m: number })[]; beats: Line[] }>();
+
+/**
+ * ノーツと小節線・拍線。線は曲の終わり（END。NX はこの小節線が判定ラインを過ぎると演奏を終える）まで。
+ * 小節線・拍線の表示（C2 の 01 で出す・02 で消す）に従う。endM が 0（何も分からない）なら最後のノーツの少し先まで
+ */
+function notesOf(doc: ReturnType<typeof useEditor.getState>['doc'], endM: number) {
   let v = noteCache.get(doc);
-  if (v) return v;
+  if (v && v.endM === endM) return v;
   const t = tempoOf(doc);
   const notes: Note[] = [];
   for (const c of doc.chips) {
@@ -36,17 +47,29 @@ function notesOf(doc: ReturnType<typeof useEditor.getState>['doc']) {
   }
   notes.sort((a, b) => a.sec - b.sec);
   const lastSec = notes.length ? notes[notes.length - 1].sec + 4 : 8;
-  const bars: { sec: number; m: number }[] = [];
-  const beats: number[] = [];
+  const toggles = doc.chips
+    .filter((c) => c.ch === CH.LINE_DISPLAY && (c.v === 1 || c.v === 2))
+    .map((c) => ({ pos: c.m + c.f.n / c.f.d, show: c.v === 1 }))
+    .sort((a, b) => a.pos - b.pos);
+  let ti = 0;
+  let show = true;
+  /** 位置 pos（小節）の線を出すか。pos は小さい順に聞く */
+  const visible = (pos: number) => {
+    while (ti < toggles.length && toggles[ti].pos <= pos + 1e-9) show = toggles[ti++].show;
+    return show;
+  };
+  const bars: (Line & { m: number })[] = [];
+  const beats: Line[] = [];
   for (let m = 0; m < 3600; m++) {
     const b0 = t.measureStart(m);
     const s0 = t.beatToSec(b0);
-    if (s0 > lastSec) break;
-    bars.push({ sec: s0, m });
+    if (endM <= 0 && s0 > lastSec) break;
+    bars.push({ sec: s0, m, show: visible(m) });
+    if (endM > 0 && m >= endM) break;
     const n = t.measureBeats(m);
-    for (let k = 1; k < n - 1e-6; k++) beats.push(t.beatToSec(b0 + k));
+    for (let k = 1; k < n - 1e-6; k++) beats.push({ sec: t.beatToSec(b0 + k), show: visible(m + k / n) });
   }
-  v = { notes, bars, beats };
+  v = { endM, notes, bars, beats };
   noteCache.set(doc, v);
   return v;
 }
@@ -100,7 +123,8 @@ export function NxPreview({ full = false }: { full?: boolean }) {
       const playing = engine.playing;
       const now = engine.heardSec() ?? t.beatToSec(Math.max(0, s.cursorBeat));
       const p = usePreview.getState();
-      const { notes, bars, beats } = notesOf(doc);
+      const endM = songEndM(doc);
+      const { notes, bars, beats } = notesOf(doc, endM);
       const order = useInputSettings.getState().laneOrder;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -154,21 +178,32 @@ export function NxPreview({ full = false }: { full?: boolean }) {
       const topSec = secAtY(-20);
       const botSec = secAtY(h + 20);
 
-      // 小節線・拍線
+      // 小節線・拍線（C2 で消した線は描かない）。最後の小節線が曲の終わり（END）
       for (const b of beats) {
-        if (b < botSec || b > topSec) continue;
-        const y = judgeY - (b - now) * pxPerSec;
+        if (!b.show || b.sec < botSec || b.sec > topSec) continue;
+        const y = judgeY - (b.sec - now) * pxPerSec;
         ctx.fillStyle = 'rgba(255,255,255,.06)';
         ctx.fillRect(x0, Math.round(y), laneArea, 1);
       }
       ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
       ctx.textAlign = 'right';
       for (let i = Math.max(0, lowerBound(bars, botSec) - 1); i < bars.length && bars[i].sec <= topSec; i++) {
-        const y = judgeY - (bars[i].sec - now) * pxPerSec;
-        ctx.fillStyle = 'rgba(255,255,255,.22)';
-        ctx.fillRect(x0, Math.round(y), laneArea, 1);
+        const bar = bars[i];
+        const y = judgeY - (bar.sec - now) * pxPerSec;
+        if (bar.show) {
+          ctx.fillStyle = 'rgba(255,255,255,.22)';
+          ctx.fillRect(x0, Math.round(y), laneArea, 1);
+        }
         ctx.fillStyle = 'rgba(255,255,255,.35)';
-        ctx.fillText(toMeasure(bars[i].m), x0 - 4, y + 3);
+        if (endM > 0 && bar.m === endM) {
+          // 曲の終わり：この線が判定ラインを過ぎると NX は演奏を終える（線を消していても印を出す）
+          ctx.textAlign = 'left';
+          ctx.fillStyle = 'rgba(231,235,241,.8)';
+          ctx.fillText('END', x0 + 4, y - 4);
+          ctx.textAlign = 'right';
+        } else {
+          ctx.fillText(toMeasure(bar.m), x0 - 4, y + 3);
+        }
       }
 
       // 叩いた瞬間の光

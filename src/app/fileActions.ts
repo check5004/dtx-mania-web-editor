@@ -27,7 +27,7 @@ import {
   type SongFolder,
 } from '../fs/folder';
 import { listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
-import { createDoc, edit, isDirty, openDocument, prepareSounds, toast, useEditor, type DocMeta } from '../store/editor';
+import { createDoc, edit, isDirty, openDocument, prepareSounds, toast, useEditor, withSongEnd, type DocMeta } from '../store/editor';
 import { bgmSource } from '../store/derived';
 import { freeWavNumber, setField } from '../edit/ops';
 import { toBase36x2 } from '../dtx/base36';
@@ -357,8 +357,9 @@ function creditNote(kit: { path: string; origin: string; library: boolean }[]): 
   return `。他の曲から取り込んだ音を使っています（出典: ${songs.slice(0, 3).join('、')}${songs.length > 3 ? ' ほか' : ''}）。個人の曲づくりの範囲で使ってください`;
 }
 
+/** 保存する DTX。曲の終わりを決めていなければ、いま見えている終わり（原曲の鳴り終わり）を書き込む */
 function encodeForSave(doc: DtxDoc) {
-  return encodeDtx(serializeDtx(doc), 'shift_jis');
+  return encodeDtx(serializeDtx(withSongEnd(doc)), 'shift_jis');
 }
 
 /** 作業ファイルの中身（空で、フォルダにも無ければ書かない） */
@@ -507,7 +508,7 @@ export async function autosaveNow(saved = false) {
     fileName: s.meta.fileName,
     folderName: s.folder?.name ?? '',
     dir: s.folder?.dir,
-    text: serializeDtx(s.doc),
+    text: serializeDtx(withSongEnd(s.doc)),
     sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()),
     saved: !isDirty(s),
     updatedAt: Date.now(),

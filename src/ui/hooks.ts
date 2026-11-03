@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DtxDoc } from '../dtx/model';
 import { useAssist } from '../store/assist';
-import { currentBeat, songEndSec, useEditor } from '../store/editor';
+import { contentEndSec, currentBeat, songEndMeasure, songEndSec, useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
+import { useStems } from '../store/stems';
 
 /** 再生中は再生位置、止まっていればカーソル位置（拍）。再生中は画面の更新に合わせて変わる */
 export function usePlayBeat(): number {
@@ -25,29 +26,58 @@ export function usePlayBeat(): number {
   return playing ? beat : cursor;
 }
 
-const lengthCache = new WeakMap<DtxDoc, { v: number; key: unknown[] }>();
+const lengthCache = new WeakMap<DtxDoc, { v: number; span: number; m: number; key: unknown[] }>();
 
 function lengthKey(): unknown[] {
-  return [useEditor.getState().soundsVersion, useEditor.getState().refVideoSec, useSidecar.getState().youtube?.offset, useAssist.getState().data];
+  return [useEditor.getState().soundsVersion, useEditor.getState().refVideoSec, useSidecar.getState().youtube?.offset, useAssist.getState().data, useStems.getState().version];
 }
 
-/** 曲の長さ（秒）。BGM の長さは音の読み込み後・解析後に、映像の長さは読み込み後に分かるので、そのたびに計算し直す */
-export function songLength(doc: DtxDoc): number {
+function lengths(doc: DtxDoc): { v: number; span: number; m: number } {
   const key = lengthKey();
   const c = lengthCache.get(doc);
-  if (c && c.key.every((v, i) => v === key[i])) return c.v;
-  const v = songEndSec(doc);
-  lengthCache.set(doc, { v, key });
-  return v;
+  if (c && c.key.every((v, i) => v === key[i])) return c;
+  const out = { v: songEndSec(doc), span: contentEndSec(doc), m: songEndMeasure(doc), key };
+  lengthCache.set(doc, out);
+  return out;
 }
 
-/** 曲の長さ（秒）。長さが変わったら再描画する */
-export function useSongLength(doc: DtxDoc): number {
+/**
+ * 曲の長さ（秒）＝曲の終わり（END の線）。原曲の長さは音の読み込み後・解析後に分かるので、そのたびに計算し直す。
+ * 参照映像の長さは、原曲ファイルが無いときだけ使う
+ */
+export function songLength(doc: DtxDoc): number {
+  return lengths(doc).v;
+}
+
+/** 全体を見渡す幅（秒）。曲の終わりと原曲の鳴り終わりの遅い方（終わりより後の原曲も見えるように） */
+export function songSpan(doc: DtxDoc): number {
+  return lengths(doc).span;
+}
+
+/** 曲の終わり（END の線）の小節。何も分からなければ 0 */
+export function songEndM(doc: DtxDoc): number {
+  return lengths(doc).m;
+}
+
+/** 長さが変わったら再描画する */
+function useLengthDeps() {
   useEditor((s) => s.soundsVersion);
   useEditor((s) => s.refVideoSec);
   useSidecar((s) => s.youtube?.offset);
   useAssist((s) => s.data);
+  useStems((s) => s.version);
+}
+
+/** 曲の長さ（秒）。長さが変わったら再描画する */
+export function useSongLength(doc: DtxDoc): number {
+  useLengthDeps();
   return songLength(doc);
+}
+
+/** 全体を見渡す幅（秒）。変わったら再描画する */
+export function useSongSpan(doc: DtxDoc): number {
+  useLengthDeps();
+  return songSpan(doc);
 }
 
 /** 音の読み込みが終わったら再描画するためのフック */

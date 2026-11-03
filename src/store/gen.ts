@@ -17,7 +17,7 @@ import { confirmDialog } from '../ui/dialogs';
 import { hasAiKey, runAi } from './ai';
 import { judgeDoc, type JudgeResult } from './aiLevel';
 import { levelOf } from './check';
-import { toast, useEditor } from './editor';
+import { songEndMeasure, toast, useEditor } from './editor';
 import { bandOf, guidelineText, levelOfField, loadGuideline, useGuideline } from './guideline';
 import { useSidecar } from './sidecar';
 
@@ -404,9 +404,12 @@ export async function writeOut(): Promise<boolean> {
     if (!ok) return false;
   }
   let memory = false;
+  // どの難易度も、元の譜面と同じ所で曲を終える（原曲の鳴り終わりに合わせているときも）
+  const end = songEndMeasure(g.master);
   for (const { diff, file } of files) {
     const ds = g.diffs[diff];
     const doc: DtxDoc = structuredClone(ds.result!.doc);
+    if (end > 0) doc.endMeasure = end;
     const lv = shownLevel(ds, g.calib);
     setField(doc, 'DLEVEL', levelToField(lv));
     const { bytes } = encodeDtx(serializeDtx(doc), 'shift_jis');

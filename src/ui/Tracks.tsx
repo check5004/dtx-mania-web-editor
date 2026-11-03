@@ -7,7 +7,7 @@ import { DRUM_LANES, drumChannel } from '../dtx/model';
 import { pickBgmFile } from '../app/fileActions';
 import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setLoop, setSpecSource, setWaveMode, useAssist, type LoopDrag } from '../store/assist';
 import { bgmSource, tempoOf, wavPath } from '../store/derived';
-import { openPage, playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
+import { dragSongEnd, openPage, playFrom, resetSongEnd, setCursorBeat, setView, useEditor } from '../store/editor';
 import { maxTracksH, SEEK_CLOSED_H, togglePanel, useLayout } from '../store/layout';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
@@ -26,7 +26,7 @@ import {
   useStems,
 } from '../store/stems';
 import { formatTime } from './format';
-import { usePlayBeat, useSoundsVersion } from './hooks';
+import { songLength, usePlayBeat, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 
 /** トラックの見出しの幅 */
@@ -113,22 +113,45 @@ function peaksOfOrig(): Float32Array | null {
 
 // ---- 操作（シーク・ループ） --------------------------------------------------------
 
-type SeekDrag = { type: 'seek' } | { type: 'loop'; ld: LoopDrag; x0: number } | null;
+type SeekDrag = { type: 'seek' } | { type: 'loop'; ld: LoopDrag; x0: number } | { type: 'end'; group: string } | null;
 
-/** 上の帯とトラックの両方で使う、クリックで再生を始める位置・ループの端のドラッグ */
-function useSeekPointer(length: number, ruler: boolean) {
+/** 上の帯の「END」の札の幅 */
+const END_TAB_W = 26;
+
+/** END の札の左端（線の右に出す。右端で入らなければ線の左） */
+function endTabX(xe: number, W: number): number {
+  return xe + END_TAB_W + 1 <= W ? xe + 1 : xe - END_TAB_W - 1;
+}
+
+/**
+ * 上の帯とトラックの両方で使う、クリックで再生を始める位置・ループの端・曲の終わり（END）のドラッグ。
+ * span: 横幅に入れる長さ（秒）
+ */
+function useSeekPointer(span: number, ruler: boolean) {
   const drag = useRef<SeekDrag>(null);
   const geomAt = (c: HTMLCanvasElement, clientX: number, clientY: number) => {
     const r = c.getBoundingClientRect();
-    const sec = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * seekLength(length);
+    const sec = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * seekLength(span);
     const tempo = tempoOf(useEditor.getState().doc);
     return { beat: tempo.secToBeat(sec), y: clientY - r.top, x: clientX - r.left, w: r.width };
+  };
+  /** 曲の終わり（END）の線の近く。上の帯では「END」の札も */
+  const nearEnd = (x: number, y: number, w: number): boolean => {
+    const end = songLength(useEditor.getState().doc);
+    if (end <= 0) return false;
+    const xe = (end / seekLength(span)) * w;
+    if (ruler) {
+      if (y < LOOP_H + 1) return false;
+      const tx = endTabX(xe, w);
+      if (y >= SEC_TOP && y <= SEC_TOP + SEC_H && x >= tx - 1 && x <= tx + END_TAB_W + 1) return true;
+    }
+    return Math.abs(x - xe) <= 5;
   };
   /** A・B の線の近く（どの段でも掴める）。上の帯では線の外に出ている印（A は左、B は右）も */
   const nearHandle = (x: number, w: number): boolean => {
     const { loop: l, loopMark: mk } = useAssist.getState();
     const tempo = tempoOf(useEditor.getState().doc);
-    const len = seekLength(length);
+    const len = seekLength(span);
     const xOf = (b: number) => (tempo.beatToSec(b) / len) * w;
     const near = (xl: number, side: 'a' | 'b') =>
       Math.abs(x - xl) <= 6 || (ruler && (side === 'a' ? x >= xl - 12 && x < xl : x > xl && x <= xl + 12));
@@ -137,7 +160,7 @@ function useSeekPointer(length: number, ruler: boolean) {
   };
   const beatTol = (w: number) => {
     const tempo = tempoOf(useEditor.getState().doc);
-    const secPerPx = seekLength(length) / Math.max(1, w);
+    const secPerPx = seekLength(span) / Math.max(1, w);
     return tempo.secToBeat(secPerPx * 8) - tempo.secToBeat(0);
   };
   const inBand = (y: number) => ruler && y < LOOP_H + 1;
@@ -168,6 +191,11 @@ function useSeekPointer(length: number, ruler: boolean) {
         }
         return;
       }
+      if (nearEnd(g.x, g.y, g.w)) {
+        // 曲の終わり（END）：ドラッグで小節の頭へ（Undo 1回で戻せるようにまとめる）
+        drag.current = { type: 'end', group: `song-end-${Date.now()}` };
+        return;
+      }
       drag.current = { type: 'seek' };
       seek(c, e.clientX, false);
     },
@@ -176,10 +204,11 @@ function useSeekPointer(length: number, ruler: boolean) {
       const d = drag.current;
       const g = geomAt(c, e.clientX, e.clientY);
       if (!d) {
-        c.style.cursor = nearHandle(g.x, g.w) ? 'ew-resize' : inBand(g.y) ? 'crosshair' : 'pointer';
+        c.style.cursor = nearHandle(g.x, g.w) || nearEnd(g.x, g.y, g.w) ? 'ew-resize' : inBand(g.y) ? 'crosshair' : 'pointer';
         return;
       }
       if (d.type === 'seek') seek(c, e.clientX, false);
+      else if (d.type === 'end') dragSongEnd(g.beat, d.group);
       else dragLoop(d.ld, g.beat, LOOP_DIV, Math.abs(e.clientX - d.x0) > 3);
     },
     onPointerUp: (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -187,7 +216,13 @@ function useSeekPointer(length: number, ruler: boolean) {
       drag.current = null;
       if (!d) return;
       if (d.type === 'seek') seek(e.currentTarget, e.clientX, true);
-      else endLoopDrag(d.ld);
+      else if (d.type === 'loop') endLoopDrag(d.ld);
+    },
+    onDoubleClick: (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const g = geomAt(e.currentTarget, e.clientX, e.clientY);
+      if (nearHandle(g.x, g.w) || !nearEnd(g.x, g.y, g.w)) return;
+      // END のダブルクリック：決めた終わりをやめて、原曲の鳴り終わりに合わせる
+      resetSongEnd();
     },
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
   };
@@ -219,11 +254,43 @@ function useDraw(ref: React.RefObject<HTMLCanvasElement | null>, draw: (ctx: Can
   }, deps);
 }
 
-/** ループ（範囲と A・B の線。A だけ・B だけならその点線）・再生を始める位置（▶）・再生位置を上に重ねる */
-function drawOverlay(ctx: CanvasRenderingContext2D, W: number, H: number, length: number, top: number, opts: { tabs: boolean; cursor: number; beat: number; playing: boolean }) {
+/**
+ * 曲の終わり（END。その先を暗く）・ループ（範囲と A・B の線。A だけ・B だけならその点線）・再生を始める位置（▶）・再生位置を上に重ねる。
+ * span: 横幅に入れる長さ（秒）、end: 曲の終わり（秒）
+ */
+function drawOverlay(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  span: number,
+  top: number,
+  opts: { tabs: boolean; cursor: number; beat: number; playing: boolean; end: number },
+) {
   const doc = useEditor.getState().doc;
   const tempo = tempoOf(doc);
-  const len = seekLength(length);
+  const len = seekLength(span);
+  if (opts.end > 0) {
+    const xe = Math.round((opts.end / len) * W);
+    if (xe < W) {
+      ctx.fillStyle = 'rgba(4,6,9,.55)';
+      ctx.fillRect(xe, top, W - xe, H - top);
+    }
+    ctx.fillStyle = 'rgba(231,235,241,.85)';
+    ctx.fillRect(xe - 1, top, 2, H - top);
+    if (opts.tabs) {
+      const tx = endTabX(xe, W);
+      ctx.beginPath();
+      ctx.roundRect(tx, SEC_TOP, END_TAB_W, SEC_H, 2);
+      ctx.fillStyle = '#E7EBF1';
+      ctx.fill();
+      ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#0B0E13';
+      ctx.fillText('END', tx + END_TAB_W / 2, SEC_TOP + SEC_H / 2 + 0.5);
+      ctx.textAlign = 'left';
+    }
+  }
   const { loop, loopMark } = useAssist.getState();
   const xOf = (b: number) => (tempo.beatToSec(Math.max(0, b)) / len) * W;
   const tab = (x: number, label: string, col: string) => {
@@ -302,7 +369,8 @@ export function releaseFocus(e: React.PointerEvent<HTMLElement>) {
   if (a && a !== document.body && e.currentTarget.contains(a) && a.tagName !== 'SELECT') a.blur();
 }
 
-export function TrackPanel({ length }: { length: number }) {
+/** length: 曲の長さ（曲の終わり END。秒）、span: 横幅に入れる長さ（END と原曲の鳴り終わりの遅い方） */
+export function TrackPanel({ length, span }: { length: number; span: number }) {
   const open = useLayout((s) => s.seekOpen);
   const tracksH = useLayout((s) => s.tracksH);
   const [winH, setWinH] = useState(() => window.innerHeight);
@@ -320,7 +388,7 @@ export function TrackPanel({ length }: { length: number }) {
     <div className="tracks" style={{ height }} onPointerUp={releaseFocus}>
       <div className="tracks-top" style={{ height: RULER_H }}>
         <Corner length={length} open={open} />
-        <Ruler length={length} />
+        <Ruler length={length} span={span} />
       </div>
       {open && (
         <div className="tracks-body scroll" style={{ height: bodyH }}>
@@ -330,7 +398,7 @@ export function TrackPanel({ length }: { length: number }) {
                 <TrackHead key={r.id} row={r} h={rowH} />
               ))}
             </div>
-            <Lanes rows={rows} rowH={rowH} length={length} />
+            <Lanes rows={rows} rowH={rowH} length={length} span={span} />
           </div>
         </div>
       )}
@@ -384,8 +452,8 @@ function Corner({ length, open }: { length: number; open: boolean }) {
   );
 }
 
-/** 上の帯：ループ（A–B）とセクション */
-function Ruler({ length }: { length: number }) {
+/** 上の帯：ループ（A–B）とセクション、曲の終わり（END）の札 */
+function Ruler({ length, span }: { length: number; span: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const doc = useEditor((s) => s.doc);
   const beat = usePlayBeat();
@@ -396,11 +464,11 @@ function Ruler({ length }: { length: number }) {
   const sections = useSidecar((s) => s.sections);
   const colors = useSidecar((s) => s.sectionColors);
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
-  const handlers = useSeekPointer(length, true);
+  const handlers = useSeekPointer(span, true);
   useDraw(
     ref,
     (ctx, W, H, dpr) => {
-      const len = seekLength(length);
+      const len = seekLength(span);
       const tempo = tempoOf(doc);
       const key = [doc, W, H, len, sections, colors, dpr];
       if (!cache.current || cache.current.key.some((v, i) => v !== key[i])) {
@@ -453,23 +521,23 @@ function Ruler({ length }: { length: number }) {
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
       ctx.drawImage(cache.current.canvas, 0, 0);
       ctx.restore();
-      drawOverlay(ctx, W, H, length, SEC_TOP, { tabs: true, cursor, beat, playing });
+      drawOverlay(ctx, W, H, span, SEC_TOP, { tabs: true, cursor, beat, playing, end: length });
     },
-    [doc, length, beat, cursor, playing, loop, loopMark, sections, colors],
+    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, colors],
   );
   return (
     <canvas
       ref={ref}
       className="tracks-ruler"
       {...handlers}
-      aria-label="ループの帯とセクション。クリックで再生を始める位置、上の帯のドラッグでループの範囲"
-      title="クリック: 再生を始める位置（▶）/ 上の帯をドラッグ: ループ（A–B）の範囲、A・B の印をドラッグで端を動かす / 右クリック（上の帯）: ループを消す"
+      aria-label="ループの帯とセクション。クリックで再生を始める位置、上の帯のドラッグでループの範囲、END の札のドラッグで曲の終わり"
+      title="クリック: 再生を始める位置（▶）/ 上の帯をドラッグ: ループ（A–B）の範囲、A・B の印をドラッグで端を動かす / 右クリック（上の帯）: ループを消す / END の札をドラッグ: 曲の終わりを動かす（ダブルクリックで原曲の終わりに戻す）"
     />
   );
 }
 
 /** トラックの波形（原曲・ステム）と譜面の音（レーンごとの色の印） */
-function Lanes({ rows, rowH, length }: { rows: Row[]; rowH: number; length: number }) {
+function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length: number; span: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const doc = useEditor((s) => s.doc);
   const mix = useEditor((s) => s.mix);
@@ -483,13 +551,13 @@ function Lanes({ rows, rowH, length }: { rows: Row[]; rowH: number; length: numb
   const version = useStems((s) => s.version);
   const sounds = useSoundsVersion();
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
-  const handlers = useSeekPointer(length, false);
+  const handlers = useSeekPointer(span, false);
   const H = rows.length * rowH;
   const audible = rows.map(rowAudible).join('');
   useDraw(
     ref,
     (ctx, W, Hc, dpr) => {
-      const len = seekLength(length);
+      const len = seekLength(span);
       const tempo = tempoOf(doc);
       const bgm = bgmSource(doc);
       const at = bgm?.sec ?? 0;
@@ -573,9 +641,9 @@ function Lanes({ rows, rowH, length }: { rows: Row[]; rowH: number; length: numb
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
       ctx.drawImage(cache.current.canvas, 0, 0);
       ctx.restore();
-      drawOverlay(ctx, W, Hc, length, 0, { tabs: false, cursor, beat, playing });
+      drawOverlay(ctx, W, Hc, span, 0, { tabs: false, cursor, beat, playing, end: length });
     },
-    [doc, length, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix],
+    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix],
   );
   return (
     <canvas
@@ -583,8 +651,8 @@ function Lanes({ rows, rowH, length }: { rows: Row[]; rowH: number; length: numb
       className="tracks-lanes"
       style={{ height: H }}
       {...handlers}
-      aria-label="トラックの波形。クリックで再生を始める位置、A・B の線をドラッグでループの端"
-      title="クリック: 再生を始める位置（▶）/ A・B の線をドラッグ: ループの端を動かす"
+      aria-label="トラックの波形。クリックで再生を始める位置、A・B の線をドラッグでループの端、END の線のドラッグで曲の終わり"
+      title="クリック: 再生を始める位置（▶）/ A・B の線をドラッグ: ループの端を動かす / END（白い線）をドラッグ: 曲の終わりを動かす"
     />
   );
 }

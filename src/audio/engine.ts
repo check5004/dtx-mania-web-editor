@@ -728,6 +728,13 @@ class AudioEngine {
     if (clicks) run.clickIdx = lowerBound(clicks, run.sched);
   }
 
+  /** 再生中に止める位置を変える（曲の終わりを動かしたとき） */
+  setEndSec(endSec: number) {
+    const run = this.run;
+    if (!run || !Number.isFinite(endSec) || run.req.endSec === endSec) return;
+    run.req = { ...run.req, endSec };
+  }
+
   /** 再生中にループの範囲を変える（null で解除） */
   setLoop(loop: LoopRange | null) {
     const run = this.run;

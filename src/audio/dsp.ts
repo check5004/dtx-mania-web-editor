@@ -152,3 +152,24 @@ export function fft(re: Float32Array, im: Float32Array) {
     }
   }
 }
+
+/** 鳴り終わりとみなす音の大きさ（約 -54dBFS）。フェードアウトの最後やエンコーダの無音の詰め物は数えない */
+export const AUDIBLE_FLOOR = 0.002;
+
+/**
+ * 音の鳴り終わり（秒）。末尾の、どのチャンネルも floor 以下の所は鳴っていないとみなす。
+ * 全部が小さい音なら長さそのまま。後ろから探すので長い曲でも速い
+ */
+export function audibleEnd(buf: { numberOfChannels: number; sampleRate: number; duration: number; getChannelData(c: number): Float32Array }, floor = AUDIBLE_FLOOR): number {
+  let last = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const x = buf.getChannelData(c);
+    for (let i = x.length - 1; i >= last; i--) {
+      if (Math.abs(x[i]) > floor) {
+        last = i + 1;
+        break;
+      }
+    }
+  }
+  return last > 0 ? last / buf.sampleRate : buf.duration;
+}

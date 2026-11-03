@@ -4,7 +4,7 @@ import { bgmSource, docStats } from '../store/derived';
 import { isDirty, useEditor } from '../store/editor';
 import { formatTime } from './format';
 import { stemsActive, useStems } from '../store/stems';
-import { useSongLength, useSoundsVersion } from './hooks';
+import { songEndM, useSongLength, useSongSpan, useSoundsVersion } from './hooks';
 import { TrackPanel } from './Tracks';
 
 /** 下のトラック（原曲・ステム・譜面の音。上の帯はループとセクション）と状態の表示 */
@@ -22,6 +22,7 @@ export function Footer() {
   const missing = missingAll.filter((n) => n !== anchor);
   const stats = docStats(doc);
   const length = useSongLength(doc);
+  const span = useSongSpan(doc);
 
   const where = folder?.dir
     ? `${folder.name}/${meta.fileName}（曲フォルダに直接保存）`
@@ -32,13 +33,13 @@ export function Footer() {
   return (
     <footer className="footer">
       <HSplitter />
-      <TrackPanel length={length} />
+      <TrackPanel length={length} span={span} />
       <div className="status">
         <span>
           ノーツ <b>{stats.notes.toLocaleString()}</b>
         </span>
         <span>
-          小節 <b>{stats.measures}</b>
+          小節 <b>{Math.max(stats.measures, songEndM(doc))}</b>
         </span>
         <span>
           WAV <b>{stats.wavCount}</b>
