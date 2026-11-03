@@ -25,6 +25,7 @@ export function Transport() {
   const tempo = tempoOf(doc);
   const { m } = tempo.locate(beat);
   const loop = useAssist((s) => s.loop);
+  const loopMark = useAssist((s) => s.loopMark);
   const speed = useAssist((s) => s.speed);
   const inputMode = useAssist((s) => s.inputMode);
   const stretching = useAssist((s) => s.stretching);
@@ -42,6 +43,17 @@ export function Transport() {
     setSpeed(v);
     if (useEditor.getState().playing) void playFrom(currentBeat(), { keepStart: true });
   };
+  // ループの範囲の表示。A だけ・B だけのときは、決まっていない方を「?」にする
+  const half = loop ? null : loopMark;
+  const rangeText = loop ? `${short(loop.a)}–${short(loop.b)}` : half ? (half.side === 'a' ? `${short(half.beat)}–?` : `?–${short(half.beat)}`) : '—';
+  const rangeTip = loop
+    ? 'ループの範囲（A–B）'
+    : half
+      ? half.side === 'a'
+        ? 'A（始まり）だけ決めています。B（O）を押すとループします'
+        : 'B（終わり）だけ決めています。A（I）を押すとループします'
+      : 'ループの範囲はまだありません。A（I）と B（O）を1つずつ決めるとループします';
+  const clearLabel = loop ? 'ループの範囲を消す' : half ? `${half.side === 'a' ? 'A' : 'B'} を消す` : null;
 
   return (
     <div className="transport">
@@ -105,23 +117,33 @@ export function Transport() {
           title={
             loop
               ? 'ループ再生のオン・オフ（/）。範囲は譜面の左端・下の波形・右の全体図の「A・B」の帯をドラッグして変えられます'
-              : 'ループ再生（/）。範囲が無いときは今の小節（チップを選んでいればその小節）をループします。譜面の左端の帯をドラッグしても作れます'
+              : half
+                ? `ループ再生（/）。${half.side === 'a' ? 'B（O）' : 'A（I）'}を決めるとループします`
+                : 'ループ再生（/）。範囲が無いときは今の小節（チップを選んでいればその小節）をループします。譜面の左端の帯をドラッグしても作れます'
           }
         >
           {Icon.loop(14)}
           ループ
         </button>
-        <button className="ab-btn" onClick={() => setLoopPoint('a')} title="今の位置を A（ループの始まり）にする（I）">
+        <button
+          className={`ab-btn ${half?.side === 'b' ? 'next' : ''}`}
+          onClick={() => setLoopPoint('a')}
+          title={half?.side === 'b' ? '今の位置を A（ループの始まり）にしてループする（I）' : '今の位置を A（ループの始まり）にする（I）。B も決めるとループします'}
+        >
           A
         </button>
-        <span className={`ab-range mono ${loop?.on ? 'on' : ''}`} title={loop ? 'ループの範囲（A–B）' : 'ループの範囲はまだありません'}>
-          {loop ? `${short(loop.a)}–${short(loop.b)}` : '—'}
+        <span className={`ab-range mono ${loop?.on ? 'on' : half ? 'half' : ''}`} title={rangeTip}>
+          {rangeText}
         </span>
-        <button className="ab-btn" onClick={() => setLoopPoint('b')} title="今の位置を B（ループの終わり）にする（O）">
+        <button
+          className={`ab-btn ${half?.side === 'a' ? 'next' : ''}`}
+          onClick={() => setLoopPoint('b')}
+          title={half?.side === 'a' ? '今の位置を B（ループの終わり）にしてループする（O）' : '今の位置を B（ループの終わり）にする（O）。A も決めるとループします'}
+        >
           B
         </button>
-        {loop && (
-          <button className="ib" style={{ width: 20, height: 24 }} onClick={() => setLoop(null)} title="ループの範囲を消す" aria-label="ループの範囲を消す">
+        {clearLabel && (
+          <button className="ib" style={{ width: 20, height: 24 }} onClick={() => setLoop(null)} title={clearLabel} aria-label={clearLabel}>
             ✕
           </button>
         )}

@@ -124,15 +124,16 @@ function useSeekPointer(length: number, ruler: boolean) {
     const tempo = tempoOf(useEditor.getState().doc);
     return { beat: tempo.secToBeat(sec), y: clientY - r.top, x: clientX - r.left, w: r.width };
   };
-  /** A・B の線の近く（どの段でも掴める） */
+  /** A・B の線の近く（どの段でも掴める）。上の帯では線の外に出ている印（A は左、B は右）も */
   const nearHandle = (x: number, w: number): boolean => {
-    const l = useAssist.getState().loop;
-    if (!l || l.b <= l.a) return false;
+    const { loop: l, loopMark: mk } = useAssist.getState();
     const tempo = tempoOf(useEditor.getState().doc);
     const len = seekLength(length);
-    const xa = (tempo.beatToSec(l.a) / len) * w;
-    const xb = (tempo.beatToSec(l.b) / len) * w;
-    return Math.abs(x - xa) <= 6 || Math.abs(x - xb) <= 6 || (ruler && ((x >= xa - 12 && x < xa) || (x > xb && x <= xb + 12)));
+    const xOf = (b: number) => (tempo.beatToSec(b) / len) * w;
+    const near = (xl: number, side: 'a' | 'b') =>
+      Math.abs(x - xl) <= 6 || (ruler && (side === 'a' ? x >= xl - 12 && x < xl : x > xl && x <= xl + 12));
+    if (l && l.b > l.a) return near(xOf(l.a), 'a') || near(xOf(l.b), 'b');
+    return !!mk && near(xOf(mk.beat), mk.side);
   };
   const beatTol = (w: number) => {
     const tempo = tempoOf(useEditor.getState().doc);
@@ -156,13 +157,14 @@ function useSeekPointer(length: number, ruler: boolean) {
       }
       if (e.button !== 0) return;
       c.setPointerCapture(e.pointerId);
-      if (inBand(g.y) || nearHandle(g.x, g.w)) {
+      const near = nearHandle(g.x, g.w);
+      if (inBand(g.y) || near) {
         drag.current = { type: 'loop', ld: beginLoopDrag(g.beat, beatTol(g.w)), x0: e.clientX };
-        // 線を掴んだのに範囲の外と判定されたら、近い方の端にする
+        // 線・印を掴んだのに範囲の外（や中）と判定されたら、近い方の端（A だけ・B だけならその印）にする
         const ld = drag.current.ld;
-        if (!inBand(g.y) && (ld.mode === 'new' || ld.mode === 'move')) {
-          const l = useAssist.getState().loop!;
-          ld.mode = Math.abs(g.beat - l.a) < Math.abs(g.beat - l.b) ? 'a' : 'b';
+        if (near && (ld.mode === 'new' || ld.mode === 'move')) {
+          const l = useAssist.getState().loop;
+          ld.mode = !l || l.b <= l.a ? 'mark' : Math.abs(g.beat - l.a) < Math.abs(g.beat - l.b) ? 'a' : 'b';
         }
         return;
       }
@@ -217,13 +219,25 @@ function useDraw(ref: React.RefObject<HTMLCanvasElement | null>, draw: (ctx: Can
   }, deps);
 }
 
-/** ループ（範囲と A・B の線）・再生を始める位置（▶）・再生位置を上に重ねる */
+/** ループ（範囲と A・B の線。A だけ・B だけならその点線）・再生を始める位置（▶）・再生位置を上に重ねる */
 function drawOverlay(ctx: CanvasRenderingContext2D, W: number, H: number, length: number, top: number, opts: { tabs: boolean; cursor: number; beat: number; playing: boolean }) {
   const doc = useEditor.getState().doc;
   const tempo = tempoOf(doc);
   const len = seekLength(length);
-  const loop = useAssist.getState().loop;
+  const { loop, loopMark } = useAssist.getState();
   const xOf = (b: number) => (tempo.beatToSec(Math.max(0, b)) / len) * W;
+  const tab = (x: number, label: string, col: string) => {
+    ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.roundRect(x, 0, 12, LOOP_H, 2);
+    ctx.fill();
+    ctx.fillStyle = '#1A1408';
+    ctx.fillText(label, x + 6, LOOP_H / 2 + 0.5);
+    ctx.textAlign = 'left';
+  };
   if (loop && loop.b > loop.a) {
     const xa = xOf(loop.a);
     const xb = xOf(loop.b);
@@ -239,21 +253,24 @@ function drawOverlay(ctx: CanvasRenderingContext2D, W: number, H: number, length
     ctx.fillRect(Math.round(xa), 0, 1, H);
     ctx.fillRect(Math.round(xb) - 1, 0, 1, H);
     if (opts.tabs) {
-      ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const tab = (x: number, label: string) => {
-        ctx.fillStyle = col;
-        ctx.beginPath();
-        ctx.roundRect(x, 0, 12, LOOP_H, 2);
-        ctx.fill();
-        ctx.fillStyle = '#1A1408';
-        ctx.fillText(label, x + 6, LOOP_H / 2 + 0.5);
-      };
       // A は線の左、B は線の右（重ならない）
-      tab(xa - 12, 'A');
-      tab(xb, 'B');
-      ctx.textAlign = 'left';
+      tab(xa - 12, 'A', col);
+      tab(xb, 'B', col);
+    }
+  } else if (loopMark) {
+    // 片方だけ：もう片方を決めるまでループしないので、線は点線
+    const x = Math.round(xOf(loopMark.beat)) - (loopMark.side === 'b' ? 1 : 0);
+    ctx.strokeStyle = '#FFC768';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (opts.tabs) {
+      if (loopMark.side === 'a') tab(x - 12, 'A', '#FFC768');
+      else tab(x + 1, 'B', '#FFC768');
     }
   }
   // 再生を始める位置（▶）
@@ -375,6 +392,7 @@ function Ruler({ length }: { length: number }) {
   const cursor = useEditor((s) => s.cursorBeat);
   const playing = useEditor((s) => s.playing);
   const loop = useAssist((s) => s.loop);
+  const loopMark = useAssist((s) => s.loopMark);
   const sections = useSidecar((s) => s.sections);
   const colors = useSidecar((s) => s.sectionColors);
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
@@ -437,7 +455,7 @@ function Ruler({ length }: { length: number }) {
       ctx.restore();
       drawOverlay(ctx, W, H, length, SEC_TOP, { tabs: true, cursor, beat, playing });
     },
-    [doc, length, beat, cursor, playing, loop, sections, colors],
+    [doc, length, beat, cursor, playing, loop, loopMark, sections, colors],
   );
   return (
     <canvas
@@ -459,6 +477,7 @@ function Lanes({ rows, rowH, length }: { rows: Row[]; rowH: number; length: numb
   const cursor = useEditor((s) => s.cursorBeat);
   const playing = useEditor((s) => s.playing);
   const loop = useAssist((s) => s.loop);
+  const loopMark = useAssist((s) => s.loopMark);
   const sections = useSidecar((s) => s.sections);
   const stems = useSidecar((s) => s.stems);
   const version = useStems((s) => s.version);
@@ -556,7 +575,7 @@ function Lanes({ rows, rowH, length }: { rows: Row[]; rowH: number; length: numb
       ctx.restore();
       drawOverlay(ctx, W, Hc, length, 0, { tabs: false, cursor, beat, playing });
     },
-    [doc, length, beat, cursor, playing, loop, sections, stems, version, sounds, rowH, rows.length, audible, mix],
+    [doc, length, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix],
   );
   return (
     <canvas

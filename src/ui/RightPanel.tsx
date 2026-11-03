@@ -82,7 +82,7 @@ function SelectionCard() {
           <div>小節番号の列・波形をクリック … 再生を始める位置（▶）</div>
           <div>左端の A・B の帯をドラッグ … ループの範囲</div>
           <div>
-            <kbd>I</kbd> <kbd>O</kbd> … 今の位置を A・B に、<kbd>/</kbd> … ループのオン・オフ
+            <kbd>I</kbd> <kbd>O</kbd> … 今の位置を A・B に（両方決めるとループ）、<kbd>/</kbd> … ループのオン・オフ
           </div>
           <div>
             <kbd>Ctrl</kbd>+ホイール … ズーム、<kbd>[</kbd> <kbd>]</kbd> … グリッド

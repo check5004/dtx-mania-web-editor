@@ -4,20 +4,16 @@ import { pickOnsets, type AnalysisData, type Band, type Onset } from '../audio/a
 import { engine, type BgmFilter, type StretchProvider } from '../audio/engine';
 import * as wk from '../audio/workerClient';
 import type { SpecMode } from '../audio/spectro';
+import { grabLoop, placeLoopPoint, type LoopBeats, type LoopGrab, type LoopMark } from '../assist/loopPoints';
 import { copyMeasureInto, measureSignatures, sameMeasures } from '../assist/similar';
 import type { DtxDoc } from '../dtx/model';
 import { bgmSource, tempoOf, wavPath } from './derived';
 import { snapToGrid } from '../edit/ops';
-import { edit, useEditor } from './editor';
+import { edit, toast, useEditor } from './editor';
+
+export type { LoopBeats, LoopMark } from '../assist/loopPoints';
 
 export type InputMode = 'mouse' | 'key' | 'rec';
-
-export interface LoopBeats {
-  on: boolean;
-  /** 拍（曲頭=0） */
-  a: number;
-  b: number;
-}
 
 export interface AssistState {
   /** 解析している原曲 */
@@ -41,7 +37,10 @@ export interface AssistState {
   audioCols: boolean;
   /** 「原曲の打点」の列に出す打点の感度（0〜1） */
   sensitivity: number;
+  /** ループの範囲（A と B の両方が決まったとき） */
   loop: LoopBeats | null;
+  /** A だけ・B だけ決めたときの印（もう片方を決めると loop になる。loop と同時には持たない） */
+  loopMark: LoopMark | null;
   speed: number;
   bandFilter: BgmFilter;
   mute: readonly number[];
@@ -98,6 +97,7 @@ export const useAssist = create<AssistState>(() => ({
   audioCols: true,
   sensitivity: 0.5,
   loop: null,
+  loopMark: null,
   speed: 1,
   bandFilter: 'all',
   mute: [],
@@ -268,8 +268,9 @@ export function bandOnsets(): Record<Band, Onset[]> | null {
 
 // ---- ループ・速度・ミックス ----------------------------------------------------------
 
+/** ループの範囲を決める（null で消す）。A だけ・B だけの印も消える */
 export function setLoop(loop: LoopBeats | null, opts: { engine?: boolean } = {}) {
-  aset({ loop });
+  aset({ loop, loopMark: null });
   if (opts.engine !== false) applyLoopToEngine();
 }
 
@@ -294,11 +295,22 @@ function hereBeat(): number {
   return sec === null ? s.cursorBeat : tempoOf(s.doc).secToBeat(sec);
 }
 
-/** ループのオン・オフ。範囲が無ければ、選んだチップの小節か今の位置の小節で作る */
+/**
+ * ループのオン・オフ。範囲が無ければ、選んだチップの小節か今の位置の小節で作る。
+ * A だけ・B だけ決めているときは、もう片方を勝手に作らずに知らせる。
+ */
 export function toggleLoop() {
-  const loop = aget().loop;
+  const { loop, loopMark } = aget();
   if (loop) {
     setLoop({ ...loop, on: !loop.on });
+    return;
+  }
+  if (loopMark) {
+    toast(
+      loopMark.side === 'a'
+        ? 'ループの終わり（B）がまだ決まっていません。B ボタンか O キーで決めるとループします'
+        : 'ループの始まり（A）がまだ決まっていません。A ボタンか I キーで決めるとループします',
+    );
     return;
   }
   const s = useEditor.getState();
@@ -321,31 +333,24 @@ export function toggleLoop() {
 }
 
 /**
- * 今の位置を A（ループの始まり）か B（終わり）にする。範囲が無ければ1小節ぶんで作る。
- * A が B を越えたら B を、B が A より前なら A を1小節ずらす。
+ * 今の位置を A（ループの始まり）か B（終わり）にする。もう片方も決まっていれば、その範囲でループする。
+ * もう片方がまだなら、押した方だけを決めておく（B を押すまでは A だけ）。
+ * A を B 以降に、B を A 以前に置いたときは、もう片方を消して押した方だけにする。
  */
 export function setLoopPoint(which: 'a' | 'b', beat = hereBeat()) {
   // ループの端は拍に吸着する（聴きながら押すと少し遅れるので、近い拍へ）
-  const b0 = snapBeat(beat, LOOP_DIV);
-  const t = tempoOf(useEditor.getState().doc);
-  const cur = aget().loop;
-  const barAt = (x: number) => t.measureBeats(t.locate(Math.max(0, x)).m);
-  if (which === 'a') {
-    const b = cur && cur.b > b0 + 1e-6 ? cur.b : b0 + barAt(b0);
-    setLoop({ on: true, a: b0, b });
-  } else {
-    let a = cur && cur.a < b0 - 1e-6 ? cur.a : Math.max(0, b0 - barAt(Math.max(0, b0 - 1e-6)));
-    if (b0 - a < 1e-6) a = 0;
-    if (b0 <= 1e-6) return;
-    setLoop({ on: true, a, b: b0 });
-  }
+  const at = snapBeat(beat, LOOP_DIV);
+  const { loop, loopMark } = aget();
+  const next = placeLoopPoint({ loop, mark: loopMark }, which, at);
+  aset({ loop: next.loop, loopMark: next.mark });
+  applyLoopToEngine();
 }
 
 /** ループの端を吸着させる細かさ（4 = 拍） */
 export const LOOP_DIV = 4;
 
-/** ループの範囲をドラッグで変える（譜面・下の波形・全体図で共通） */
-export type LoopDragMode = 'new' | 'a' | 'b' | 'move';
+/** ループの範囲をドラッグで変える（譜面・下の波形・全体図で共通）。mark は A だけ・B だけの印 */
+export type LoopDragMode = LoopGrab;
 export interface LoopDrag {
   mode: LoopDragMode;
   /** 押したところの拍 */
@@ -355,19 +360,18 @@ export interface LoopDrag {
   moved: boolean;
 }
 
-/** どこを掴んだか（A・B の印の近く・範囲の中・空いた所） */
-export function loopGrab(beat: number, tol: number): LoopDragMode {
-  const l = aget().loop;
-  if (!l || l.b <= l.a) return 'new';
-  if (Math.abs(beat - l.a) <= tol && Math.abs(beat - l.a) <= Math.abs(beat - l.b)) return 'a';
-  if (Math.abs(beat - l.b) <= tol) return 'b';
-  if (beat > l.a && beat < l.b) return 'move';
-  return 'new';
+/**
+ * どこを掴んだか（A・B の印の近く・範囲の中・空いた所）。
+ * tab: 線の外側に出ている印の長さ（拍。A の印は線の前、B の印は後ろ）。印の上を押しても端を掴む
+ */
+export function loopGrab(beat: number, tol: number, tab = tol): LoopDragMode {
+  const { loop, loopMark } = aget();
+  return grabLoop({ loop, mark: loopMark }, beat, tol, tab);
 }
 
-export function beginLoopDrag(beat: number, tol: number): LoopDrag {
+export function beginLoopDrag(beat: number, tol: number, tab = tol): LoopDrag {
   const l = aget().loop;
-  return { mode: loopGrab(beat, tol), origin: beat, a0: l?.a ?? beat, b0: l?.b ?? beat, moved: false };
+  return { mode: loopGrab(beat, tol, tab), origin: beat, a0: l?.a ?? beat, b0: l?.b ?? beat, moved: false };
 }
 
 /** ドラッグ中：ループを書き換える（エンジンへは離したときに渡す） */
@@ -377,6 +381,12 @@ export function dragLoop(d: LoopDrag, beat: number, div: number, movedPx: boolea
   const snap = (x: number) => snapBeat(x, div);
   const step = 4 / div;
   const on = true;
+  if (d.mode === 'mark') {
+    // A だけ・B だけの印を動かす（範囲が無いのでエンジンは変わらない）
+    const mk = aget().loopMark;
+    if (mk) aset({ loopMark: { side: mk.side, beat: snap(beat) } });
+    return;
+  }
   if (d.mode === 'new') {
     const a = snap(Math.min(d.origin, beat));
     const b = snap(Math.max(d.origin, beat));
@@ -513,7 +523,7 @@ export function resetAssistForDoc() {
     specSrc = null;
     aset({ specSource: null, spectro: null, spectroStatus: 'none' });
   }
-  aset({ loop: null, similarPin: null });
+  aset({ loop: null, loopMark: null, similarPin: null });
 }
 
 // ---- スロー再生の BGM（伸ばした音をワーカーで作る） --------------------------------------

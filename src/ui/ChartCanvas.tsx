@@ -15,6 +15,7 @@ import {
   beginLoopDrag,
   dragLoop,
   endLoopDrag,
+  loopGrab,
   setBandFilter,
   setLoop,
   setWaveMode,
@@ -429,13 +430,9 @@ export function ChartCanvas() {
       scrollFromMini(l, y);
       return;
     }
-    if (h.kind === 'loop') {
-      l.drag = { type: 'loop', ld: beginLoopDrag(Math.max(0, g.yToBeat(y)), 7 / g.px), y0: y, where: 'chart' };
-      return;
-    }
-    if (h.kind === 'miniLoop') {
-      const mg = miniGeom(l);
-      l.drag = { type: 'loop', ld: beginLoopDrag(mg.beatAt(y), (6 * mg.end) / (mg.bottom - mg.top)), y0: y, where: 'mini' };
+    if (h.kind === 'loop' || h.kind === 'miniLoop') {
+      const at = loopBandAt(l, g, h.kind, y);
+      l.drag = { type: 'loop', ld: beginLoopDrag(at.beat, at.tol, at.tab), y0: y, where: h.kind === 'loop' ? 'chart' : 'mini' };
       return;
     }
     if (h.kind === 'audio' && !useAssist.getState().data && (useAssist.getState().status === 'nosource' || useAssist.getState().status === 'none')) {
@@ -969,14 +966,19 @@ function scrollFromMini(l: Local, y: number) {
   setView({ scrollBeat: Math.max(-2, beat - viewBeats / 2), follow: false });
 }
 
+/** 左端の帯・全体図の帯で、その高さの拍と、掴める近さ（線から・線の外に出ている印の長さ） */
+function loopBandAt(l: Local, g: Geom, kind: 'loop' | 'miniLoop', y: number): { beat: number; tol: number; tab: number } {
+  if (kind === 'loop') return { beat: Math.max(0, g.yToBeat(y)), tol: 7 / g.px, tab: 14 / g.px };
+  const mg = miniGeom(l);
+  const per = mg.end / (mg.bottom - mg.top);
+  return { beat: mg.beatAt(y), tol: 6 * per, tab: 11 * per };
+}
+
 /** ループの帯の上のマウスの形（A・B の印は上下に動かせる） */
 function loopCursor(l: Local, g: Geom, kind: 'loop' | 'miniLoop', y: number): string {
-  const loop = useAssist.getState().loop;
-  if (!loop || loop.b <= loop.a) return 'crosshair';
-  const yOf = kind === 'loop' ? g.beatToY : miniGeom(l).yOf;
-  if (Math.abs(y - yOf(loop.a)) <= 7 || Math.abs(y - yOf(loop.b)) <= 7) return 'ns-resize';
-  if (y < yOf(loop.a) && y > yOf(loop.b)) return 'grab';
-  return 'crosshair';
+  const at = loopBandAt(l, g, kind, y);
+  const mode = loopGrab(at.beat, at.tol, at.tab);
+  return mode === 'move' ? 'grab' : mode === 'new' ? 'crosshair' : 'ns-resize';
 }
 
 /** マウスの下の説明（無理な配置の警告・ループの帯・再生を始める位置） */
@@ -1003,10 +1005,18 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
     }
   }
   if (h.kind === 'loop' || h.kind === 'miniLoop') {
-    const loop = useAssist.getState().loop;
-    return at('loop', 'hint', 'ループの帯', loop
+    const { loop, loopMark: mk } = useAssist.getState();
+    if (!loop && mk) {
+      const [me, other, key] = mk.side === 'a' ? ['A', 'B', 'O'] : ['B', 'A', 'I'];
+      return at(`loop:${mk.side}`, 'hint', `ループの帯（${me} だけ）`, [
+        `${other}（${key} キー・上のバーの ${other}）を決めるとループします`,
+        `${me} の印をドラッグ: 動かす / 右クリック: 消す`,
+        'ドラッグ: 新しい範囲 / クリック: その小節をループ',
+      ]);
+    }
+    return at(loop ? 'loop' : 'loop:none', 'hint', 'ループの帯', loop
       ? ['ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', '範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', '右クリック: ループを消す']
-      : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ']);
+      : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ', 'I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます']);
   }
   if (h.kind === 'gutter') return at('gutter', 'hint', '小節番号の列', ['クリック・ドラッグ: 再生を始める位置（▶）を置く', 'ダブルクリック: セクション名を付ける']);
   const a = useAssist.getState();
@@ -1685,11 +1695,43 @@ function drawStartTag(ctx: CanvasRenderingContext2D, ox: number, y: number, alph
   ctx.globalAlpha = 1;
 }
 
-/** ループ：左端の帯に範囲と A・B の印、譜面に A・B の線 */
+/** ループ：左端の帯に範囲と A・B の印、譜面に A・B の線。A だけ・B だけのときは、その印と点線 */
 function drawLoop(ctx: CanvasRenderingContext2D, g: Geom, H: number, cw: number, a: AssistState) {
   const { ox } = g;
-  const loop = a.loop;
-  if (!loop || loop.b <= loop.a) return;
+  const loop = a.loop && a.loop.b > a.loop.a ? a.loop : null;
+  const mark = loop ? null : a.loopMark;
+  if (!loop && !mark) return;
+  // A・B の印（A は線の下、B は線の上。重ならない）
+  ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const tab = (y: number, label: string, below: boolean, col: string) => {
+    const ty = below ? y : y - 13;
+    if (ty + 13 < GEO.head || ty > H) return;
+    roundRect(ctx, ox + 1, ty, GEO.loopW - 2, 13, 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.fillStyle = '#1A1408';
+    ctx.fillText(label, ox + GEO.loopW / 2, ty + 7);
+  };
+  if (mark) {
+    // 片方だけ：もう片方を決めるまでループしないので、線は点線
+    const y = g.beatToY(mark.beat);
+    if (y < GEO.head - 14 || y > H + 14) return;
+    if (y >= GEO.head && y <= H) {
+      ctx.strokeStyle = C.loop;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(ox, Math.round(y));
+      ctx.lineTo(ox + cw, Math.round(y));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    tab(y, mark.side === 'a' ? 'A' : 'B', mark.side === 'a', C.loop);
+    return;
+  }
+  if (!loop) return;
   const yB = g.beatToY(loop.b);
   const yA = g.beatToY(loop.a);
   if (yA < GEO.head - 14 || yB > H + 14) return;
@@ -1708,21 +1750,8 @@ function drawLoop(ctx: CanvasRenderingContext2D, g: Geom, H: number, cw: number,
     if (y < GEO.head || y > H) continue;
     ctx.fillRect(ox, Math.round(y) - 0.5, cw, 1);
   }
-  // A・B の印（A は線の下、B は線の上。重ならない）
-  ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const tab = (y: number, label: string, below: boolean) => {
-    const ty = below ? y : y - 13;
-    if (ty + 13 < GEO.head || ty > H) return;
-    roundRect(ctx, ox + 1, ty, GEO.loopW - 2, 13, 2);
-    ctx.fillStyle = col;
-    ctx.fill();
-    ctx.fillStyle = '#1A1408';
-    ctx.fillText(label, ox + GEO.loopW / 2, ty + 7);
-  };
-  tab(yA, 'A', true);
-  tab(yB, 'B', false);
+  tab(yA, 'A', true, col);
+  tab(yB, 'B', false, col);
 }
 
 // ---- ベロシティ -----------------------------------------------------------------------
@@ -2219,30 +2248,44 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
     l.mini = { canvas: c, doc, h: l.h, endBeat: end, sections: side.sections };
   }
   ctx.drawImage(l.mini.canvas, x, 0, GEO.miniW, l.h);
-  // ループの範囲（左の帯に範囲と A・B の印）
+  // ループの範囲（左の帯に範囲と A・B の印）。A だけ・B だけのときは、その印と点線
+  const miniTab = (ty: number, label: string, col: string) => {
+    ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = col;
+    roundRect(ctx, x + 1, ty, ML - 2, 10, 2);
+    ctx.fill();
+    ctx.fillStyle = '#1A1408';
+    ctx.fillText(label, x + ML / 2, ty + 5.5);
+  };
   if (a.loop && a.loop.b > a.loop.a) {
     const ya = bottom - (a.loop.b / end) * (bottom - top);
     const yb = bottom - (a.loop.a / end) * (bottom - top);
     const on = a.loop.on;
+    const col = on ? C.loop : 'rgba(255,199,104,.5)';
     ctx.fillStyle = on ? 'rgba(255,199,104,.14)' : 'rgba(255,199,104,.06)';
     ctx.fillRect(x + ML + 1, ya, GEO.miniW - ML - 2, Math.max(2, yb - ya));
     ctx.fillStyle = on ? 'rgba(255,199,104,.45)' : 'rgba(255,199,104,.18)';
     ctx.fillRect(x + 2, ya, ML - 4, Math.max(2, yb - ya));
-    ctx.fillStyle = on ? C.loop : 'rgba(255,199,104,.5)';
+    ctx.fillStyle = col;
     ctx.fillRect(x + 1, Math.round(ya) - 1, GEO.miniW - 2, 1);
     ctx.fillRect(x + 1, Math.round(yb), GEO.miniW - 2, 1);
-    ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const tab = (ty: number, label: string) => {
-      roundRect(ctx, x + 1, ty, ML - 2, 10, 2);
-      ctx.fill();
-      ctx.fillStyle = '#1A1408';
-      ctx.fillText(label, x + ML / 2, ty + 5.5);
-      ctx.fillStyle = on ? C.loop : 'rgba(255,199,104,.5)';
-    };
-    tab(yb, 'A');
-    tab(ya - 10, 'B');
+    miniTab(yb, 'A', col);
+    miniTab(ya - 10, 'B', col);
+  } else if (a.loopMark) {
+    const mk = a.loopMark;
+    const y = Math.round(bottom - (mk.beat / end) * (bottom - top)) - (mk.side === 'b' ? 1 : 0);
+    ctx.strokeStyle = C.loop;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + 0.5);
+    ctx.lineTo(x + GEO.miniW - 1, y + 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (mk.side === 'a') miniTab(y, 'A', C.loop);
+    else miniTab(y - 9, 'B', C.loop);
   }
   // 見えている範囲
   const y0 = bottom - (Math.max(0, g.maxBeat) / end) * (bottom - top);

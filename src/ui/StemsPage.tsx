@@ -148,12 +148,20 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
   const doc = useEditor((s) => s.doc);
   const playing = useEditor((s) => s.playing);
   const loop = useAssist((s) => s.loop);
+  const loopMark = useAssist((s) => s.loopMark);
   const listen = useStems((s) => s.listen);
   const stems = useSidecar((s) => s.stems);
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
   const hasDrums = stems.some((t) => t.kind === 'drums');
-  const loopLabel = loop ? `${toMeasure(tempo.locate(loop.a).m)}–${toMeasure(tempo.locate(Math.max(loop.a, loop.b - 1e-6)).m)}` : null;
+  const markM = loopMark ? toMeasure(tempo.locate(loopMark.beat).m) : '';
+  const loopLabel = loop
+    ? `${toMeasure(tempo.locate(loop.a).m)}–${toMeasure(tempo.locate(Math.max(loop.a, loop.b - 1e-6)).m)}`
+    : loopMark
+      ? loopMark.side === 'a'
+        ? `${markM}–?`
+        : `?–${markM}`
+      : null;
   return (
     <div className="transport">
       <button className="ib" title="曲の頭へ。▶ を曲の頭に置きます" onClick={goToStart}>
@@ -183,7 +191,13 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
       <button
         className={`btn small loop-btn ${loop?.on ? 'on' : ''}`}
         onClick={toggleLoop}
-        title={loop ? 'ループのオン・オフ（範囲は譜面画面の左端・下の波形・全体図の「A・B」の帯をドラッグして決めます）' : 'ループ再生（範囲が無ければ今の小節）'}
+        title={
+          loop
+            ? 'ループのオン・オフ（範囲は譜面画面の左端・下の波形・全体図の「A・B」の帯をドラッグして決めます）'
+            : loopMark
+              ? `${loopMark.side === 'a' ? 'A（始まり）' : 'B（終わり）'}だけ決めています。譜面画面で${loopMark.side === 'a' ? ' B（O）' : ' A（I）'}も決めるとループします`
+              : 'ループ再生（範囲が無ければ今の小節）'
+        }
       >
         {Icon.loop(14)} ループ {loopLabel && <span className="mono">{loopLabel}</span>}
       </button>
@@ -370,6 +384,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
   const version = useStems((s) => s.version);
   const analysis = effectiveAnalysisStem()?.file ?? null;
   const loop = useAssist((s) => s.loop);
+  const loopMark = useAssist((s) => s.loopMark);
   const playing = useEditor((s) => s.playing);
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
@@ -519,6 +534,17 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
         ctx.fillStyle = loop.on ? '#FFC768' : 'rgba(255,199,104,.5)';
         ctx.fillRect(xa, RULER_H - 18, 1.5, H);
         ctx.fillRect(xb - 1.5, RULER_H - 18, 1.5, H);
+      } else if (loopMark) {
+        // A だけ・B だけ：もう片方を決めるまでループしないので点線
+        const x = X(tempo.beatToSec(loopMark.beat)) - (loopMark.side === 'b' ? 1.5 : 0);
+        ctx.strokeStyle = '#FFC768';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x + 0.75, RULER_H - 18);
+        ctx.lineTo(x + 0.75, H);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       // 譜面の音を消しているとき
       if (!engine.audible().chart) {
@@ -529,7 +555,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
       ctx.fillStyle = playing ? '#FFB547' : '#4CC2FF';
       ctx.fillRect(Math.round(x) - 1, RULER_H - 18, 2, H);
     },
-    [doc, stems, sections, colors, analysis, version, loop, playing, beat, win, H, audible, mix],
+    [doc, stems, sections, colors, analysis, version, loop, loopMark, playing, beat, win, H, audible, mix],
   );
 
   const seek = (clientX: number, commit: boolean) => {

@@ -1778,6 +1778,13 @@ input[type='range'] {
   color: var(--amber);
 }
 
+/* A だけ・B だけのとき、次に押すとループになる方 */
+.ab-btn.next {
+  background: var(--amber-bg);
+  color: var(--amber);
+  box-shadow: inset 0 -2px 0 var(--amber);
+}
+
 .ab-range {
   min-width: 74px;
   text-align: center;
@@ -1787,6 +1794,10 @@ input[type='range'] {
 
 .ab-range.on {
   color: var(--amber);
+}
+
+.ab-range.half {
+  color: #c9a463;
 }
 
 select.field.speed-slow {
