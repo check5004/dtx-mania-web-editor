@@ -98,7 +98,7 @@ export function NxPreview({ full = false }: { full?: boolean }) {
       const doc = s.doc;
       const t = tempoOf(doc);
       const playing = engine.playing;
-      const now = engine.currentSec() ?? t.beatToSec(Math.max(0, s.cursorBeat));
+      const now = engine.heardSec() ?? t.beatToSec(Math.max(0, s.cursorBeat));
       const p = usePreview.getState();
       const { notes, bars, beats } = notesOf(doc);
       const order = useInputSettings.getState().laneOrder;
@@ -197,8 +197,8 @@ export function NxPreview({ full = false }: { full?: boolean }) {
       ctx.fillStyle = 'rgba(76,194,255,.35)';
       ctx.fillRect(x0, judgeY + 2, laneArea, 6);
 
-      // チップ
-      const start = lowerBound(notes, now - 0.05);
+      // チップ（判定ラインに届いたら消えて光る。ラインより下には描かない）
+      const start = lowerBound(notes, now);
       for (let i = start; i < notes.length; i++) {
         const n = notes[i];
         if (n.sec > topSec) break;

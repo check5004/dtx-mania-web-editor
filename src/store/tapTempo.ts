@@ -109,7 +109,7 @@ function songTimeOf(ref: number): number {
 /** 譜面を変える。再生中なら、聴いている音の同じ所から新しい譜面で再生し直す */
 function keepPlaying(change: () => void) {
   const playing = useEditor.getState().playing;
-  const sec = playing ? engine.currentSec() : null;
+  const sec = playing ? engine.heardSec() : null;
   const ref = sec === null ? null : refTime(sec);
   if (playing) stop();
   change();

@@ -265,7 +265,7 @@ function measureRange(beat: number): { a: number; b: number } {
 
 /** 今の位置（再生中なら再生位置、止まっていれば再生を始める位置） */
 function hereBeat(): number {
-  const sec = engine.currentSec();
+  const sec = engine.heardSec();
   const s = useEditor.getState();
   return sec === null ? s.cursorBeat : tempoOf(s.doc).secToBeat(sec);
 }

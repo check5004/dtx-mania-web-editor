@@ -304,7 +304,7 @@ export function stopPlan() {
 
 /** 再生中の位置（原曲の秒） */
 export function playAudioSec(): number | null {
-  const sec = engine.currentSec();
+  const sec = engine.heardSec();
   if (sec === null || !get().playing) return null;
   return sec - planBgmSec();
 }

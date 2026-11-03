@@ -839,7 +839,7 @@ export function togglePlay() {
 /** 今の再生位置（拍）。止まっていればカーソル位置 */
 export function currentBeat(): number {
   const s = get();
-  const sec = engine.currentSec();
+  const sec = engine.heardSec();
   if (sec === null) return s.cursorBeat;
   return tempoOf(s.doc).secToBeat(sec);
 }

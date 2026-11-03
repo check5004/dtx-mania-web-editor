@@ -413,16 +413,27 @@ class AudioEngine {
     return this.run?.loop ?? null;
   }
 
+  /**
+   * ctx 時刻のときの曲の位置。鳴り始める前は始めの位置のまま。
+   * ループで頭に戻ったあとは、戻った区間の位置を返す（始めの位置より前でもよい）
+   */
   private songAt(run: Run, ctxTime: number): number {
-    let seg = run.segs[0];
+    const first = run.segs[0];
+    if (ctxTime <= first.ctx) return first.song;
+    let seg = first;
     for (const s of run.segs) if (s.ctx <= ctxTime + 1e-9) seg = s;
     return seg.song + (ctxTime - seg.ctx) * run.rate;
   }
 
-  /** 再生中なら今の曲の位置（秒）。画面の再生位置に使う */
+  /** 再生中なら、いま音を作っている曲の位置（秒）。耳に届くのは出力の遅れの分あと（画面には heardSec を使う） */
   currentSec(): number | null {
     if (!this.run || !this.ctx) return null;
-    return Math.max(this.run.segs[0].song, this.songAt(this.run, this.ctx.currentTime));
+    return this.songAt(this.run, this.ctx.currentTime);
+  }
+
+  /** 再生中なら、いま耳に届いている曲の位置（秒）。画面の再生位置や「今の位置」に使う */
+  heardSec(): number | null {
+    return this.songSecAtPerf(performance.now());
   }
 
   /**
@@ -435,11 +446,13 @@ class AudioEngine {
     if (!run || !ctx) return null;
     let ctxTime: number;
     const ts = typeof ctx.getOutputTimestamp === 'function' ? ctx.getOutputTimestamp() : null;
-    if (ts && ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.performanceTime > 0) {
+    if (ts && ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.performanceTime > 0 && ts.contextTime > 0) {
       ctxTime = ts.contextTime + (perfMs - ts.performanceTime) / 1000;
     } else {
       ctxTime = ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0) + (perfMs - performance.now()) / 1000;
     }
+    // 出力の時刻が古いまま（タブが裏にあった直後など）でも、作っている音より先には進めない
+    ctxTime = Math.min(ctxTime, ctx.currentTime + (perfMs - performance.now()) / 1000);
     return this.songAt(run, ctxTime);
   }
 
@@ -625,7 +638,8 @@ class AudioEngine {
         for (const st of run.streams) st.dead = true;
         run.streams = [];
         run.segs.push({ ctx: boundary, song: run.loop.from });
-        if (run.segs.length > 4) run.segs.shift();
+        // 耳に届くまでの遅れの間は前の区間の位置を出すので、少し残しておく
+        if (run.segs.length > 8) run.segs.shift();
         this.startSegment(run, run.loop.from, boundary);
         const cb = run.req.onLoop;
         if (cb) window.setTimeout(cb, Math.max(0, (boundary - now) * 1000));

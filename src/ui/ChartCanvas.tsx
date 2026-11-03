@@ -1092,7 +1092,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   const div = s.view.div;
   let scroll = s.view.scrollBeat;
   let playBeat: number | null = null;
-  const sec = engine.currentSec();
+  const sec = engine.heardSec();
   if (sec !== null) {
     playBeat = tempo.secToBeat(sec);
     if (s.view.follow) {
