@@ -1,11 +1,13 @@
 // TAB補完の状態：打った小節の続き（先の1〜4小節）を点線で出し、Tab で入れる。
-// 予測は assist/complete（この曲で打った小節を写す）、原曲の構造は assist/measureAudio、原曲との照合は assist/evidence が受け持つ。
+// 予測は assist/complete（この曲で打った小節を写す）、原曲の構造は assist/measureAudio、原曲との照合は assist/evidence、
+// 原曲で聞こえるドラム（採譜モデルの打点）との合い方は assist/heard が受け持つ。
 // 点線を出すのは、チップを置いた（足した）ときだけ。足した中でいちばん後ろの小節の次から、空いている小節にだけ出す。
 import { create } from 'zustand';
 import { AiError } from '../ai/openrouter';
 import { buildContext, decodeCandidates, PHRASE_SCHEMA, phrasePrompt, type PhraseCandidate } from '../ai/phrase';
 import { measureContents, noteKey, predictChain, type Candidate, type ChartSource, type CNote } from '../assist/complete';
-import { onsetEvidence, unheard, type Evidence } from '../assist/evidence';
+import { modelEvidence, onsetEvidence, unheard, type Evidence } from '../assist/evidence';
+import { heardDrums, type HeardDrums } from '../assist/heard';
 import { measureAudio, type MeasureAudio } from '../assist/measureAudio';
 import type { AnalysisData } from '../audio/analysis';
 import type { FrameFeatures } from '../audio/features';
@@ -15,7 +17,10 @@ import type { Frac } from '../dtx/fraction';
 import type { DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { hasAiKey, NO_KEY_TITLE, runAi } from './ai';
-import { bandOnsets, useAssist } from './assist';
+import { aiOnsets, useAssist } from './assist';
+import { readyDrums, useDrums } from './drums';
+import { drumHits, type DrumHit } from '../transcribe/peaks';
+import type { DrumActivations } from '../transcribe/model';
 import { bgmSource, tempoOf } from './derived';
 import { edit, toast, useEditor, wavForChannel } from './editor';
 import { levelOfField } from './guideline';
@@ -172,16 +177,46 @@ export function sourceLabel(c: Candidate): string {
   return `小節 ${toMeasure(c.src)} と同じ流れ`;
 }
 
-// ---- 原曲との照合（スネアが聞こえない所に印） ---------------------------------------------
+// ---- 原曲との照合（聞こえない所に印） --------------------------------------------------
 
 const EMPTY: ReadonlySet<string> = new Set();
-let evMemo: { data: AnalysisData; ev: Evidence } | null = null;
+let evMemo: { data: AnalysisData | DrumActivations; ev: Evidence } | null = null;
 
+/** 採譜モデルの打点（作者の閾値。「打点の感度」のつまみには合わせない：照合の当てになり方は精度テストで測った値で決めてある） */
+let hitsMemo: { d: DrumActivations; hits: DrumHit[] } | null = null;
+function modelHits(): DrumHit[] | null {
+  const d = readyDrums();
+  if (!d) return null;
+  if (hitsMemo?.d !== d) hitsMemo = { d, hits: drumHits(d, 0.5) };
+  return hitsMemo.hits;
+}
+
+/** 照合のしかた：採譜モデルがあればその打点、無ければ v0 の打点（スネアだけ） */
 function evidence(): Evidence | null {
+  const d = readyDrums();
+  const hits = modelHits();
+  if (d && hits) {
+    if (evMemo?.data !== d) evMemo = { data: d, ev: modelEvidence(hits) };
+    return evMemo.ev;
+  }
   const data = useAssist.getState().data;
   if (!data) return null;
   if (evMemo?.data !== data) evMemo = { data, ev: onsetEvidence(data) };
   return evMemo.ev;
+}
+
+/** 原曲で聞こえるドラム（採譜モデルの打点）。曲の構造と同じ音・同じずれで */
+let heardMemo: { hits: DrumHit[]; tempo: TempoMap; off: number; dur: number; h: HeardDrums } | null = null;
+function heardOf(doc: DtxDoc, tempo: TempoMap): HeardDrums | null {
+  const d = readyDrums();
+  const hits = modelHits();
+  const bgm = bgmSource(doc);
+  if (!d || !hits || !bgm) return null;
+  const dur = d.frames / d.fps;
+  if (heardMemo && heardMemo.hits === hits && heardMemo.tempo === tempo && heardMemo.off === bgm.sec && heardMemo.dur === dur) return heardMemo.h;
+  const h = heardDrums(hits, tempo, bgm.sec, dur);
+  heardMemo = { hits, tempo, off: bgm.sec, dur, h };
+  return h;
 }
 
 const doubtMemo = new WeakMap<Candidate, { ev: Evidence; tempo: TempoMap; off: number; out: ReadonlySet<string> }>();
@@ -260,7 +295,7 @@ function structureAudio(doc: DtxDoc, tempo: TempoMap): MeasureAudio | null {
 // ---- 予測 ------------------------------------------------------------------------
 
 /** 小節 at からの続きを予測する（空いている小節だけ、設定の小節数まで） */
-export function predictAt(doc: DtxDoc, at: number, o: { ahead: number; min: number; minNext: number; audio: MeasureAudio | null }): Candidate[] {
+export function predictAt(doc: DtxDoc, at: number, o: { ahead: number; min: number; minNext: number; audio: MeasureAudio | null; heard?: HeardDrums | null }): Candidate[] {
   const tempo = tempoOf(doc);
   const contents = measureContents(doc);
   let len = 0;
@@ -272,16 +307,18 @@ export function predictAt(doc: DtxDoc, at: number, o: { ahead: number; min: numb
     // 前の小節（空いていても「打たない小節」として）と、後ろの打ってある小節を写せる
     canCopy: (m) => m >= 0 && (m < at || contents.has(m)),
   };
-  return predictChain(chart, { at, len, audio: o.audio, minNext: o.minNext, alternatives: 3 }).filter((c) => c.score >= o.min);
+  return predictChain(chart, { at, len, audio: o.audio, heard: o.heard ?? null, minNext: o.minNext, alternatives: 3 }).filter((c) => c.score >= o.min);
 }
 
 function refresh() {
   const c = get();
   if (!c.enabled || c.at === null) return;
   const doc = useEditor.getState().doc;
-  const audio = structureAudio(doc, tempoOf(doc));
+  const tempo = tempoOf(doc);
+  const audio = structureAudio(doc, tempo);
+  const heard = audio ? heardOf(doc, tempo) : null;
   const min = AMOUNT[c.amount].min;
-  const cands = predictAt(doc, c.at, { ahead: c.ahead, min: c.summoned ? SUMMON_MIN : min, minNext: min, audio });
+  const cands = predictAt(doc, c.at, { ahead: c.ahead, min: c.summoned ? SUMMON_MIN : min, minNext: min, audio, heard });
   set({ cands, index: 0 });
 }
 
@@ -393,6 +430,12 @@ useAssist.subscribe((a, prev) => {
   ensureAudio();
 });
 
+// 採譜が終わったら、出している点線を予測し直す（聞こえるドラムとの合い方と照合の印が変わる）
+useDrums.subscribe((d, prev) => {
+  if (d.status === prev.status && d.data === prev.data && d.enabled === prev.enabled) return;
+  if (get().at !== null && !get().aiLoading) refresh();
+});
+
 // ---- 操作 ------------------------------------------------------------------------
 
 /** 点線をまとめて（count を渡すとその小節数だけ）入れる。入れたら true */
@@ -501,7 +544,7 @@ export async function askAi() {
   aiAbort = ac;
   set({ aiLoading: true, aiError: null, at: from, dismissed: false });
   try {
-    const onsets = bandOnsets();
+    const onsets = aiOnsets();
     const bgm = bgmSource(doc);
     const ctx = buildContext(doc, tempo, {
       kind: 'rhythm',

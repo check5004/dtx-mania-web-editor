@@ -1,5 +1,8 @@
-// 精度テストで比べる「打点の推定のしかた」。段階3以降のモデル（ADTOF など）はここに足す。
+// 精度テストで比べる「打点の推定のしかた」。v0（外した候補チップ）と、段階3のドラムの採譜モデル（ADTOF）。
 import { analyzeAudio, type AnalysisData } from '../audio/analysis';
+import { transcribe } from '../transcribe/client';
+import type { DrumActivations } from '../transcribe/model';
+import { drumHits } from '../transcribe/peaks';
 import { classifyEvents, detectEvents } from './baseline';
 import type { DrumClass } from './classes';
 
@@ -49,5 +52,30 @@ function baseline(sensitivity: number): BenchMethod {
   };
 }
 
+/** 採譜モデルの出力（同じテスト曲では1回だけ計算する） */
+function activationsOf(input: BenchInput): Promise<DrumActivations> {
+  let p = input.cache.get('adtof') as Promise<DrumActivations> | undefined;
+  if (!p) {
+    p = transcribe(input.channels, input.sr);
+    input.cache.set('adtof', p);
+  }
+  return p;
+}
+
+function adtof(sensitivity: number): BenchMethod {
+  const pct = Math.round(sensitivity * 100);
+  return {
+    id: `adtof-s${pct}`,
+    label: `ADTOF（ブラウザ内・感度${pct}）`,
+    note:
+      'ドラムの採譜モデル ADTOF Frame_RNN（音ゲーの譜面と原曲 359 時間で学習、2.2MB）をブラウザの中で動かし、5種の打点を拾う。' +
+      (pct === 50 ? '閾値は作者のもの' : `閾値を作者のものの ${(2 ** ((0.5 - sensitivity) * 2)).toFixed(2)} 倍にしたもの`),
+    async run(input) {
+      const d = await activationsOf(input);
+      return drumHits(d, sensitivity).map((h) => ({ t: h.t, cls: h.cls, s: h.s }));
+    },
+  };
+}
+
 /** 既定で比べる方式。v0 の感度50がエディタで出していた候補チップと同じ */
-export const BENCH_METHODS: readonly BenchMethod[] = [baseline(0.5), baseline(0.3), baseline(0.7)];
+export const BENCH_METHODS: readonly BenchMethod[] = [adtof(0.5), adtof(0.3), adtof(0.7), baseline(0.5)];

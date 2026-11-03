@@ -6,6 +6,7 @@ import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { contentOf, contentSim, measureContents, predictBlock, predictChain, type AudioSimilarity, type ChartSource, type CNote } from './complete';
 import { onsetEvidence } from './evidence';
+import type { HeardDrums } from './heard';
 import { measureAudio } from './measureAudio';
 
 /** 8ビート（HH 8分、BD 1・3拍、SD 2・4拍） */
@@ -83,6 +84,21 @@ describe('TAB補完の予測', () => {
     // 譜面だけなら、直前と同じ A を続ける
     const chartOnly = predictChain(chart, { at: 16, len: 4 })[0];
     expect(sig(chartOnly.measures[0])).toBe(sig(A));
+  });
+
+  it('採譜で、予測する小節にドラムが聞こえないと見込みが下がる', () => {
+    const ms: Record<number, CNote[]> = {};
+    for (let m = 0; m < 8; m++) ms[m] = A;
+    const audio: AudioSimilarity = { sim: (a, b) => (a === b ? 1 : 0.5) };
+    // 直前の小節までは譜面どおりに聞こえる。小節 8 で鳴りやむかどうか
+    const agree = (silentFrom: number): HeardDrums => ({ agree: (notes, m) => (m >= silentFrom ? (notes.length ? 0 : 1) : 1) });
+    const keepsPlaying = predictBlock(chartOf(ms, 8), { at: 8, len: 1, audio, heard: agree(99) })[0];
+    const stops = predictBlock(chartOf(ms, 8), { at: 8, len: 1, audio, heard: agree(8) })[0];
+    const noDrums = predictBlock(chartOf(ms, 8), { at: 8, len: 1, audio })[0];
+    expect(sig(keepsPlaying.measures[0])).toBe(sig(A));
+    expect(stops.score).toBeLessThan(keepsPlaying.score - 0.2);
+    // 聞こえ方どおりなら、採譜なしのときと大きくは変わらない
+    expect(Math.abs(keepsPlaying.score - noDrums.score)).toBeLessThan(0.15);
   });
 
   it('続けて予測するときは、見込みが下がった所で止める', () => {

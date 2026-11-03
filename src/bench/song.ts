@@ -9,13 +9,14 @@ import { renderMix, type MixEvent } from './mix';
 import { chartHits, truthFrom, type ChartHit, type TruthHit } from './truth';
 
 /** 混ぜ方 */
-export type MixKind = 'drums' | 'chips' | 'stem' | 'full' | 'nodrums';
-export const MIX_KINDS: readonly MixKind[] = ['drums', 'chips', 'stem', 'full', 'nodrums'];
+export type MixKind = 'drums' | 'chips' | 'stem' | 'stemonly' | 'full' | 'nodrums';
+export const MIX_KINDS: readonly MixKind[] = ['drums', 'chips', 'stem', 'stemonly', 'full', 'nodrums'];
 
 export const MIX_LABEL: Record<MixKind, string> = {
   drums: 'ドラムだけ',
   chips: '合成',
   stem: '実録音',
+  stemonly: '録音のドラムだけ',
   full: '原曲',
   nodrums: 'ドラム無し（対照）',
 };
@@ -24,6 +25,7 @@ export const MIX_NOTE: Record<MixKind, string> = {
   drums: '譜面のドラムの音だけ（BGM なし）。BGM に邪魔されないときの上限の目安',
   chips: 'BGM＋譜面のドラムの音。正解が完全に分かっているテスト曲',
   stem: 'BGM（ドラム抜き）＋曲に付いている本物のドラムの録音。原曲に近い。正解は譜面（人の耳コピ）',
+  stemonly: '曲に付いている本物のドラムの録音だけ（BGM なし）。原曲からドラムを完全に分離できたときの上限の目安（実録音との差が、分離で伸ばせる幅）',
   full: 'BGM がドラム入りの原曲そのものの曲。正解は譜面（人の耳コピ）',
   nodrums: 'ドラム抜きの BGM だけ（ドラムは鳴っていない）。ここで当たった分は偶然で、方式の「当てずっぽうの水準」が分かる',
 };
@@ -193,9 +195,9 @@ export function buildCase(s: LoadedSong, mix: MixKind, opts: { fullSong?: boolea
       if (!s.bgm.some((b) => snd(b.path))) return { skip: 'BGM が無いか読めない' };
       s.bgm.forEach(addPlaced);
     }
-  } else if (mix === 'stem') {
+  } else if (mix === 'stem' || mix === 'stemonly') {
     if (!s.stem) return { skip: 'ドラムの録音（名前に drum を含む音）が無い' };
-    s.bgm.forEach(addPlaced);
+    if (mix === 'stem') s.bgm.forEach(addPlaced);
     addPlaced(s.stem);
   } else {
     if (mix === 'full' && !opts.fullSong) return { skip: 'BGM がドラム入りの原曲と指定されていない' };

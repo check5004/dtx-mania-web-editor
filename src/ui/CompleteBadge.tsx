@@ -138,7 +138,7 @@ export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: n
           )}
         </span>
         {g.doubt.size > 0 && (
-          <span className="tg-doubt" title="オレンジの枠のスネアは、原曲でスネアらしい音が聞こえません。外れのことが多い所なので、入れたあと聴いて確かめてください">
+          <span className="tg-doubt" title="オレンジの枠のチップは、原曲でその音（バスドラム・スネア・タム）が聞こえません。外れのことが多い所なので、入れたあと聴いて確かめてください">
             {' · '}要確認 {g.doubt.size}
           </span>
         )}

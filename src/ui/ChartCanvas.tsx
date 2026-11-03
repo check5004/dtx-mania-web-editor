@@ -1,5 +1,5 @@
 // 譜面の縦スクロール表示と、マウスでの編集。下から上へ時間が進む（NXと同じ向き）。
-// 右に「原曲の打点（低・中・高）」と「原曲の波形」の列を出す。
+// 右に「原曲の打点」（ドラムの採譜モデルの5種。使えないときは低・中・高の3帯域）と「原曲の波形」の列を出す。
 import { useEffect, useRef, useState } from 'react';
 import type { Onset } from '../audio/analysis';
 import { engine } from '../audio/engine';
@@ -47,6 +47,9 @@ import { CompleteBadge, type GhostAnchor } from './CompleteBadge';
 import { gotoNextIssue, issuesOf, useCheck, type Issue } from '../store/check';
 import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
 import { thumb, useThumbs } from './thumbs';
+import { drumHitsByClass, drumStatusText, readyDrums, useDrums } from '../store/drums';
+import { DRUM_CLASSES, CLASS_LABEL, type DrumClass } from '../bench/classes';
+import { ADTOF } from '../transcribe/model';
 import { promptDialog } from './dialogs';
 import { songLength } from './hooks';
 import { chipBpmLabel, meterLabel } from './format';
@@ -119,6 +122,16 @@ const C = {
   high: '#7FD3F9',
   loop: '#FFC768',
 };
+
+/** 「原曲の打点」の5種の色（帯域の色とそろえる：BD=低、SD=中、HH=高） */
+const DRUM_COL: Record<DrumClass, string> = { BD: '#B9A6F2', SD: '#FFD54F', TT: '#7BD88F', HH: '#7FD3F9', CY: '#FF8FB3' };
+
+/** 「原曲の打点」の列の中の小さな列（採譜モデルなら5種、無ければ3帯域）。x は列の左端から */
+function hitLanes(model: boolean): { n: number; w: number; x: (i: number) => number } {
+  const n = model ? DRUM_CLASSES.length : 3;
+  const w = Math.floor((GEO.hitsW - 4) / n);
+  return { n, w, x: (i) => 2 + i * w };
+}
 
 type Drag =
   | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean }
@@ -329,6 +342,9 @@ export function ChartCanvas() {
         l.dirty = true;
       }),
       useComplete.subscribe(() => {
+        l.dirty = true;
+      }),
+      useDrums.subscribe(() => {
         l.dirty = true;
       }),
     ];
@@ -752,15 +768,48 @@ export function ChartCanvas() {
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
       {tip && !popover && <ChartTip tip={tip} />}
       <IssueBadge />
-      {help && (
-        <div className="popover" style={{ left: help.x - 200, top: help.y, width: 280 }} onPointerDown={(e) => e.stopPropagation()}>
-          <div className="row" style={{ marginBottom: 6 }}>
-            <b>原曲の打点（低・中・高）</b>
-            <span className="grow" />
-            <button className="ib" style={{ width: 24, height: 24 }} onClick={() => setHelp(null)} aria-label="閉じる">
-              ✕
-            </button>
+      {help && <OnsetHelp x={help.x} y={help.y} onClose={() => setHelp(null)} />}
+    </div>
+  );
+}
+
+/** 「原曲の打点」の見出しの ⓘ：何を出しているかの説明 */
+function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => void }) {
+  const dr = useDrums();
+  const model = dr.enabled && dr.status === 'ready';
+  return (
+    <div className="popover" style={{ left: x - 200, top: y, width: 300 }} onPointerDown={(e) => e.stopPropagation()}>
+      <div className="row" style={{ marginBottom: 6 }}>
+        <b>{model ? '原曲の打点（ドラムの採譜）' : '原曲の打点（低・中・高）'}</b>
+        <span className="grow" />
+        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label="閉じる">
+          ✕
+        </button>
+      </div>
+      {model ? (
+        <>
+          <p className="lbl" style={{ margin: '0 0 6px', lineHeight: 1.7, color: 'var(--text2)' }}>
+            ドラムの採譜モデルが原曲から聞き取った打点です。横棒が打点（幅は確からしさ）、薄い帯は「その音が鳴っていそうな度合い」です。
+          </p>
+          <div className="lbl" style={{ lineHeight: 1.8 }}>
+            {DRUM_CLASSES.map((k) => (
+              <div key={k}>
+                <b className="mono" style={{ color: DRUM_COL[k] }}>
+                  {k}
+                </b>
+                <span style={{ marginLeft: 8 }}>{CLASS_LABEL[k]}</span>
+              </div>
+            ))}
           </div>
+          <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
+            {ONSET_ACCURACY}右のパネルの「打点の感度」で増やしたり減らしたりできます。
+          </p>
+          <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6, fontSize: 10.5 }}>
+            モデル: {ADTOF.credit}・{ADTOF.license}（非商用）。音はこのブラウザの中だけで解析します。
+          </p>
+        </>
+      ) : (
+        <>
           <p className="lbl" style={{ margin: '0 0 6px', lineHeight: 1.7, color: 'var(--text2)' }}>
             原曲を3つの音域に分けて、音が鳴り始めた強さを横棒で出します。太いほど強い打点です。
           </p>
@@ -776,15 +825,26 @@ export function ChartCanvas() {
             </div>
           </div>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
+            {dr.enabled
+              ? dr.status === 'loading' || dr.status === 'error'
+                ? `${drumStatusText(dr)}。採譜が終わると、ドラムの5種（BD・SD・タム・HH・シンバル）の打点に切り替わります。`
+                : '原曲が読み込まれると、ドラムの採譜モデルで5種の打点に切り替わります。'
+              : 'ドラムの採譜モデルは右のパネルで切ってあります。入れると、ドラムの5種の打点に切り替わります（こちらより正確）。'}
+          </p>
+          <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
             波形だけでは埋もれて見えない音を探す目印です。「原曲の波形」の見出しをクリックするとスペクトログラムに切り替わります。
           </p>
-        </div>
+        </>
       )}
     </div>
   );
 }
 
-/** TAB補完の点線（範囲の枠と、点線のチップ。原曲で聞こえないスネアはオレンジの枠） */
+/** 精度テスト（docs/bench.md）で測った当たり具合 */
+const ONSET_ACCURACY =
+  '精度テストでは、本物のドラムの録音入りの曲で、拾った打点の約7割が譜面と同じ位置にあり、譜面の打点の約3分の2を拾えました（BD・SD はよく当たり、タム・シンバルは取りこぼしや取り違えが多め。ハイハットはペダルの小さな音を拾えないことがあります）。';
+
+/** TAB補完の点線（範囲の枠と、点線のチップ。原曲でその音が聞こえないチップはオレンジの枠） */
 function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoMap) {
   const left = g.ox + GEO.laneX;
   const w = GEO.laneW * DRUM_LANES.length;
@@ -1743,11 +1803,27 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.font = '9px system-ui, sans-serif';
     ctx.fillStyle = '#A3ADBB';
     ctx.fillText('原曲の打点 ⓘ', ox + GEO.hitsX + GEO.hitsW / 2, 8);
-    ctx.font = '600 10px system-ui, sans-serif';
-    (['low', 'mid', 'high'] as const).forEach((b, i) => {
-      ctx.fillStyle = C[b];
-      ctx.fillText(['低', '中', '高'][i], ox + GEO.hitsX + 11 + i * 20, 21);
-    });
+    const dr = useDrums.getState();
+    if (readyDrums()) {
+      // ドラムの採譜モデルの5種
+      const hl = hitLanes(true);
+      ctx.font = '600 8px "JetBrains Mono", ui-monospace, monospace';
+      DRUM_CLASSES.forEach((k, i) => {
+        ctx.fillStyle = DRUM_COL[k];
+        ctx.fillText(k, ox + GEO.hitsX + hl.x(i) + hl.w / 2, 21);
+      });
+    } else if (dr.enabled && dr.status === 'loading') {
+      ctx.font = '9px system-ui, sans-serif';
+      ctx.fillStyle = C.amber;
+      ctx.fillText(dr.stage === 'run' ? `採譜中 ${Math.round(dr.progress * 100)}%` : '採譜の準備…', ox + GEO.hitsX + GEO.hitsW / 2, 21);
+    } else {
+      const hl = hitLanes(false);
+      ctx.font = '600 10px system-ui, sans-serif';
+      (['low', 'mid', 'high'] as const).forEach((b, i) => {
+        ctx.fillStyle = C[b];
+        ctx.fillText(['低', '中', '高'][i], ox + GEO.hitsX + hl.x(i) + hl.w / 2, 21);
+      });
+    }
     ctx.font = '10px system-ui, sans-serif';
     ctx.fillStyle = C.text;
     // BGA の列が波形の上に重なっているときは、見えている所の真ん中に出す
@@ -2056,56 +2132,75 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
     ctx.textAlign = 'center';
     ctx.fillText(label, wx + W / 2, GEO.head + 12);
   }
-  if (!a.data) return;
-  const data = a.data;
-
-  // 打点の強さ（薄い帯）と打点（横棒）
-  const fr = data.frameRate;
-  const bands = ['low', 'mid', 'high'] as const;
-  bands.forEach((b, bi) => {
-    const odf = data.odf[b];
-    const cx = hx + 2 + bi * 20;
-    ctx.fillStyle = C[b];
+  const tMin = Math.min(audioAt(H), audioAt(GEO.head));
+  const tMax = Math.max(audioAt(H), audioAt(GEO.head));
+  /** 時刻の順の打点を、見えている所だけ横棒で描く */
+  const drawBars = (list: readonly { t: number; s: number }[], cx: number, cw: number, color: string) => {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const md = (lo + hi) >> 1;
+      if (list[md].t < tMin) lo = md + 1;
+      else hi = md;
+    }
+    ctx.fillStyle = color;
+    for (let i = lo; i < list.length && list[i].t <= tMax; i++) {
+      const o = list[i];
+      const y = g.beatToY(tempo.secToBeat(o.t + off));
+      const w = Math.max(3, Math.round(cw * Math.min(1, o.s)));
+      ctx.fillRect(cx + (cw - w) / 2, y - 2.5, w, 5);
+    }
+  };
+  /** 1/fr 秒ごとの値（get(i)）を薄い帯で描く */
+  const drawStrip = (n: number, fr: number, get: (i: number) => number, cx: number, cw: number, color: string, floor: number) => {
+    ctx.fillStyle = color;
     ctx.globalAlpha = 0.18;
     for (let y = GEO.head; y < H; y += 2) {
       const tTop = audioAt(y);
       const tBot = audioAt(y + 2);
       let i0 = Math.floor(Math.min(tTop, tBot) * fr);
       let i1 = Math.ceil(Math.max(tTop, tBot) * fr);
-      if (i1 < 0 || i0 >= odf.length) continue;
+      if (i1 < 0 || i0 >= n) continue;
       i0 = Math.max(0, i0);
-      i1 = Math.min(odf.length - 1, i1);
+      i1 = Math.min(n - 1, i1);
       let m = 0;
-      for (let i = i0; i <= i1; i++) if (odf[i] > m) m = odf[i];
-      if (m < 0.04) continue;
-      const w = Math.min(18, m * 18);
-      ctx.fillRect(cx + (18 - w) / 2, y, w, 2);
+      for (let i = i0; i <= i1; i++) {
+        const v = get(i);
+        if (v > m) m = v;
+      }
+      if (m < floor) continue;
+      const w = Math.min(cw, m * cw);
+      ctx.fillRect(cx + (cw - w) / 2, y, w, 2);
     }
     ctx.globalAlpha = 1;
+  };
+
+  // ドラムの採譜モデル：5種の「鳴っていそうな度合い」（薄い帯）と打点（横棒）
+  const drums = readyDrums();
+  const byClass = drums ? drumHitsByClass(a.sensitivity) : null;
+  if (drums && byClass) {
+    const hl = hitLanes(true);
+    const nCls = ADTOF.classes.length;
+    DRUM_CLASSES.forEach((k, i) => {
+      const c = ADTOF.classes.indexOf(k);
+      const cx = hx + hl.x(i);
+      drawStrip(drums.frames, drums.fps, (f) => drums.act[f * nCls + c], cx, hl.w - 2, DRUM_COL[k], 0.08);
+      drawBars(byClass[k], cx, hl.w - 2, DRUM_COL[k]);
+    });
+    return;
+  }
+
+  // 使えないとき（読み込み中・切ってある・失敗）は、原曲を3帯域に分けた打点
+  if (!a.data) return;
+  const data = a.data;
+  const hl = hitLanes(false);
+  const bands = ['low', 'mid', 'high'] as const;
+  bands.forEach((b, bi) => {
+    const odf = data.odf[b];
+    drawStrip(odf.length, data.frameRate, (i) => odf[i], hx + hl.x(bi), hl.w - 2, C[b], 0.04);
   });
   const on = bandOnsets();
-  if (on) {
-    const tMin = Math.min(audioAt(H), audioAt(GEO.head));
-    const tMax = Math.max(audioAt(H), audioAt(GEO.head));
-    bands.forEach((b, bi) => {
-      const list: Onset[] = on[b];
-      let lo = 0;
-      let hi = list.length;
-      while (lo < hi) {
-        const md = (lo + hi) >> 1;
-        if (list[md].t < tMin) lo = md + 1;
-        else hi = md;
-      }
-      const cx = hx + 2 + bi * 20;
-      ctx.fillStyle = C[b];
-      for (let i = lo; i < list.length && list[i].t <= tMax; i++) {
-        const o = list[i];
-        const y = g.beatToY(tempo.secToBeat(o.t + off));
-        const w = Math.max(3, Math.round(18 * Math.min(1, o.s)));
-        ctx.fillRect(cx + (18 - w) / 2, y - 2.5, w, 5);
-      }
-    });
-  }
+  if (on) bands.forEach((b, bi) => drawBars(on[b] as Onset[], hx + hl.x(bi), hl.w - 2, C[b]));
 }
 
 // ---- スペクトル -------------------------------------------------------------------

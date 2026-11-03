@@ -2,9 +2,11 @@
 // 精度テスト（bench.html）をヘッドレスの Chromium で回し、結果を JSON と Markdown に書き出す。
 //
 // 使い方:
-//   npm run bench -- <曲フォルダ か 曲フォルダの入ったフォルダ> [...] [--full 曲名] [--mix drums,chips,stem,full,nodrums] [--tol 0.05] [--out bench-results]
+//   npm run bench -- <曲フォルダ か 曲フォルダの入ったフォルダ> [...] [--full 曲名] [--mix drums,chips,stem,stemonly,full,nodrums] [--tol 0.05] [--out bench-results]
 //   --full は BGM がドラム入りの原曲そのものの曲（何度でも指定できる）。
 //   --complete を付けると、打点の推定の代わりに TAB補完（先の小節の予測）を測る。
+//   --train（--complete と一緒に）を付けると、候補の点数の重みを学習するための行も書き出す（train-*.json）。
+//   --no-drums を付けると、ドラムの採譜モデル（ADTOF）を使う方式を測らない。
 // 必要なもの: Playwright と Chromium（npx playwright install chromium）。
 import { createRequire } from 'node:module';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
@@ -27,10 +29,14 @@ let mixes;
 let tol = 0.05;
 let out = 'bench-results';
 let complete = false;
+let train = false;
+let drums = true;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--full') full.push(args[++i]);
   else if (a === '--complete') complete = true;
+  else if (a === '--train') train = true;
+  else if (a === '--no-drums') drums = false;
   else if (a === '--mix') mixes = args[++i].split(',');
   else if (a === '--tol') tol = Number(args[++i]);
   else if (a === '--out') out = args[++i];
@@ -46,11 +52,14 @@ const server = await createServer({ server: { port: 0, host: '127.0.0.1' }, logL
 await server.listen();
 const addr = server.httpServer.address();
 const base = `http://127.0.0.1:${addr.port}/dtx-mania-web-editor/`;
-const browser = await chromium.launch();
+// 採譜モデルを Hugging Face から読むので、プロキシの内側ではプロキシを通す（手元のサーバーは通さない）
+const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
+const browser = await chromium.launch(proxy ? { proxy: { server: proxy, bypass: '127.0.0.1,localhost' } } : {});
 const results = [];
 const skipped = [];
+const trainRows = [];
 try {
-  const page = await browser.newPage();
+  const page = await browser.newPage(proxy ? { ignoreHTTPSErrors: true } : {});
   page.on('console', (m) => m.type() === 'error' && console.error('[page]', m.text()));
   await page.goto(base + 'bench.html');
   await page.waitForFunction(() => !!window.__bench);
@@ -67,7 +76,10 @@ try {
       await page.locator('#pick').setInputFiles(d);
       const names = await page.evaluate(() => window.__bench.songs());
       console.log(`${d}: ${names.join(', ')}`);
-      const r = complete ? await page.evaluate(() => window.__bench.runComplete()) : await page.evaluate((opts) => window.__bench.run(opts), { mixes, full, tol, wav: false });
+      const r = complete
+        ? await page.evaluate((opts) => window.__bench.runComplete(opts), { train, drums })
+        : await page.evaluate((opts) => window.__bench.run(opts), { mixes, full, tol, wav: false });
+      if (r.train) trainRows.push(...r.train);
       results.push(...r.results);
       skipped.push(...r.skipped);
     }
@@ -79,8 +91,13 @@ try {
   const stamp = at.slice(0, 19).replace(/[:T]/g, '-');
   if (complete) {
     const pooled = await page.evaluate((r) => window.__bench.poolComplete(r), results);
-    writeFileSync(join(out, `complete-${stamp}.json`), JSON.stringify({ at, results, pooled, skipped }, null, 1));
-    const md = completeReport({ at, results, pooled, skipped });
+    const evidence = await page.evaluate((r) => window.__bench.poolEvidence(r), results);
+    writeFileSync(join(out, `complete-${stamp}.json`), JSON.stringify({ at, results, pooled, evidence, skipped }, null, 1));
+    if (train) {
+      writeFileSync(join(out, `train-${stamp}.json`), JSON.stringify(trainRows));
+      console.log(`学習用の行: ${join(out, `train-${stamp}.json`)}`);
+    }
+    const md = completeReport({ at, results, pooled, skipped, evidence });
     writeFileSync(join(out, `complete-${stamp}.md`), md);
     console.log('\n' + md);
     console.log(`書き出しました: ${join(out, `complete-${stamp}.{json,md}`)}`);
@@ -99,7 +116,7 @@ try {
 
 function report({ at, tol, results, pooled, skipped }) {
   const C = ['BD', 'SD', 'TT', 'HH', 'CY'];
-  const mixLabel = { drums: 'ドラムだけ', chips: '合成', stem: '実録音', full: '原曲', nodrums: 'ドラム無し（対照）' };
+  const mixLabel = { drums: 'ドラムだけ', chips: '合成', stem: '実録音', stemonly: '録音のドラムだけ', full: '原曲', nodrums: 'ドラム無し（対照）' };
   const f = (c) => (!c || c.f === null ? '–' : c.f.toFixed(2));
   const pr = (c) => (!c || c.f === null ? '' : ` (${c.precision === null ? '–' : c.precision.toFixed(2)}/${c.recall === null ? '–' : c.recall.toFixed(2)})`);
   const row = (head, s) => `| ${head} | **${f(s.all)}**${pr(s.all)} | ${C.map((k) => f(s.classes[k])).join(' | ')} | ${s.all.ref} | ${s.all.est} |`;
@@ -119,7 +136,7 @@ function report({ at, tol, results, pooled, skipped }) {
   return s;
 }
 
-function completeReport({ at, results, pooled, skipped }) {
+function completeReport({ at, results, pooled, skipped, evidence }) {
   const pct = (x) => (x === null || x === undefined ? '–' : `${Math.round(x * 100)}%`);
   const f2 = (x) => (x === null || x === undefined ? '–' : x.toFixed(2));
   const songs = new Set(results.map((r) => r.song)).size;
@@ -133,6 +150,16 @@ function completeReport({ at, results, pooled, skipped }) {
   if (cal) {
     s += `\n## 見込みごとのそのまま正解の割合（${cal.label}）\n\n| 見込み | 数 | そのまま正解 | F の平均 |\n|---|---|---|---|\n`;
     for (const b of cal.calib) s += `| ${b.lo.toFixed(1)}〜${b.hi.toFixed(1)} | ${b.n} | ${pct(b.exact)} | ${f2(b.f)} |\n`;
+  }
+  if (evidence && Object.keys(evidence).length) {
+    const C = ['BD', 'SD', 'TT', 'HH', 'CY'];
+    s += `\n## 原曲との照合（曲の構造も使う・見込み0.2以上・次の小節）\n\n各セルは「聞こえる と言ったチップの正解率 / 聞こえない と言ったチップの正解率」（数）。\n\n| 照合 | ${C.join(' | ')} |\n|${'---|'.repeat(C.length + 1)}\n`;
+    for (const [k, t] of Object.entries(evidence)) {
+      s += `| ${k} | ${C.map((c) => {
+        const x = t[c];
+        return x.heard + x.unheard ? `${pct(x.heard ? x.heardOk / x.heard : null)} / ${pct(x.unheard ? x.unheardOk / x.unheard : null)} (${x.heard}/${x.unheard})` : '–';
+      }).join(' | ')} |\n`;
+    }
   }
   if (skipped.length) s += `\n## 測らなかった譜面\n\n${skipped.map((x) => `- ${x}`).join('\n')}\n`;
   return s;

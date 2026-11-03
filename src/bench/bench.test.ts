@@ -170,6 +170,17 @@ describe('テスト曲を作る', () => {
     expect(r.methods[0].lanes.SD).toEqual({ ref: 2, hit: 0 });
     const rows = poolResults([r, r]);
     expect(rows[0].score.all).toMatchObject({ ref: 12, tp: 8 });
-    expect(BENCH_METHODS[0].id).toBe('v0-s50');
+    // 段階3の採譜モデル（ADTOF）を先頭に、外した v0 も比べるために残す
+    expect(BENCH_METHODS[0].id).toBe('adtof-s50');
+    expect(BENCH_METHODS.some((m) => m.id === 'v0-s50')).toBe(true);
+  });
+
+  it('録音のドラムだけ（分離の上限）は、ドラムの録音だけを鳴らす', async () => {
+    const s = (await loadSong(folder, decode, 100))!;
+    const only = buildCase(s, 'stemonly') as TestCase;
+    const stem = buildCase(s, 'stem') as TestCase;
+    expect(only.truth).toHaveLength(stem.truth.length);
+    // BGM（0.1）は入らず、ドラムの録音だけ
+    expect(only.channels[0][250]).toBeCloseTo(stem.channels[0][250] - 0.1);
   });
 });

@@ -8,6 +8,8 @@ import { grabLoop, placeLoopPoint, type LoopBeats, type LoopGrab, type LoopMark 
 import { copyMeasureInto, measureSignatures, sameMeasures } from '../assist/similar';
 import type { DtxDoc } from '../dtx/model';
 import { bgmSource, tempoOf, wavPath } from './derived';
+import { drumHitsByClass, setDrumSource } from './drums';
+import type { OnsetRows } from '../ai/phrase';
 import { snapToGrid } from '../edit/ops';
 import { edit, toast, useEditor } from './editor';
 
@@ -133,14 +135,21 @@ export function syncAnalysis() {
   const bgm = bgmSource(s.doc);
   if (!bgm) {
     if (aget().status !== 'nosource') aset({ src: null, status: 'nosource', data: null, ...specReset() });
+    setDrumSource(null);
     return;
   }
   const stem = analysisProvider?.() ?? null;
   const got = stem ?? engine.buffer(bgm.wav);
   if (!got) {
-    if (!s.loading && aget().status !== 'loading') aset({ src: null, status: 'nosource', data: null, ...specReset() });
+    if (!s.loading && aget().status !== 'loading') {
+      aset({ src: null, status: 'nosource', data: null, ...specReset() });
+      setDrumSource(null);
+    }
     return;
   }
+  const name = stem ? stem.name : ((wavPath(s.doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '');
+  // ドラムの採譜も同じ音で（別スレッド。同じ音はやり直さない）
+  setDrumSource({ key: got.key, buf: got.buf, name });
   const cur = aget();
   if (cur.src?.key === got.key && (cur.status === 'ready' || cur.status === 'loading')) {
     if (cur.src.wav !== bgm.wav) aset({ src: { ...cur.src, wav: bgm.wav } });
@@ -148,7 +157,6 @@ export function syncAnalysis() {
   }
   if (running === got.key) return;
   running = got.key;
-  const name = stem ? stem.name : ((wavPath(s.doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '');
   aset({ src: { wav: bgm.wav, key: got.key, name }, status: 'loading', progress: 0, error: null, data: null, ...specReset() });
   void (async () => {
     try {
@@ -264,6 +272,11 @@ export function bandOnsets(): Record<Band, Onset[]> | null {
   };
   bandMemo = { data: a.data, sens: a.sensitivity, out };
   return out;
+}
+
+/** AI のフレーズ候補に渡す原曲の打点：ドラムの採譜ができていればその5種、無ければ3帯域 */
+export function aiOnsets(): OnsetRows | null {
+  return drumHitsByClass(aget().sensitivity) ?? bandOnsets();
 }
 
 // ---- ループ・速度・ミックス ----------------------------------------------------------

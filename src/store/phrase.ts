@@ -6,7 +6,7 @@ import { drumChannel } from '../dtx/model';
 import { lastMeasure } from '../gen/features';
 import { levelOfField } from './guideline';
 import { hasAiKey, runAi } from './ai';
-import { bandOnsets } from './assist';
+import { aiOnsets } from './assist';
 import { bgmSource, tempoOf } from './derived';
 import { edit, toast, useEditor, wavForChannel } from './editor';
 
@@ -66,7 +66,7 @@ export async function makeCandidates(kind: 'fill' | 'rhythm') {
   const s = useEditor.getState();
   const p = get();
   const tempo = tempoOf(s.doc);
-  const onsets = bandOnsets();
+  const onsets = aiOnsets();
   const bgm = bgmSource(s.doc);
   const offsetSec = bgm?.sec ?? 0;
   set({ kind, loading: true, error: null, cands: [], index: 0, cost: null });

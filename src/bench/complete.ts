@@ -13,6 +13,9 @@ import {
   type MeasureContent,
   type PredictOptions,
 } from '../assist/complete';
+import type { Evidence } from '../assist/evidence';
+import type { HeardDrums } from '../assist/heard';
+import { classOfChannel, DRUM_CLASSES, type DrumClass } from './classes';
 import type { DtxDoc } from '../dtx/model';
 import { tempoOf } from '../store/derived';
 
@@ -25,7 +28,9 @@ export interface CompletionMethod {
   note: string;
   /** 原曲の聞こえ方を使うか（使う方式は、原曲が無い曲では測らない） */
   audio?: boolean;
-  pick(chart: ChartSource, at: number, audio: AudioSimilarity | null, truth: (m: number) => MeasureContent | undefined): Candidate | null;
+  /** 原曲で聞こえるドラム（採譜モデル）を使うか（使う方式は、採譜が無い曲では測らない） */
+  drums?: boolean;
+  pick(chart: ChartSource, at: number, audio: AudioSimilarity | null, truth: (m: number) => MeasureContent | undefined, heard: HeardDrums | null): Candidate | null;
 }
 
 /** 先の i 小節目（0 が次の小節）ごとの集計 */
@@ -61,14 +66,31 @@ export interface MethodCompletion {
   ms: number;
 }
 
+/** 原曲との照合の集計：種類ごとに、聞こえる／聞こえないと言った予測のチップの数と、そのうち正解だった数 */
+export type EvidenceTally = Record<DrumClass, { heard: number; heardOk: number; unheard: number; unheardOk: number }>;
+
 export interface ChartCompletion {
   song: string;
   chart: string;
   /** 測った小節の数 */
   blocks: number;
   audio: boolean;
+  /** 採譜モデルの打点があったか */
+  drums?: boolean;
   methods: MethodCompletion[];
+  /** 原曲との照合（照合のしかたごと） */
+  evidence?: Record<string, EvidenceTally>;
 }
+
+/** 照合を測るときの材料。toAudio は譜面の秒 → 原曲の秒 */
+export interface EvidenceInput {
+  sources: Record<string, Evidence>;
+  toAudio: (chartSec: number) => number;
+  /** これ以上の見込みの予測だけ数える */
+  minScore: number;
+}
+
+const emptyTally = (): EvidenceTally => Object.fromEntries(DRUM_CLASSES.map((c) => [c, { heard: 0, heardOk: 0, unheard: 0, unheardOk: 0 }])) as EvidenceTally;
 
 const emptyStats = (): OffsetStats => ({ blocks: 0, shown: 0, exact: 0, tp: 0, fp: 0, fn: 0, refAll: 0, nonEmpty: 0 });
 
@@ -90,16 +112,27 @@ export function historyView(doc: DtxDoc, at: number): ChartSource {
   return { contents, barLen: (m) => tempo.barLen(m), canCopy: (m) => m >= 0 && m < at };
 }
 
-export function evaluateCompletion(song: string, chart: string, doc: DtxDoc, methods: readonly CompletionMethod[], audio: AudioSimilarity | null): ChartCompletion {
+export function evaluateCompletion(
+  song: string,
+  chart: string,
+  doc: DtxDoc,
+  methods: readonly CompletionMethod[],
+  audio: AudioSimilarity | null,
+  heard: HeardDrums | null = null,
+  ev: EvidenceInput | null = null,
+): ChartCompletion {
   const truthAll = measureContents(doc);
   const ms = [...truthAll.keys()].filter((m) => (truthAll.get(m)?.keys.size ?? 0) > 0);
   const first = Math.min(...ms);
   const last = Math.max(...ms);
   const truth = (m: number) => truthAll.get(m);
+  const tempo = tempoOf(doc);
   const out: MethodCompletion[] = [];
+  const evidence: Record<string, EvidenceTally> | undefined = ev ? Object.fromEntries(Object.keys(ev.sources).map((k) => [k, emptyTally()])) : undefined;
   let blocks = 0;
   for (const method of methods) {
     if (method.audio && !audio) continue;
+    if (method.drums && !heard) continue;
     const offsets = Array.from({ length: AHEAD }, emptyStats);
     const calib: CalibPoint[] = [];
     const t0 = performance.now();
@@ -107,7 +140,29 @@ export function evaluateCompletion(song: string, chart: string, doc: DtxDoc, met
     for (let at = first + 1; at <= last; at++) {
       blocks++;
       const view = historyView(doc, at);
-      const cand = method.pick(view, at, audio, truth);
+      const cand = method.pick(view, at, audio, truth, heard);
+      // 原曲との照合：「曲の構造も使う」の予測（次の小節）のチップごとに、聞こえるかと正解かを数える
+      if (ev && evidence && method.id === 'audio' && cand && cand.score >= ev.minScore && cand.measures[0]?.length) {
+        const tr = truth(at)?.keys ?? new Set<string>();
+        for (const n of cand.measures[0]) {
+          const cls = classOfChannel(n.ch);
+          if (!cls) continue;
+          const ok = tr.has(noteKey(n.ch, n.f));
+          const t = ev.toAudio(tempo.beatToSec(tempo.beatOf(at, n.f)));
+          for (const [k, src] of Object.entries(ev.sources)) {
+            const h = src.heard(cls, t);
+            if (h === null) continue;
+            const x = evidence[k][cls];
+            if (h) {
+              x.heard++;
+              if (ok) x.heardOk++;
+            } else {
+              x.unheard++;
+              if (ok) x.unheardOk++;
+            }
+          }
+        }
+      }
       for (let i = 0; i < AHEAD; i++) {
         const st = offsets[i];
         const tr = truth(at + i);
@@ -130,7 +185,46 @@ export function evaluateCompletion(song: string, chart: string, doc: DtxDoc, met
     }
     out.push({ id: method.id, label: method.label, offsets, calib, ms: Math.round(performance.now() - t0) });
   }
-  return { song, chart, blocks, audio: !!audio, methods: out };
+  return { song, chart, blocks, audio: !!audio, drums: !!heard, methods: out, evidence };
+}
+
+/** 照合の集計を曲をまたいで足す */
+export function poolEvidence(list: readonly ChartCompletion[]): Record<string, EvidenceTally> {
+  const out: Record<string, EvidenceTally> = {};
+  for (const c of list) {
+    for (const [k, t] of Object.entries(c.evidence ?? {})) {
+      out[k] ??= emptyTally();
+      for (const cls of DRUM_CLASSES) {
+        const a = out[k][cls];
+        const b = t[cls];
+        a.heard += b.heard;
+        a.heardOk += b.heardOk;
+        a.unheard += b.unheard;
+        a.unheardOk += b.unheardOk;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 点数の重みを学習するための行（小節 at ごとの候補すべて：[at, そのまま正解か(0/1), ...特徴]）。
+ * エディタと同じく1小節ずつ予測する（len 1）。
+ */
+export function trainingRows(doc: DtxDoc, audio: AudioSimilarity | null, heard: HeardDrums | null): number[][] {
+  const truthAll = measureContents(doc);
+  const ms = [...truthAll.keys()].filter((m) => (truthAll.get(m)?.keys.size ?? 0) > 0);
+  const first = Math.min(...ms);
+  const last = Math.max(...ms);
+  const rows: number[][] = [];
+  for (let at = first + 1; at <= last; at++) {
+    const view = historyView(doc, at);
+    for (const c of predictBlock(view, { at, len: 1, audio, heard })) {
+      const r = compareMeasure(c.measures[0], truthAll.get(at));
+      rows.push([at, r.exact ? 1 : 0, ...c.feat.map((x) => Math.round(x * 1e4) / 1e4)]);
+    }
+  }
+  return rows;
 }
 
 // ---- 比べる方式 -----------------------------------------------------------------------
@@ -179,6 +273,21 @@ export function audioMethod(id: string, label: string, extra: Extra = {}, minSco
   };
 }
 
+/** 曲の構造に加えて、原曲で聞こえるドラム（採譜モデル）との合い方も点数にする */
+export function drumsMethod(id: string, label: string, extra: Extra = {}, minScore = 0): CompletionMethod {
+  return {
+    id,
+    label,
+    note: '曲の構造も使う方式に、採譜モデルが聞き取ったバスドラム・スネア・タムと候補がどれだけ合うか（直前の打ってある小節と比べて）を足して点数にする',
+    audio: true,
+    drums: true,
+    pick(chart, at, audio, _truth, heard) {
+      const c = predictBlock(chart, { at, len: AHEAD, audio, heard, ...extra })[0] ?? null;
+      return c && c.score >= minScore ? c : null;
+    },
+  };
+}
+
 /** 入力済みの小節から写すやり方の上限（正解を見て、いちばん合う元を選ぶ。ずるい参考値） */
 export const ORACLE: CompletionMethod = {
   id: 'oracle',
@@ -207,13 +316,16 @@ export const ORACLE: CompletionMethod = {
  * エディタと同じ出し方：原曲があれば曲の構造も使い、見込みが基準以上のときだけ出す。
  * 2小節目からは、見込みが基準以上の間だけ1小節ずつ続けて予測する。
  */
-export function appMethod(min = 0.35): CompletionMethod {
+export function appMethod(min = 0.35, useDrums = false): CompletionMethod {
   return {
-    id: 'app',
-    label: `TAB補完（エディタと同じ・基準 ${min}）`,
-    note: `原曲があれば曲の構造も使い、見込み ${min} 以上のときだけ出す。2小節目からは、見込みが ${min} 以上の間だけ続けて予測する（エディタの「出す量：ふつう」）`,
-    pick(chart, at, audio) {
-      const c = predictChain(chart, { at, len: AHEAD, audio, minNext: min, alternatives: 1 })[0] ?? null;
+    id: useDrums ? 'app-drums' : 'app',
+    label: useDrums ? `TAB補完＋採譜（エディタと同じ・基準 ${min}）` : `TAB補完（採譜なし・基準 ${min}）`,
+    note: useDrums
+      ? `エディタと同じ。原曲があれば曲の構造と、採譜モデルが聞き取った打点との合い方も使い、見込み ${min} 以上のときだけ出す（「出す量：ふつう」）`
+      : `採譜モデルを使わないとき（v0.8.0 と同じ）。原曲があれば曲の構造も使い、見込み ${min} 以上のときだけ出す。2小節目からは、見込みが ${min} 以上の間だけ続けて予測する`,
+    drums: useDrums || undefined,
+    pick(chart, at, audio, _truth, heard) {
+      const c = predictChain(chart, { at, len: AHEAD, audio, heard: useDrums ? heard : null, minNext: min, alternatives: 1 })[0] ?? null;
       return c && c.score >= min ? c : null;
     },
   };
@@ -224,7 +336,9 @@ export const COMPLETION_METHODS: readonly CompletionMethod[] = [
   PREV_MEASURE,
   contextMethod('context', '前回の続き（譜面だけ）'),
   audioMethod('audio', '曲の構造も使う（原曲）'),
+  drumsMethod('drums', '聞こえるドラムも使う（採譜）'),
   appMethod(),
+  appMethod(0.35, true),
   ORACLE,
 ];
 

@@ -4,10 +4,12 @@
 //  - 前回の続き（譜面だけ）: 直前の数小節と同じ・似た並びが前にあれば、そのときの続きを写す。
 //    「1・2・4小節の繰り返し」は、すぐ前が同じ並びという特別な形としてここに含まれる。
 //  - 曲の構造（原曲）: 先の小節と原曲で同じに聞こえる小節が打ってあれば、その譜面を写す（2番のサビ＝1番のサビ）。
-//    原曲の聞こえ方は AudioSimilarity として外から渡す。段階3でドラムの採譜モデルの結果に差し替えられる。
+//    原曲の聞こえ方は AudioSimilarity として外から渡す。
+//  - 原曲で聞こえるドラム（採譜モデルの打点）: 候補の小節が、予測する小節で聞こえる打点とどれだけ合うかを点数に足す（HeardDrums）。
 // AI の候補は押したときだけ store 側で足す。
 import type { Frac } from '../dtx/fraction';
 import { drumChannel, type DtxDoc } from '../dtx/model';
+import type { HeardDrums } from './heard';
 
 /** 小節の中の1打（写した元の WAV 番号のまま） */
 export interface CNote {
@@ -106,10 +108,12 @@ export interface PredictOptions {
   /** 何小節ぶん予測するか（ふつうは空いている小節だけ、4まで） */
   len: number;
   audio?: AudioSimilarity | null;
+  /** 原曲で聞こえるドラム（採譜モデルの打点）。原曲の聞こえ方（audio）と一緒に使う */
+  heard?: HeardDrums | null;
   /** 予測を始める小節にもう置いてあるチップ（入力の途中）。候補はこれを全部含むものだけ */
   partial?: MeasureContent | null;
   /** 候補の点数の付け方（精度テストで差し替える）。省くと学習した重み */
-  scorer?: (x: readonly number[], hasAudio: boolean) => number;
+  scorer?: (x: readonly number[], mode: ScoreMode) => number;
   /** 原曲がこれより似ていない小節で候補を切る（2小節目から。省くと切らない） */
   audioCut?: number;
   /** 同じ中身の候補をまとめない（重みの学習用） */
@@ -118,9 +122,13 @@ export interface PredictOptions {
 
 /**
  * 候補ごとの特徴（点数の材料）。並びは FEATURE_NAMES と同じ。
- * 直前の並びの一致・原曲の似ている度合い・何小節前か・4小節や8小節の区切りがそろうか。
+ * 直前の並びの一致・原曲の似ている度合い・何小節前か・4小節や8小節の区切りがそろうか・
+ * 原曲で聞こえるドラム（バスドラム・スネア・タム）との合い方（予測する小節の候補・直前の打ってある小節）。
  */
-export const FEATURE_NAMES = ['c1', 'c2', 'c3', 'c4', 'a0', 'a1', 'aPrev', 'near1', 'near2', 'phase4', 'phase8', 'dist'] as const;
+export const FEATURE_NAMES = ['c1', 'c2', 'c3', 'c4', 'a0', 'a1', 'aPrev', 'near1', 'near2', 'phase4', 'phase8', 'dist', 's0', 'sPrev'] as const;
+
+/** 点数の付け方：譜面だけ・原曲の聞こえ方も・聞こえるドラムも */
+export type ScoreMode = 'chart' | 'audio' | 'drums';
 
 /**
  * 学習した重み。精度テストの6曲23譜面で「次の小節がまったく同じになるか」をロジスティック回帰で当てた
@@ -131,6 +139,12 @@ export const WEIGHTS = {
   chart: { bias: -4.214, w: [3.156, -0.056, -0.395, 0.739, 0, 0, 0, 0.112, 0.43, 0.459, 0.055, -0.438] },
   /** 原曲があるとき */
   audio: { bias: -4.631, w: [2.753, -0.132, -0.435, 0.706, 1.836, 1.3, 0.314, -0.008, 0.291, 0.374, -0.008, -0.225] },
+  /**
+   * 原曲があり、ドラムの採譜もできたとき。原曲があるときの点数に、聞こえるドラムとの合い方（候補 s0 と直前の小節 sPrev）を
+   * 足して学び直し、各小節で一番の候補の見込みが「そのまま正解」の割合に合うよう較正した（どちらも曲ごとの交差検証で確かめた）。
+   * s0 と sPrev の重みがほぼ逆向きなので、効くのは「直前の小節より、候補の方が聞こえるドラムに合うか」。
+   */
+  drums: { bias: -3.744, w: [2.351, -0.113, -0.372, 0.603, 1.568, 1.11, 0.268, -0.007, 0.249, 0.319, -0.007, -0.192, 1.947, -2.017] },
 };
 
 export function logistic(x: readonly number[], m: { bias: number; w: readonly number[] }): number {
@@ -139,7 +153,7 @@ export function logistic(x: readonly number[], m: { bias: number; w: readonly nu
   return 1 / (1 + Math.exp(-z));
 }
 
-export const defaultScorer = (x: readonly number[], hasAudio: boolean) => logistic(x, hasAudio ? WEIGHTS.audio : WEIGHTS.chart);
+export const defaultScorer = (x: readonly number[], mode: ScoreMode) => logistic(x, WEIGHTS[mode]);
 
 /** 直前の何小節の並びを比べるか */
 const CONTEXT = 4;
@@ -157,7 +171,11 @@ export function predictBlock(chart: ChartSource, o: PredictOptions): (Candidate 
   const partial = o.partial && o.partial.keys.size ? o.partial : null;
   const audio = o.audio ?? null;
   const hasAudio = !!audio && audio.sim(at, at) !== null;
+  const heard = hasAudio && o.heard && o.heard.agree([], at) !== null ? o.heard : null;
+  const mode: ScoreMode = heard ? 'drums' : hasAudio ? 'audio' : 'chart';
   const scorer = o.scorer ?? defaultScorer;
+  // 直前の打ってある小節と、聞こえるドラムの合い方（この曲・この辺りで採譜がどれだけ譜面に合うかの目安）
+  const sPrev = heard ? (heard.agree(get(at - 1)?.notes ?? [], at - 1) ?? 0) : 0;
   const best = new Map<string, Candidate & { feat: number[] }>();
   let hi = at - 1;
   for (const m of chart.contents.keys()) if (m > hi) hi = m;
@@ -200,6 +218,7 @@ export function predictBlock(chart: ChartSource, o: PredictOptions): (Candidate 
     for (let k = 1; k <= CONTEXT; k++) c.push(at - k >= 0 ? contentSim(get(at - k), j - k >= 0 ? get(j - k) : undefined) : 0.5);
     const d = Math.abs(at - j);
     const aPrev = hasAudio ? (audio!.sim(at - 1, j - 1) ?? 0) : 0;
+    const s0 = heard ? (heard.agree(measures[0], at) ?? 0) : 0;
     const feat = [
       ...c,
       sims[0] ?? 0,
@@ -210,8 +229,10 @@ export function predictBlock(chart: ChartSource, o: PredictOptions): (Candidate 
       d % 4 === 0 ? 1 : 0,
       d % 8 === 0 ? 1 : 0,
       Math.log2(d) / 6,
+      s0,
+      sPrev,
     ];
-    const score = scorer(feat, hasAudio);
+    const score = scorer(feat, mode);
     const sig = o.keepAll ? String(j) : measures.map((ns) => contentOf(ns).sig).join('|');
     const prev = best.get(sig);
     // 同じ中身なら点数の高い方、同じ点数なら近い小節を元にする

@@ -1,7 +1,6 @@
 // フレーズ候補：選んだ範囲に入れるフィルやリズムの候補を3つ作る。
 // AI には小節ごとの「レーン × 16分」の文字の格子で渡し、同じ形で返してもらう（拍がずれない）。
 // キーが無いときは、原曲の打点が似た小節・直前の小節から候補を作る。
-import type { Onset } from '../audio/analysis';
 import { frac, type Frac } from '../dtx/fraction';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
@@ -65,13 +64,26 @@ export function measureGrid(doc: DtxDoc, tempo: TempoMap, m: number): { lines: s
   return { lines, rounded };
 }
 
+/**
+ * 原曲の打点。3帯域（low・mid・high、原曲の解析）か、ドラムの採譜モデルの5種（BD・SD・TT・HH・CY）。
+ * どちらも、時刻（秒、原曲の頭が 0）の順に強さ・確からしさ（0〜1）を持つ。
+ */
+export type OnsetRows = Readonly<Record<string, readonly { t: number; s: number }[]>>;
+
+const ONSET_LABEL: Record<string, string> = { low: '低', mid: '中', high: '高' };
+
+/** 採譜モデルの5種か（でなければ3帯域） */
+export function isDrumRows(onsets: OnsetRows): boolean {
+  return 'BD' in onsets;
+}
+
 /** 原曲の打点を、小節の16分ごとの強さ（0〜9）の文字列にする */
-export function onsetGrid(onsets: Record<'low' | 'mid' | 'high', Onset[]>, tempo: TempoMap, m: number, offsetSec: number): string[] {
+export function onsetGrid(onsets: OnsetRows, tempo: TempoMap, m: number, offsetSec: number): string[] {
   const steps = stepsOf(tempo, m);
   const start = tempo.measureStart(m);
   const beats = tempo.measureBeats(m);
   const out: string[] = [];
-  for (const b of ['low', 'mid', 'high'] as const) {
+  for (const b of Object.keys(onsets)) {
     const cells = Array(steps).fill(0);
     for (const o of onsets[b]) {
       const beat = tempo.secToBeat(o.t + offsetSec);
@@ -80,7 +92,7 @@ export function onsetGrid(onsets: Record<'low' | 'mid' | 'high', Onset[]>, tempo
       if (i < 0 || i >= steps) continue;
       cells[i] = Math.max(cells[i], Math.min(9, Math.round(o.s * 9)));
     }
-    out.push(`${b === 'low' ? '低' : b === 'mid' ? '中' : '高'}: ${cells.join('')}`);
+    out.push(`${ONSET_LABEL[b] ?? b}: ${cells.join('')}`);
   }
   return out;
 }
@@ -95,9 +107,11 @@ export interface PhraseContext {
   /** 範囲と前後4小節の格子 */
   measures: { m: number; inRange: boolean; steps: number; grid: string[]; onsets: string[] | null }[];
   rounded: boolean;
+  /** 原曲の打点の種類（採譜モデルの5種か、3帯域か） */
+  onsetKind?: 'drums' | 'bands';
 }
 
-export function buildContext(doc: DtxDoc, tempo: TempoMap, o: { kind: 'fill' | 'rhythm'; from: number; to: number; instruction: string; targetLevel: number | null; onsets: Record<'low' | 'mid' | 'high', Onset[]> | null; offsetSec: number }): PhraseContext {
+export function buildContext(doc: DtxDoc, tempo: TempoMap, o: { kind: 'fill' | 'rhythm'; from: number; to: number; instruction: string; targetLevel: number | null; onsets: OnsetRows | null; offsetSec: number }): PhraseContext {
   const measures: PhraseContext['measures'] = [];
   let rounded = false;
   for (let m = Math.max(0, o.from - 4); m <= o.to + 4; m++) {
@@ -105,7 +119,17 @@ export function buildContext(doc: DtxDoc, tempo: TempoMap, o: { kind: 'fill' | '
     rounded ||= g.rounded;
     measures.push({ m, inRange: m >= o.from && m <= o.to, steps: stepsOf(tempo, m), grid: g.lines, onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec) : null });
   }
-  return { kind: o.kind, from: o.from, to: o.to, bpm: Math.round(tempo.bpmAt(tempo.measureStart(o.from))), targetLevel: o.targetLevel, instruction: o.instruction, measures, rounded };
+  return {
+    kind: o.kind,
+    from: o.from,
+    to: o.to,
+    bpm: Math.round(tempo.bpmAt(tempo.measureStart(o.from))),
+    targetLevel: o.targetLevel,
+    instruction: o.instruction,
+    measures,
+    rounded,
+    onsetKind: o.onsets ? (isDrumRows(o.onsets) ? 'drums' : 'bands') : undefined,
+  };
 }
 
 export const PHRASE_SCHEMA = {
@@ -161,7 +185,9 @@ export function phrasePrompt(ctx: PhraseContext): { system: string; user: string
     '指定の範囲に入れる' + (ctx.kind === 'fill' ? 'フィルイン' : 'リズムパターン') + 'の候補を、性格の違う3つ作ってください。',
     '譜面は小節ごとに「レーン: 格子」で表します。格子の1文字は16分音符1つ、x は打つ、- は休み。',
     'レーン: LC=左シンバル HH=ハイハット(閉) HO=ハイハット(開) LP=左ペダル LB=左バスドラム SD=スネア HT=ハイタム BD=バスドラム LT=ロータム FT=フロアタム CY=右シンバル RD=ライド',
-    '原曲の打点は「低・中・高」の帯域ごとの強さ（0〜9）で、同じ16分の位置に並んでいます。低はキック、中はスネアやタム、高はシンバルやハイハットの目安です。',
+    ctx.onsetKind === 'drums'
+      ? '原曲の打点は、ドラムの採譜モデルが原曲から聞き取った BD=バスドラム SD=スネア TT=タム（どれかは区別しない） HH=ハイハット CY=シンバル・ライド ごとの確からしさ（0〜9）で、同じ16分の位置に並んでいます。0 でない所はその音が鳴っている見込みが高い所です（ただし小さい音は取りこぼすことがあります）。'
+      : '原曲の打点は「低・中・高」の帯域ごとの強さ（0〜9）で、同じ16分の位置に並んでいます。低はキック、中はスネアやタム、高はシンバルやハイハットの目安です。',
     '守ること: 手は同時に2つまで、足は左右1つずつ。前後の小節とのつながりを自然に。範囲の外は書かない。',
     '答えは指定の JSON だけで返してください。',
   ].join('\n');
@@ -273,12 +299,13 @@ function cosine(a: number[], b: number[]): number {
   return aa && bb ? ab / Math.sqrt(aa * bb) : 0;
 }
 
-function onsetVector(onsets: Record<'low' | 'mid' | 'high', Onset[]>, tempo: TempoMap, m: number, offsetSec: number): number[] {
+function onsetVector(onsets: OnsetRows, tempo: TempoMap, m: number, offsetSec: number): number[] {
   const steps = 16;
   const start = tempo.measureStart(m);
   const beats = tempo.measureBeats(m);
-  const v = Array(steps * 3).fill(0);
-  (['low', 'mid', 'high'] as const).forEach((b, bi) => {
+  const keys = Object.keys(onsets);
+  const v = Array(steps * keys.length).fill(0);
+  keys.forEach((b, bi) => {
     for (const o of onsets[b]) {
       const beat = tempo.secToBeat(o.t + offsetSec);
       if (beat < start - 0.1 || beat >= start + beats - 0.1) continue;
@@ -294,7 +321,7 @@ function noteKey(n: { ch: number; f: Frac }) {
 }
 
 /** キーが無いときの候補：原曲の打点が似た小節（譜面のある小節）からのコピーと、直前の小節の複製 */
-export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; to: number; onsets: Record<'low' | 'mid' | 'high', Onset[]> | null; offsetSec: number; lastMeasure: number }): PhraseCandidate[] {
+export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; to: number; onsets: OnsetRows | null; offsetSec: number; lastMeasure: number }): PhraseCandidate[] {
   const len = o.to - o.from + 1;
   const out: PhraseCandidate[] = [];
   const has = (m: number) => drumNotesIn(doc, m).length >= 3;

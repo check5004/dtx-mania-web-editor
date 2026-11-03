@@ -1,13 +1,18 @@
 // 精度テストのページ（bench.html）。曲フォルダを選ぶと、混ぜ方ごとにテスト曲を作って方式ごとに採点する。
 // 自動で回すとき（scripts/bench.mjs）は window.__bench.run() を呼ぶ。
+import { modelEvidence, onsetEvidence, type Evidence } from '../assist/evidence';
+import { heardDrums, type HeardDrums } from '../assist/heard';
 import { measureAudio, type MeasureAudio } from '../assist/measureAudio';
+import { analyzeAudio } from '../audio/analysis';
 import { computeFrameFeatures, type FrameFeatures } from '../audio/features';
+import { transcribe } from '../transcribe/client';
+import { drumHits, type DrumHit } from '../transcribe/peaks';
 import { decodeDtx } from '../dtx/encoding';
 import { parseDtx } from '../dtx/parse';
 import { dtxFiles, normPath, type FolderFile, type SongFolder } from '../fs/folder';
 import { bgmSource, tempoOf } from '../store/derived';
 import { CLASS_LABEL, DRUM_CLASSES } from './classes';
-import { AHEAD, calibBins, COMPLETION_METHODS, evaluateCompletion, offsetSummary, poolCompletion, type ChartCompletion } from './complete';
+import { AHEAD, calibBins, COMPLETION_METHODS, evaluateCompletion, offsetSummary, poolCompletion, poolEvidence, trainingRows, type ChartCompletion, type EvidenceInput } from './complete';
 import { BENCH_METHODS } from './methods';
 import { encodeWav, renderMix, type MixEvent } from './mix';
 import { evaluateCase, poolResults, type CaseResult, type PooledRow } from './run';
@@ -210,8 +215,18 @@ function renderResults(results: CaseResult[], skipped: { song: string; mix: MixK
 
 let lastComplete: { results: ChartCompletion[]; at: string } | null = null;
 
-/** 曲の原曲に近い音（BGM＋ドラムの録音があれば重ねる）の特徴。0 秒は正解の譜面の 0 秒 */
-function songFeatures(s: LoadedSong): { frames: FrameFeatures; duration: number; bgmSec: number } | null {
+interface SongAudio {
+  frames: FrameFeatures;
+  duration: number;
+  bgmSec: number;
+  /** 採譜モデルの打点（0 秒は正解の譜面の 0 秒） */
+  hits: DrumHit[] | null;
+  /** v0 の打点検出での照合 */
+  v0: Evidence;
+}
+
+/** 曲の原曲に近い音（BGM＋ドラムの録音があれば重ねる）の特徴・採譜。0 秒は正解の譜面の 0 秒 */
+async function songAudio(s: LoadedSong, useDrums: boolean, onStep: (m: string) => void): Promise<SongAudio | null> {
   const events: MixEvent[] = [];
   for (const p of [...s.bgm, ...(s.stem ? [s.stem] : [])]) {
     const sound = s.sounds.get(normPath(p.path));
@@ -221,11 +236,29 @@ function songFeatures(s: LoadedSong): { frames: FrameFeatures; duration: number;
   let end = 0;
   for (const e of events) end = Math.max(end, e.sec + e.sound[0].length / s.sr);
   const ch = renderMix(events, s.sr, end);
-  return { frames: computeFrameFeatures(ch, s.sr), duration: end, bgmSec: s.bgm[0].sec };
+  const frames = computeFrameFeatures(ch, s.sr);
+  const v0 = onsetEvidence(analyzeAudio([...ch], s.sr));
+  let hits: DrumHit[] | null = null;
+  if (useDrums) {
+    onStep('ドラムを採譜中');
+    hits = drumHits(await transcribe(ch, s.sr, { onProgress: (st, p) => st === 'run' && onStep(`ドラムを採譜中 ${Math.round(p * 100)}%`) }));
+  }
+  return { frames, duration: end, bgmSec: s.bgm[0].sec, hits, v0 };
 }
 
-async function runComplete() {
+export interface CompleteOptions {
+  /** 採譜モデルを使う方式も測る（既定は使う） */
+  drums?: boolean;
+  /** 点数の重みを学習するための行も返す */
+  train?: boolean;
+}
+
+let lastTrain: { song: string; chart: string; rows: number[][] }[] = [];
+
+async function runComplete(opts: CompleteOptions = {}) {
+  const useDrums = opts.drums ?? true;
   const results: ChartCompletion[] = [];
+  const train: { song: string; chart: string; rows: number[][] }[] = [];
   const skipped: string[] = [];
   $('runComplete').toggleAttribute('disabled', true);
   $('outComplete').innerHTML = '';
@@ -241,33 +274,44 @@ async function runComplete() {
       }
       setStatus(`${tag}: 原曲の聞こえ方を調べています`);
       await new Promise((r) => setTimeout(r, 0));
-      const feat = songFeatures(s);
+      const feat = await songAudio(s, useDrums, (m) => setStatus(`${tag}: ${m}`));
       if (!feat) skipped.push(`${sf.name}：BGM が読めないので、原曲を使う方式は測らない`);
       for (const f of dtxFiles(sf)) {
         const { doc } = parseDtx(decodeDtx(new Uint8Array(await (await f.getFile()).arrayBuffer())).text);
         const tempo = tempoOf(doc);
         let audio: MeasureAudio | null = null;
+        let heard: HeardDrums | null = null;
+        let ev: EvidenceInput | null = null;
         const bx = bgmSource(doc)?.sec;
         if (feat && bx !== undefined) {
-          const last = Math.min(3599, tempo.locate(tempo.secToBeat(feat.duration + bx - feat.bgmSec)).m + 1);
-          audio = measureAudio({ frames: feat.frames, offsetSec: bx - feat.bgmSec, duration: feat.duration }, tempo, last);
+          const off = bx - feat.bgmSec;
+          const last = Math.min(3599, tempo.locate(tempo.secToBeat(feat.duration + off)).m + 1);
+          audio = measureAudio({ frames: feat.frames, offsetSec: off, duration: feat.duration }, tempo, last);
+          const sources: Record<string, Evidence> = { v0: feat.v0 };
+          if (feat.hits) {
+            heard = heardDrums(feat.hits, tempo, off, feat.duration);
+            sources.model = modelEvidence(feat.hits);
+          }
+          ev = { sources, toAudio: (sec) => sec - off, minScore: 0.2 };
         }
         setStatus(`${tag}: ${f.name} の先を予測中`);
         await new Promise((r) => setTimeout(r, 0));
-        const r = evaluateCompletion(sf.name, f.name, doc, COMPLETION_METHODS, audio);
+        const r = evaluateCompletion(sf.name, f.name, doc, COMPLETION_METHODS, audio, heard, ev);
         if (r.blocks < 16) {
           skipped.push(`${sf.name}・${f.name}：ドラムの小節が少ない`);
           continue;
         }
         results.push(r);
+        if (opts.train && audio) train.push({ song: sf.name, chart: f.name, rows: trainingRows(doc, audio, heard) });
         renderCompletion(results, skipped);
       }
     }
     lastComplete = { results, at: new Date().toISOString() };
+    lastTrain = train;
     renderCompletion(results, skipped);
     setStatus(`TAB補完：終わりました（${results.length} 譜面）`);
     $('json').toggleAttribute('disabled', false);
-    return { results, pooled: poolCompletion(results), skipped };
+    return { results, pooled: poolCompletion(results), skipped, evidence: poolEvidence(results), train: opts.train ? train : undefined };
   } catch (e) {
     setStatus(`止まりました: ${(e as Error).message}`);
     throw e;
@@ -303,6 +347,22 @@ function renderCompletion(results: ChartCompletion[], skipped: string[]) {
     h += `<h2>見込みは当てになるか（${app.label}、次の小節）</h2><p>候補の点数（見込み）ごとに、次の小節がそのまま正解だった割合。エディタは見込み 0.35 以上（ふつう）・0.5 以上（控えめ）・0.2 以上（多め）で点線を出します。</p>`;
     h += '<div class="scroll"><table><tr><th class="l">見込み</th><th>数</th><th>そのまま正解</th><th>F の平均</th></tr>';
     for (const b of calibBins(app.calib)) h += `<tr><td class="l mono">${b.lo.toFixed(1)}〜${b.hi.toFixed(1)}</td><td class="mono">${b.n}</td><td class="f">${pct(b.exact)}</td><td class="f">${f2(b.f)}</td></tr>`;
+    h += '</table></div>';
+  }
+  const ev = poolEvidence(results);
+  if (Object.keys(ev).length) {
+    h += '<h2>原曲との照合（曲の構造も使う・見込み 0.2 以上・次の小節）</h2><p>予測したチップの近く（±50ms）に、同じ種類の打点があったか（聞こえる）／無かったか（聞こえない）で分けて、正解だった割合を比べます。差が大きい種類ほど、「聞こえない」の印が当てになります。</p>';
+    h += '<div class="scroll"><table><tr><th class="l">照合</th>' + DRUM_CLASSES.map((k) => `<th>${k}<br><span class="lbl">聞こえる / 聞こえない</span></th>`).join('') + '</tr>';
+    for (const [k, t] of Object.entries(ev)) {
+      h += `<tr><td class="l">${k === 'v0' ? 'v0（3帯域の打点）' : k === 'model' ? '採譜モデル（ADTOF）' : k}</td>`;
+      for (const cls of DRUM_CLASSES) {
+        const x = t[cls];
+        const a = x.heard ? x.heardOk / x.heard : null;
+        const b = x.unheard ? x.unheardOk / x.unheard : null;
+        h += x.heard + x.unheard ? `<td class="f">${pct(a)} / ${pct(b)}<small>${x.heard} / ${x.unheard} 個</small></td>` : '<td class="f">–</td>';
+      }
+      h += '</tr>';
+    }
     h += '</table></div>';
   }
   h += '<h2>譜面ごと（次の小節：そのまま / 出した）</h2><div class="scroll"><table><tr><th class="l">曲・譜面</th><th>小節</th>';
@@ -353,7 +413,15 @@ function poolComplete(list: ChartCompletion[]) {
 
 declare global {
   interface Window {
-    __bench?: { run: typeof run; runComplete: typeof runComplete; songs: () => string[]; pool: typeof poolResults; poolComplete: typeof poolComplete };
+    __bench?: {
+      run: typeof run;
+      runComplete: typeof runComplete;
+      songs: () => string[];
+      pool: typeof poolResults;
+      poolComplete: typeof poolComplete;
+      poolEvidence: typeof poolEvidence;
+      lastTrain: () => typeof lastTrain;
+    };
   }
 }
-window.__bench = { run, runComplete, songs: () => songs.map((s) => s.name), pool: poolResults, poolComplete };
+window.__bench = { run, runComplete, songs: () => songs.map((s) => s.name), pool: poolResults, poolComplete, poolEvidence, lastTrain: () => lastTrain };

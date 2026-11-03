@@ -14,6 +14,8 @@ import { deleteMeasures, deleteSelection, insertMeasures, openPage, setMeasureLe
 import { judgeCurrent, useAiLevel } from '../store/aiLevel';
 import { makeCandidates, openPhrase } from '../store/phrase';
 import { AMOUNT, setCompleteSettings, useComplete, type CompleteAmount } from '../store/complete';
+import { drumStatusText, setDrumsEnabled, useDrums } from '../store/drums';
+import { ADTOF } from '../transcribe/model';
 import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
 import { chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
@@ -468,6 +470,41 @@ function AssistCard() {
           <span className="mono lbl">{Math.round(a.sensitivity * 100)}</span>
         </label>
       )}
+      <DrumModelRow />
+    </div>
+  );
+}
+
+/** ドラムの採譜モデルを使うか・進み具合 */
+function DrumModelRow() {
+  const d = useDrums();
+  const text = drumStatusText(d);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <label
+        className="row lbl"
+        title={`原曲からドラムの5種（BD・SD・タム・HH・シンバル）の打点を聞き取ります。初回だけモデル（2.2MB）を Hugging Face から、動かす部分（約4MB）をこのサイトから読み込みます。音はこのブラウザの外に出しません。モデル: ${ADTOF.credit}・${ADTOF.license}`}
+      >
+        <input type="checkbox" checked={d.enabled} onChange={(e) => setDrumsEnabled(e.target.checked)} />
+        ドラムの採譜モデルで打点を聞き取る
+      </label>
+      {d.enabled && d.status === 'loading' && (
+        <div style={{ marginTop: 4 }}>
+          <div className="lbl" style={{ marginBottom: 4 }}>
+            {text}
+          </div>
+          <div className="progress">
+            <div style={{ width: `${Math.round((d.stage === 'run' ? d.progress : 0) * 100)}%` }} />
+          </div>
+        </div>
+      )}
+      {d.enabled && d.status === 'error' && (
+        <div className="notice" style={{ marginTop: 6 }}>
+          <span style={{ flex: 'none', marginTop: 1 }}>{Icon.warn(14)}</span>
+          <span>{text}。低・中・高の3帯域の打点を出しています。</span>
+        </div>
+      )}
+      {d.enabled && d.status === 'ready' && <div className="lbl" style={{ marginTop: 2, lineHeight: 1.6 }}>原曲の打点を5種で出し、TAB補完の候補選びと照合にも使っています。</div>}
     </div>
   );
 }
@@ -481,6 +518,7 @@ const AUDIO_NOTE: Record<string, string> = {
 
 function CompleteCard() {
   const c = useComplete();
+  const drumsReady = useDrums((d) => d.enabled && d.status === 'ready');
   return (
     <div className="card">
       <div className="row" style={{ marginBottom: 6 }}>
@@ -522,10 +560,12 @@ function CompleteCard() {
               <kbd>Alt</kbd>+<kbd>]</kbd> <kbd>[</kbd> … 次・前の候補（点線が無いときはカーソルの所に出す）
             </div>
             <div>
-              <kbd>Esc</kbd> … 消す。<span style={{ color: '#FF9F43' }}>オレンジの枠</span> … 原曲でスネアが聞こえない所
+              <kbd>Esc</kbd> … 消す。<span style={{ color: '#FF9F43' }}>オレンジの枠</span> … 原曲でその音が聞こえない所（バスドラム・スネア・タム）
             </div>
           </div>
-          <p className="lbl" style={{ margin: '6px 0 0' }}>{AUDIO_NOTE[c.audio]}</p>
+          <p className="lbl" style={{ margin: '6px 0 0' }}>
+            {c.audio === 'ready' && drumsReady ? '原曲の聞こえ方と、採譜したドラム（バスドラム・スネア・タム）との合い方も使って予測しています。' : AUDIO_NOTE[c.audio]}
+          </p>
         </>
       )}
     </div>
