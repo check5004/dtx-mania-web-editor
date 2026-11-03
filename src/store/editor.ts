@@ -757,13 +757,6 @@ function emit(e: PlaybackEvent) {
 }
 
 let playToken = 0;
-/** 再生を始める途中（音の読み込み・スロー再生の準備中）の数 */
-let starting = 0;
-
-/** 再生を始める途中なら true。止めたのではなく、位置や速さを変えて再生し直している */
-export function playStarting(): boolean {
-  return starting > 0;
-}
 
 /** ループがオンなら範囲の外からは再生しない（A から始める）。範囲の終わり B ちょうども外 */
 function loopedStart(beat: number): number {
@@ -782,51 +775,46 @@ export async function playFrom(beat: number, opts: { keepStart?: boolean } = {})
   const token = ++playToken;
   const startBeat = loopedStart(Math.max(0, beat));
   if (!opts.keepStart) set({ cursorBeat: startBeat });
-  starting++;
-  try {
-    await prepareSounds();
-    if (token !== playToken) return;
-    const doc = get().doc;
-    const tempo = tempoOf(doc);
-    const a = useAssist.getState();
-    const loop = loopSec(doc, a.loop);
-    let startSec = tempo.beatToSec(startBeat);
-    // ループ中は範囲の外から始めない（準備の間にループが変わったときのため秒でも確かめる）
-    if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
-    const endSec = playEndSec(doc, startSec);
-    const rate = a.speed;
-    const events = playbackEvents(doc);
-    const longs = new Map<number, number>();
-    for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
-    if (rate < 0.999 && longs.size > 0) {
-      set({ loading: 'スロー再生の準備中…' });
-      try {
-        await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
-      } catch (e) {
-        toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
-      } finally {
-        set({ loading: null });
-      }
-      if (token !== playToken) return;
+  await prepareSounds();
+  if (token !== playToken) return;
+  const doc = get().doc;
+  const tempo = tempoOf(doc);
+  const a = useAssist.getState();
+  const loop = loopSec(doc, a.loop);
+  let startSec = tempo.beatToSec(startBeat);
+  // ループ中は範囲の外から始めない（準備の間にループが変わったときのため秒でも確かめる）
+  if (loop && (startSec < loop.from - 1e-6 || startSec >= loop.to)) startSec = loop.from;
+  const endSec = playEndSec(doc, startSec);
+  const rate = a.speed;
+  const events = playbackEvents(doc);
+  const longs = new Map<number, number>();
+  for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
+  if (rate < 0.999 && longs.size > 0) {
+    set({ loading: 'スロー再生の準備中…' });
+    try {
+      await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
+    } catch (e) {
+      toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
+    } finally {
+      set({ loading: null });
     }
-    engine.play({
-      events,
-      clicks: clickTimes(doc, 0, endSec + 2),
-      startSec,
-      endSec,
-      rate,
-      loop,
-      onEnd: () => {
-        set({ playing: false });
-        emit({ type: 'stop' });
-      },
-      onLoop: () => emit({ type: 'loop', startSec: loop?.from ?? 0 }),
-    });
-    set({ playing: true, view: { ...get().view, follow: true } });
-    emit({ type: 'play', startSec, rate });
-  } finally {
-    starting--;
+    if (token !== playToken) return;
   }
+  engine.play({
+    events,
+    clicks: clickTimes(doc, 0, endSec + 2),
+    startSec,
+    endSec,
+    rate,
+    loop,
+    onEnd: () => {
+      set({ playing: false });
+      emit({ type: 'stop' });
+    },
+    onLoop: () => emit({ type: 'loop', startSec: loop?.from ?? 0 }),
+  });
+  set({ playing: true, view: { ...get().view, follow: true } });
+  emit({ type: 'play', startSec, rate });
 }
 
 // 再生中に譜面が変わったら、まだ鳴らしていない所から新しい譜面で鳴らす

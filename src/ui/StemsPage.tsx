@@ -170,7 +170,7 @@ function StemsTransport({ zoom, setZoom }: { zoom: Zoom; setZoom: (z: Zoom) => v
       <button
         className="play-btn"
         onClick={togglePlay}
-        title={playing ? '停止（Space）。再生位置は ▶ に戻ります' : '▶ の位置から再生（Space）。止めると ▶ に戻ります'}
+        title={playing ? '停止（Space）。次はまた ▶ から再生します（表示は止めた所のまま）' : '▶ の位置から再生（Space）。止めると再生位置は ▶ に戻ります'}
         aria-label={playing ? '停止' : '再生'}
       >
         {playing ? Icon.stop(18) : Icon.play(18)}
@@ -393,8 +393,18 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
   const audible = stems.map((t) => (stemAudible(t) ? 1 : 0)).join('');
   const dragging = useRef(false);
 
-  // 見せる範囲（秒）。ズーム中は再生位置の入っている数小節（ページ送り）
-  const curM = tempo.locate(Math.max(0, beat)).m;
+  // 見せる範囲（秒）。ズーム中は再生位置の入っている数小節（ページ送り）。
+  // 止めても表示は止めた所のまま。止めている間に ▶ を動かしたら ▶ の所を見せる
+  const cursor = useEditor((s) => s.cursorBeat);
+  const playM = tempo.locate(Math.max(0, beat)).m;
+  const [curM, setCurM] = useState(playM);
+  useEffect(() => {
+    if (playing) setCurM(playM);
+  }, [playing, playM]);
+  useEffect(() => {
+    const s = useEditor.getState();
+    if (!s.playing) setCurM(tempoOf(s.doc).locate(Math.max(0, cursor)).m);
+  }, [cursor]);
   const page = zoom === 'all' ? 0 : curM - (curM % zoom);
   const win = useMemo(() => {
     if (zoom === 'all') return { from: 0, to: total };

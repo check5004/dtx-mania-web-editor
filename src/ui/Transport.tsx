@@ -63,7 +63,7 @@ export function Transport() {
       <button
         className="play-btn"
         onClick={togglePlay}
-        title={playing ? '停止（Space / F7）。再生位置は ▶ に戻ります' : '▶ の位置から再生（Space / F6）。止めると ▶ に戻ります'}
+        title={playing ? '停止（Space / F7）。次はまた ▶ から再生します（譜面の表示は止めた所のまま）' : '▶ の位置から再生（Space / F6）。止めると再生位置は ▶ に戻ります'}
         aria-label={playing ? '停止' : '再生'}
       >
         {playing ? Icon.stop(18) : Icon.play(18)}
