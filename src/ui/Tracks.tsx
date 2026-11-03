@@ -597,7 +597,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
     );
   }
 
-  // 解析元（波形・原曲の打点・候補チップ・BPM推定に使う音）
+  // 解析元（波形・原曲の打点・BPM推定に使う音）
   const eff = effectiveAnalysisStem();
   const isAnalysis = row.type === 'stem' ? eff?.file === row.id : row.type === 'orig' ? eff === null : false;
   const audio = row.type !== 'chart' ? trackAudio(row.id) : null;
@@ -634,8 +634,8 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
           }}
           title={
             isAnalysis
-              ? '解析元：波形・原曲の打点・候補チップ・BPM推定をこのトラックから作っています'
-              : '解析元にする（波形・原曲の打点・候補チップ・BPM推定をこのトラックから作る）'
+              ? '解析元：波形・原曲の打点・BPM推定をこのトラックから作っています'
+              : '解析元にする（波形・原曲の打点・BPM推定をこのトラックから作る）'
           }
           aria-label={`${row.name}を解析元にする`}
           aria-pressed={isAnalysis}

@@ -1,4 +1,4 @@
-// 原曲（音声ファイル）：読み込む場所。BGM（#WAV と ch01）に登録し、波形と候補チップはこの音から作る。
+// 原曲（音声ファイル）：読み込む場所。BGM（#WAV と ch01）に登録し、波形と原曲の打点はこの音から作る。
 import { useState } from 'react';
 import { importBgmFile, pickBgmFile } from '../app/fileActions';
 import { engine } from '../audio/engine';
@@ -50,7 +50,7 @@ export function SourceCard() {
   };
 
   const analysis =
-    status === 'loading' ? `解析中… ${Math.round(progress * 100)}%` : status === 'ready' ? `波形・候補チップ: ${srcName ?? name}` : status === 'error' ? '解析できませんでした' : null;
+    status === 'loading' ? `解析中… ${Math.round(progress * 100)}%` : status === 'ready' ? `波形・打点: ${srcName ?? name}` : status === 'error' ? '解析できませんでした' : null;
 
   return (
     <div className={`card source-card ${over ? 'over' : ''}`} {...drop}>
@@ -101,7 +101,7 @@ export function SourceCard() {
             <span>ここにドロップするか、クリックして選ぶ（WAV・OGG・MP3）</span>
           </button>
           <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-            曲フォルダにコピーしてBGM（#WAV と ch01）に登録します。譜面の右の波形と候補チップはこの音から作ります。楽器ごとに分けた音は
+            曲フォルダにコピーしてBGM（#WAV と ch01）に登録します。譜面の右の波形と原曲の打点はこの音から作ります。楽器ごとに分けた音は
             <button className="link-btn" onClick={() => openPage('stems')}>
               ステム
             </button>

@@ -3,7 +3,7 @@ import { dropAudioInEditor, openDroppedFiles, openFolderFromInput, openFolderPic
 import { frac } from '../dtx/fraction';
 import { gridStep, snapToGrid, stepGrid } from '../edit/ops';
 import { autoEnableMidi } from '../input/midi';
-import { adoptGhostsInRange, setLoopPoint, toggleLoop, useAssist } from '../store/assist';
+import { setLoopPoint, toggleLoop, useAssist } from '../store/assist';
 import { tempoOf } from '../store/derived';
 import { keyHit } from '../store/hits';
 import {
@@ -200,14 +200,6 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       e.preventDefault();
       togglePlay();
       return;
-    case 'Enter': {
-      // カーソルの小節の候補をまとめて採用
-      e.preventDefault();
-      const tempo = tempoOf(s.doc);
-      const { m } = tempo.locate(Math.max(0, s.cursorBeat));
-      adoptGhostsInRange(tempo.measureStart(m), tempo.measureStart(m + 1));
-      return;
-    }
     case 'Delete':
     case 'Backspace':
       e.preventDefault();

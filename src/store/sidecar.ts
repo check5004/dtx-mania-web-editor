@@ -60,7 +60,7 @@ export interface SidecarData {
   /** テンポ合わせ画面の拍アンカー */
   anchors: TempoAnchor[];
   stems: StemTrack[];
-  /** 解析（波形・原曲の打点・候補チップ・BPM推定）に使うステム。null なら原曲（BGM） */
+  /** 解析（波形・原曲の打点・BPM推定）に使うステム。null なら原曲（BGM） */
   analysisStem: string | null;
   mix: SavedMix | null;
 }

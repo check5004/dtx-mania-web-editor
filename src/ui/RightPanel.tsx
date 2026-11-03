@@ -1,21 +1,9 @@
 import { sameMeasures } from '../assist/similar';
-import { GHOST_LANE_INDEX } from '../assist/ghosts';
 import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
 import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
-import {
-  adoptGhosts,
-  applySimilar,
-  clearSimilarPin,
-  currentGhosts,
-  ghostsInRange,
-  GHOST_LANES,
-  restoreGhosts,
-  setBandFilter,
-  setGhostLane,
-  useAssist,
-} from '../store/assist';
+import { applySimilar, clearSimilarPin, setBandFilter, useAssist } from '../store/assist';
 import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
 import { useInputSettings } from '../input/settings';
 import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
@@ -334,8 +322,6 @@ function AssistCard() {
   const a = useAssist();
   const tempo = tempoOf(doc);
   const vis = visibleBeats();
-  const inView = a.data && a.ghostsOn ? ghostsInRange(vis.from, vis.to) : [];
-  const total = a.data && a.ghostsOn ? currentGhosts().length : 0;
   const cm = tempo.locate(Math.max(0, cursor)).m;
   const same = sameMeasures(doc, cm);
   const pin = a.similarPin;
@@ -360,7 +346,7 @@ function AssistCard() {
       {(a.status === 'nosource' || a.status === 'none') && (
         <div className="notice info" style={{ marginBottom: 10 }}>
           <span style={{ flex: 'none', marginTop: 1 }}>{Icon.info(14)}</span>
-          <span>原曲（BGMチップ ch01）が鳴らせないため、波形と候補チップは出ません。曲フォルダを開くか、テンポ合わせ画面で原曲を選んでください。</span>
+          <span>原曲（BGMチップ ch01）が鳴らせないため、波形と原曲の打点は出ません。曲フォルダを開くか、テンポ合わせ画面で原曲を選んでください。</span>
         </div>
       )}
       {a.status === 'error' && (
@@ -369,47 +355,7 @@ function AssistCard() {
           <span>原曲を解析できませんでした: {a.error}</span>
         </div>
       )}
-      <div className="ghost-box">
-        <div className="row">
-          <label className="row" style={{ gap: 6, fontSize: 12 }}>
-            <input type="checkbox" checked={a.ghostsOn} onChange={(e) => useAssist.setState({ ghostsOn: e.target.checked })} />
-            候補チップ
-          </label>
-          <span className="mono" style={{ fontWeight: 700, color: 'var(--accent)' }}>
-            {inView.length}
-          </span>
-          <span className="lbl">件（全体 {total}）</span>
-          <span className="grow" />
-        </div>
-        <div className="lbl">クリックで1つずつ採用、右クリックで捨てる。Enter でカーソルの小節をまとめて採用。</div>
-        <div className="row">
-          <button className="btn small primary grow" style={{ justifyContent: 'center' }} disabled={inView.length === 0} onClick={() => adoptGhosts(inView)}>
-            表示中をすべて採用
-          </button>
-          <button className="btn small grow" style={{ justifyContent: 'center' }} disabled={a.dismissed.size === 0} onClick={restoreGhosts} title="捨てた候補を戻す">
-            候補を戻す
-          </button>
-        </div>
-        <label className="slider-row" title="上げると弱い音も拾います（誤検出も増えます）">
-          <span className="lbl">検出の感度</span>
-          <input type="range" min={0} max={1} step={0.05} value={a.sensitivity} onChange={(e) => useAssist.setState({ sensitivity: Number(e.target.value) })} />
-          <span className="mono lbl">{Math.round(a.sensitivity * 100)}</span>
-        </label>
-        <div className="lane-toggles">
-          {GHOST_LANES.map((g) => (
-            <button
-              key={g}
-              className={`lane-toggle ${a.ghostLanes[g] ? 'on' : ''}`}
-              style={{ ['--c' as string]: DRUM_LANES[GHOST_LANE_INDEX[g]].color }}
-              onClick={() => setGhostLane(g, !a.ghostLanes[g])}
-              title={`${DRUM_LANES[GHOST_LANE_INDEX[g]].name}の候補を${a.ghostLanes[g] ? '出さない' : '出す'}`}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div style={{ marginTop: 12 }}>
+      <div>
         <div className="lbl" style={{ marginBottom: 6 }}>
           原曲を聴く帯域
         </div>
@@ -454,6 +400,13 @@ function AssistCard() {
         <input type="checkbox" checked={a.audioCols} onChange={(e) => useAssist.setState({ audioCols: e.target.checked })} />
         譜面の右に原曲の打点と波形を出す
       </label>
+      {a.audioCols && (
+        <label className="slider-row" style={{ marginTop: 6, gridTemplateColumns: '68px minmax(0, 1fr) 36px' }} title="上げると弱い音も打点として出します（関係ない音も増えます）">
+          <span className="lbl">打点の感度</span>
+          <input type="range" min={0} max={1} step={0.05} value={a.sensitivity} onChange={(e) => useAssist.setState({ sensitivity: Number(e.target.value) })} />
+          <span className="mono lbl">{Math.round(a.sensitivity * 100)}</span>
+        </label>
+      )}
     </div>
   );
 }
