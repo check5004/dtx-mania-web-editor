@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { engine } from '../audio/engine';
 import { virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
-import { DRUM_LANES } from '../dtx/model';
+import { CH, DRUM_LANES, isSeChannel } from '../dtx/model';
 import { serializeHeader } from '../dtx/serialize';
 import { parseDtx } from '../dtx/parse';
 import { freeWavNumber, setField, setFieldComment } from '../edit/ops';
@@ -11,9 +12,11 @@ import { BGA_CHANNELS } from '../dtx/model';
 import { thumb, useThumbs } from './thumbs';
 import { audioFiles, findFile } from '../fs/folder';
 import { wavPan, wavVolume } from '../store/derived';
-import { edit, openPage, prepareSounds, previewFile, previewWav, setFieldValue, setLaneWav, toast, useEditor, type LeftTab } from '../store/editor';
+import { playAudition, useStopAuditionOnClose } from '../store/audition';
+import { edit, fileBuffer, openPage, prepareSounds, setFieldValue, setLaneWav, toast, useEditor, wavAuditionSound, type LeftTab } from '../store/editor';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
+import { AuditionButton, AuditionProgress } from './Audition';
 import { chooseDialog, confirmDialog } from './dialogs';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -55,11 +58,17 @@ function wavList(fields: Record<string, string>): { no: number; path: string }[]
     .sort((a, b) => a.no - b.no);
 }
 
+/** ファイルの音を試聴するときの音 */
+async function fileSound(path: string) {
+  const buf = await fileBuffer(path);
+  return buf ? { buf } : null;
+}
+
 /** レーンの音を「キットの音」に戻す（チップを置いたときにキットの音を登録する） */
 function followKit(ch: number) {
   setLaneWav(ch, null);
   const file = kitFile(ch);
-  if (file) void previewFile(file);
+  if (file) void playAudition(`kit:${ch}`, () => fileSound(file));
 }
 
 function KitTab() {
@@ -69,6 +78,7 @@ function KitTab() {
   const kitId = useKit((s) => s.kitId);
   useLibrary((s) => s.kits);
   useLibrary((s) => s.samples);
+  useStopAuditionOnClose('kit:');
   const choices = kitChoices();
   const cur = choices.find((k) => k.id === kitId) ?? choices[0];
   const wavs = wavList(fields);
@@ -143,8 +153,9 @@ function KitTab() {
               onChange={(e) => {
                 if (e.target.value === 'kit') followKit(r.ch);
                 else {
-                  setLaneWav(r.ch, Number(e.target.value));
-                  previewWav(Number(e.target.value));
+                  const picked = Number(e.target.value);
+                  setLaneWav(r.ch, picked);
+                  void playAudition(`kit:${r.ch}`, () => wavAuditionSound(picked));
                 }
               }}
             >
@@ -159,18 +170,15 @@ function KitTab() {
             <span className={`kit-badge ${badge === '曲' ? 'own' : badge === '曲から' ? 'lib' : ''}`} title={vs?.origin ?? (own ? '曲フォルダの音' : '')}>
               {badge}
             </span>
-            <button
-              className="ib"
+            <AuditionButton
+              k={`kit:${r.ch}`}
+              load={() => (valid ? wavAuditionSound(no!) : kf ? fileSound(kf) : null)}
+              label={`${r.name}の音`}
+              size={14}
+              idleIcon={Icon.speaker(14)}
               style={{ width: 26, height: 26 }}
-              title="試聴"
-              aria-label={`${r.name}の音を試聴`}
-              onClick={() => {
-                if (valid) previewWav(no!);
-                else if (kf) void previewFile(kf);
-              }}
-            >
-              {Icon.speaker(14)}
-            </button>
+            />
+            <AuditionProgress k={`kit:${r.ch}`} />
           </div>
         );
       })}
@@ -185,11 +193,21 @@ function WavTab() {
   const doc = useEditor((s) => s.doc);
   const folder = useEditor((s) => s.folder);
   const missing = useEditor((s) => s.missingWavs);
+  useEditor((s) => s.soundsVersion);
+  useStopAuditionOnClose('wav:');
   const wavs = wavList(doc.fields);
   const pathWav = doc.fields['PATH_WAV'] ?? '';
   const missSet = new Set(missing);
   const usage = new Map<number, number>();
-  for (const c of doc.chips) if (c.ch !== 3 && c.ch !== 8) usage.set(c.v, (usage.get(c.v) ?? 0) + 1);
+  // 原曲（BGM レーン）・SE レーンで鳴らす音には印を付ける（ドラムの音と並んでいても分かるように）
+  const bgmNos = new Set<number>();
+  const seNos = new Set<number>();
+  for (const c of doc.chips) {
+    if (c.ch === CH.BPM || c.ch === CH.BPM_EX) continue;
+    usage.set(c.v, (usage.get(c.v) ?? 0) + 1);
+    if (c.ch === CH.BGM) bgmNos.add(c.v);
+    else if (isSeChannel(c.ch)) seNos.add(c.v);
+  }
 
   const unused = wavs.filter((w) => !usage.get(w.no));
   const cleanup = async () => {
@@ -256,15 +274,33 @@ function WavTab() {
           {wavs.map((w) => {
             const z = toBase36x2(w.no);
             const isMissing = missSet.has(w.no) || (!findFile(folder, w.path, pathWav) && !/^dtxweb_kit_/i.test(w.path) && !!folder);
+            const kind = bgmNos.has(w.no) ? '原曲' : seNos.has(w.no) ? 'SE' : null;
+            const dur = engine.duration(w.no);
+            const long = dur >= LONG_SOUND_SEC;
             return (
               <tr key={w.no} className={isMissing ? 'missing' : ''} title={`${usage.get(w.no) ?? 0} 個のチップで使用${isMissing ? '・ファイルが見つかりません' : ''}`}>
-                <td className="mono">
+                <td className="mono wav-no">
                   {z}
-                  <span className="wav-uses">{usage.get(w.no) ?? 0}</span>
+                  <span className="wav-uses" style={kind ? { visibility: 'hidden' } : undefined}>
+                    {usage.get(w.no) ?? 0}
+                  </span>
+                  {kind && (
+                    <span className={`wav-kind ${kind === '原曲' ? 'bgm' : ''}`} title={KIND_HINT[kind]}>
+                      {kind}
+                    </span>
+                  )}
                 </td>
-                <td>
+                <td className="wav-file">
                   <CommitInput value={w.path} onCommit={(v) => setFieldValue('WAV' + z, v || undefined)} />
-                  <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder="ラベル" onCommit={(v) => setComment('WAV' + z, v)} />
+                  <div className="wav-sub">
+                    <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder="ラベル" onCommit={(v) => setComment('WAV' + z, v)} />
+                    {long && (
+                      <span className="wav-len mono" title={`${formatDur(dur)} の長い音（試聴は ■ か Esc で止められます）`}>
+                        {formatDur(dur)}
+                      </span>
+                    )}
+                  </div>
+                  <AuditionProgress k={`wav:${w.no}`} />
                 </td>
                 <td>
                   <CommitInput
@@ -277,9 +313,7 @@ function WavTab() {
                   <CommitInput className="mono" value={String(wavPan(doc, w.no))} onCommit={(v) => setFieldValue('PAN' + z, v === '' || v === '0' ? undefined : v)} />
                 </td>
                 <td>
-                  <button className="ib" style={{ width: 22, height: 22 }} onClick={() => previewWav(w.no)} title="試聴">
-                    {Icon.play(11)}
-                  </button>
+                  <AuditionButton k={`wav:${w.no}`} load={() => wavAuditionSound(w.no)} label={`WAV${z}（${w.path}）`} style={{ width: 22, height: 22 }} />
                 </td>
               </tr>
             );
@@ -289,6 +323,19 @@ function WavTab() {
       {wavs.length === 0 && <p className="lbl">まだWAVはありません。譜面にチップを置くと内蔵キットの音が自動で登録されます。</p>}
     </>
   );
+}
+
+/** これより長い音は WAV リストに長さを出す（原曲・SE の伴奏など） */
+const LONG_SOUND_SEC = 10;
+
+const KIND_HINT: Record<string, string> = {
+  原曲: '原曲（BGM レーン ch01 で鳴らす音）。DTX では原曲も #WAV に登録して鳴らします',
+  SE: 'SE レーン（ch61〜）で鳴らす音',
+};
+
+function formatDur(sec: number): string {
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 /** フォーカスを外したか Enter で確定する入力欄 */

@@ -3954,6 +3954,113 @@ button.ms.s.on {
   opacity: 0.5;
 }
 
+/* 原曲・SE の印と、長い音の長さ */
+.wav-table td.wav-file {
+  position: relative;
+}
+
+/* 見出しは位置を決めたセル（印・進み具合の線）より上に出す */
+.wav-table th {
+  z-index: 2;
+}
+
+.wav-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wav-sub input.wav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 番号の列を広げない（使用数の所に重ねる） */
+.wav-table td.wav-no {
+  position: relative;
+}
+
+.wav-kind {
+  position: absolute;
+  left: 3px;
+  bottom: 4px;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-family: 'IBM Plex Sans JP', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 9.5px;
+  line-height: 15px;
+  white-space: nowrap;
+  background: var(--raise);
+  color: var(--mute);
+  cursor: default;
+}
+
+.wav-len {
+  flex: none;
+  font-size: 10px;
+  color: var(--mute);
+}
+
+.wav-kind.bgm {
+  background: #14222b;
+  color: var(--accent);
+}
+
+/* ---- 試聴（▶ を押すと ■、もう一度押すと止める） ---- */
+
+.ib.aud-btn.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.play-mini.aud-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #13212c;
+}
+
+.kit-row {
+  position: relative;
+}
+
+/* 鳴っている間の進み具合（親の下の端に細い線） */
+.aud-bar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(76, 194, 255, 0.16);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.kit-row .aud-bar {
+  left: 8px;
+  right: 8px;
+  bottom: 1px;
+}
+
+.aud-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: aud-fill linear forwards;
+}
+
+@keyframes aud-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* ---- 確かめる ---- */
 
 .check-level {

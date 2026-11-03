@@ -6,11 +6,14 @@ import { CH } from '../dtx/model';
 import { freeWavNumber, setField } from '../edit/ops';
 import { INSTS, instInfo } from '../library/analyze';
 import type { Inst, LibraryKit } from '../library/db';
+import { playAudition, useStopAuditionOnClose } from '../store/audition';
 import { backToChart, edit, openPage, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
 import { kitFile, setKit, useKit } from '../store/kit';
 import {
   allItems,
   auditionItem,
+  auditionKey,
+  auditionSound,
   exportZip,
   filteredItems,
   grantFolders,
@@ -33,6 +36,7 @@ import {
   type LibItem,
 } from '../store/library';
 import { chooseDialog, confirmDialog, promptDialog } from './dialogs';
+import { AuditionButton } from './Audition';
 import { Icon } from './icons';
 import { FolderInput } from './Editor';
 
@@ -94,6 +98,7 @@ export function LibraryPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
   const [showAll, setShowAll] = useState(false);
+  useStopAuditionOnClose('lib:');
   useEffect(() => {
     void loadBuiltinItems();
     const h = (e: KeyboardEvent) => {
@@ -322,17 +327,7 @@ function Row({ it, on }: { it: LibItem; on: boolean }) {
   useLibrary((s) => s.kits);
   return (
     <div className={`lib-tr ${on ? 'on' : ''}`} onClick={() => useLibrary.setState({ selected: it.id })} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void auditionItem(it)}>
-      <button
-        className="play-mini"
-        onClick={(e) => {
-          e.stopPropagation();
-          useLibrary.setState({ selected: it.id });
-          void auditionItem(it);
-        }}
-        aria-label={`${it.name}を試聴`}
-      >
-        {Icon.play(11)}
-      </button>
+      <AuditionButton k={auditionKey(it)} load={() => auditionSound(it)} label={it.name} className="play-mini" onPress={() => useLibrary.setState({ selected: it.id })} />
       <Wave peaks={it.peaks} color={info.color} />
       <span className="nm">
         <span className="ellipsis">
@@ -369,9 +364,7 @@ function Detail({ it }: { it: LibItem }) {
         <Wave peaks={it.peaks} color={info.color} w={270} h={90} fluid />
       </div>
       <div className="row" style={{ gap: 10 }}>
-        <button className="play-btn" onClick={() => void auditionItem(it)} aria-label="試聴">
-          {Icon.play(16)}
-        </button>
+        <AuditionButton k={auditionKey(it)} load={() => auditionSound(it)} label={it.name} className="play-btn" size={16} />
         <div style={{ minWidth: 0 }}>
           <b className="ellipsis" style={{ display: 'block' }}>
             {it.name}
@@ -437,7 +430,7 @@ function Detail({ it }: { it: LibItem }) {
             key={item.id}
             onClick={() => {
               useLibrary.setState({ selected: item.id });
-              void auditionItem(item);
+              void playAudition(auditionKey(item), () => auditionSound(item));
             }}
           >
             <span className="ellipsis mono">{item.name}</span>

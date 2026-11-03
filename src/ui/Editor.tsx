@@ -4,6 +4,7 @@ import { frac } from '../dtx/fraction';
 import { gridStep, snapToGrid, stepGrid } from '../edit/ops';
 import { autoEnableMidi } from '../input/midi';
 import { setLoopPoint, toggleLoop, useAssist } from '../store/assist';
+import { stopAudition } from '../store/audition';
 import { tempoOf } from '../store/derived';
 import { keyHit } from '../store/hits';
 import {
@@ -252,6 +253,8 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       deleteSelection();
       return;
     case 'Escape':
+      // 試聴（WAV・キットのタブの ▶）を止める
+      if (stopAudition()) return;
       if (usePreview.getState().mode === 'full') {
         usePreview.setState({ mode: 'side' });
         return;

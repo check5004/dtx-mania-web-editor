@@ -2,7 +2,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { create } from 'zustand';
 import { scanCharts } from './guideline';
-import { engine } from '../audio/engine';
 import { BUILTIN_KITS, KIT_LANES, decodeBytes, loadBuiltin, registerVirtual, unregisterVirtual, builtinFile } from '../audio/sounds';
 import { decodeDtx } from '../dtx/encoding';
 import { drumChannel } from '../dtx/model';
@@ -11,6 +10,7 @@ import { downloadBytes, folderFromFileList, folderFromHandle, normPath, type Fol
 import * as db from '../library/db';
 import type { Inst, LibraryKit, RefFolder, SampleMeta } from '../library/db';
 import { classifyUsage, features, instOfChannel, miniPeaks, monoOf, similarity } from '../library/analyze';
+import { toggleAudition, type AuditionSound } from './audition';
 import { prepareSounds, toast, useEditor } from './editor';
 
 export type LibSource = 'all' | 'builtin' | 'imported' | 'fav';
@@ -178,12 +178,19 @@ export async function grantFolders() {
   lset({ needPermission: left });
 }
 
-/** 試聴 */
-export async function auditionItem(item: LibItem) {
-  engine.ensure();
+/** 試聴するときの音（store/audition の key は auditionKey） */
+export async function auditionSound(item: LibItem): Promise<AuditionSound | null> {
   const buf = item.builtin ? await loadBuiltin(item.builtin.kit, item.builtin.lane) : await sampleBuffer(item.id);
-  if (buf) engine.previewBuffer(buf, 0.9);
-  else toast(item.ref ? '参照モードの曲フォルダを読む許可が必要です（ライブラリの左下）' : '音を読めませんでした', 'warn');
+  if (buf) return { buf, volume: 90 };
+  toast(item.ref ? '参照モードの曲フォルダを読む許可が必要です（ライブラリの左下）' : '音を読めませんでした', 'warn');
+  return null;
+}
+
+export const auditionKey = (item: LibItem) => `lib:${item.id}`;
+
+/** 試聴（鳴っていれば止める） */
+export function auditionItem(item: LibItem) {
+  return toggleAudition(auditionKey(item), () => auditionSound(item));
 }
 
 // ---- 標準キットの音を一覧に並べる ---------------------------------------------------------

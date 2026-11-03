@@ -29,7 +29,7 @@ import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
 import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
-import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavSources, wavVolume } from './derived';
+import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
 import { loadSidecar, useSidecar, type SectionMark, type TempoAnchor } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
@@ -718,13 +718,13 @@ export function previewWav(no: number) {
 
 const previewCache = new Map<string, Promise<AudioBuffer | null>>();
 
-/** ファイル（曲フォルダの音・標準キット・ライブラリの音）を1回鳴らす。譜面は変えない */
-export async function previewFile(path: string, gain = 1): Promise<boolean> {
+/** ファイル（曲フォルダの音・標準キット・ライブラリの音）を読み込む。読めなければ null */
+export async function fileBuffer(path: string): Promise<AudioBuffer | null> {
   const ctx = engine.ensure();
   const s = get();
   const f = findFile(s.folder, path, s.doc.fields['PATH_WAV'] ?? '');
   const vs = f ? null : virtualSound(path);
-  if (!f && !vs) return false;
+  if (!f && !vs) return null;
   const key = f ? `${s.folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : `virtual:${vs!.sampleId ?? vs!.file.toLowerCase()}`;
   let p = previewCache.get(key);
   if (!p) {
@@ -739,12 +739,37 @@ export async function previewFile(path: string, gain = 1): Promise<boolean> {
     previewCache.set(key, p);
   }
   const buf = await p;
-  if (!buf) {
-    previewCache.delete(key);
-    return false;
-  }
+  if (!buf) previewCache.delete(key);
+  return buf;
+}
+
+/** ファイル（曲フォルダの音・標準キット・ライブラリの音）を1回鳴らす。譜面は変えない */
+export async function previewFile(path: string, gain = 1): Promise<boolean> {
+  const buf = await fileBuffer(path);
+  if (!buf) return false;
   engine.previewBuffer(buf, gain);
   return true;
+}
+
+/**
+ * WAV 番号の音を試聴するときの音（store/audition に渡す）。#VOLUME・#PAN も譜面で鳴るのと同じにする。
+ * 読み込んでいなければ、同じファイルのベロシティ違い（ベロシティの比で鳴らす）、それも無ければその場で読み込む
+ */
+export async function wavAuditionSound(no: number): Promise<{ buf: AudioBuffer; volume: number; pan: number; gain?: number } | null> {
+  const loaded = engine.sound(no);
+  if (loaded) return loaded;
+  const doc = get().doc;
+  const fields = doc.fields;
+  const path = fields['WAV' + toBase36x2(no)];
+  if (path === undefined) return null;
+  for (const [k, v] of Object.entries(fields)) {
+    if (!/^WAV[0-9A-Z]{2}$/.test(k) || v.toLowerCase() !== path.toLowerCase()) continue;
+    const other = parseInt(k.slice(3), 36);
+    const snd = other === no ? null : engine.sound(other);
+    if (snd) return { ...snd, gain: velOfWav(fields, no) / Math.max(1, velOfWav(fields, other)) };
+  }
+  const buf = await fileBuffer(path);
+  return buf ? { buf, volume: wavVolume(doc, no), pan: wavPan(doc, no) } : null;
 }
 
 // ---- 曲の終わり -------------------------------------------------------------------
@@ -977,6 +1002,8 @@ function loopedStart(beat: number): number {
 export async function playFrom(beat: number, opts: { keepStart?: boolean } = {}) {
   engine.ensure();
   halt();
+  // 試聴は押したらすぐ止める（曲の準備を待たない）
+  engine.stopAudition();
   const token = ++playToken;
   const startBeat = loopedStart(Math.max(0, beat));
   if (!opts.keepStart) set({ cursorBeat: startBeat });

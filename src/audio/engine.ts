@@ -448,6 +448,54 @@ class AudioEngine {
     v.src.start(ctx.currentTime + 0.005);
   }
 
+  /** WAV 番号の読み込んだ音と #VOLUME・#PAN（試聴に使う）。読み込んでいなければ null */
+  sound(no: number): { buf: AudioBuffer; volume: number; pan: number } | null {
+    const t = this.entry(no);
+    return t?.buf ? { buf: t.buf, volume: t.volume, pan: t.pan } : null;
+  }
+
+  /** 試聴（WAV・キット・ライブラリの ▶）。同時に鳴らすのは1つだけ */
+  private aud: { voice: Voice; onEnd?: () => void } | null = null;
+
+  /**
+   * 試聴の音を鳴らす。前の試聴は止める。鳴り終わったとき・止めたときに onEnd を呼ぶ。
+   * volume・pan は #VOLUME・#PAN と同じ（0〜100・-100〜100）、gain はそれに掛ける倍率。長さ（秒）を返す
+   */
+  audition(buf: AudioBuffer, volume = 100, pan = 0, gain = 1, onEnd?: () => void): number {
+    this.stopAudition();
+    const ctx = this.ensure();
+    const voice = this.connectVoice(buf, volume, pan, 'drum');
+    if (gain !== 1) voice.gain.gain.value *= Math.max(0, Math.min(4, gain));
+    const a = { voice, onEnd };
+    voice.src.onended = () => {
+      if (this.aud !== a) return;
+      this.aud = null;
+      onEnd?.();
+    };
+    voice.src.start(ctx.currentTime + 0.005);
+    this.aud = a;
+    return buf.duration;
+  }
+
+  /** 試聴を止める（プチッと鳴らないよう短くフェードアウト）。鳴っていたら true */
+  stopAudition(): boolean {
+    const a = this.aud;
+    if (!a || !this.ctx) return false;
+    this.aud = null;
+    const t = this.ctx.currentTime;
+    const g = a.voice.gain.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(0, t + 0.03);
+    try {
+      a.voice.src.stop(t + 0.035);
+    } catch {
+      // もう止まっている
+    }
+    a.onEnd?.();
+    return true;
+  }
+
   /** WAV 番号の音が読み込めているか */
   has(no: number): boolean {
     return !!this.table.get(no)?.buf;
@@ -535,6 +583,8 @@ class AudioEngine {
 
   play(req: PlayRequest) {
     this.stop();
+    // 試聴（原曲など長い音もある）を鳴らしたまま曲を始めない
+    this.stopAudition();
     const ctx = this.ensure();
     const t0 = ctx.currentTime + 0.08;
     const run: Run = {
