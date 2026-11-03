@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { pickOnsets, type AnalysisData, type Band, type Onset } from '../audio/analysis';
 import { engine, type BgmFilter, type StretchProvider } from '../audio/engine';
 import * as wk from '../audio/workerClient';
+import type { SpecMode } from '../audio/spectro';
 import { copyMeasureInto, measureSignatures, sameMeasures } from '../assist/similar';
 import type { DtxDoc } from '../dtx/model';
 import { bgmSource, tempoOf, wavPath } from './derived';
@@ -29,6 +30,12 @@ export interface AssistState {
   spectroStatus: 'none' | 'loading' | 'ready' | 'error';
   /** スペクトルに出している音（setSpecSource で選んだ音の key）。null なら解析元の音 */
   specSource: string | null;
+  /** スペクトルの見せ方（ドラム強調・アタック・そのまま） */
+  specMode: SpecMode;
+  /** スペクトルの明るさ（1 が標準） */
+  specGain: number;
+  /** スペクトルを作っている進み具合（0〜1） */
+  specProgress: number;
   waveMode: 'wave' | 'spec';
   /** 譜面の右の「原曲の打点」「原曲の波形」の列を出すか */
   audioCols: boolean;
@@ -45,6 +52,36 @@ export interface AssistState {
   similarPin: { base: number; targets: number[] } | null;
 }
 
+// ---- スペクトルの見せ方（ブラウザに覚える） ----------------------------------------------
+
+const SPEC_KEY = 'dtxe.spec.v1';
+type SpecPrefs = Pick<AssistState, 'specMode' | 'specGain' | 'waveMode'>;
+
+function loadSpecPrefs(): SpecPrefs {
+  const def: SpecPrefs = { specMode: 'drum', specGain: 1, waveMode: 'wave' };
+  try {
+    const v = JSON.parse(localStorage.getItem(SPEC_KEY) || '{}') as Partial<SpecPrefs>;
+    return {
+      specMode: v.specMode === 'attack' || v.specMode === 'raw' || v.specMode === 'drum' ? v.specMode : def.specMode,
+      specGain: typeof v.specGain === 'number' && v.specGain >= 0.4 && v.specGain <= 3 ? v.specGain : def.specGain,
+      waveMode: v.waveMode === 'spec' ? 'spec' : 'wave',
+    };
+  } catch {
+    return def;
+  }
+}
+
+const SPEC_PREFS = loadSpecPrefs();
+
+function saveSpecPrefs() {
+  const { specMode, specGain, waveMode } = aget();
+  try {
+    localStorage.setItem(SPEC_KEY, JSON.stringify({ specMode, specGain, waveMode }));
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
 export const useAssist = create<AssistState>(() => ({
   src: null,
   status: 'none',
@@ -54,7 +91,10 @@ export const useAssist = create<AssistState>(() => ({
   spectro: null,
   spectroStatus: 'none',
   specSource: null,
-  waveMode: 'wave',
+  specMode: SPEC_PREFS.specMode,
+  specGain: SPEC_PREFS.specGain,
+  specProgress: 0,
+  waveMode: SPEC_PREFS.waveMode,
   audioCols: true,
   sensitivity: 0.5,
   loop: null,
@@ -135,19 +175,44 @@ function specReset(): Partial<AssistState> {
 /** スペクトルに出す音（setSpecSource で選んだもの。無ければ解析元） */
 let specSrc: AnalysisSource | null = null;
 
+/** 作っている最中のスペクトル（音の key と見せ方） */
+let specInflight = '';
+/** いま出しているスペクトル（音の key と見せ方） */
+let specShown = '';
+
+function specWant(): string | null {
+  const key = specSrc ? specSrc.key : aget().src?.key;
+  return key ? `${key}|${aget().specMode}` : null;
+}
+
+/** スペクトルを作る（同じ音で見せ方だけ変えたときは、測り直さずに速く作る） */
 export async function loadSpectrogram() {
   const a = aget();
   const own = specSrc;
   const key = own ? own.key : a.src?.key;
-  if (!key || a.spectroStatus === 'loading' || a.spectroStatus === 'ready') return;
-  aset({ spectroStatus: 'loading' });
-  const current = () => (specSrc ? specSrc.key : aget().src?.key) === key;
+  const want = specWant();
+  if (!key || !want || specInflight === want) return;
+  if (a.spectroStatus === 'ready' && a.spectro && specShown === want) return;
+  specInflight = want;
+  // 見せ方を変えるあいだは前のスペクトルを出しておく（ちらつかせない）
+  aset({ spectroStatus: 'loading', specProgress: 0 });
+  const mode = a.specMode;
   try {
     if (own) await wk.loadAudio(own.key, own.buf);
-    const sp = await wk.spectrogram(key);
-    if (current()) aset({ spectro: sp, spectroStatus: 'ready' });
+    const sp = await wk.spectrogram(key, mode, (p) => {
+      if (specWant() === want) aset({ specProgress: p });
+    });
+    if (specWant() === want) {
+      specShown = want;
+      aset({ spectro: sp, spectroStatus: 'ready', specProgress: 1 });
+    }
   } catch {
-    if (current()) aset({ spectroStatus: 'error' });
+    if (specWant() === want) aset({ spectroStatus: 'error' });
+  } finally {
+    if (specInflight === want) specInflight = '';
+    // 作っている間に見せ方や音が変わっていたら、続けて作る
+    const now = specWant();
+    if (now && now !== want && aget().waveMode === 'spec' && specInflight !== now) void loadSpectrogram();
   }
 }
 
@@ -160,13 +225,27 @@ export function setSpecSource(src: AnalysisSource | null) {
   specSrc = src;
   const next = src?.key ?? null;
   if (prev !== next) aset({ specSource: next, spectro: null, spectroStatus: 'none' });
-  if (src) aset({ waveMode: 'spec' });
-  if (aget().waveMode === 'spec') void loadSpectrogram();
+  if (src) setWaveMode('spec');
+  else if (aget().waveMode === 'spec') void loadSpectrogram();
 }
 
 export function setWaveMode(m: 'wave' | 'spec') {
   aset({ waveMode: m });
+  saveSpecPrefs();
   if (m === 'spec') void loadSpectrogram();
+}
+
+/** スペクトルの見せ方を変える（ドラム強調・アタック・そのまま） */
+export function setSpecMode(m: SpecMode) {
+  if (aget().specMode === m) return;
+  aset({ specMode: m });
+  saveSpecPrefs();
+  if (aget().waveMode === 'spec') void loadSpectrogram();
+}
+
+export function setSpecGain(g: number) {
+  aset({ specGain: Math.max(0.4, Math.min(3, g)) });
+  saveSpecPrefs();
 }
 
 // ---- 原曲の打点 -------------------------------------------------------------------

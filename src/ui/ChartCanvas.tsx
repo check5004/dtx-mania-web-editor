@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Onset } from '../audio/analysis';
 import { engine } from '../audio/engine';
+import { SPEC_F_HI, SPEC_F_LO, specFreq, specPos, type SpectroData } from '../audio/spectro';
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
@@ -14,6 +15,7 @@ import {
   beginLoopDrag,
   dragLoop,
   endLoopDrag,
+  setBandFilter,
   setLoop,
   setWaveMode,
   useAssist,
@@ -45,6 +47,7 @@ import { promptDialog } from './dialogs';
 import { songLength } from './hooks';
 import { chipBpmLabel, meterLabel } from './format';
 import { SectionPopover } from './SectionPopover';
+import { SPEC_ZONES, zoneLut, type SpecZone } from './specColors';
 import { pickBgmFile } from '../app/fileActions';
 
 export const GEO = {
@@ -72,7 +75,23 @@ export const GEO = {
 };
 
 const BASE_W = GEO.bgmX + GEO.bgmW;
-const FULL_W = GEO.waveX + GEO.waveW;
+
+/** スペクトルを出すときの列の最大幅（画面に余裕があれば広げる） */
+const SPEC_W_MAX = 196;
+
+/** 原曲の波形・スペクトルの列の幅 */
+function waveColW(): number {
+  if (useAssist.getState().waveMode !== 'spec') return GEO.waveW;
+  const v = useVel.getState();
+  const vel = v.mode ? GEO.velGap + v.lanes.length * GEO.velW : 0;
+  const room = viewport.w - GEO.miniW - 24 - GEO.waveX - vel;
+  return Math.max(GEO.waveW, Math.min(SPEC_W_MAX, Math.floor(room)));
+}
+
+/** 原曲の列まで含めた幅 */
+function fullW(): number {
+  return GEO.waveX + waveColW();
+}
 
 const C = {
   bg: '#0B0E13',
@@ -137,7 +156,7 @@ interface Local {
   hover: Hover | null;
   followScroll: number | null;
   mini: { canvas: HTMLCanvasElement; doc: unknown; h: number; endBeat: number; sections: unknown } | null;
-  spec: { canvas: HTMLCanvasElement; data: unknown } | null;
+  spec: SpecTiles | null;
   pointer: { x: number; y: number } | null;
 }
 
@@ -154,7 +173,7 @@ export function visibleBeats(): { from: number; to: number } {
 /** BGA 列の左端（譜面の左端から）。原曲の列の右に置く */
 const BGA_GAP = 6;
 function coreWidth(): number {
-  return useAssist.getState().audioCols ? FULL_W : BASE_W;
+  return useAssist.getState().audioCols ? fullW() : BASE_W;
 }
 function bgaW(): number {
   return useBga.getState().wide ? 92 : 46;
@@ -347,8 +366,15 @@ export function ChartCanvas() {
         setHelp({ x: g.ox + GEO.hitsX, y: GEO.head + 4 });
         return;
       }
-      if (useAssist.getState().audioCols && rx >= GEO.waveX && rx < GEO.waveX + GEO.waveW) {
-        setWaveMode(useAssist.getState().waveMode === 'wave' ? 'spec' : 'wave');
+      if (useAssist.getState().audioCols && rx >= GEO.waveX && rx < GEO.waveX + waveColW()) {
+        const a = useAssist.getState();
+        // スペクトルの帯域の見出し：その帯域だけ聴く（もう一度で全体）
+        const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
+        if (z) {
+          setBandFilter(a.bandFilter === z.listen ? 'all' : z.listen);
+          return;
+        }
+        setWaveMode(a.waveMode === 'wave' ? 'spec' : 'wave');
         return;
       }
     }
@@ -773,7 +799,7 @@ function colAt(g: Geom, x: number): number | 'gutter' | 'audio' | 'loop' | null 
   if (rx < GEO.laneX + GEO.laneW * 10) return laneAt(Math.floor((rx - GEO.laneX) / GEO.laneW)) ?? null;
   if (rx >= GEO.bgmX - 2 && rx < GEO.bgmX + GEO.bgmW) return COL_BGM;
   if (bgaVisible() && rx >= bgaX() && rx < bgaX() + bgaW()) return COL_BGA;
-  if (useAssist.getState().audioCols && rx >= GEO.hitsX && rx < FULL_W) return 'audio';
+  if (useAssist.getState().audioCols && rx >= GEO.hitsX && rx < fullW()) return 'audio';
   return null;
 }
 
@@ -966,6 +992,31 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ']);
   }
   if (h.kind === 'gutter') return at('gutter', 'hint', '小節番号の列', ['クリック・ドラッグ: 再生を始める位置（▶）を置く', 'ダブルクリック: セクション名を付ける']);
+  const a = useAssist.getState();
+  const rx = x - g.ox;
+  const inWave = a.audioCols && rx >= GEO.waveX && rx < GEO.waveX + waveColW();
+  if (h.kind === 'header' && inWave) {
+    const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
+    if (z) {
+      return at(`zone:${z.key}:${a.bandFilter}`, 'hint', `${z.label}の帯域`, [
+        z.tip,
+        a.bandFilter === z.listen ? 'クリック: 原曲を全体で聴くに戻す' : `クリック: 原曲をこの帯域だけで聴く（${LISTEN_LABEL[z.listen]}）`,
+      ]);
+    }
+    return at(`wavehead:${a.waveMode}`, 'hint', a.waveMode === 'spec' ? 'スペクトル' : '原曲の波形', [
+      a.waveMode === 'spec' ? 'クリック: 波形に切り替え' : 'クリック: スペクトル（ドラムの帯域ごとの色分け）に切り替え',
+      ...(a.waveMode === 'spec' ? ['下の段の見出しをクリック: その帯域だけ聴く'] : []),
+    ]);
+  }
+  if (h.kind === 'audio' && inWave && a.waveMode === 'spec' && rx < GEO.waveX + specVisW()) {
+    const z = zoneOfFreq(specFreqAt(rx - GEO.waveX));
+    return at(`spec:${z.key}`, 'hint', `スペクトル・${z.label}の帯域`, [
+      '光った帯の下の端が、叩いた瞬間',
+      '紫: キック　橙: 胴鳴り　黄: スネア　水色: HH・シンバル',
+      'クリック: 再生を始める位置（▶）を置く',
+      'ダブルクリック: そこから再生',
+    ]);
+  }
   if (h.kind === 'audio') return at('audio', 'hint', '原曲の打点・波形', ['クリック: 再生を始める位置（▶）を置く', 'ダブルクリック: そこから再生']);
   return null;
 }
@@ -1579,9 +1630,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.font = '10px system-ui, sans-serif';
     ctx.fillStyle = C.text;
     // BGA の列が波形の上に重なっているときは、見えている所の真ん中に出す
-    const waveRight = bgaVisible() && bgaX() < FULL_W ? Math.max(GEO.waveX + 40, bgaX() - 2) : GEO.waveX + GEO.waveW;
+    const waveRight = bgaVisible() && bgaX() < fullW() ? Math.max(GEO.waveX + 40, bgaX() - 2) : GEO.waveX + waveColW();
     const narrowWave = waveRight - GEO.waveX < 80;
-    ctx.fillText(a.waveMode === 'wave' ? (narrowWave ? '波形 ⇄' : '原曲の波形 ⇄') : 'スペクトル ⇄', ox + (GEO.waveX + waveRight) / 2, GEO.head / 2);
+    if (a.waveMode === 'spec') drawSpecHeader(ctx, ox, waveRight, a);
+    else ctx.fillText(narrowWave ? '波形 ⇄' : '原曲の波形 ⇄', ox + (GEO.waveX + waveRight) / 2, GEO.head / 2);
   }
 
   if (velMode) {
@@ -1790,18 +1842,21 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
   const { ox } = g;
   const hx = ox + GEO.hitsX;
   const wx = ox + GEO.waveX;
+  const W = waveColW();
   ctx.fillStyle = '#0D1015';
   ctx.fillRect(hx, GEO.head, GEO.hitsW, H);
-  ctx.fillRect(wx, GEO.head, GEO.waveW, H);
+  ctx.fillRect(wx, GEO.head, W, H);
   ctx.fillStyle = C.sep;
   ctx.fillRect(hx - 0.5, GEO.head, 1, H);
   ctx.fillRect(wx - 0.5, GEO.head, 1, H);
-  ctx.fillRect(wx + GEO.waveW - 0.5, GEO.head, 1, H);
+  ctx.fillRect(wx + W - 0.5, GEO.head, 1, H);
   const doc = useEditor.getState().doc;
   const bgm = bgmSource(doc);
-  if (!a.data || !bgm) {
+  // スペクトルは解析が済んでいなくても出せる（下のトラックで選んだステムなど）
+  const spec = a.waveMode === 'spec' && a.spectro && bgm ? a.spectro : null;
+  if ((!a.data && !spec) || !bgm) {
     ctx.save();
-    ctx.translate(wx + GEO.waveW / 2, (GEO.head + H) / 2);
+    ctx.translate(wx + W / 2, (GEO.head + H) / 2);
     ctx.fillStyle = C.dim;
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -1823,20 +1878,19 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
     ctx.restore();
     return;
   }
-  const data = a.data;
   const off = bgm.sec;
   const audioAt = (y: number) => tempo.beatToSec(g.yToBeat(y)) - off;
 
-  // 小節線を薄く通す
   // 波形 / スペクトログラム
-  if (a.waveMode === 'spec' && a.spectro) {
-    drawSpectro(ctx, l, g, tempo, off, a.spectro, wx, H);
-  } else {
+  if (spec) {
+    drawSpectro(ctx, l, g, tempo, off, spec, a, wx, specVisW(), H);
+  } else if (a.data) {
+    const data = a.data;
     ctx.fillStyle = C.wave;
     const pr = data.peakRate;
     const n = data.peaks.length;
-    const mid = wx + GEO.waveW / 2;
-    const half = GEO.waveW / 2 - 4;
+    const mid = wx + W / 2;
+    const half = W / 2 - 4;
     for (let y = GEO.head; y < H; y += 2) {
       const tTop = audioAt(y);
       const tBot = audioAt(y + 2);
@@ -1850,13 +1904,20 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
       const w = Math.max(1, m * half);
       ctx.fillRect(mid - w, y, w * 2, 2);
     }
-    if (a.waveMode === 'spec') {
-      ctx.fillStyle = C.dim;
-      ctx.font = '10px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(a.spectroStatus === 'error' ? '作れませんでした' : '作成中…', mid, GEO.head + 14);
-    }
   }
+  if (a.waveMode === 'spec' && a.spectroStatus !== 'ready') {
+    // 作っている途中（見せ方を変えたときは前のスペクトルの上に出す）
+    const label = a.spectroStatus === 'error' ? 'スペクトルを作れませんでした' : `スペクトルを作成中… ${Math.round(a.specProgress * 100)}%`;
+    ctx.font = '10px system-ui, sans-serif';
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(11,14,19,0.85)';
+    ctx.fillRect(wx + W / 2 - tw / 2 - 6, GEO.head + 4, tw + 12, 16);
+    ctx.fillStyle = a.spectroStatus === 'error' ? '#FF8A80' : C.text;
+    ctx.textAlign = 'center';
+    ctx.fillText(label, wx + W / 2, GEO.head + 12);
+  }
+  if (!a.data) return;
+  const data = a.data;
 
   // 打点の強さ（薄い帯）と打点（横棒）
   const fr = data.frameRate;
@@ -1907,76 +1968,187 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
   }
 }
 
-const SPEC_COLORS = (() => {
-  // 暗い紺 → 青緑 → 黄
-  const stops: [number, number, number, number][] = [
-    [0, 11, 14, 19],
-    [0.35, 22, 60, 110],
-    [0.6, 40, 150, 170],
-    [0.8, 160, 210, 120],
-    [1, 255, 230, 120],
-  ];
-  const out = new Uint8ClampedArray(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    let k = 0;
-    while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
-    const [t0, r0, g0, b0] = stops[k];
-    const [t1, r1, g1, b1] = stops[k + 1];
-    const f = (t - t0) / (t1 - t0);
-    out[i * 4] = r0 + (r1 - r0) * f;
-    out[i * 4 + 1] = g0 + (g1 - g0) * f;
-    out[i * 4 + 2] = b0 + (b1 - b0) * f;
-    out[i * 4 + 3] = 255;
-  }
-  return out;
-})();
+// ---- スペクトル -------------------------------------------------------------------
 
-function drawSpectro(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: TempoMap, off: number, sp: NonNullable<AssistState['spectro']>, wx: number, H: number) {
-  if (!l.spec || l.spec.data !== sp) {
-    // 縦（下が古い時刻）× 横（周波数、左が低い）の画像を作る
-    const frames = Math.min(sp.frames, 32000);
-    const c = document.createElement('canvas');
-    c.width = sp.bins;
-    c.height = Math.max(1, frames);
-    const cx = c.getContext('2d')!;
-    const img = cx.createImageData(sp.bins, Math.max(1, frames));
-    for (let f = 0; f < frames; f++) {
-      const row = frames - 1 - f;
-      for (let b = 0; b < sp.bins; b++) {
-        const v = sp.data[f * sp.bins + b];
-        const o = (row * sp.bins + b) * 4;
-        img.data[o] = SPEC_COLORS[v * 4];
-        img.data[o + 1] = SPEC_COLORS[v * 4 + 1];
-        img.data[o + 2] = SPEC_COLORS[v * 4 + 2];
-        img.data[o + 3] = 255;
-      }
-    }
-    cx.putImageData(img, 0, 0);
-    l.spec = { canvas: c, data: sp };
+/** 帯域の見出しの段（見出しの下半分） */
+const SPEC_ZONE_Y = 15;
+
+const LISTEN_LABEL: Record<'low' | 'mid' | 'high', string> = { low: '低域 〜160Hz', mid: '中域 200〜3500Hz', high: '高域 5kHz〜' };
+/** 聴く帯域のフィルタが通す周波数（engine の帯域フィルタと同じ） */
+const LISTEN_RANGE: Record<'low' | 'mid' | 'high', [number, number]> = { low: [0, 160], mid: [200, 3500], high: [5000, Infinity] };
+
+function specRange(): { fLo: number; fHi: number } {
+  const sp = useAssist.getState().spectro;
+  return sp ? { fLo: sp.fLo, fHi: sp.fHi } : { fLo: SPEC_F_LO, fHi: SPEC_F_HI };
+}
+
+/**
+ * スペクトルを描く幅。BGA の列が重なるほど狭いときは、重ならないところに縮めて全部の帯域を見せる
+ * （右端のハイハット・シンバルの帯が隠れないように）
+ */
+function specVisW(): number {
+  const W = waveColW();
+  if (!bgaVisible()) return W;
+  const bx = bgaX();
+  return bx < GEO.waveX + W ? Math.max(40, Math.min(W, bx - 2 - GEO.waveX)) : W;
+}
+
+/** 列の中の x（列の左端から）→ 周波数 */
+function specFreqAt(rx: number): number {
+  const { fLo, fHi } = specRange();
+  const p = Math.max(0, Math.min(1, (rx - 1) / (specVisW() - 2)));
+  return specFreq(p, fLo, fHi);
+}
+
+/** 周波数 → 列の中の x（列の左端から） */
+function specXAt(f: number): number {
+  const { fLo, fHi } = specRange();
+  return 1 + Math.max(0, Math.min(1, specPos(Math.max(f, fLo), fLo, fHi))) * (specVisW() - 2);
+}
+
+function zoneOfFreq(f: number): SpecZone {
+  return SPEC_ZONES.find((z) => f < z.to) ?? SPEC_ZONES[SPEC_ZONES.length - 1];
+}
+
+function specZoneAt(rx: number): SpecZone | null {
+  if (rx < 0 || rx >= specVisW()) return null;
+  return zoneOfFreq(specFreqAt(rx));
+}
+
+function fmtHz(f: number): string {
+  return f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 0 : 1)}kHz` : `${Math.round(f / 10) * 10}Hz`;
+}
+
+/** スペクトルの列の見出し：上の段に「スペクトル ⇄」、下の段に帯域（クリックでその帯域だけ聴く） */
+function drawSpecHeader(ctx: CanvasRenderingContext2D, ox: number, right: number, a: AssistState) {
+  const x0 = ox + GEO.waveX;
+  const x1 = ox + right;
+  ctx.textAlign = 'center';
+  ctx.font = '9px system-ui, sans-serif';
+  ctx.fillStyle = '#A3ADBB';
+  ctx.fillText('スペクトル ⇄', (x0 + x1) / 2, 8);
+  ctx.font = '600 9px system-ui, sans-serif';
+  for (const z of SPEC_ZONES) {
+    const za = x0 + specXAt(z.from);
+    const zb = Math.min(x1, x0 + specXAt(z.to));
+    if (zb - za < 6) continue;
+    const on = a.bandFilter !== 'all' && a.bandFilter === z.listen;
+    const off = a.bandFilter !== 'all' && !on;
+    const label = ctx.measureText(z.label).width + 4 <= zb - za ? z.label : ctx.measureText(z.short).width + 2 <= zb - za ? z.short : '';
+    ctx.globalAlpha = off ? 0.35 : z.key === 'mid' ? 0.7 : 1;
+    ctx.fillStyle = z.color;
+    if (label) ctx.fillText(label, (za + zb) / 2, 21);
+    if (on) ctx.fillRect(za + 1, GEO.head - 3, zb - za - 2, 2);
+    ctx.globalAlpha = 1;
   }
-  const frames = l.spec.canvas.height;
+}
+
+/** 縦に並べるスペクトルの画像の1枚の高さ（フレーム数）。長い曲は何枚かに分ける */
+const SPEC_TILE = 2048;
+
+interface SpecTiles {
+  data: SpectroData;
+  gain: number;
+  lut: Uint8ClampedArray;
+  tiles: (HTMLCanvasElement | null)[];
+}
+
+function specTile(t: SpecTiles, k: number): HTMLCanvasElement {
+  const have = t.tiles[k];
+  if (have) return have;
+  const sp = t.data;
+  const f0 = k * SPEC_TILE;
+  const h = Math.max(1, Math.min(SPEC_TILE, sp.frames - f0));
+  const c = document.createElement('canvas');
+  c.width = sp.bins;
+  c.height = h;
+  const cx = c.getContext('2d')!;
+  const img = cx.createImageData(sp.bins, h);
+  const lut = t.lut;
+  // 画像の上が新しい時刻（譜面と同じく下から上へ進む）
+  for (let r = 0; r < h; r++) {
+    const f = f0 + h - 1 - r;
+    const src = f * sp.bins;
+    const dst = r * sp.bins * 4;
+    for (let b = 0; b < sp.bins; b++) {
+      const o = (b * 256 + sp.data[src + b]) * 4;
+      const q = dst + b * 4;
+      img.data[q] = lut[o];
+      img.data[q + 1] = lut[o + 1];
+      img.data[q + 2] = lut[o + 2];
+      img.data[q + 3] = 255;
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  t.tiles[k] = c;
+  return c;
+}
+
+function drawSpectro(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: TempoMap, off: number, sp: SpectroData, a: AssistState, wx: number, W: number, H: number) {
+  if (!l.spec || l.spec.data !== sp || l.spec.gain !== a.specGain) {
+    l.spec = { data: sp, gain: a.specGain, lut: zoneLut(sp.bins, sp.fLo, sp.fHi, { gain: a.specGain, dimMid: sp.mode !== 'raw' }), tiles: [] };
+  }
+  const t = l.spec;
+  const frames = sp.frames;
   const evs = tempo.events;
   ctx.imageSmoothingEnabled = true;
-  // テンポが一定の区間ごとに1回ずつ伸ばして描く
+  // テンポが一定の区間ごとに、画像を伸ばして描く。フレーム f は [f, f+1) の帯で、真ん中が f / rate 秒
   for (let i = 0; i < evs.length; i++) {
     const bA = Math.max(evs[i].beat, g.minBeat);
     const bB = Math.min(i + 1 < evs.length ? evs[i + 1].beat : Infinity, g.maxBeat + 1);
     if (bB <= bA) continue;
-    const fA = (tempo.beatToSec(bA) - off) * sp.rate;
-    const fB = (tempo.beatToSec(bB) - off) * sp.rate;
-    const fa = Math.max(0, fA);
-    const fb = Math.min(frames, fB);
-    if (fb <= fa) continue;
-    const yA = g.beatToY(tempo.secToBeat(fa / sp.rate + off));
-    const yB = g.beatToY(tempo.secToBeat(fb / sp.rate + off));
-    const top = Math.max(GEO.head, yB);
-    const bottom = Math.min(H, yA);
-    if (bottom <= top) continue;
-    // 画像の行は下が古い：行 = frames - フレーム
-    const srcTop = frames - fb + ((top - yB) / (yA - yB)) * (fb - fa);
-    const srcH = ((bottom - top) / (yA - yB)) * (fb - fa);
-    ctx.drawImage(l.spec.canvas, 0, srcTop, l.spec.canvas.width, Math.max(0.5, srcH), wx + 1, top, GEO.waveW - 2, bottom - top);
+    const eA = (tempo.beatToSec(bA) - off) * sp.rate + 0.5;
+    const eB = (tempo.beatToSec(bB) - off) * sp.rate + 0.5;
+    const ea = Math.max(0, eA);
+    const eb = Math.min(frames, eB);
+    if (eb <= ea) continue;
+    const yOf = (e: number) => g.beatToY(tempo.secToBeat((e - 0.5) / sp.rate + off));
+    const ya = yOf(ea);
+    const yb = yOf(eb);
+    if (ya - yb < 0.01) continue;
+    const eAt = (y: number) => ea + ((ya - y) / (ya - yb)) * (eb - ea);
+    for (let k = Math.floor(ea / SPEC_TILE); k * SPEC_TILE < eb; k++) {
+      const t0 = k * SPEC_TILE;
+      const th = Math.min(SPEC_TILE, frames - t0);
+      const s0 = Math.max(ea, t0);
+      const s1 = Math.min(eb, t0 + th);
+      if (s1 <= s0) continue;
+      const bottom = Math.min(H, ya - ((s0 - ea) / (eb - ea)) * (ya - yb));
+      const top = Math.max(GEO.head, ya - ((s1 - ea) / (eb - ea)) * (ya - yb));
+      if (bottom <= top) continue;
+      const eTop = eAt(top);
+      const eBot = eAt(bottom);
+      const srcTop = t0 + th - eTop;
+      ctx.drawImage(specTile(t, k), 0, srcTop, sp.bins, Math.max(0.05, eTop - eBot), wx + 1, top, W - 2, bottom - top);
+    }
+  }
+  // 帯域の区切り
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  for (const z of SPEC_ZONES.slice(1)) ctx.fillRect(Math.round(wx + specXAt(z.from)) - 0.5, GEO.head, 1, H - GEO.head);
+  // 帯域だけ聴いているときは、ほかの帯域を暗くする
+  if (a.bandFilter !== 'all') {
+    const [fa, fb] = LISTEN_RANGE[a.bandFilter];
+    const xa = wx + (fa <= sp.fLo ? 1 : specXAt(fa));
+    const xb = wx + (fb >= sp.fHi ? W - 1 : specXAt(fb));
+    ctx.fillStyle = 'rgba(8,10,14,0.66)';
+    if (xa > wx + 1) ctx.fillRect(wx + 1, GEO.head, xa - wx - 1, H - GEO.head);
+    if (xb < wx + W - 1) ctx.fillRect(xb, GEO.head, wx + W - 1 - xb, H - GEO.head);
+  }
+  // マウスの位置の周波数
+  const p = l.pointer;
+  if (p && !l.drag && p.x >= wx && p.x < wx + W && p.y > GEO.head && p.y < H) {
+    const f = specFreqAt(p.x - wx);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(Math.round(p.x) - 0.5, GEO.head, 1, H - GEO.head);
+    const label = fmtHz(f);
+    ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
+    const tw = ctx.measureText(label).width;
+    const lx = Math.max(wx + 2, Math.min(wx + W - tw - 8, p.x - tw / 2 - 3));
+    ctx.fillStyle = 'rgba(11,14,19,0.9)';
+    ctx.fillRect(lx, GEO.head + 2, tw + 6, 14);
+    ctx.fillStyle = zoneOfFreq(f).color;
+    ctx.textAlign = 'left';
+    ctx.fillText(label, lx + 3, GEO.head + 9);
   }
 }
 

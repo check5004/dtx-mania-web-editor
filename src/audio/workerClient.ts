@@ -1,12 +1,8 @@
 // 解析ワーカーへの窓口。要求ごとに Promise を返す。
 import type { AnalysisData } from './analysis';
+import type { SpecMode, SpectroData } from './spectro';
 
-export interface SpectroData {
-  rate: number;
-  bins: number;
-  frames: number;
-  data: Uint8Array;
-}
+export type { SpectroData };
 
 export interface StretchChunk {
   channels: Float32Array[];
@@ -71,8 +67,9 @@ export function analyze(key: string, progress?: (p: number) => void): Promise<An
   return call<AnalysisData>({ type: 'analyze', key }, [], progress);
 }
 
-export function spectrogram(key: string): Promise<SpectroData> {
-  return call<SpectroData>({ type: 'spectro', key });
+/** ドラムの耳コピ向けのスペクトル（同じ音で見せ方だけ変えるときは速い） */
+export function spectrogram(key: string, mode: SpecMode, progress?: (p: number) => void): Promise<SpectroData> {
+  return call<SpectroData>({ type: 'spectro', key, mode }, [], progress);
 }
 
 export function stretch(key: string, rate: number, from: number, to: number): Promise<StretchChunk> {

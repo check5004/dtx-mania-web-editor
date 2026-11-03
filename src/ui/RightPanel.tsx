@@ -3,7 +3,9 @@ import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
 import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
-import { applySimilar, clearSimilarPin, setBandFilter, useAssist } from '../store/assist';
+import { applySimilar, clearSimilarPin, setBandFilter, setSpecGain, setSpecMode, setWaveMode, useAssist } from '../store/assist';
+import type { SpecMode } from '../audio/spectro';
+import { SPEC_ZONES } from './specColors';
 import { docStats, tempoOf, wavPath, wavVel } from '../store/derived';
 import { useInputSettings } from '../input/settings';
 import { setSelectionVel, toggleVelMode, VEL_PRESET_NAMES } from '../store/velocity';
@@ -307,6 +309,59 @@ const BANDS: [BgmFilter, string, string][] = [
   ['high', '高域', 'ハイハット・シンバルが聴きやすい（5000Hz〜）'],
 ];
 
+const SPEC_MODE_UI: [SpecMode, string, string][] = [
+  ['drum', 'ドラム強調', '伸びる音（ベース・声・和音）を引いて、叩いた音だけを光らせます。光った帯の下の端が叩いた瞬間です。'],
+  ['attack', 'アタック', '音の立ち上がりだけを出します。細かい連打や、シンバルが鳴り続ける中の刻みを数えるときに。'],
+  ['raw', 'そのまま', '音の大きさをそのまま出します。シンバルの伸び（オープン・クラッシュ）の長さを見るときに。'],
+];
+
+/** 原曲の列を波形かスペクトルにする。スペクトルの見せ方・明るさ・色の見方 */
+function SpecControls() {
+  const a = useAssist();
+  return (
+    <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+      <div className="row">
+        <span className="lbl">譜面の右の原曲の列</span>
+        <span className="grow" />
+        <div className="seg small">
+          <button className={a.waveMode === 'wave' ? 'on' : ''} onClick={() => setWaveMode('wave')}>
+            波形
+          </button>
+          <button className={a.waveMode === 'spec' ? 'on' : ''} onClick={() => setWaveMode('spec')} title="ドラムの帯域ごとに色分けしたスペクトル">
+            スペクトル
+          </button>
+        </div>
+      </div>
+      {a.waveMode === 'spec' && (
+        <>
+          <div className="seg" style={{ display: 'flex' }}>
+            {SPEC_MODE_UI.map(([k, label, tip]) => (
+              <button key={k} className={a.specMode === k ? 'on' : ''} style={{ flex: 1 }} title={tip} onClick={() => setSpecMode(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="lbl">{SPEC_MODE_UI.find(([k]) => k === a.specMode)?.[2]}</span>
+          <label className="slider-row" title="スペクトルの明るさ。小さな音を見たいときは上げる">
+            <span className="lbl">明るさ</span>
+            <input type="range" min={0.5} max={2.5} step={0.1} value={a.specGain} onChange={(e) => setSpecGain(Number(e.target.value))} />
+            <span className="mono lbl">{Math.round(a.specGain * 100)}</span>
+          </label>
+          <div className="row" style={{ flexWrap: 'wrap', gap: '4px 10px' }}>
+            {SPEC_ZONES.filter((z) => z.key !== 'mid').map((z) => (
+              <span key={z.key} className="row lbl" style={{ gap: 4 }} title={z.tip}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: z.color, flex: 'none' }} />
+                {z.key === 'body' ? 'タム・スネアの胴' : z.label}
+              </span>
+            ))}
+          </div>
+          <span className="lbl">列の見出しの帯域をクリックすると、原曲をその帯域だけで聴けます。</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function measureRange(from: number, to: number, tempo: ReturnType<typeof tempoOf>): string {
   const a = tempo.locate(from).m;
   const b = tempo.locate(Math.max(from, to - 1e-6)).m;
@@ -367,6 +422,7 @@ function AssistCard() {
           ))}
         </div>
       </div>
+      <SpecControls />
       {pin ? (
         <div className="similar-box pinned">
           <span style={{ fontSize: 12 }}>
@@ -398,7 +454,7 @@ function AssistCard() {
       ) : null}
       <label className="row lbl" style={{ marginTop: 10 }}>
         <input type="checkbox" checked={a.audioCols} onChange={(e) => useAssist.setState({ audioCols: e.target.checked })} />
-        譜面の右に原曲の打点と波形を出す
+        譜面の右に原曲の打点と波形（スペクトル）を出す
       </label>
       {a.audioCols && (
         <label className="slider-row" style={{ marginTop: 6, gridTemplateColumns: '68px minmax(0, 1fr) 36px' }} title="上げると弱い音も打点として出します（関係ない音も増えます）">

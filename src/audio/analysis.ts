@@ -1,6 +1,6 @@
 // 原曲の解析。波形の山、帯域別（低・中・高）の打点の強さ、BPMの推定、拍の追跡。
 // 重い処理（フィルタ・自己相関）はワーカーで、軽い処理（打点の拾い出し・拍の追跡）は画面側でも使う。
-import { applyChain, biquad, downmix, fft, quantile, resample } from './dsp';
+import { applyChain, biquad, downmix, quantile, resample } from './dsp';
 
 /** 打点の強さを出す細かさ（1秒あたりのフレーム数。5ms刻み） */
 export const FRAME_RATE = 200;
@@ -417,51 +417,4 @@ export function analyzeAudio(channels: Float32Array[], sr: number, progress?: (p
   const tempo = estimateTempo(combinedOdf(odf), FRAME_RATE);
   progress?.(1);
   return { duration: mono.length / sr, peakRate: PEAK_RATE, peaks, frameRate: FRAME_RATE, odf, env, tempo };
-}
-
-// ---- スペクトログラム ---------------------------------------------------------------
-
-export const SPEC_BINS = 72;
-export const SPEC_RATE = 50;
-
-/** 対数周波数（40Hz〜11kHz）のスペクトログラム。各フレーム SPEC_BINS 個の 0〜255 */
-export function computeSpectrogram(channels: Float32Array[], sr: number): { rate: number; bins: number; data: Uint8Array; frames: number } {
-  const x = resample(downmix(channels), sr, ANALYSIS_SR);
-  const N = 1024;
-  const hop = ANALYSIS_SR / SPEC_RATE;
-  const frames = Math.max(0, Math.floor((x.length - N) / hop) + 1);
-  const data = new Uint8Array(frames * SPEC_BINS);
-  const win = new Float32Array(N);
-  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
-  // 対数周波数の区切り
-  const fLo = 40;
-  const fHi = 11000;
-  const edges: number[] = [];
-  for (let b = 0; b <= SPEC_BINS; b++) edges.push(Math.min(N / 2, Math.max(1, Math.round(((fLo * (fHi / fLo) ** (b / SPEC_BINS)) * N) / ANALYSIS_SR))));
-  const re = new Float32Array(N);
-  const im = new Float32Array(N);
-  const mag = new Float32Array(N / 2);
-  const db = new Float32Array(frames * SPEC_BINS);
-  for (let f = 0; f < frames; f++) {
-    const off = Math.floor(f * hop);
-    for (let i = 0; i < N; i++) {
-      re[i] = x[off + i] * win[i];
-      im[i] = 0;
-    }
-    fft(re, im);
-    for (let k = 0; k < N / 2; k++) mag[k] = re[k] * re[k] + im[k] * im[k];
-    for (let b = 0; b < SPEC_BINS; b++) {
-      const a = edges[b];
-      const z = Math.max(a + 1, edges[b + 1]);
-      let s = 0;
-      for (let k = a; k < z; k++) s += mag[k];
-      db[f * SPEC_BINS + b] = 10 * Math.log10(s / (z - a) + 1e-12);
-    }
-  }
-  const top = quantile(db, 0.995);
-  for (let i = 0; i < db.length; i++) {
-    const v = (db[i] - (top - 70)) / 70;
-    data[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
-  }
-  return { rate: SPEC_RATE, bins: SPEC_BINS, data, frames };
 }

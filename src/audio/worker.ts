@@ -1,14 +1,17 @@
 // 原曲の解析とスロー再生用の伸長を、画面を止めないように別スレッドで行う。
-import { analyzeAudio, computeSpectrogram } from './analysis';
+import { analyzeAudio } from './analysis';
+import { renderSpectro, spectroDb, type SpecMode } from './spectro';
 import { wsola } from './stretch';
 
 export type WorkerRequest =
   | { id: number; type: 'load'; key: string; channels: Float32Array[]; sr: number }
   | { id: number; type: 'analyze'; key: string }
-  | { id: number; type: 'spectro'; key: string }
+  | { id: number; type: 'spectro'; key: string; mode: SpecMode }
   | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number };
 
 const store = new Map<string, { channels: Float32Array[]; sr: number }>();
+/** スペクトルの dB（見せ方を変えるときに測り直さない）。2曲ぶん */
+const specCache = new Map<string, ReturnType<typeof spectroDb>>();
 
 const post = (msg: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(msg, transfer);
 
@@ -18,6 +21,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     if (req.type === 'load') {
       // 古い曲は捨てる（2曲まで持つ）
       store.delete(req.key);
+      specCache.delete(req.key);
       store.set(req.key, { channels: req.channels, sr: req.sr });
       while (store.size > 7) store.delete(store.keys().next().value!);
       post({ id: req.id, ok: true });
@@ -32,7 +36,13 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (req.type === 'spectro') {
-      const r = computeSpectrogram(src.channels, src.sr);
+      let db = specCache.get(req.key);
+      if (!db) {
+        db = spectroDb(src.channels, src.sr, (p) => post({ id: req.id, progress: p * 0.8 }));
+        specCache.set(req.key, db);
+        while (specCache.size > 2) specCache.delete(specCache.keys().next().value!);
+      }
+      const r = renderSpectro(db.db, db.frames, db.fHi, req.mode);
       post({ id: req.id, ok: true, result: r }, [r.data.buffer as ArrayBuffer]);
       return;
     }
