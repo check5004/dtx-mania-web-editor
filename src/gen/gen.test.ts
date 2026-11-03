@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures, drumNotes } from './features';
-import { DEFAULT_KEEP, detectFills, generateToTarget, simplify, type SectionPlan } from './simplify';
+import { crashStarts, DEFAULT_KEEP, describePolicy, detectFills, generateToTarget, LADDER, MAX_RUNG, simplify, type SectionPlan } from './simplify';
 
 const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
 
@@ -145,5 +145,107 @@ describe('簡略化', () => {
     expect(g.rung).toBe(r);
     expect(g.ease).toBeGreaterThan(0);
     expect(Math.abs(g.level - mid)).toBeLessThan(Math.min(lv[r] - mid, mid - lv[r + 1]));
+  });
+});
+
+/**
+ * 左右のシンバルを使う8ビート（作者の譜面によくある使い方）：右は4小節ごとの頭、左は2小節目の頭と食い、
+ * 6小節目は左で8分の刻み。HH 8分（シンバルの所は抜く）、BD 1・3拍、SD 2・4拍
+ */
+function cymbalSong(): DtxDoc {
+  const crash = new Map<string, number>();
+  const put = (m: number, k: number, ch: number) => crash.set(`${m}:${k}`, ch);
+  put(0, 0, CH.CY);
+  put(2, 0, CH.LC); // 4小節ごとの頭ではない頭
+  put(3, 7, CH.LC); // 食い：最後の8分の裏で、次の小節の頭にクラッシュが無い
+  put(5, 3, CH.LC); // 裏のアクセント（食いではない）
+  for (let k = 0; k < 8; k++) put(6, k, CH.LC); // 左で8分の刻み
+  put(7, 0, CH.CY);
+  const chips = [];
+  let id = 1;
+  for (let m = 0; m < 8; m++) {
+    for (let k = 0; k < 8; k++) {
+      chips.push(chip(id++, crash.get(`${m}:${k}`) ?? CH.HHC, m, k, 8));
+      if (k === 0 || k === 4) chips.push(chip(id++, CH.BD, m, k, 8));
+      if (k === 2 || k === 6) chips.push(chip(id++, CH.SD, m, k, 8));
+    }
+  }
+  return { ...emptyDoc(), fields: { BPM: '140' }, chips, nextId: id };
+}
+
+/** 左右のシンバルを入れ替える */
+function mirrorCymbals(doc: DtxDoc): DtxDoc {
+  const sw = (ch: number) => (ch === CH.LC ? CH.CY : ch === CH.CY ? CH.LC : ch);
+  return { ...doc, chips: doc.chips.map((c) => ({ ...c, ch: sw(c.ch) })) };
+}
+
+describe('左右のシンバル（同じ重さで扱う）', () => {
+  const sec: SectionPlan[] = [{ name: 'A', from: 0, to: 7, shift: 0 }];
+  const run = (rung: number, doc = cymbalSong()) => simplify({ doc, rung, sections: sec, keep: DEFAULT_KEEP });
+
+  it('左シンバルは、いちばん易しい段でも右へ寄せない', () => {
+    const d = cymbalSong();
+    const lc = d.chips.filter((c) => c.ch === CH.LC).map((c) => c.id);
+    for (let rung = 0; rung <= MAX_RUNG; rung++) {
+      const r = run(rung, d);
+      expect(lc.map((id) => r.fate.get(id)?.kind)).not.toContain('moved');
+      expect(r.doc.chips.filter((c) => c.ch === CH.LC).length).toBeGreaterThan(0);
+    }
+    for (const p of LADDER) expect(describePolicy(p)).not.toContain('左シンバル');
+  });
+
+  it('小節の頭のクラッシュは、4小節ごとの頭でなくても残す', () => {
+    const r = run(MAX_RUNG);
+    expect(at(r.doc, 0, CH.CY)).toEqual([0]);
+    expect(at(r.doc, 2, CH.LC)).toEqual([0]);
+    expect(at(r.doc, 7, CH.CY)).toEqual([0]);
+  });
+
+  it('食い（最後の8分の裏で、次の頭にクラッシュが無い）は残し、ほかの裏のクラッシュは易しい段で消す', () => {
+    expect([...crashStarts(drumNotes(cymbalSong()))].length).toBe(5);
+    for (const rung of [6, 8, MAX_RUNG]) {
+      const r = run(rung);
+      expect(at(r.doc, 3, CH.LC)).toEqual([3.5]);
+      expect(at(r.doc, 5, CH.LC)).toEqual([]);
+    }
+    // ADVANCED あたりまでは裏のアクセントも残る
+    expect(at(run(4).doc, 5, CH.LC)).toEqual([1.5]);
+  });
+
+  it('シンバルの刻みは、段6・7 では4分で残し、もっと易しい段では頭だけ', () => {
+    expect(at(run(6).doc, 6, CH.LC)).toEqual([0, 1, 2, 3]);
+    expect(at(run(7).doc, 6, CH.LC)).toEqual([0, 1, 2, 3]);
+    expect(at(run(8).doc, 6, CH.LC)).toEqual([0]);
+  });
+
+  it('フィルの終わりの食いのクラッシュは、易しい段でも残す', () => {
+    const chips = [];
+    let id = 1;
+    for (let m = 0; m < 3; m++) {
+      for (let k = 0; k < 16; k += 2) {
+        const fill = m === 1 && k >= 8;
+        if (!fill) chips.push(chip(id++, CH.HHC, m, k, 16));
+        if (k === 0 || k === 8) chips.push(chip(id++, CH.BD, m, k, 16));
+        if (!fill && (k === 4 || k === 12)) chips.push(chip(id++, CH.SD, m, k, 16));
+      }
+    }
+    // 1小節目の後半はタム回し、最後の8分の裏で左のクラッシュ（次の小節の頭にはクラッシュなし）
+    for (const k of [8, 9, 10, 11, 12, 13]) chips.push(chip(id++, k < 10 ? CH.SD : k < 12 ? CH.HT : CH.LT, 1, k, 16));
+    chips.push(chip(id++, CH.LC, 1, 14, 16), chip(id++, CH.BD, 1, 14, 16));
+    const d: DtxDoc = { ...emptyDoc(), fields: { BPM: '140' }, chips, nextId: id };
+    expect(detectFills(drumNotes(d)).has(1)).toBe(true);
+    const r = simplify({ doc: d, rung: MAX_RUNG, sections: [{ name: 'A', from: 0, to: 2, shift: 0 }], keep: DEFAULT_KEEP });
+    expect(at(r.doc, 1, CH.LC)).toEqual([3.5]);
+  });
+
+  it('左右を入れ替えた譜面は、左右を入れ替えた結果になる', () => {
+    const key = (doc: DtxDoc, swap: boolean) =>
+      drumNotes(doc)
+        .filter((n) => n.ch === CH.LC || n.ch === CH.CY)
+        .map((n) => `${n.m}:${n.inBeat}:${swap ? (n.ch === CH.LC ? 'R' : 'L') : n.ch === CH.LC ? 'L' : 'R'}`)
+        .sort();
+    for (let rung = 0; rung <= MAX_RUNG; rung++) {
+      expect(key(run(rung, mirrorCymbals(cymbalSong())).doc, true)).toEqual(key(run(rung).doc, false));
+    }
   });
 });

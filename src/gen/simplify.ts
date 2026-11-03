@@ -17,29 +17,32 @@ export interface Policy {
   /** フィル：前半と最後の拍の間隔（前半 null は消す） */
   fillEarly: Step | null;
   fillLast: Step;
-  /** クラッシュ：'heads' は小節の頭・セクションの頭・フィルの着地だけ */
+  /**
+   * クラッシュ（左右のシンバル。2つは同じに扱う）：小節の頭と食い（次の小節の頭の代わりに前の8分の裏で鳴らす）はいつも残す。
+   * 'keep' はそのほかもハイハットと同じ細かさまで残し、'heads' は頭と食いだけ
+   */
   cymbals: 'keep' | 'heads';
   openHH: boolean;
   /** 左足：merge は左バスドラムを右へ寄せる、drop は左ペダルも消す */
   leftFoot: 'keep' | 'merge' | 'drop';
   ride: 'keep' | 'toHH';
-  leftCymbal: 'keep' | 'toRight';
   maxChord: number;
 }
 
-/** 簡略化の段（0 がほぼそのまま、8 がいちばん簡単） */
+/** 簡略化の段（0 がほぼそのまま、9 がいちばん簡単） */
 export const LADDER: readonly Policy[] = [
-  { hh: 0, kick: 0, snare: 0, toms: 0, fillEarly: 0, fillLast: 0, cymbals: 'keep', openHH: true, leftFoot: 'keep', ride: 'keep', leftCymbal: 'keep', maxChord: 4 },
-  { hh: 0.25, kick: 0.25, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'keep', ride: 'keep', leftCymbal: 'keep', maxChord: 3 },
-  { hh: 0.25, kick: 0.5, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', leftCymbal: 'keep', maxChord: 3 },
-  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.25, fillEarly: 0.5, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', leftCymbal: 'keep', maxChord: 3 },
-  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.5, fillEarly: 0.5, fillLast: 0.5, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', leftCymbal: 'keep', maxChord: 2 },
-  { hh: 0.5, kick: 1, snare: 0.5, toms: 0.5, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', openHH: true, leftFoot: 'drop', ride: 'keep', leftCymbal: 'keep', maxChord: 2 },
-  { hh: 1, kick: 1, snare: 'backbeat', toms: 1, fillEarly: 1, fillLast: 0.5, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'keep', maxChord: 2 },
-  { hh: 1, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 0.5, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'toRight', maxChord: 2 },
-  { hh: 2, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'toRight', maxChord: 2 },
+  { hh: 0, kick: 0, snare: 0, toms: 0, fillEarly: 0, fillLast: 0, cymbals: 'keep', openHH: true, leftFoot: 'keep', ride: 'keep', maxChord: 4 },
+  { hh: 0.25, kick: 0.25, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'keep', ride: 'keep', maxChord: 3 },
+  { hh: 0.25, kick: 0.5, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', maxChord: 3 },
+  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.25, fillEarly: 0.5, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', maxChord: 3 },
+  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.5, fillEarly: 0.5, fillLast: 0.5, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', maxChord: 2 },
+  { hh: 0.5, kick: 1, snare: 0.5, toms: 0.5, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', openHH: true, leftFoot: 'drop', ride: 'keep', maxChord: 2 },
+  // 6・7 は ADVANCED になることが多い：シンバルの刻み・拍のアクセントは4分で残す（作者の ADVANCED は8割前後残している）
+  { hh: 1, kick: 1, snare: 'backbeat', toms: 1, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
+  { hh: 1, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 0.5, cymbals: 'keep', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
+  { hh: 2, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
   // 速い曲の BASIC 用：キックは小節の頭だけ（人の作った BASIC は 180BPM 前後でこの形が多い）
-  { hh: 2, kick: 4, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'toRight', maxChord: 2 },
+  { hh: 2, kick: 4, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
 ];
 
 export const MAX_RUNG = LADDER.length - 1;
@@ -211,6 +214,25 @@ function snareRoll(beats: number[]): number | null {
   return null;
 }
 
+/**
+ * 小節の始まりを告げるクラッシュ（左右のシンバル）の id：小節の頭のものと、食い（小節の最後の8分の裏で鳴らし、
+ * 次の小節の頭にはクラッシュが無いもの）。どの段でも残す。
+ * 作者の譜面（2026-11-03、手元の6曲）では BASIC でも頭の 73〜90%、食いの 8割を残している。
+ * 左シンバルは2小節目の頭や食いに多いので、4小節ごとの頭だけを残すと左だけが消えていた。
+ */
+export function crashStarts(notes: readonly Note[]): Set<number> {
+  const isCrash = (n: Note) => n.lane === 0 || n.lane === 8;
+  const heads = new Set<number>();
+  for (const n of notes) if (isCrash(n) && n.inBeat < EPS) heads.add(n.m);
+  const out = new Set<number>();
+  for (const n of notes) {
+    if (!isCrash(n)) continue;
+    if (n.inBeat < EPS) out.add(n.id);
+    else if (Math.abs(n.mBeats - n.inBeat - 0.5) < 1e-4 && !heads.has(n.m + 1)) out.add(n.id);
+  }
+  return out;
+}
+
 const PRIORITY: Record<number, number> = {
   // 大きいほど残す
   [CH.CY]: 9,
@@ -233,6 +255,7 @@ export function simplify(input: SimplifyInput): SimplifyResult {
   const notes = drumNotes(doc, tempo);
   const fills = detectFills(notes);
   const backbeat = backbeatSnares(notes, fills);
+  const starts = crashStarts(notes);
   const sectionHeads = new Set(input.sections.map((s) => s.from));
   const planOf = (m: number) => input.sections.find((s) => m >= s.from && m <= s.to);
   const fate = new Map<number, ChipFate>();
@@ -258,8 +281,8 @@ export function simplify(input: SimplifyInput): SimplifyResult {
       const lastBeatStart = Math.max(fillStart!, Math.ceil(n.mBeats - 1 - EPS));
       const step = n.inBeat >= lastBeatStart - EPS ? p.fillLast : p.fillEarly;
       ok = step !== null && onGrid(n.inBeat, step);
-      // フィルの中のシンバル・キックはビートと同じに扱う
-      if (n.lane === 0 || n.lane === 8) ok = onGrid(n.inBeat, Math.max(p.toms, 0.5));
+      // フィルの中のシンバル・キックはビートと同じに扱う（フィルの終わりの食いのクラッシュは残す）
+      if (n.lane === 0 || n.lane === 8) ok = starts.has(n.id) || onGrid(n.inBeat, Math.max(p.toms, 0.5));
       if (n.lane === 5 || n.lane === 2) ok = step !== null && onGrid(n.inBeat, Math.max(step, p.kick));
       if (n.lane === 2 && n.alt && p.leftFoot !== 'keep') ch = CH.BD;
       if (n.lane === 2 && !n.alt && p.leftFoot === 'drop') ok = false;
@@ -275,9 +298,8 @@ export function simplify(input: SimplifyInput): SimplifyResult {
           if (p.ride === 'toHH') ch = CH.HHC;
           break;
         case 0:
-        case 8: // クラッシュ
-          ok = p.cymbals === 'keep' ? onGrid(n.inBeat, Math.max(0.5, p.hh)) : isHead && (n.m === 0 || sectionHeads.has(n.m) || landing || isPhraseHead(n.m, input.sections));
-          if (n.lane === 0 && p.leftCymbal === 'toRight') ch = CH.CY;
+        case 8: // クラッシュ（左右のシンバルは同じに扱う）
+          ok = starts.has(n.id) || (p.cymbals === 'keep' && onGrid(n.inBeat, Math.max(0.5, p.hh)));
           break;
         case 3: // スネア
           ok = p.snare === 'backbeat' ? backbeat.has(n.id) : onGrid(n.inBeat, p.snare);
@@ -382,13 +404,6 @@ function laneOfCh(ch: number): number {
   }
 }
 
-/** セクションが無いときも、4小節ごとの頭はフレーズの頭として扱う */
-function isPhraseHead(m: number, sections: SectionPlan[]): boolean {
-  const s = sections.find((x) => m >= x.from && m <= x.to);
-  const from = s ? s.from : 0;
-  return (m - from) % 4 === 0;
-}
-
 export interface Generated extends SimplifyResult {
   rung: number;
   level: number;
@@ -454,12 +469,11 @@ export function levelOfDoc(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): n
 export function describePolicy(p: Policy): string {
   const g = (s: Step | null | 'backbeat') => (s === null ? 'なし' : s === 'backbeat' ? '2・4拍' : s === 0 ? 'そのまま' : s === 0.25 ? '16分' : s === 0.5 ? '8分' : s === 1 ? '4分' : s === 2 ? '2分' : '小節の頭だけ');
   const parts = [`ハイハット ${g(p.hh)}`, `キック ${g(p.kick)}`, `スネア ${g(p.snare)}`, `フィル ${p.fillEarly === null ? '最後の拍だけ' : g(p.fillEarly)}`];
-  if (p.cymbals === 'heads') parts.push('クラッシュは頭だけ');
+  if (p.cymbals === 'heads') parts.push('クラッシュは小節の頭と食いだけ');
   if (!p.openHH) parts.push('オープンHHは閉じる');
   if (p.leftFoot === 'merge') parts.push('左バスは右へ');
   if (p.leftFoot === 'drop') parts.push('左足なし');
   if (p.ride === 'toHH') parts.push('ライドはHHへ');
-  if (p.leftCymbal === 'toRight') parts.push('左シンバルは右へ');
   parts.push(`同時 ${p.maxChord} まで`);
   return parts.join('・');
 }
