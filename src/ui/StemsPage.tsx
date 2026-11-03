@@ -1,5 +1,6 @@
 // ステムとミックスの画面：トラックを縦に並べた DTM 風の再生、解析元の選択、書き出しと DTX への登録。
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { engine } from '../audio/engine';
 import { STEM_KINDS, stemKindInfo } from '../audio/stems';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { drumChannel } from '../dtx/model';
@@ -16,10 +17,12 @@ import {
   fileExists,
   importStems,
   LISTEN_PRESETS,
-  leaveListenPreset,
   PEAK_RATE,
   removeStem,
+  setChartTrack,
   setListen,
+  soloOnly,
+  stemAudible,
   stemInfo,
   stemPeaks,
   stemsDuration,
@@ -216,10 +219,10 @@ function TrackHead({ t }: { t: StemTrack }) {
   const listen = useStems((s) => s.listen);
   const comparePan = listen === 'compare' && t.kind === 'drums';
   const status = useStems((s) => s.status[t.file]);
-  const anySolo = useSidecar((s) => s.stems.some((x) => x.solo));
+  useEditor((s) => s.mix);
   const [open, setOpen] = useState(false);
   const info = stemKindInfo(t.kind);
-  const off = t.mute || (anySolo && !t.solo);
+  const off = !stemAudible(t);
   return (
     <div className="track-head" style={{ height: ROW_H, borderLeftColor: info.color, opacity: off ? 0.6 : 1 }}>
       <div className="row" style={{ gap: 6 }}>
@@ -244,7 +247,7 @@ function TrackHead({ t }: { t: StemTrack }) {
         <button className={`ms m ${t.mute ? 'on' : ''}`} onClick={() => updateStem(t.file, { mute: !t.mute })} aria-label={`${t.name}をミュート`}>
           M
         </button>
-        <button className={`ms s ${t.solo ? 'on' : ''}`} onClick={() => updateStem(t.file, { solo: !t.solo })} aria-label={`${t.name}をソロ`}>
+        <button className={`ms s ${t.solo ? 'on' : ''}`} onClick={(e) => (e.altKey ? soloOnly(t.file) : updateStem(t.file, { solo: !t.solo }))} aria-label={`${t.name}をソロ`} title="ソロ（Alt+クリックでこのトラックだけ）">
           S
         </button>
       </div>
@@ -311,7 +314,7 @@ function ChartHead() {
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
   const lastM = Math.max(0, ...doc.chips.map((c) => c.m));
-  const soloChart = mix.bgmMute && !mix.drumMute;
+  const soloChart = mix.drumSolo;
   return (
     <div className="track-head" style={{ height: ROW_H, borderLeftColor: 'var(--accent)' }}>
       <div className="row" style={{ gap: 6 }}>
@@ -322,20 +325,14 @@ function ChartHead() {
         <span className="grow" />
         <button
           className={`ms m ${mix.drumMute ? 'on' : ''}`}
-          onClick={() => {
-            setMix({ drumMute: !mix.drumMute });
-            leaveListenPreset();
-          }}
+          onClick={() => setChartTrack({ mute: !mix.drumMute })}
           aria-label="譜面の音をミュート"
         >
           M
         </button>
         <button
           className={`ms s ${soloChart ? 'on' : ''}`}
-          onClick={() => {
-            setMix(soloChart ? { bgmMute: false } : { bgmMute: true, drumMute: false });
-            leaveListenPreset();
-          }}
+          onClick={(e) => (e.altKey ? soloOnly('chart') : setChartTrack({ solo: !soloChart }))}
           aria-label="譜面の音をソロ"
         >
           S
@@ -373,8 +370,8 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
   const anchor = bgmSource(doc)?.sec ?? 0;
-  const anySolo = stems.some((t) => t.solo);
   const mix = useEditor((s) => s.mix);
+  const audible = stems.map((t) => (stemAudible(t) ? 1 : 0)).join('');
   const dragging = useRef(false);
 
   // 見せる範囲（秒）。ズーム中は再生位置の入っている数小節（ページ送り）
@@ -392,7 +389,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
     (ctx, W) => {
       const dpr = window.devicePixelRatio || 1;
       const X = (sec: number) => ((sec - win.from) / (win.to - win.from)) * W;
-      const key = [doc, W, H, win.from, win.to, version, stems, sections, colors, analysis, dpr, anySolo];
+      const key = [doc, W, H, win.from, win.to, version, stems, sections, colors, analysis, dpr, audible];
       if (!cache.current || cache.current.key.some((v, i) => v !== key[i])) {
         const off = cache.current?.canvas ?? document.createElement('canvas');
         off.width = Math.floor(W * dpr);
@@ -448,7 +445,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
           c.fillStyle = '#1E242D';
           c.fillRect(0, top + ROW_H - 1, W, 1);
           const peaks = stemPeaks(t.file);
-          const off = t.mute || (anySolo && !t.solo);
+          const off = !stemAudible(t);
           if (peaks) {
             c.fillStyle = info.color;
             c.globalAlpha = off ? 0.3 : 0.9;
@@ -520,7 +517,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
         ctx.fillRect(xb - 1.5, RULER_H - 18, 1.5, H);
       }
       // 譜面の音を消しているとき
-      if (mix.drumMute) {
+      if (!engine.audible().chart) {
         ctx.fillStyle = 'rgba(11,14,19,.55)';
         ctx.fillRect(0, RULER_H + stems.length * ROW_H, W, ROW_H);
       }
@@ -528,7 +525,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
       ctx.fillStyle = playing ? '#FFB547' : '#4CC2FF';
       ctx.fillRect(Math.round(x) - 1, RULER_H - 18, 2, H);
     },
-    [doc, stems, sections, colors, analysis, version, loop, playing, beat, win, H, anySolo, mix.drumMute],
+    [doc, stems, sections, colors, analysis, version, loop, playing, beat, win, H, audible, mix],
   );
 
   const seek = (clientX: number, commit: boolean) => {

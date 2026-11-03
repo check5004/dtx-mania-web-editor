@@ -1,6 +1,6 @@
 // パネルの境目：ドラッグで幅（高さ）を変え、ボタンかダブルクリックで開け閉めする。
 import { useRef } from 'react';
-import { LAYOUT_LIMITS, SEEK_CLOSED_H, setLayout, togglePanel, useLayout } from '../store/layout';
+import { LAYOUT_LIMITS, maxTracksH, SEEK_CLOSED_H, setLayout, togglePanel, useLayout } from '../store/layout';
 
 /** 左右のパネルと譜面の境目 */
 export function VSplitter({ side, open }: { side: 'left' | 'right'; open: boolean }) {
@@ -72,7 +72,7 @@ export function PanelRail({ side, label }: { side: 'left' | 'right'; label: stri
   );
 }
 
-/** 下の波形（シークバー）の上の境目：上下にドラッグで高さ、ダブルクリックで開け閉め */
+/** 下のトラックの上の境目：上下にドラッグで高さ、ダブルクリックで開け閉め */
 export function HSplitter() {
   const drag = useRef<{ y0: number; h0: number; moved: boolean } | null>(null);
   const open = useLayout((s) => s.seekOpen);
@@ -81,14 +81,14 @@ export function HSplitter() {
       className="hsplit"
       role="separator"
       aria-orientation="horizontal"
-      aria-label="下の波形の高さ"
-      title={`ドラッグで下の波形の高さを変える（ダブルクリックで${open ? '閉じる' : '開く'}）`}
+      aria-label="下のトラックの高さ"
+      title={`ドラッグで下のトラックの高さを変える（ダブルクリックで${open ? '閉じる' : '開く'}）`}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.preventDefault();
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         const l = useLayout.getState();
-        drag.current = { y0: e.clientY, h0: l.seekOpen ? l.seekH : SEEK_CLOSED_H, moved: false };
+        drag.current = { y0: e.clientY, h0: l.seekOpen ? Math.min(l.tracksH, maxTracksH()) : SEEK_CLOSED_H, moved: false };
         document.body.classList.add('resizing-y');
       }}
       onPointerMove={(e) => {
@@ -99,7 +99,7 @@ export function HSplitter() {
         d.moved = true;
         const h = d.h0 + dy;
         if (h < LAYOUT_LIMITS.seek[0] - 14) setLayout({ seekOpen: false });
-        else setLayout({ seekOpen: true, seekH: h });
+        else setLayout({ seekOpen: true, tracksH: Math.min(h, maxTracksH()) });
       }}
       onPointerUp={() => {
         drag.current = null;

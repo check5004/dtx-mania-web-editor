@@ -1,20 +1,20 @@
-// 聴く音量とミックス：再生バーの右に常設する音量と、「ステム」ボタンで開くミックスのパネル。
-// ここの音量は聴くためのもの。DTX の #VOLUME や書き出しには影響しない。
+// 聴く音量とミックス：上のバーのマスター（全体の音量・曲の音と譜面の音のミュート・クリック）と、「ミックス」で開くパネル。
+// トラックごとの音量・ミュート・ソロは下のトラックで変える。ここの音量は聴くためのもの。DTX の #VOLUME や書き出しには影響しない。
 import { useEffect, useRef, useState } from 'react';
-import { stemKindInfo } from '../audio/stems';
 import { DRUM_LANES } from '../dtx/model';
 import { clearMuteSolo, toggleMute, toggleSolo, useAssist } from '../store/assist';
 import { openPage, setMix, useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
-import { LISTEN_PRESETS, leaveListenPreset, setListen, toggleBgmMute, toggleDrumMute, updateStem, useStems } from '../store/stems';
+import { LISTEN_PRESETS, leaveListenPreset, setListen, toggleBgmMute, toggleDrumMute, useStems } from '../store/stems';
 import { Icon } from './icons';
+import { releaseFocus } from './Tracks';
 
 const pct = (v: number) => Math.round(v * 100);
 
-/** 再生バーの右の音量（原曲・譜面の音・クリック・ミックスのパネル） */
-export function FooterMixer() {
+/** 上のバーのマスター：全体の音量、曲の音（原曲・ステム）と譜面の音をまとめてミュート、クリック、ミックスのパネル */
+export function MasterMixer() {
   const mix = useEditor((s) => s.mix);
-  const stems = useSidecar((s) => s.stems);
+  const listen = useStems((s) => s.listen);
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -30,73 +30,44 @@ export function FooterMixer() {
       window.removeEventListener('keydown', key);
     };
   }, [open]);
+  const preset = LISTEN_PRESETS.find((p) => p.id === listen);
+  const groupMuted = mix.bgmMute || mix.drumMute;
   return (
-    <div className="mixer" ref={wrap}>
-      <VolumeKnob
-        label="原曲"
-        title={stems.length ? '原曲（全ステムの合計）' : '原曲'}
-        value={mix.bgm}
-        muted={mix.bgmMute}
-        icon={mix.bgmMute ? Icon.speakerOff(15) : Icon.speaker(15)}
-        onToggle={toggleBgmMute}
-        onChange={(v) => setMix({ bgm: v })}
-        keyHint="Alt+1"
-      />
-      <VolumeKnob
-        label="譜面の音"
-        title="譜面の音（置いたチップのドラム）"
-        value={mix.drums}
-        muted={mix.drumMute}
-        icon={mix.drumMute ? Icon.chartOff(15) : Icon.drum(15)}
-        onToggle={toggleDrumMute}
-        onChange={(v) => setMix({ drums: v })}
-        keyHint="Alt+2"
-      />
+    <div className="master" ref={wrap} role="group" aria-label="マスター" onPointerUp={releaseFocus}>
       <button
-        className={`ib mixer-click ${mix.metronome ? 'on' : ''}`}
-        onClick={() => setMix({ metronome: !mix.metronome })}
-        title={`クリック（メトロノーム）${mix.metronome ? 'を止める' : 'を鳴らす'}`}
-        aria-pressed={mix.metronome}
+        className={`ib ${mix.masterMute ? 'muted' : ''}`}
+        onClick={() => setMix({ masterMute: !mix.masterMute })}
+        title={mix.masterMute ? '音を出す' : 'すべての音を消す'}
+        aria-pressed={mix.masterMute}
       >
+        {mix.masterMute ? Icon.speakerOff(16) : Icon.speaker(16)}
+      </button>
+      <input
+        type="range"
+        className="master-vol"
+        min={0}
+        max={1}
+        step={0.01}
+        value={mix.master}
+        onChange={(e) => setMix({ master: Number(e.target.value), masterMute: false })}
+        onDoubleClick={() => setMix({ master: 0.9 })}
+        aria-label="マスターの音量"
+        title={`マスターの音量 ${pct(mix.master)}（すべての音。ダブルクリックで 90 に戻す）。トラックごとの音量は下のトラックで変えます`}
+      />
+      <button className={`ib mixer-click ${mix.metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !mix.metronome })} title={`クリック（メトロノーム）${mix.metronome ? 'を止める' : 'を鳴らす'}`} aria-pressed={mix.metronome}>
         {Icon.metronome(15)}
       </button>
-      <button className={`btn small mixer-open ${open ? 'on' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open} title="ミックス（ステム・レーンのミュートとソロ・クリックの音量）">
-        {stems.length ? (
-          <>
-            ステム <b className="mono">{stems.length}</b>
-          </>
-        ) : (
-          'ミックス'
-        )}
-        {Icon.chevronDown(13)}
+      <button
+        className={`btn small mixer-open ${open ? 'on' : ''}`}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        title={`ミックス（聞こえ方${preset && listen !== 'all' ? `: ${preset.label}` : ''}・曲の音と譜面の音をまとめて消す・レーンのミュートとソロ・クリックの音量）`}
+      >
+        {Icon.sliders(14)}
+        {groupMuted && <i className="mute-dot" title={mix.bgmMute ? '曲の音を消しています（Alt+1）' : '譜面の音を消しています（Alt+2）'} />}
+        {Icon.chevronDown(12)}
       </button>
       {open && <MixPopover onClose={() => setOpen(false)} />}
-    </div>
-  );
-}
-
-function VolumeKnob(p: {
-  label: string;
-  title: string;
-  value: number;
-  muted: boolean;
-  icon: React.ReactNode;
-  keyHint: string;
-  onToggle: () => void;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className={`vol ${p.muted ? 'muted' : ''}`}>
-      <button className="ib" onClick={p.onToggle} title={`${p.title}を${p.muted ? '鳴らす' : 'ミュート'}（${p.keyHint}）`} aria-pressed={p.muted}>
-        {p.icon}
-      </button>
-      <div className="vol-body">
-        <div className="vol-top">
-          <span>{p.label}</span>
-          <span className="mono">{p.muted ? 'M' : pct(p.value)}</span>
-        </div>
-        <input type="range" min={0} max={1} step={0.01} value={p.value} onChange={(e) => p.onChange(Number(e.target.value))} aria-label={`${p.title}の音量`} />
-      </div>
     </div>
   );
 }
@@ -105,18 +76,15 @@ function MixPopover({ onClose }: { onClose: () => void }) {
   const mix = useEditor((s) => s.mix);
   const previewOnPlace = useEditor((s) => s.previewOnPlace);
   const stems = useSidecar((s) => s.stems);
-  const analysis = useSidecar((s) => s.analysisStem);
   const listen = useStems((s) => s.listen);
-  const status = useStems((s) => s.status);
   const mute = useAssist((s) => s.mute);
   const solo = useAssist((s) => s.solo);
   const has = stems.length > 0;
   const hasDrums = stems.some((t) => t.kind === 'drums');
-  const anySolo = stems.some((t) => t.solo);
   const preset = LISTEN_PRESETS.find((p) => p.id === listen);
   const hint = preset ? (has ? preset.hint : preset.hintNoStems) : 'M・Sで個別に変えています。';
   return (
-    <div className="mix-pop" role="dialog" aria-label="ミックス">
+    <div className="mix-pop down" role="dialog" aria-label="ミックス">
       <div className="mix-head">
         <b>ミックス</b>
         <span className="grow" />
@@ -146,58 +114,20 @@ function MixPopover({ onClose }: { onClose: () => void }) {
       <p className="mix-hint">{hint}</p>
 
       <div className="mix-sec">
-        <span className="t">{has ? `原曲・ステム ${stems.length}本` : '原曲'}</span>
-        <span className="grow" />
-        <span className="lbl">M ミュート · S ソロ</span>
+        <span className="t">まとめて消す</span>
       </div>
-      {has ? (
-        stems.map((t) => {
-          const info = stemKindInfo(t.kind);
-          const off = t.mute || (anySolo && !t.solo);
-          return (
-            <div key={t.file} className="stem-row" style={{ opacity: off ? 0.45 : 1 }}>
-              <i className="dot" style={{ background: info.color }} />
-              <span className="name">{t.name}</span>
-              <span className="file mono ellipsis" title={t.file}>
-                {t.file.split('/').pop()}
-                {analysis === t.file ? ' · 解析元' : ''}
-                {listen === 'compare' && t.kind === 'drums' ? ' · 左' : ''}
-                {status[t.file] === 'missing' ? ' · 見つかりません' : status[t.file] === 'loading' ? ' · 読み込み中' : ''}
-              </span>
-              <button className={`ms m ${t.mute ? 'on' : ''}`} onClick={() => updateStem(t.file, { mute: !t.mute })} aria-label={`${t.name}をミュート`}>
-                M
-              </button>
-              <button className={`ms s ${t.solo ? 'on' : ''}`} onClick={() => updateStem(t.file, { solo: !t.solo })} aria-label={`${t.name}をソロ`}>
-                S
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1.5}
-                step={0.01}
-                value={t.gain}
-                style={{ accentColor: info.color }}
-                onChange={(e) => updateStem(t.file, { gain: Number(e.target.value) })}
-                aria-label={`${t.name}の音量`}
-              />
-              <span className="mono v">{pct(t.gain)}</span>
-            </div>
-          );
-        })
-      ) : (
-        <div className="mix-empty">
-          ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込むと、楽器ごとに鳴らし分けられます。
-          <button
-            className="btn small"
-            onClick={() => {
-              onClose();
-              openPage('stems');
-            }}
-          >
-            {Icon.layers(14)} ステムを読み込む
-          </button>
-        </div>
-      )}
+      <div className="row" style={{ gap: 6 }}>
+        <button className={`btn small mute-tg ${mix.bgmMute ? 'muted' : ''}`} onClick={toggleBgmMute} aria-pressed={mix.bgmMute} title="原曲・ステムのトラックをまとめてミュート（トラックごとの設定はそのまま）">
+          {Icon.wave(14)} 曲の音 <span className="key">Alt+1</span>
+        </button>
+        <button className={`btn small mute-tg ${mix.drumMute ? 'muted' : ''}`} onClick={toggleDrumMute} aria-pressed={mix.drumMute} title="譜面の音をミュート（下のトラックの「譜面の音」の M と同じ）">
+          {mix.drumMute ? Icon.chartOff(14) : Icon.drum(14)} 譜面の音 <span className="key">Alt+2</span>
+        </button>
+      </div>
+
+      <p className="mix-hint" style={{ marginTop: 10 }}>
+        原曲・ステム・譜面の音のトラックごとの音量・ミュート・ソロは、下のトラックで変えられます{has ? `（ステム ${stems.length}本）` : ''}。
+      </p>
 
       <div className="mix-sec">
         <span className="t">譜面の音・レーン</span>
@@ -253,7 +183,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
         <input type="checkbox" checked={previewOnPlace} onChange={(e) => useEditor.setState({ previewOnPlace: e.target.checked })} />
         チップを置いたときに音を鳴らす
       </label>
-      <p className="mix-note">ここは聴くための音量です。DTXの音量（#VOLUME）や書き出しには影響しません。書き出すときのミックスはステム画面で決めます。</p>
+      <p className="mix-note">ここと下のトラックは聴くための音量です。DTXの音量（#VOLUME）や書き出しには影響しません。書き出すときのミックスはステム画面で決めます。</p>
     </div>
   );
 }

@@ -38,5 +38,9 @@ describe('ステム', () => {
     const bad = parseSidecar(JSON.stringify({ stems: [{ file: 'x.wav', kind: 'kazoo', gain: 9 }], analysisStem: 'nope' }))!;
     expect(bad.stems[0]).toMatchObject({ kind: 'other', gain: 2, pan: 0 });
     expect(bad.analysisStem).toBeNull();
+    // 原曲・譜面の音のトラックのミュート・ソロ（前の作業ファイルには無い）
+    const withTracks = { ...d, mix: { ...d.mix, origMute: true, origSolo: false, drumSolo: true } };
+    expect(parseSidecar(serializeSidecar(withTracks))!.mix).toEqual(withTracks.mix);
+    expect(back.mix!.origMute).toBeUndefined();
   });
 });

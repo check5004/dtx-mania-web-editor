@@ -82,7 +82,7 @@ export function SourceCard() {
           {analysis && <div className="lbl" style={{ marginTop: 6 }}>{analysis}</div>}
           {stems.length > 0 && (
             <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
-              ステム {stems.length} 本を原曲の代わりに鳴らしています。
+              ステム {stems.length} 本を鳴らしています（原曲と鳴らし分けるのは下のトラックで）。
               <button className="link-btn" onClick={() => openPage('stems')}>
                 ステムとミックス
               </button>

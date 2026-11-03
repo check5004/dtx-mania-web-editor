@@ -45,6 +45,11 @@ export interface SavedMix {
   click: number;
   clickBarOnly: boolean;
   listen: ListenPreset;
+  /** 原曲のトラックのミュート（無ければ、ステムがあるときは消す） */
+  origMute?: boolean;
+  /** 原曲・譜面の音のトラックのソロ */
+  origSolo?: boolean;
+  drumSolo?: boolean;
 }
 
 export interface SidecarData {
@@ -226,6 +231,10 @@ export function parseSidecar(text: string): SidecarData | null {
         clickBarOnly: !!m.clickBarOnly,
         listen: listens.includes(m.listen as ListenPreset) ? (m.listen as ListenPreset) : 'all',
       };
+      const b = (x: unknown) => (typeof x === 'boolean' ? x : undefined);
+      if (b(m.origMute) !== undefined) out.mix.origMute = b(m.origMute);
+      if (b(m.origSolo) !== undefined) out.mix.origSolo = b(m.origSolo);
+      if (b(m.drumSolo) !== undefined) out.mix.drumSolo = b(m.drumSolo);
     }
     return out;
   } catch {

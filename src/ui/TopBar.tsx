@@ -38,6 +38,7 @@ import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
 import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
+import { MasterMixer } from './MixPanel';
 
 interface MenuItem {
   label: string;
@@ -140,7 +141,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
     <header className="topbar">
       <button className="logo" onClick={goHome} title="ホームに戻る（編集中の譜面は自動保存されています）">
         <span className="logo-mark">D</span>
-        <span className="hide-narrow">DTX Web Editor</span>
+        <span className="hide-narrow logo-text">DTX Web Editor</span>
       </button>
       <nav className="menus">
         <Menu
@@ -184,7 +185,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
           items={() => [
             { label: `左のパネル（キット・WAV・曲情報）${useLayout.getState().leftOpen ? '  ✓' : ''}`, run: () => togglePanel('left') },
             { label: `右のパネル（原曲・耳コピアシスト・確かめる）${useLayout.getState().rightOpen ? '  ✓' : ''}`, run: () => togglePanel('right') },
-            { label: `下の波形${useLayout.getState().seekOpen ? '  ✓' : ''}`, run: () => togglePanel('seek') },
+            { label: `下のトラック（原曲・ステム・譜面の音）${useLayout.getState().seekOpen ? '  ✓' : ''}`, run: () => togglePanel('seek') },
             '-',
             { label: '拡大', key: 'Ctrl+ホイール', run: () => zoom(1.25) },
             { label: '縮小', run: () => zoom(0.8) },
@@ -229,7 +230,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       </nav>
       <div className="song-head grow">
         <div className="song-art">{art ? <img src={art} alt="" /> : '♪'}</div>
-        <div style={{ minWidth: 0 }}>
+        <div className="song-text">
           <div className="song-title ellipsis">
             {f['TITLE'] || '無題'}
             {dirty && <span style={{ color: 'var(--amber)', marginLeft: 6 }} title="保存していない変更があります">●</span>}
@@ -242,12 +243,15 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
           <div className="seg diff-tabs hide-narrow" style={{ marginLeft: 6 }}>
             {meta.siblings.map((sb) => (
               <button key={sb.file} className={sb.file.toLowerCase() === meta.fileName.toLowerCase() ? 'on' : ''} onClick={() => void switchDifficulty(sb.file)} title={sb.file}>
-                {sb.label}
+                <span className="diff-full">{sb.label}</span>
+                <span className="diff-abbr">{abbrDiff(sb.label)}</span>
               </button>
             ))}
           </div>
         )}
       </div>
+      <MasterMixer />
+      <div className="vsep" />
       <button className="ib" onClick={undo} disabled={!canUndo} title={undoLabel ? `元に戻す: ${undoLabel}（Ctrl+Z）` : '元に戻す（Ctrl+Z）'}>
         {Icon.undo()}
       </button>
@@ -267,6 +271,12 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       </button>
     </header>
   );
+}
+
+/** 狭い画面での難易度の短い名前 */
+function abbrDiff(label: string): string {
+  const m: Record<string, string> = { NOVICE: 'NOV', REGULAR: 'REG', BASIC: 'BSC', ADVANCED: 'ADV', EXPERT: 'EXP', EXTREME: 'EXT', MASTER: 'MAS', ULTIMATE: 'ULT' };
+  return m[label.toUpperCase()] ?? (label.length > 5 ? label.slice(0, 4) : label);
 }
 
 /** 曲フォルダの PREIMAGE を表示用の URL にする */

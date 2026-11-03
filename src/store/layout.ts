@@ -1,11 +1,11 @@
-// 画面の配置：左右のパネルの幅と開閉、下の波形（シークバー）の高さと開閉。ブラウザに覚える。
+// 画面の配置：左右のパネルの幅と開閉、下のトラック（原曲・ステム・譜面の音）の高さと開閉。ブラウザに覚える。
 import { create } from 'zustand';
 
 export interface Layout {
   leftW: number;
   rightW: number;
-  /** 下の波形（シークバー）の高さ */
-  seekH: number;
+  /** 下のトラックのパネルの高さ（上の帯を含む） */
+  tracksH: number;
   leftOpen: boolean;
   rightOpen: boolean;
   seekOpen: boolean;
@@ -16,17 +16,17 @@ export interface Layout {
 export const LAYOUT_LIMITS = {
   left: [200, 560] as const,
   right: [260, 640] as const,
-  seek: [48, 300] as const,
+  seek: [60, 560] as const,
 };
 
 /** 閉じたパネルの細い帯の幅 */
 export const RAIL_W = 26;
-/** 波形を閉じたときのシークバーの高さ（ループの帯とセクションだけ） */
+/** トラックを閉じたときの高さ（ループの帯とセクションだけ）。開いたときの上の帯も同じ高さ */
 export const SEEK_CLOSED_H = 28;
 
 const KEY = 'dtxe.layout.v1';
 
-const DEFAULT: Layout = { leftW: 280, rightW: 340, seekH: 76, leftOpen: true, rightOpen: true, seekOpen: true };
+const DEFAULT: Layout = { leftW: 280, rightW: 340, tracksH: 176, leftOpen: true, rightOpen: true, seekOpen: true };
 
 const clamp = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, Math.round(v)));
 
@@ -43,7 +43,8 @@ function load(): Layout {
   return {
     leftW: clamp(Number(l.leftW) || DEFAULT.leftW, LAYOUT_LIMITS.left),
     rightW: clamp(Number(l.rightW) || DEFAULT.rightW, LAYOUT_LIMITS.right),
-    seekH: clamp(Number(l.seekH) || DEFAULT.seekH, LAYOUT_LIMITS.seek),
+    // 前の「下の波形」の高さ（seekH）はトラックには低すぎるので引き継がない
+    tracksH: clamp(Number(l.tracksH) || DEFAULT.tracksH, LAYOUT_LIMITS.seek),
     leftOpen: l.leftOpen !== false,
     rightOpen: l.rightOpen !== false,
     seekOpen: l.seekOpen !== false,
@@ -59,7 +60,7 @@ export function setLayout(p: Partial<Layout>) {
     ...p,
     leftW: clamp(p.leftW ?? cur.leftW, LAYOUT_LIMITS.left),
     rightW: clamp(p.rightW ?? cur.rightW, LAYOUT_LIMITS.right),
-    seekH: clamp(p.seekH ?? cur.seekH, LAYOUT_LIMITS.seek),
+    tracksH: clamp(p.tracksH ?? cur.tracksH, LAYOUT_LIMITS.seek),
   };
   useLayout.setState(next);
   try {
@@ -74,6 +75,12 @@ export function togglePanel(which: 'left' | 'right' | 'seek', open?: boolean) {
   if (which === 'left') setLayout({ leftOpen: open ?? !l.leftOpen, prefer: 'left' });
   else if (which === 'right') setLayout({ rightOpen: open ?? !l.rightOpen, prefer: 'right' });
   else setLayout({ seekOpen: open ?? !l.seekOpen });
+}
+
+/** 下のトラックの高さの上限（譜面を見る高さを残す） */
+export function maxTracksH(): number {
+  const h = typeof window !== 'undefined' ? window.innerHeight : 900;
+  return Math.max(LAYOUT_LIMITS.seek[0], Math.min(LAYOUT_LIMITS.seek[1], h - 360));
 }
 
 /** 譜面の列に最低限残したい幅 */

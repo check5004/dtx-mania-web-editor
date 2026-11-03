@@ -47,13 +47,24 @@ export interface PlayRequest {
 
 export interface Mix {
   master: number;
-  /** 原曲（ステムがあれば全ステムの合計） */
+  /** マスター（全部）のミュート */
+  masterMute: boolean;
+  /** 原曲のトラックの音量 */
   bgm: number;
-  /** 譜面の音（チップのドラム） */
+  /** 譜面の音（チップのドラム）のトラックの音量 */
   drums: number;
   metronome: boolean;
+  /** 曲の音（原曲・ステム）をまとめてミュート（Alt+1） */
   bgmMute: boolean;
+  /** 譜面の音のミュート（Alt+2） */
   drumMute: boolean;
+  /** 原曲のトラックのミュート（ステムがあるときは初め消しておく。ステムの合計が原曲なので） */
+  origMute: boolean;
+  /** 原曲・譜面の音のトラックのソロ */
+  origSolo: boolean;
+  drumSolo: boolean;
+  /** ステムのどれかがソロ（store/stems が入れる。ソロはトラックをまたいで効く） */
+  stemSolo: boolean;
   /** クリックの音量 */
   click: number;
   /** クリックを小節の頭だけ鳴らす */
@@ -138,13 +149,31 @@ class AudioEngine {
   private master!: GainNode;
   private buses!: Record<'bgm' | 'drum' | 'se' | 'click', GainNode>;
   private bgmOut!: GainNode;
+  /** ステムのトラックをまとめる（原曲の帯域フィルタは通す） */
+  private stemBus!: GainNode;
   private drumPanNode: StereoPannerNode | null = null;
   private bgmPanNode: StereoPannerNode | null = null;
   private strips = new Map<number, { gain: GainNode; pan: StereoPannerNode | null; def: StemStrip }>();
   private filters!: Record<Exclude<BgmFilter, 'all'>, { input: AudioNode; output: AudioNode }>;
   private cache = new Map<string, Promise<AudioBuffer | null>>();
   private table = new Map<number, { buf: AudioBuffer | null; volume: number; pan: number; key: string }>();
-  mix: Mix = { master: 0.9, bgm: 0.8, drums: 0.9, metronome: false, bgmMute: false, drumMute: false, click: 0.5, clickBarOnly: false, drumPan: 0, bgmPan: 0 };
+  mix: Mix = {
+    master: 0.9,
+    masterMute: false,
+    bgm: 0.8,
+    drums: 0.9,
+    metronome: false,
+    bgmMute: false,
+    drumMute: false,
+    origMute: false,
+    origSolo: false,
+    drumSolo: false,
+    stemSolo: false,
+    click: 0.5,
+    clickBarOnly: false,
+    drumPan: 0,
+    bgmPan: 0,
+  };
   bgmFilter: BgmFilter = 'all';
   /** BGM を鳴らさない（YouTube の音で聴くとき） */
   bgmMuted = false;
@@ -180,6 +209,7 @@ class AudioEngine {
         bgmIn = this.bgmPanNode;
       }
       this.buses = { bgm: bus(bgmIn), drum: bus(drumOut), se: bus(), click: bus() };
+      this.stemBus = bus(this.bgmOut);
       const chain = (...nodes: BiquadFilterNode[]) => {
         for (let i = 0; i + 1 < nodes.length; i++) nodes[i].connect(nodes[i + 1]);
         nodes[nodes.length - 1].connect(this.master);
@@ -214,13 +244,27 @@ class AudioEngine {
     this.applyMix();
   }
 
+  /** 原曲・譜面の音のトラックが鳴るか（ミュート・ソロ。ソロはステムも含めてトラックをまたいで効く） */
+  audible(): { orig: boolean; chart: boolean; song: boolean } {
+    const m = this.mix;
+    const anySolo = m.origSolo || m.drumSolo || m.stemSolo;
+    const song = !this.bgmMuted && !m.bgmMute;
+    return {
+      song,
+      orig: song && !m.origMute && (!anySolo || m.origSolo),
+      chart: !m.drumMute && (!anySolo || m.drumSolo),
+    };
+  }
+
   private applyMix() {
     if (!this.ctx) return;
     const m = this.mix;
-    this.master.gain.value = m.master;
-    this.buses.bgm.gain.value = this.bgmMuted || m.bgmMute ? 0 : m.bgm;
-    this.buses.se.gain.value = m.bgmMute ? 0 : m.bgm;
-    this.buses.drum.gain.value = m.drumMute ? 0 : m.drums;
+    const a = this.audible();
+    this.master.gain.value = m.masterMute ? 0 : m.master;
+    this.buses.bgm.gain.value = a.orig ? m.bgm : 0;
+    this.stemBus.gain.value = a.song ? 1 : 0;
+    this.buses.se.gain.value = a.song && !(m.origSolo || m.drumSolo || m.stemSolo) ? 1 : 0;
+    this.buses.drum.gain.value = a.chart ? m.drums : 0;
     this.buses.click.gain.value = m.metronome || this.forceClick ? Math.max(0.05, m.click) : 0;
     if (this.drumPanNode) this.drumPanNode.pan.value = Math.max(-1, Math.min(1, m.drumPan));
     if (this.bgmPanNode) this.bgmPanNode.pan.value = Math.max(-1, Math.min(1, m.bgmPan));
@@ -249,9 +293,9 @@ class AudioEngine {
         if (ctx.createStereoPanner) {
           pan = ctx.createStereoPanner();
           gain.connect(pan);
-          pan.connect(this.buses.bgm);
+          pan.connect(this.stemBus);
         } else {
-          gain.connect(this.buses.bgm);
+          gain.connect(this.stemBus);
         }
         st = { gain, pan, def };
         this.strips.set(def.no, st);
@@ -359,7 +403,7 @@ class AudioEngine {
     }
     if (bus === 'stem') {
       const st = this.strips.get(no);
-      node.connect(st ? st.gain : this.buses.bgm);
+      node.connect(st ? st.gain : this.stemBus);
     } else {
       node.connect(this.buses[bus]);
     }

@@ -8,7 +8,7 @@ import { CH } from '../dtx/model';
 import { frac } from '../dtx/fraction';
 import { freeWavNumber, setField } from '../edit/ops';
 import { AUDIO_EXT, findFile, folderFromFiles, putFile, type SongFolder } from '../fs/folder';
-import { setAnalysisProvider, syncAnalysis, useAssist } from './assist';
+import { setAnalysisProvider, syncAnalysis, useAssist, type AnalysisSource } from './assist';
 import { bgmSource, setPlaybackTransform, tempoOf, wavPath } from './derived';
 import { edit, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
 import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemTrack } from './sidecar';
@@ -150,38 +150,70 @@ function applyStems() {
     engine.setStemBuffers([]);
   }
   applyStrips();
-  const nos = ready.map((t) => stemNo(t.file));
-  setPlaybackTransform(
-    nos.length
-      ? (doc, ev) => {
-          const bgm = bgmSource(doc);
-          const at = bgm?.sec ?? 0;
-          // ステムの合計が原曲なので、同じ所から鳴る BGM は鳴らさない
-          const out = bgm ? ev.filter((e) => !(e.bus === 'bgm' && e.wav === bgm.wav)) : ev.slice();
-          for (const no of nos) out.push({ sec: at, wav: no, bus: 'stem', choke: null, lane: -1 });
-          return out;
-        }
-      : null,
-  );
+  applyTransform();
   sset((s) => ({ version: s.version + 1 }));
   useEditor.setState((s) => ({ soundsVersion: s.soundsVersion + 1 }));
   syncAnalysis();
   restartIfPlaying();
 }
 
+/** 再生に原曲（BGM）を入れているか。ステムがあるときは、原曲のトラックが鳴る設定のときだけ入れる */
+let origInPlayback = true;
+
+/** 再生で鳴らす音にステムを足す */
+function applyTransform() {
+  const nos = readyStems().map((t) => stemNo(t.file));
+  // ステムの合計が原曲なので、原曲のトラックを消しているときは同じ所から鳴る BGM は鳴らさない（スロー再生で伸ばす手間も省く）
+  const withOrig = engine.audible().orig;
+  origInPlayback = withOrig;
+  setPlaybackTransform(
+    nos.length
+      ? (doc, ev) => {
+          const bgm = bgmSource(doc);
+          const at = bgm?.sec ?? 0;
+          const out = bgm && !withOrig ? ev.filter((e) => !(e.bus === 'bgm' && e.wav === bgm.wav)) : ev.slice();
+          for (const no of nos) out.push({ sec: at, wav: no, bus: 'stem', choke: null, lane: -1 });
+          return out;
+        }
+      : null,
+  );
+}
+
+/** 原曲のトラックを鳴らすかが変わったら、再生する音を作り直す */
+function syncOrigPlayback() {
+  if (!stemsActive()) return;
+  if (engine.audible().orig === origInPlayback) return;
+  applyTransform();
+  restartIfPlaying();
+}
+
+/** ソロがどれかのトラックに付いているか（ソロはトラックをまたいで効く） */
+export function anySolo(): boolean {
+  const m = engine.mix;
+  return m.origSolo || m.drumSolo || tracks().some((t) => t.solo && loaded.has(t.file));
+}
+
+/** ステムのトラックが鳴るか（ミュート・ソロ。曲の音をまとめて消しているときは別） */
+export function stemAudible(t: StemTrack): boolean {
+  return !t.mute && (!anySolo() || t.solo);
+}
+
 /** トラックの鳴らし方（ミュート・ソロ・音量・パン、聴き比べならドラムを左へ） */
 function applyStrips() {
   const list = tracks();
+  const stemSolo = list.some((t) => t.solo && loaded.has(t.file));
+  if (engine.mix.stemSolo !== stemSolo) setMix({ stemSolo });
   if (!list.length && !engine.ctx) return;
   const listen = sget().listen;
-  const anySolo = list.some((t) => t.solo);
+  const hasDrumStem = list.some((t) => t.kind === 'drums');
   const strips: StemStrip[] = list
     .filter((t) => loaded.has(t.file))
     .map((t) => ({
       no: stemNo(t.file),
       gain: t.gain,
-      pan: listen === 'compare' && t.kind === 'drums' ? -1 : t.pan,
-      audible: !t.mute && (!anySolo || t.solo),
+      // 聴き比べ：ドラムのステム（無ければ曲の音ぜんぶ）を左、譜面の音を右
+      pan: listen === 'compare' && (!hasDrumStem || t.kind === 'drums') ? -1 : t.pan,
+      audible: stemAudible(t),
     }));
   engine.setStemStrips(strips);
 }
@@ -209,6 +241,19 @@ setAnalysisProvider(() => {
   return { key: `stem:${l.key}:${t.offsetMs}`, buf: l.buf, name: `${t.name}（${t.file.split('/').pop()}）` };
 });
 
+/** トラックの音（スペクトルに出すとき）。'orig' は原曲、それ以外はステムのファイル */
+export function trackAudio(id: string): AnalysisSource | null {
+  if (id === 'orig') {
+    const bgm = bgmSource(useEditor.getState().doc);
+    const got = bgm ? engine.buffer(bgm.wav) : null;
+    return got ? { key: got.key, buf: got.buf, name: '原曲' } : null;
+  }
+  const l = loaded.get(id);
+  const t = tracks().find((x) => x.file === id);
+  if (!l || !t) return null;
+  return { key: `stem:${l.key}:${t.offsetMs}`, buf: l.buf, name: t.name };
+}
+
 // ---- 追加・変更 -----------------------------------------------------------------
 
 /** ステムのファイルを読み込む（曲フォルダの stems/ にコピーし、作業ファイルに記録する） */
@@ -218,6 +263,7 @@ export async function importStems(files: File[]): Promise<number> {
     toast('音声ファイル（WAV・OGG・MP3・FLAC）を選んでください', 'warn');
     return 0;
   }
+  const firstStems = tracks().length === 0;
   let folder: SongFolder | null = useEditor.getState().folder;
   if (!folder) {
     folder = folderFromFiles([], useEditor.getState().doc.fields['TITLE'] || '新しい曲');
@@ -249,6 +295,8 @@ export async function importStems(files: File[]): Promise<number> {
     sset({ busy: null });
   }
   setStems(list);
+  // ステムの合計が原曲なので、初めてステムを入れたら原曲のトラックは消しておく（下のトラックで鳴らせる）
+  if (firstStems && added.length) setMix({ origMute: true, origSolo: false });
   if (!useSidecar.getState().analysisStem) {
     const drums = list.find((t) => t.kind === 'drums');
     if (drums) setAnalysisStem(drums.file);
@@ -316,6 +364,7 @@ export function updateStem(file: string, patch: Partial<StemTrack>) {
 
 export function removeStem(file: string) {
   setStems(tracks().filter((t) => t.file !== file));
+  if (tracks().length === 0) setMix({ origMute: false });
   if (useSidecar.getState().analysisStem === file) setAnalysisStem(tracks().find((t) => t.kind === 'drums')?.file ?? null);
   void syncStems();
 }
@@ -325,10 +374,37 @@ export function chooseAnalysisStem(file: string | null) {
   syncAnalysis();
 }
 
+/** 原曲のトラック（音量・ミュート・ソロ） */
+export function setOrigTrack(p: { gain?: number; mute?: boolean; solo?: boolean }) {
+  setMix({ ...(p.gain !== undefined ? { bgm: p.gain } : {}), ...(p.mute !== undefined ? { origMute: p.mute } : {}), ...(p.solo !== undefined ? { origSolo: p.solo } : {}) });
+  if (p.mute !== undefined || p.solo !== undefined) leaveListenPreset();
+}
+
+/** 譜面の音のトラック（音量・ミュート・ソロ） */
+export function setChartTrack(p: { gain?: number; mute?: boolean; solo?: boolean }) {
+  setMix({ ...(p.gain !== undefined ? { drums: p.gain } : {}), ...(p.mute !== undefined ? { drumMute: p.mute } : {}), ...(p.solo !== undefined ? { drumSolo: p.solo } : {}) });
+  if (p.mute !== undefined || p.solo !== undefined) leaveListenPreset();
+}
+
+/** このトラックだけをソロにする（Alt+S）。もう一度でソロを全部外す。id は 'orig'・'chart'・ステムのファイル */
+export function soloOnly(id: string) {
+  const m = engine.mix;
+  const list = tracks();
+  const only = (id === 'orig' ? m.origSolo : id === 'chart' ? m.drumSolo : !!list.find((t) => t.file === id)?.solo) &&
+    [m.origSolo && id !== 'orig', m.drumSolo && id !== 'chart', ...list.map((t) => t.solo && t.file !== id)].every((x) => !x);
+  setStems(
+    list.map((t) => ({ ...t, solo: !only && t.file === id })),
+    { quiet: true },
+  );
+  setMix({ origSolo: !only && id === 'orig', drumSolo: !only && id === 'chart' });
+  leaveListenPreset();
+  applyStrips();
+}
+
 // ---- 聞こえ方 -------------------------------------------------------------------
 
 export const LISTEN_PRESETS: { id: Exclude<ListenPreset, 'custom'>; label: string; hint: string; hintNoStems: string }[] = [
-  { id: 'all', label: '全部', hint: 'すべてのステムと譜面の音を鳴らします。', hintNoStems: '原曲と譜面の音を鳴らします。' },
+  { id: 'all', label: '全部', hint: 'すべてのステムと譜面の音を鳴らします（原曲のトラックはステムと重なるので消します）。', hintNoStems: '原曲と譜面の音を鳴らします。' },
   {
     id: 'game',
     label: 'ゲームと同じ',
@@ -348,24 +424,27 @@ export function setListen(p: Exclude<ListenPreset, 'custom'>) {
   const list = tracks();
   const has = list.length > 0;
   const drumsOnly = (t: StemTrack) => t.kind === 'drums';
+  const hasDrumStem = list.some(drumsOnly);
+  // プリセットはソロを使わずミュートで作る（ソロはトラックをまたいで効くので）。ステムがあれば原曲のトラックは重なるので消す
+  const base = { bgmMute: false, origMute: has, origSolo: false, drumSolo: false, drumMute: false, drumPan: 0, bgmPan: 0 };
   let next = list;
   switch (p) {
     case 'all':
       next = list.map((t) => ({ ...t, mute: false, solo: false }));
-      setMix({ drumMute: false, bgmMute: false, drumPan: 0, bgmPan: 0 });
+      setMix(base);
       break;
     case 'game':
       next = list.map((t) => ({ ...t, mute: drumsOnly(t), solo: false }));
-      setMix({ drumMute: false, bgmMute: false, drumPan: 0, bgmPan: 0 });
+      setMix(base);
       break;
     case 'drums':
-      if (!list.some(drumsOnly)) return;
-      next = list.map((t) => ({ ...t, mute: false, solo: drumsOnly(t) }));
-      setMix({ drumMute: true, bgmMute: false, drumPan: 0, bgmPan: 0 });
+      if (!hasDrumStem) return;
+      next = list.map((t) => ({ ...t, mute: !drumsOnly(t), solo: false }));
+      setMix({ ...base, drumMute: true });
       break;
     case 'compare':
-      next = list.map((t) => ({ ...t, mute: false, solo: drumsOnly(t) }));
-      setMix({ drumMute: false, bgmMute: false, drumPan: 1, bgmPan: has && list.some(drumsOnly) ? 0 : -1 });
+      next = list.map((t) => ({ ...t, mute: hasDrumStem && !drumsOnly(t), solo: false }));
+      setMix({ ...base, drumPan: 1, bgmPan: has ? 0 : -1 });
       break;
   }
   setStems(next, { quiet: true });
@@ -383,11 +462,13 @@ export function leaveListenPreset() {
   saveMix();
 }
 
+/** 曲の音（原曲・ステム）をまとめてミュート（Alt+1）。トラックごとのミュートはそのまま */
 export function toggleBgmMute() {
   setMix({ bgmMute: !engine.mix.bgmMute });
   leaveListenPreset();
 }
 
+/** 譜面の音のミュート（Alt+2） */
 export function toggleDrumMute() {
   setMix({ drumMute: !engine.mix.drumMute });
   leaveListenPreset();
@@ -404,13 +485,36 @@ function saveMix() {
     click: m.click,
     clickBarOnly: m.clickBarOnly,
     listen: sget().listen,
+    origMute: m.origMute,
+    origSolo: m.origSolo,
+    drumSolo: m.drumSolo,
   };
   rememberMix(saved);
 }
 
+// マスターの音量は曲ごとではなく、このブラウザに覚える
+const MASTER_KEY = 'dtxe.master.v1';
+try {
+  const j = JSON.parse(localStorage.getItem(MASTER_KEY) || 'null') as { master?: number; masterMute?: boolean } | null;
+  if (j && typeof j.master === 'number' && Number.isFinite(j.master)) setMix({ master: Math.max(0, Math.min(1, j.master)), masterMute: !!j.masterMute });
+} catch {
+  // 覚えていなくても動く
+}
+
 // ミックスを変えたら作業ファイルに覚えておく
 useEditor.subscribe((s, prev) => {
-  if (s.mix !== prev.mix) saveMix();
+  if (s.mix !== prev.mix) {
+    saveMix();
+    if (s.mix.origSolo !== prev.mix.origSolo || s.mix.drumSolo !== prev.mix.drumSolo) applyStrips();
+    syncOrigPlayback();
+    if (s.mix.master !== prev.mix.master || s.mix.masterMute !== prev.mix.masterMute) {
+      try {
+        localStorage.setItem(MASTER_KEY, JSON.stringify({ master: s.mix.master, masterMute: s.mix.masterMute }));
+      } catch {
+        // 覚えられなくても動く
+      }
+    }
+  }
   if (s.folder !== prev.folder && tracks().length) void syncStems();
 });
 
@@ -418,13 +522,15 @@ useEditor.subscribe((s, prev) => {
 useSidecar.subscribe((s, prev) => {
   if (s.loadSeq !== prev.loadSeq) {
     const m = s.mix;
+    const hasStems = s.stems.length > 0;
     sset({ listen: m?.listen ?? 'all' });
+    const tracksMix = { origMute: m?.origMute ?? hasStems, origSolo: m?.origSolo ?? false, drumSolo: m?.drumSolo ?? false };
     setMix(
       m
-        ? { bgm: m.bgm, drums: m.drums, bgmMute: m.bgmMute, drumMute: m.drumMute, metronome: m.metronome, click: m.click, clickBarOnly: m.clickBarOnly, drumPan: 0, bgmPan: 0 }
-        : { bgmMute: false, drumMute: false, drumPan: 0, bgmPan: 0 },
+        ? { bgm: m.bgm, drums: m.drums, bgmMute: m.bgmMute, drumMute: m.drumMute, metronome: m.metronome, click: m.click, clickBarOnly: m.clickBarOnly, drumPan: 0, bgmPan: 0, ...tracksMix }
+        : { bgmMute: false, drumMute: false, drumPan: 0, bgmPan: 0, ...tracksMix },
     );
-    if (m?.listen === 'compare') setMix({ drumPan: 1, bgmPan: s.stems.some((t) => t.kind === 'drums') ? 0 : -1 });
+    if (m?.listen === 'compare') setMix({ drumPan: 1, bgmPan: hasStems ? 0 : -1 });
     void syncStems();
     return;
   }
