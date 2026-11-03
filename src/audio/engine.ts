@@ -426,9 +426,9 @@ class AudioEngine {
   }
 
   /** 1音だけ鳴らす（WAVリストの試聴やチップを置いたとき）。gain は叩いた強さ（0〜1） */
-  preview(no: number, gain = 1): boolean {
+  preview(no: number, gain = 1, delaySec = 0): boolean {
     const ctx = this.ensure();
-    const v = this.startVoice(no, ctx.currentTime + 0.005, 0, 'drum');
+    const v = this.startVoice(no, ctx.currentTime + 0.005 + Math.max(0, delaySec), 0, 'drum');
     if (v && gain !== 1) v.gain.gain.value *= Math.max(0, Math.min(4, gain));
     return v !== null;
   }

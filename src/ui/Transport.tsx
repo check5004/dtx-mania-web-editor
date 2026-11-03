@@ -11,6 +11,7 @@ import { usePlayBeat } from './hooks';
 import { Icon } from './icons';
 import { promptDialog } from './dialogs';
 import { TapTempoButton } from './TapTempoPanel';
+import { FlamButton } from './FlamControl';
 
 export function Transport() {
   const doc = useEditor((s) => s.doc);
@@ -182,6 +183,7 @@ export function Transport() {
           <option value="custom">任意の分割…</option>
         </select>
       </label>
+      <FlamButton />
       <div className="vsep" />
       <div className="row" style={{ gap: 6 }}>
         <span className="lbl tlabel">入力</span>

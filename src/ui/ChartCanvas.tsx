@@ -45,6 +45,8 @@ import { fixBpm, fixStart, fixStemLag, fmtMs, offsetBadge, offsetReport, stemLag
 import { chooseAnalysisStem } from '../store/stems';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
+import { flamModHeld, flamOptions, flamRoles, placeFlam, useFlam, wantFlam } from '../store/flam';
+import { flamSpot } from '../edit/flam';
 import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
 import { useFind } from '../store/find';
 import { usePhrase } from '../store/phrase';
@@ -153,7 +155,7 @@ function hitLanes(model: boolean): { n: number; w: number; x: (i: number) => num
 }
 
 type Drag =
-  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean }
+  | { type: 'pending'; x0: number; y0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean; flam?: boolean }
   | { type: 'rubber'; x0: number; y0: number; x1: number; y1: number; additive: boolean; base: number[] }
   | { type: 'velPencil'; idx: number; group: string; lastY: number }
   | { type: 'velLine'; idx: number; y0: number; v0: number; y1: number; v1: number }
@@ -173,6 +175,8 @@ interface Hover {
   lane: number;
   pos: Pos | null;
   alt: boolean;
+  /** クリックするとフラムで置く */
+  flam?: boolean;
   /** 小節番号の列・波形の上：クリックで再生を始める位置（拍） */
   start?: number;
   /** ✨ の上：生成する小節 */
@@ -205,6 +209,8 @@ interface Local {
   /** 直前の2回の左クリックで掴んだチップ（ダブルクリックで消すのは、1回目の前からあったチップだけ） */
   down0: number | null;
   down1: number | null;
+  /** Ctrl（Mac は ⌘）を押しているか（1回だけフラムで置く） */
+  mod: boolean;
 }
 
 /** 右のパネルから「表示中の範囲」を知るための値 */
@@ -278,7 +284,7 @@ function velFromX(rx: number, i: number): number {
 export function ChartCanvas() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const L = useRef<Local>({ w: 0, h: 0, dpr: 1, dirty: true, drag: null, hover: null, followScroll: null, mini: null, spec: null, pointer: null, down0: null, down1: null });
+  const L = useRef<Local>({ w: 0, h: 0, dpr: 1, dirty: true, drag: null, hover: null, followScroll: null, mini: null, spec: null, pointer: null, down0: null, down1: null, mod: false });
   const [popover, setPopover] = useState<{ m: number; x: number; y: number } | null>(null);
   const [help, setHelp] = useState<{ x: number; y: number } | null>(null);
   const [tip, setTipState] = useState<Tip | null>(null);
@@ -397,7 +403,27 @@ export function ChartCanvas() {
       useOffset.subscribe(() => {
         l.dirty = true;
       }),
+      useFlam.subscribe(() => {
+        if (l.hover?.pos) l.hover = { ...l.hover, flam: wantFlam(l.mod) };
+        l.dirty = true;
+      }),
     ];
+    // Ctrl（Mac は ⌘）を押す・離すだけでも、置く位置のプレビューを1打とフラムで切り替える
+    const onModKey = (e: KeyboardEvent) => {
+      const mod = flamModHeld(e);
+      if (mod === l.mod) return;
+      l.mod = mod;
+      if (l.hover?.pos) {
+        l.hover = { ...l.hover, flam: wantFlam(mod) };
+        l.dirty = true;
+      }
+    };
+    window.addEventListener('keydown', onModKey);
+    window.addEventListener('keyup', onModKey);
+    unsubs.push(() => {
+      window.removeEventListener('keydown', onModKey);
+      window.removeEventListener('keyup', onModKey);
+    });
 
     const unsubVel = useVel.subscribe(() => {
       l.dirty = true;
@@ -619,7 +645,17 @@ export function ChartCanvas() {
     if (h.kind === 'lane' || h.kind === 'bgm' || h.kind === 'bpm' || h.kind === 'bga') {
       const beat = Math.max(0, g.yToBeat(y));
       const pos = snapToGrid(tempoOf(s.doc), beat, s.view.div);
-      l.drag = { type: 'pending', x0: x, y0: y, lane: h.kind === 'lane' ? h.lane : -1, alt: e.shiftKey, pos, weak: e.altKey, bga: h.kind === 'bga' };
+      l.drag = {
+        type: 'pending',
+        x0: x,
+        y0: y,
+        lane: h.kind === 'lane' ? h.lane : -1,
+        alt: e.shiftKey,
+        pos,
+        weak: e.altKey,
+        bga: h.kind === 'bga',
+        flam: h.kind === 'lane' && wantFlam(flamModHeld(e)),
+      };
     }
   };
 
@@ -636,7 +672,8 @@ export function ChartCanvas() {
       const h = hitTest(l, g, x, y);
       if (h && h.kind === 'lane') {
         const pos = snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div);
-        l.hover = { x, y, lane: h.lane, pos, alt: e.shiftKey };
+        l.mod = flamModHeld(e);
+        l.hover = { x, y, lane: h.lane, pos, alt: e.shiftKey, flam: wantFlam(l.mod) };
       } else if (h && (h.kind === 'gutter' || h.kind === 'audio')) {
         const tempo = tempoOf(s.doc);
         const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
@@ -758,7 +795,8 @@ export function ChartCanvas() {
     if (!d) return;
     const s = useEditor.getState();
     if (d.type === 'pending') {
-      if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos, d.weak ? weakVel() : undefined);
+      if (d.lane >= 0 && d.flam) placeFlam(d.lane, d.alt, d.pos, { vel: d.weak ? weakVel() : undefined });
+      else if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos, d.weak ? weakVel() : undefined);
       else if (d.bga) placeBga(d.pos);
       else useEditor.setState({ selection: [] });
       return;
@@ -2052,18 +2090,27 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   const fs = useFind.getState();
   const found = fs.open && fs.results.length ? new Set(fs.results) : null;
   const current = fs.open && fs.index >= 0 ? fs.results[fs.index] : null;
+  // フラム（同じレーンのすばやい2打）：先に鳴る1打目は細く描き、2打目には境目の線を引く
+  const flams = flamRoles(doc);
   const drawChip = (v: ChipView, beat: number, col: number, alpha: number, selected: boolean) => {
     const y = g.beatToY(beat);
     if (col >= 0) {
       const lane = DRUM_LANES[col];
       const color = v.alt && lane.altColor ? lane.altColor : lane.color;
       const cx = ox + laneCX(col);
+      const role = flams.get(v.c.id);
+      const hw = role === 'grace' ? 12 : 17;
       ctx.globalAlpha = alpha;
-      roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
+      roundRect(ctx, cx - hw, y - 5, hw * 2, 10, 3);
       if (v.kind === 'normal') {
         const vel = wavVel(doc, v.c.v);
         ctx.fillStyle = shade(color, vel);
         ctx.fill();
+        if (role === 'main') {
+          ctx.strokeStyle = 'rgba(11,14,19,.9)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
         if (vel <= 50) {
           // 弱いチップは縁取り（点線のフレーズ候補とは見分けられるよう実線）
           ctx.strokeStyle = color;
@@ -2093,13 +2140,13 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
         ctx.setLineDash([]);
       }
       if (selected) {
-        roundRect(ctx, cx - 19, y - 7, 38, 14, 4);
+        roundRect(ctx, cx - hw - 2, y - 7, hw * 2 + 4, 14, 4);
         ctx.strokeStyle = '#FFFFFF';
         ctx.lineWidth = 1.6;
         ctx.stroke();
       } else if (issueIds.has(v.c.id)) {
         // 無理な配置
-        roundRect(ctx, cx - 19, y - 7, 38, 14, 4);
+        roundRect(ctx, cx - hw - 2, y - 7, hw * 2 + 4, 14, 4);
         ctx.setLineDash([3, 2]);
         ctx.strokeStyle = issueIds.get(v.c.id) === 'error' ? '#FF5A61' : '#FFB547';
         ctx.lineWidth = 1.5;
@@ -2108,7 +2155,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       }
       if (!selected && found?.has(v.c.id)) {
         // 検索で見つかったチップ
-        roundRect(ctx, cx - 19, y - 7, 38, 14, 4);
+        roundRect(ctx, cx - hw - 2, y - 7, hw * 2 + 4, 14, 4);
         ctx.strokeStyle = C.amber;
         ctx.lineWidth = current === v.c.id ? 2.4 : 1.4;
         ctx.stroke();
@@ -2285,17 +2332,39 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   if (velMode) drawVelLanes(ctx, g, H, sel, d);
   else drawVelBubble(ctx, g, sel, H);
 
-  // 置く位置のプレビュー
+  // 置く位置のプレビュー（フラムなら2打）
   const hv = l.hover;
   if (hv && hv.pos && !d) {
     const lane = DRUM_LANES[hv.lane];
-    const b = tempo.beatOf(hv.pos.m, hv.pos.f);
-    const y = g.beatToY(b);
+    const color = hv.alt && lane.altColor ? lane.altColor : lane.color;
     const cx = ox + laneCX(hv.lane);
-    ctx.globalAlpha = 0.38;
-    roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
-    ctx.fillStyle = hv.alt && lane.altColor ? lane.altColor : lane.color;
-    ctx.fill();
+    const spot = hv.flam ? flamSpot(tempo, hv.pos, flamOptions()) : null;
+    const ghostAt = (p: Pos, alpha: number, edge: boolean, hw = 17) => {
+      const y = g.beatToY(tempo.beatOf(p.m, p.f));
+      ctx.globalAlpha = alpha;
+      roundRect(ctx, cx - hw, y - 5, hw * 2, 10, 3);
+      ctx.fillStyle = color;
+      ctx.fill();
+      if (edge) {
+        // 重なった2打の境目
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      return y;
+    };
+    if (spot) {
+      ghostAt(spot.grace, 0.3, false, 12);
+      const y = ghostAt(spot.main, 0.46, true);
+      ctx.globalAlpha = 0.85;
+      ctx.font = '600 9px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = C.amber;
+      ctx.fillText(`フラム 1/${spot.div}`, cx + 21, y + 0.5);
+    } else {
+      ghostAt(hv.pos, 0.38, false);
+    }
     ctx.globalAlpha = 1;
   }
 

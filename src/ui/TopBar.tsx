@@ -41,6 +41,7 @@ import { bgaVisible, hasBga, useBga } from '../store/bga';
 import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
 import { openMeasureGenAtCursor } from '../store/measureGen';
+import { toggleFlamSelection } from '../store/flam';
 import { summon } from '../store/complete';
 import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
@@ -180,6 +181,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
             '-',
             { label: '検索と置換・レーンの入れ替え…', key: 'Ctrl+F', run: openFind },
             { label: '選んだチップを左右反転', run: mirrorSelection, disabled: s().selection.length === 0 },
+            { label: '選んだチップをフラムにする／1打に戻す', key: 'Alt+F', run: toggleFlamSelection, disabled: s().selection.length === 0 },
             '-',
             { label: 'カーソルの小節の前に小節を挿入', run: () => insertMeasures(cursorM()) },
             { label: 'カーソルの小節を削除して詰める', run: () => deleteCursorMeasure() },

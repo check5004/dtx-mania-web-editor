@@ -50,6 +50,7 @@ import { gotoResult, openFind, useFind } from '../store/find';
 import { toggleBgmMute, toggleDrumMute } from '../store/stems';
 import { acceptGhost, dismissGhost, stepGhost, useComplete } from '../store/complete';
 import { openMeasureGenAtCursor } from '../store/measureGen';
+import { toggleFlamSelection } from '../store/flam';
 import { TopBar } from './TopBar';
 import { effectiveColumns, useLayout } from '../store/layout';
 import { PanelRail, VSplitter } from './Splitter';
@@ -120,6 +121,12 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
   if (e.altKey && !mod && e.code === 'KeyG') {
     e.preventDefault();
     openMeasureGenAtCursor();
+    return;
+  }
+  // Alt+F：選んだチップをフラムにする（もうフラムなら1打に戻す）
+  if (e.altKey && !mod && e.code === 'KeyF') {
+    e.preventDefault();
+    toggleFlamSelection();
     return;
   }
   // Alt+] ・Alt+[：次・前の候補（点線が無ければ、カーソルの小節に呼び出す）

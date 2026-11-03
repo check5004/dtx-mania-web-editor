@@ -1,6 +1,7 @@
-// 無理な配置の警告：手が3本いる同時打ち、足が足りない同時打ち、同じレーンの速すぎる連打。
+// 無理な配置の警告：手が3本いる同時打ち、足が足りない同時打ち、同じレーンの速すぎる連打（フラムは除く）。
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
+import { FLAM_MAX_SEC, flamPairStarts } from '../edit/flam';
 
 export type IssueKind = 'hands' | 'feet' | 'leftFoot' | 'hhBoth' | 'fast';
 
@@ -78,6 +79,21 @@ export function findIssues(doc: DtxDoc, tempo: TempoMap, opt: IssueOptions = DEF
     if (n.ch === CH.LBD || n.ch === CH.LP) return 'lf';
     return HAND_LANES.has(n.lane) ? `h${n.lane}` : null;
   };
+  // フラム（手のレーンの、前後から離れたすばやい2打）は両手で叩くので連打の警告にしない
+  const flams = new Set<string>();
+  {
+    const byLimb = new Map<string, Note[]>();
+    for (const n of notes) {
+      const limb = limbOf(n);
+      if (!limb || !limb.startsWith('h')) continue;
+      let a = byLimb.get(limb);
+      if (!a) byLimb.set(limb, (a = []));
+      a.push(n);
+    }
+    for (const list of byLimb.values()) {
+      for (const i of flamPairStarts(list.map((n) => n.sec), FLAM_MAX_SEC)) flams.add(`${list[i].id}:${list[i + 1].id}`);
+    }
+  }
   const last = new Map<string, Note>();
   const reported = new Set<string>();
   for (const n of notes) {
@@ -88,6 +104,7 @@ export function findIssues(doc: DtxDoc, tempo: TempoMap, opt: IssueOptions = DEF
     if (!prev) continue;
     const dt = n.sec - prev.sec;
     if (dt <= opt.chordSec) continue;
+    if (flams.has(`${prev.id}:${n.id}`)) continue;
     const lim = limb === 'rf' ? opt.footFastSec : limb === 'lf' ? opt.leftFootFastSec : opt.handFastSec;
     if (dt >= lim) continue;
     // 続く連打は1つの警告にまとめる

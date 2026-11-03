@@ -268,4 +268,11 @@ export const Icon = {
       <path d="M2.5 5.5v5c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2v-5" />
     </Svg>
   ),
+  /** フラム：ほんの少しずれた2つのチップ（下の弱い1打目と上の2打目） */
+  flam: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2" y="9" width="12" height="3.6" rx="1.2" fill="currentColor" stroke="none" opacity=".45" />
+      <rect x="2" y="4.2" width="12" height="3.6" rx="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
 };

@@ -11,6 +11,7 @@ import { loopSec, useAssist } from './assist';
 import { tempoOf } from './derived';
 import { chipAt, currentKitFile, deleteChips, onPlayback, placeChips, useEditor, wavForLane } from './editor';
 import { placeVel } from './velocity';
+import { keyFlam, recFlam, recNoted, useFlam } from './flam';
 
 let take = 0;
 let takeHits = 0;
@@ -53,6 +54,11 @@ function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, sou
   if (a.inputMode === 'key') {
     const tempo = tempoOf(s.doc);
     const pos = snapToGrid(tempo, s.cursorBeat, s.view.div);
+    // 操作バーの「フラム」がオンなら、フラムで置く（もうあれば消す）
+    if (useFlam.getState().mode) {
+      keyFlam(lane, alt, pos, vel);
+      return;
+    }
     const id = chipAt(lane, alt, pos);
     if (id !== null) deleteChips([id]);
     else placeChips([{ lane, alt, pos, vel }], { select: false });
@@ -78,7 +84,12 @@ function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, sou
       pos = snapToGrid(tempo, a.loop.a, s.view.div);
     }
     takeHits++;
-    placeChips([{ lane, alt, pos, vel }], { label: `録音で ${takeHits} 打を置く`, group: `rec-${take}`, select: false });
+    const label = `録音で ${takeHits} 打を置く`;
+    // 同じレーンをすばやく2回（グリッドでは分けられない間）叩いたら、フラムにする
+    if (recFlam(lane, alt, sec, pos, vel, take, `rec-${take}`, label)) return;
+    const [id] = placeChips([{ lane, alt, pos, vel }], { label, group: `rec-${take}`, select: false });
+    // 電子ドラムの強さで叩いたベロシティなら、フラムの1打目はその強さのまま（キーボードは設定の割合）
+    if (id !== undefined) recNoted(lane, alt, sec, id, pos, vel, take, source === 'midi' && velocity < 1);
   }
 }
 
