@@ -117,8 +117,19 @@ export class AiError extends Error {
 async function errorOf(r: Response): Promise<AiError> {
   let detail = '';
   try {
-    const j = (await r.json()) as { error?: { message?: string } };
+    const j = (await r.json()) as { error?: { message?: string; metadata?: { raw?: unknown } } };
     detail = j.error?.message ?? '';
+    // 「Provider returned error」だけでは分からないので、提供元のことばを足す
+    const raw = j.error?.metadata?.raw;
+    if (typeof raw === 'string') {
+      let inner = raw;
+      try {
+        inner = (JSON.parse(raw) as { error?: { message?: string } }).error?.message ?? raw;
+      } catch {
+        // そのまま
+      }
+      if (inner && !detail.includes(inner)) detail = `${detail}（${inner.slice(0, 200)}）`;
+    }
   } catch {
     // 本文が JSON でなくてもよい
   }
@@ -141,9 +152,29 @@ async function errorOf(r: Response): Promise<AiError> {
 
 export type Effort = 'none' | 'low' | 'medium' | 'high';
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+/** 自分で用意する道具（関数）。モデルが呼びたいと言ったら、こちらで動かして結果を返す */
+export interface FunctionTool {
+  type: 'function';
+  function: { name: string; description: string; parameters: object };
+}
+
+export type ChatMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[]; reasoning_details?: unknown[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
+
+/** Web 検索（OpenRouter が代わりに検索する道具）の設定 */
+export interface WebSearchOptions {
+  /** 1回の検索で返すページ数 */
+  maxResults?: number;
+  /** 1回の呼び出しで検索してよい回数 */
+  maxUses?: number;
 }
 
 export interface ChatRequest {
@@ -158,7 +189,9 @@ export interface ChatRequest {
   /** JSON Schema で縛れるか。縛れなければ json_object を頼む */
   structured?: boolean;
   json?: boolean;
-  web?: boolean;
+  web?: boolean | WebSearchOptions;
+  /** 自分で用意する道具 */
+  tools?: FunctionTool[];
   maxTokens?: number;
   signal?: AbortSignal;
 }
@@ -179,6 +212,10 @@ export interface ChatResult {
   webSearches: number;
   /** 止まった理由（stop・length など） */
   finish: string;
+  /** モデルが呼びたい道具 */
+  toolCalls: ToolCall[];
+  /** 会話を続けるときにそのまま返す、モデルの発言（推論の署名を含む） */
+  message: Extract<ChatMessage, { role: 'assistant' }>;
 }
 
 export function buildChatBody(req: Omit<ChatRequest, 'key' | 'signal'>): Record<string, unknown> {
@@ -191,7 +228,15 @@ export function buildChatBody(req: Omit<ChatRequest, 'key' | 'signal'>): Record<
   } else if (req.schema && req.json !== false) {
     body.response_format = { type: 'json_object' };
   }
-  if (req.web) body.tools = [{ type: 'openrouter:web_search', parameters: { max_results: 5 } }];
+  const tools: object[] = [];
+  if (req.web) {
+    const w = typeof req.web === 'object' ? req.web : {};
+    const parameters: Record<string, number> = { max_results: w.maxResults ?? 5 };
+    if (w.maxUses) parameters.max_uses = w.maxUses;
+    tools.push({ type: 'openrouter:web_search', parameters });
+  }
+  if (req.tools?.length) tools.push(...req.tools);
+  if (tools.length) body.tools = tools;
   if (req.maxTokens) body.max_tokens = req.maxTokens;
   body.usage = { include: true };
   return body;
@@ -220,8 +265,17 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
   const j = (await r.json()) as {
     model?: string;
     error?: { message?: string };
-    choices?: { finish_reason?: string; message?: { content?: unknown; annotations?: { type?: string; url_citation?: { url?: string; title?: string } }[] } }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number; server_tool_use?: { web_search_requests?: number } };
+    choices?: {
+      finish_reason?: string;
+      message?: { content?: unknown; tool_calls?: ToolCall[]; reasoning_details?: unknown[]; annotations?: { type?: string; url_citation?: { url?: string; title?: string } }[] };
+    }[];
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      cost?: number;
+      server_tool_use?: { web_search_requests?: number };
+      server_tool_use_details?: { web_search_requests?: number };
+    };
   };
   if (j.error) throw new AiError(j.error.message ?? 'モデルがエラーを返しました');
   const msg = j.choices?.[0]?.message;
@@ -232,15 +286,22 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
     const u = a.url_citation;
     if (a.type === 'url_citation' && u?.url && !citations.some((x) => x.url === u.url)) citations.push({ url: u.url, title: u.title ?? u.url });
   }
+  const toolCalls = (msg?.tool_calls ?? []).filter((t) => t?.function?.name);
+  const message: Extract<ChatMessage, { role: 'assistant' }> = { role: 'assistant', content: text || null };
+  if (toolCalls.length) message.tool_calls = toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function.name, arguments: t.function.arguments ?? '{}' } }));
+  if (msg?.reasoning_details?.length) message.reasoning_details = msg.reasoning_details;
+  const u = j.usage;
   return {
     text,
     model: j.model ?? req.model,
     citations,
-    promptTokens: j.usage?.prompt_tokens ?? 0,
-    completionTokens: j.usage?.completion_tokens ?? 0,
-    cost: typeof j.usage?.cost === 'number' ? j.usage.cost : null,
-    webSearches: j.usage?.server_tool_use?.web_search_requests ?? (req.web ? 1 : 0),
+    promptTokens: u?.prompt_tokens ?? 0,
+    completionTokens: u?.completion_tokens ?? 0,
+    cost: typeof u?.cost === 'number' ? u.cost : null,
+    webSearches: u?.server_tool_use_details?.web_search_requests ?? u?.server_tool_use?.web_search_requests ?? (req.web && !req.tools?.length ? 1 : 0),
     finish: j.choices?.[0]?.finish_reason ?? '',
+    toolCalls,
+    message,
   };
 }
 

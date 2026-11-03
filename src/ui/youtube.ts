@@ -49,24 +49,7 @@ export interface YtState {
 export const useYt = create<YtState>(() => ({ ready: false, error: null, listen: 'file', hidden: false }));
 
 /** URL や ID から動画 ID を取り出す */
-export function youtubeId(input: string): string | null {
-  const s = input.trim();
-  if (/^[\w-]{11}$/.test(s)) return s;
-  try {
-    const u = new URL(s);
-    const host = u.hostname.replace(/^www\.|^m\./, '');
-    if (host === 'youtu.be') return u.pathname.slice(1, 12) || null;
-    if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) {
-      const v = u.searchParams.get('v');
-      if (v && /^[\w-]{11}$/.test(v)) return v;
-      const m = u.pathname.match(/\/(?:embed|shorts|live|v)\/([\w-]{11})/);
-      if (m) return m[1];
-    }
-  } catch {
-    // URL でなければ下で null
-  }
-  return null;
-}
+export { youtubeId } from '../ai/songInfo';
 
 let apiPromise: Promise<YTNamespace> | null = null;
 

@@ -1,22 +1,45 @@
 // 曲情報：YouTube の公開情報（oEmbed）、配信サービスの公開アートワーク（iTunes Search）、AI による正式表記・ジャンル・年・コメントの下書き。
 // 画像は AI に作らせず、実在する URL だけを候補にする（AI は画像 URL をでっち上げやすい）。
 
+/** URL や ID から YouTube の動画 ID を取り出す */
+export function youtubeId(input: string): string | null {
+  const s = input.trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  try {
+    const u = new URL(s);
+    const host = u.hostname.replace(/^www\.|^m\.|^music\./, '');
+    if (host === 'youtu.be') return u.pathname.slice(1, 12) || null;
+    if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) {
+      const v = u.searchParams.get('v');
+      if (v && /^[\w-]{11}$/.test(v)) return v;
+      const m = u.pathname.match(/\/(?:embed|shorts|live|v)\/([\w-]{11})/);
+      if (m) return m[1];
+    }
+  } catch {
+    // URL でなければ下で null
+  }
+  return null;
+}
+
 export interface OEmbed {
   title: string;
   author: string;
+  /** チャンネルの URL（https://www.youtube.com/@… など） */
+  authorUrl: string;
   thumbnail: string | null;
 }
 
-export async function youtubeOEmbed(url: string): Promise<OEmbed | null> {
+export async function youtubeOEmbed(url: string, signal?: AbortSignal): Promise<OEmbed | null> {
   const targets = [`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`, `https://noembed.com/embed?url=${encodeURIComponent(url)}`];
   for (const t of targets) {
     try {
-      const r = await fetch(t);
+      const r = await fetch(t, { signal });
       if (!r.ok) continue;
-      const j = (await r.json()) as { title?: string; author_name?: string; thumbnail_url?: string; error?: string };
+      const j = (await r.json()) as { title?: string; author_name?: string; author_url?: string; thumbnail_url?: string; error?: string };
       if (j.error || !j.title) continue;
-      return { title: j.title, author: j.author_name ?? '', thumbnail: j.thumbnail_url ?? null };
-    } catch {
+      return { title: j.title, author: j.author_name ?? '', authorUrl: j.author_url ?? '', thumbnail: j.thumbnail_url ?? null };
+    } catch (e) {
+      if (signal?.aborted) throw e;
       // 次を試す
     }
   }
@@ -28,7 +51,7 @@ export interface ArtCandidate {
   /** 大きい画像（あれば） */
   big: string;
   label: string;
-  source: 'youtube' | 'itunes' | 'file';
+  source: 'youtube' | 'itunes' | 'file' | 'web';
   w?: number;
   h?: number;
 }
@@ -47,6 +70,7 @@ interface ItunesResult {
   artworkUrl100?: string;
   releaseDate?: string;
   primaryGenreName?: string;
+  trackTimeMillis?: number;
 }
 
 /** iTunes Search API（JSONP。CORS が無くても読める） */
@@ -82,32 +106,43 @@ export interface StoreHit {
   album: string;
   artist: string;
   year: string;
+  /** 発売日（YYYY-MM-DD） */
+  date: string;
   genre: string;
+  /** 曲の長さ（秒）。分からなければ 0 */
+  durationSec: number;
   art: ArtCandidate;
 }
 
-export async function itunesSearch(term: string): Promise<StoreHit[]> {
+/** iTunes のアートワークの URL を指定の大きさにする（配信元が大きいものを持っていればその大きさで返る） */
+export const itunesArt = (url100: string, px: number) => url100.replace(/\/\d+x\d+bb\./, `/${px}x${px}bb.`);
+
+export async function itunesSearch(term: string, opts: { country?: string; limit?: number; signal?: AbortSignal } = {}): Promise<StoreHit[]> {
   if (!term.trim()) return [];
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=8&country=JP&lang=ja_jp`;
+  const country = opts.country ?? 'JP';
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${opts.limit ?? 8}&country=${country}${country === 'JP' ? '&lang=ja_jp' : ''}`;
   let data: { results?: ItunesResult[] };
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { signal: opts.signal });
     data = await r.json();
-  } catch {
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
     data = await jsonp<{ results?: ItunesResult[] }>(url);
   }
   const out: StoreHit[] = [];
   for (const x of data.results ?? []) {
     if (!x.artworkUrl100) continue;
-    const big = x.artworkUrl100.replace(/\/\d+x\d+bb\./, '/600x600bb.');
-    if (out.some((o) => o.art.big === big)) continue;
+    const big = itunesArt(x.artworkUrl100, 1200);
+    if (out.some((o) => o.art.big === big && o.title === (x.trackName ?? ''))) continue;
     out.push({
       title: x.trackName ?? '',
       album: x.collectionName ?? '',
       artist: x.artistName ?? '',
       year: (x.releaseDate ?? '').slice(0, 4),
+      date: (x.releaseDate ?? '').slice(0, 10),
       genre: x.primaryGenreName ?? '',
-      art: { url: x.artworkUrl100, big, label: `${x.collectionName ?? x.trackName ?? ''}（iTunes）`, source: 'itunes', w: 600, h: 600 },
+      durationSec: x.trackTimeMillis ? Math.round(x.trackTimeMillis / 1000) : 0,
+      art: { url: itunesArt(x.artworkUrl100, 300), big, label: `${x.collectionName ?? x.trackName ?? ''}（iTunes）`, source: 'itunes', w: 1200, h: 1200 },
     });
   }
   return out;
@@ -142,32 +177,6 @@ export const SONG_INFO_SCHEMA = {
     additionalProperties: false,
   },
 };
-
-export function songInfoPrompt(input: { title: string; artist: string; youtubeTitle?: string; youtubeAuthor?: string; bpm?: number; genre?: string }): { system: string; user: string } {
-  const system = [
-    'あなたはドラム譜面（DTXMania 用）の曲情報を整える手伝いをします。',
-    'Web検索で裏を取り、公式の表記（大文字小文字・記号・全角半角）に合わせてください。',
-    '確かめられないことは推測で埋めず、空にするか入力のままにして notes に書いてください。',
-    '画像や URL は作らないでください。',
-    '答えは指定の JSON だけで返してください。',
-  ].join('\n');
-  const lines = [
-    `曲名（入力）: ${input.title || '（未入力）'}`,
-    `アーティスト（入力）: ${input.artist || '（未入力）'}`,
-  ];
-  if (input.youtubeTitle) lines.push(`YouTube の動画タイトル: ${input.youtubeTitle}${input.youtubeAuthor ? `（チャンネル: ${input.youtubeAuthor}）` : ''}`);
-  if (input.genre) lines.push(`今のジャンル: ${input.genre}`);
-  if (input.bpm) lines.push(`BPM: ${input.bpm}`);
-  lines.push('', '正式な曲名・アーティスト・ジャンル・リリース年を調べ、選曲画面のコメントと演奏中のパネル文を日本語で下書きしてください。');
-  // Web 検索を使うと response_format が効かないモデルがあるので、キー名を文でも伝える
-  lines.push(
-    '',
-    '答えは次のキーを持つ JSON 1つだけ（キー名は英語のまま）:',
-    'title（正式な曲名）, artist（正式なアーティスト表記）, genre（短いジャンル）, year（リリース年を4桁、分からなければ空）, comment（選曲画面のコメント、60字以内）, panel（演奏中のパネル文、40字以内）, confidence（high / medium / low）, notes（確かめたこと・分からなかったこと）',
-    'comment・panel・notes に URL やリンクの記法は入れないでください。',
-  );
-  return { system, user: lines.join('\n') };
-}
 
 const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').trim();
 /** [文字](URL) は文字だけにし、むき出しの URL は消す */

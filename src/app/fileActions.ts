@@ -1,5 +1,6 @@
 // ファイルを開く・保存する流れ。
 import { zipSync } from 'fflate';
+import { readAudioTags } from '../fs/tags';
 import { virtualSound } from '../audio/sounds';
 import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
@@ -214,10 +215,17 @@ export async function openDroppedFiles(files: File[]) {
       return;
     }
   }
+  // 音声ファイルのタグ（曲名・アーティスト・BPM）があれば最初から入れておく
+  const tags = await readAudioTags(audio[0]);
   const info = await newSongDialog({
     title: '新しい譜面をつくる',
     audioFiles: audio.map((f) => f.name),
-    defaults: { title: audio[0].name.replace(/\.[^.]+$/, ''), bgmFile: audio[0].name },
+    defaults: {
+      title: tags?.title || audio[0].name.replace(/\.[^.]+$/, ''),
+      artist: tags?.artist || tags?.albumArtist || undefined,
+      bpm: tags?.bpm ? Math.round(tags.bpm * 100) / 100 : undefined,
+      bgmFile: audio[0].name,
+    },
   });
   if (!info) return;
   openDocument(createDoc(info), newMeta('mstr.dtx', null), folder, { dirty: true });

@@ -1,13 +1,14 @@
-// 曲情報の画面：ヘッダの全項目、AI による取得（Web検索で裏を取る）、サムネイルの選択とトリミング。
+// 曲情報の画面：ヘッダの全項目、曲情報を調べるエージェント（Web検索・iTunes・公式YouTube・ジャケット）、サムネイルの選択とトリミング。
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AiError } from '../ai/openrouter';
-import { cleanSongInfo, itunesSearch, SONG_INFO_SCHEMA, songInfoPrompt, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type SongInfoAnswer, type StoreHit } from '../ai/songInfo';
+import type { YtPick } from '../ai/songAgent';
+import { itunesSearch, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type StoreHit } from '../ai/songInfo';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { setField } from '../edit/ops';
-import { downloadBytes, findFile, putFile } from '../fs/folder';
-import { NO_KEY_TITLE, runAi, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { edit, goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
+import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion } from '../store/songinfo';
+import { ART_PRESETS, artPreset, loadArtImage, saveArt, saveArtCentered, type ArtPreset } from './artExport';
 import { formatLevel } from './format';
 import { Icon } from './icons';
 import { CommitInput } from './LeftPanel';
@@ -63,11 +64,14 @@ const GROUPS: { title: string; fields: FieldDef[] }[] = [
 
 const KNOWN = new Set(GROUPS.flatMap((g) => g.fields.map((f) => f.key)));
 const SKIP = /^(WAV|VOLUME|WAVVOL|PAN|WAVPAN|BPM|BMP|BMPTEX|AVI|AVIPAN|BGA|BGAPAN|SIZE)[0-9A-Z]{2}$/;
+const INFO_FIELDS: InfoField[] = ['TITLE', 'ARTIST', 'GENRE', 'COMMENT', 'PANEL'];
+const FIELD_LABEL: Record<InfoField, string> = { TITLE: '曲名', ARTIST: 'アーティスト', GENRE: 'ジャンル', COMMENT: 'コメント', PANEL: 'パネル' };
 
 export function SongInfoPage() {
   const fields = useEditor((s) => s.doc.fields);
-  const [ai, setAi] = useState<{ answer: SongInfoAnswer; sources: { url: string; title: string }[]; cost: number; model: string } | null>(null);
+  const result = useSongInfo((s) => s.result);
   useEffect(() => {
+    ensureClues();
     const h = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !document.querySelector('.modal-back') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) goBack();
     };
@@ -75,9 +79,7 @@ export function SongInfoPage() {
     return () => window.removeEventListener('keydown', h);
   }, []);
   const others = Object.keys(fields).filter((k) => !KNOWN.has(k) && !SKIP.test(k) && !/^(GLEVEL|BLEVEL|BGMWAV)$/.test(k));
-  const suggestion: Record<string, string> = ai
-    ? { TITLE: ai.answer.title, ARTIST: ai.answer.artist, GENRE: ai.answer.genre, COMMENT: ai.answer.comment, PANEL: ai.answer.panel }
-    : {};
+  const suggestion = (result?.fields ?? {}) as Partial<Record<string, Suggestion>>;
   return (
     <div className="info-page">
       <header className="tempo-head">
@@ -97,7 +99,7 @@ export function SongInfoPage() {
               <h3>{g.title}</h3>
               <div className="info-grid">
                 {g.fields.map((f) => (
-                  <FieldRow key={f.key} f={f} value={fields[f.key] ?? ''} suggestion={suggestion[f.key]} />
+                  <FieldRow key={f.key} f={f} value={fields[f.key] ?? ''} suggestion={suggestion[f.key]} alt={f.key === 'TITLE' ? result?.titleAlt : undefined} />
                 ))}
               </div>
             </section>
@@ -115,7 +117,7 @@ export function SongInfoPage() {
           <p className="lbl">BGM・音・BGA の定義（#WAV・#BMP など）は左のパネルの「素材」や「ヘッダ」から直せます。</p>
         </main>
         <aside className="info-side scroll">
-          <AiCard result={ai} onResult={setAi} />
+          <LookupCard />
           <ArtCard />
         </aside>
       </div>
@@ -123,10 +125,10 @@ export function SongInfoPage() {
   );
 }
 
-function FieldRow({ f, value, suggestion }: { f: FieldDef; value: string; suggestion?: string }) {
+function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; suggestion?: Suggestion; alt?: string }) {
   const folder = useEditor((s) => s.folder);
   const options = f.files && folder ? [...folder.files.values()].filter((x) => f.files!.test(x.name)) : null;
-  const differs = suggestion !== undefined && suggestion.trim() !== '' && suggestion.trim() !== value.trim();
+  const differs = (v: string | undefined) => v !== undefined && v.trim() !== '' && v.trim() !== value.trim();
   return (
     <>
       <span className="lbl info-label">
@@ -153,11 +155,22 @@ function FieldRow({ f, value, suggestion }: { f: FieldDef; value: string; sugges
           <CommitInput className={`field ${f.key === 'BPM' || f.key === 'DLEVEL' ? 'mono' : ''}`} value={value} onCommit={(v) => setFieldValue(f.key, v === '' ? undefined : v, `${f.label}を変更`)} />
         )}
         {f.key === 'DLEVEL' && value && <span className="lbl"> 表示 {formatLevel(value)}</span>}
-        {differs && (
+        {suggestion && differs(suggestion.value) && (
           <div className="info-suggest">
-            <span className="ai-mark">AI</span>
-            <span className="grow">{suggestion}</span>
-            <button className="link-btn" onClick={() => setFieldValue(f.key, suggestion!.trim(), `${f.label}をAIの案にする`)}>
+            <span className="ai-mark" title={suggestion.src === 'AI' ? 'AI が調べた案' : suggestion.src === 'タグ' ? '原曲のファイルのタグ' : 'iTunes の配信情報'}>
+              {suggestion.src}
+            </span>
+            <span className="grow">{suggestion.value}</span>
+            <button className="link-btn" onClick={() => setFieldValue(f.key, suggestion.value.trim(), `${f.label}を${suggestion.src}の案にする`)}>
+              反映
+            </button>
+          </div>
+        )}
+        {alt && differs(alt) && (
+          <div className="info-suggest">
+            <span className="ai-mark" title="英語・ローマ字などの別の表記">別表記</span>
+            <span className="grow">{alt}</span>
+            <button className="link-btn" onClick={() => setFieldValue(f.key, alt.trim(), `${f.label}を別表記にする`)}>
               反映
             </button>
           </div>
@@ -167,94 +180,52 @@ function FieldRow({ f, value, suggestion }: { f: FieldDef; value: string; sugges
   );
 }
 
-function AiCard({
-  result,
-  onResult,
-}: {
-  result: { answer: SongInfoAnswer; sources: { url: string; title: string }[]; cost: number; model: string } | null;
-  onResult: (r: { answer: SongInfoAnswer; sources: { url: string; title: string }[]; cost: number; model: string } | null) => void;
-}) {
+// ---- 曲情報を調べる -------------------------------------------------------------------
+
+const fmtLen = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
+
+function LookupCard() {
   const fields = useEditor((s) => s.doc.fields);
   const yt = useSidecar((s) => s.youtube);
   const hasKey = useHasAiKey();
-  const running = useAi((s) => (s.running.songinfo ?? 0) > 0);
   const model = useAi((s) => modelLabel(s.tasks.songinfo.model, s.models));
   const cost = useAi(() => taskCostEstimate('songinfo'));
+  const clues = useSongInfo((s) => s.clues);
+  const picture = useSongInfo((s) => s.picture);
+  const status = useSongInfo((s) => s.status);
+  const steps = useSongInfo((s) => s.steps);
+  const error = useSongInfo((s) => s.error);
+  const result = useSongInfo((s) => s.result);
   const [url, setUrl] = useState(yt?.url ?? '');
   const [oe, setOe] = useState<{ title: string; author: string } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [urlErr, setUrlErr] = useState<string | null>(null);
   useEffect(() => setUrl(yt?.url ?? ''), [yt?.url]);
+  const running = status === 'running';
 
   const fetchYt = async () => {
-    setErr(null);
+    setUrlErr(null);
     if (!youtubeId(url)) {
-      setErr('YouTube の URL を入れてください');
-      return null;
+      setUrlErr('YouTube の URL を入れてください');
+      return;
     }
     const r = await youtubeOEmbed(url);
     if (!r) {
-      setErr('動画の情報を取れませんでした（非公開か、ネットワークの問題）');
-      return null;
+      setUrlErr('動画の情報を取れませんでした（非公開か、ネットワークの問題）');
+      return;
     }
     setOe({ title: r.title, author: r.author });
     if (!yt || yt.url !== url) setYoutube({ url, offset: yt?.offset ?? 0 });
-    return r;
   };
 
-  const askAi = async () => {
-    setErr(null);
-    let o = oe;
-    if (!o && youtubeId(url)) o = await fetchYt();
-    const p = songInfoPrompt({
-      title: fields['TITLE'] ?? '',
-      artist: fields['ARTIST'] ?? '',
-      youtubeTitle: o?.title,
-      youtubeAuthor: o?.author,
-      genre: fields['GENRE'],
-      bpm: Number(fields['BPM']) || undefined,
-    });
-    if (!fields['TITLE'] && !o) {
-      setErr('曲名か YouTube の URL を入れてください');
-      return;
-    }
-    try {
-      const r = await runAi<Partial<SongInfoAnswer>>('songinfo', { ...p, schema: SONG_INFO_SCHEMA, maxTokens: 1500 });
-      if (!r) return;
-      onResult({ answer: cleanSongInfo(r.data), sources: r.citations, cost: r.costUsed, model: r.model });
-    } catch (e) {
-      setErr(e instanceof AiError ? e.message : `失敗しました: ${(e as Error).message}`);
-    }
-  };
-
-  const applyAll = () => {
-    if (!result) return;
-    const a = result.answer;
-    const map: [string, string][] = [
-      ['TITLE', a.title],
-      ['ARTIST', a.artist],
-      ['GENRE', a.genre],
-      ['COMMENT', a.comment],
-      ['PANEL', a.panel],
-    ];
-    const changes = map.filter(([k, v]) => v.trim() && v.trim() !== (fields[k] ?? '').trim());
-    if (changes.length === 0) {
-      toast('変わる項目はありません', 'info');
-      return;
-    }
-    edit('曲情報をAIの案にする', (d) => {
-      for (const [k, v] of changes) setField(d, k, v.trim());
-    });
-    toast(`${changes.length} 項目を反映しました（Ctrl+Z で戻せます）`, 'ok');
-  };
-
+  const t = clues?.tags;
   return (
     <section className="card ai-card">
       <div className="row" style={{ gap: 8 }}>
         <span className="ai-spark">{Icon.sparkle(14)}</span>
-        <h3>AIで調べる</h3>
+        <h3>曲情報を調べる</h3>
         <span className="grow" />
         {hasKey ? (
-          <span className="lbl">
+          <span className="lbl" title="1回の目安（Web検索を数回含む）">
             {model} · 約 {formatUsd(cost)}
           </span>
         ) : (
@@ -263,84 +234,303 @@ function AiCard({
           </button>
         )}
       </div>
-      <div className="lbl" style={{ margin: '8px 0 4px' }}>
-        YouTube の URL（動画タイトルとサムネイルはキーが無くても取れます）
+      <div className="clue-box">
+        <div className="lbl clue-head">手がかり</div>
+        {clues ? (
+          <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <div className="clue-list grow">
+              <div>
+                <span className="clue-k">原曲</span>
+                <span className="ellipsis" title={clues.fileName ?? ''}>
+                  {clues.fileName ?? 'なし'}
+                </span>
+              </div>
+              <div>
+                <span className="clue-k">タグ</span>
+                <span className="ellipsis" title={t ? [t.title, t.artist, t.album, t.year, t.genre].filter(Boolean).join(' / ') : ''}>
+                  {t ? [t.title, t.artist, t.album, t.year].filter(Boolean).join(' / ') : clues.fileName ? 'なし（ファイル名から探します）' : '—'}
+                </span>
+              </div>
+              {clues.durationSec ? (
+                <div>
+                  <span className="clue-k">長さ</span>
+                  <span className="mono">{fmtLen(clues.durationSec)}</span>
+                </div>
+              ) : null}
+              {clues.folderName && (
+                <div>
+                  <span className="clue-k">フォルダ</span>
+                  <span className="ellipsis">{clues.folderName}</span>
+                </div>
+              )}
+            </div>
+            {picture && <img className="clue-pic" src={picture} alt="" title="原曲のファイルに入っていたジャケット" />}
+          </div>
+        ) : (
+          <div className="lbl">原曲のタグを読んでいます…</div>
+        )}
       </div>
-      <div className="row" style={{ gap: 6 }}>
-        <input className="field grow" value={url} placeholder="https://www.youtube.com/watch?v=…" onChange={(e) => setUrl(e.target.value)} />
-        <button className="btn small" onClick={() => void fetchYt()} disabled={!url.trim()}>
-          取得
+      <div className="row" style={{ gap: 6, marginTop: 10 }}>
+        <button
+          className="btn primary grow"
+          onClick={() => void lookupSong(true)}
+          disabled={running}
+          title={hasKey ? 'ファイルのタグと名前から曲を特定し、Web検索で正式表記・年・ジャンル・公式のYouTube・ジャケットを探します' : 'タグと iTunes の配信情報から探します（無料）。AIのキーがあれば Web 検索もします'}
+        >
+          {running ? <span className="spin" style={{ width: 13, height: 13 }} /> : Icon.sparkle(14)} {running ? '調べています…' : hasKey ? 'AIで調べる（Web検索）' : 'タグと配信情報から調べる'}
         </button>
+        {running && (
+          <button className="btn" onClick={stopLookup}>
+            止める
+          </button>
+        )}
       </div>
-      {oe && (
-        <div className="info-oe">
-          <b>{oe.title}</b>
-          <span className="lbl"> {oe.author}</span>
-          <div className="row" style={{ gap: 8, marginTop: 4 }}>
+      {!hasKey && !running && (
+        <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6 }}>
+          {NO_KEY_TITLE}。キーがあると、Web検索で公式の YouTube 動画・曲の紹介文も探します。
+        </p>
+      )}
+      {steps.length > 0 && <StepList />}
+      {error && <div className="ai-err">{error}</div>}
+      {result && !running && <ResultView result={result} />}
+      <details className="yt-manual" open={!!oe}>
+        <summary className="lbl">YouTube の URL を自分で入れる</summary>
+        <div className="row" style={{ gap: 6, marginTop: 6 }}>
+          <input className="field grow" value={url} placeholder="https://www.youtube.com/watch?v=…" onChange={(e) => setUrl(e.target.value)} />
+          <button className="btn small" onClick={() => void fetchYt()} disabled={!url.trim()}>
+            参照映像にする
+          </button>
+        </div>
+        {urlErr && <div className="ai-err">{urlErr}</div>}
+        {oe && (
+          <div className="info-oe">
+            <b>{oe.title}</b>
+            <span className="lbl"> {oe.author}</span>
             {!fields['TITLE'] && (
-              <button className="link-btn" onClick={() => setFieldValue('TITLE', oe.title, '曲名を動画タイトルにする')}>
-                動画タイトルを曲名にする
-              </button>
+              <div className="row" style={{ gap: 8, marginTop: 4 }}>
+                <button className="link-btn" onClick={() => setFieldValue('TITLE', oe.title, '曲名を動画タイトルにする')}>
+                  動画タイトルを曲名にする
+                </button>
+              </div>
             )}
           </div>
-        </div>
-      )}
-      <button className="btn primary" style={{ width: '100%', marginTop: 10 }} onClick={() => void askAi()} disabled={!hasKey || running} title={hasKey ? '正式表記・ジャンル・年・コメント・パネル文を Web 検索で調べます' : NO_KEY_TITLE}>
-        {Icon.sparkle(14)} {running ? '調べています…' : 'AIで曲情報を調べる'}
-      </button>
-      {!hasKey && <p className="lbl" style={{ margin: '6px 0 0' }}>{NO_KEY_TITLE}。キーが無くても左の項目は手で入力できます。</p>}
-      {err && <div className="ai-err">{err}</div>}
-      {result && (
-        <div className="info-ai">
-          <div className="row" style={{ gap: 6 }}>
-            <span className={`ai-conf ${result.answer.confidence}`}>{result.answer.confidence === 'high' ? '自信度 高' : result.answer.confidence === 'medium' ? '自信度 中' : '自信度 低'}</span>
-            {result.answer.year && <span className="lbl">リリース {result.answer.year}年</span>}
-            <span className="grow" />
-            <span className="lbl mono">{formatUsd(result.cost)}</span>
-          </div>
-          {result.answer.notes && <p className="lbl" style={{ margin: '6px 0' }}>{result.answer.notes}</p>}
-          {result.sources.length > 0 && (
-            <div className="info-src">
-              <div className="lbl">調べた先</div>
-              {result.sources.slice(0, 5).map((s) => (
-                <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="ellipsis">
-                  {s.title}
-                </a>
-              ))}
-            </div>
-          )}
-          <button className="btn small" style={{ marginTop: 8 }} onClick={applyAll}>
-            案をまとめて反映
-          </button>
-          <span className="lbl"> 項目ごとの「反映」でも選べます</span>
-        </div>
-      )}
+        )}
+      </details>
     </section>
+  );
+}
+
+function StepList() {
+  const steps = useSongInfo((s) => s.steps);
+  const running = useSongInfo((s) => s.status === 'running');
+  const [open, setOpen] = useState(true);
+  const ref = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (running) setOpen(true);
+  }, [running]);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [steps.length]);
+  return (
+    <div className="agent-steps">
+      <button className="agent-steps-head lbl" onClick={() => setOpen((o) => !o)}>
+        {open ? Icon.chevronDown(12) : Icon.chevronRight(12)} 経過（{steps.filter((s) => s.state !== 'run').length}）
+      </button>
+      {open && (
+        <ol ref={ref}>
+          {steps.map((s) => (
+            <li key={s.id} className={`agent-step ${s.state} ${s.kind}`}>
+              <span className="agent-ic">{s.state === 'run' ? <span className="spin" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> : s.state === 'fail' ? '×' : s.state === 'info' ? 'i' : '✓'}</span>
+              <span className="agent-txt">
+                {s.text}
+                {s.detail && <span className="agent-detail">{s.detail}</span>}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+const YT_KIND: Record<YtPick['kind'], string> = { mv: 'MV', audio: '音源', live: 'ライブ', other: '動画' };
+
+function ResultView({ result }: { result: LookupResult }) {
+  const fields = useEditor((s) => s.doc.fields);
+  const yt = useSidecar((s) => s.youtube);
+  const curId = yt ? youtubeId(yt.url) : null;
+  const changes = INFO_FIELDS.filter((k) => {
+    const v = result.fields[k]?.value;
+    return v && v.trim() !== (fields[k] ?? '').trim();
+  });
+  const firstYt = result.youtube[0] ?? null;
+  const [useFields, setUseFields] = useState(true);
+  const [useYt, setUseYt] = useState(true);
+  const [useJacket, setUseJacket] = useState(!fields['PREIMAGE']);
+  const [useBg, setUseBg] = useState(!fields['BACKGROUND'] && !fields['STAGEFILE']);
+  const [busy, setBusy] = useState(false);
+  const [applied, setApplied] = useState<string[] | null>(null);
+  const canYt = !!firstYt && curId !== firstYt.id;
+  const items = [useFields && changes.length > 0, useYt && canYt, useJacket && !!result.jacket, useBg && !!firstYt].filter(Boolean).length;
+
+  const applyAll = async () => {
+    setBusy(true);
+    const done: string[] = [];
+    const failed: string[] = [];
+    try {
+      if (useFields && changes.length) {
+        edit('曲情報をまとめて設定', (d) => {
+          for (const k of changes) setField(d, k, result.fields[k]!.value.trim());
+        });
+        done.push(`${changes.length}項目`);
+      }
+      if (useYt && canYt && firstYt) {
+        setYoutube({ url: firstYt.url, offset: yt?.offset ?? 0 });
+        done.push('参照映像');
+      }
+      if (useJacket && result.jacket) {
+        try {
+          await saveArtCentered(result.jacket, artPreset('pre-sq'));
+          done.push('#PREIMAGE');
+        } catch (e) {
+          failed.push(`ジャケット（${(e as Error).message}）`);
+        }
+      }
+      if (useBg && firstYt) {
+        const cand: ArtCandidate = { url: `https://i.ytimg.com/vi/${firstYt.id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${firstYt.id}/maxresdefault.jpg`, label: '', source: 'youtube' };
+        for (const id of ['stage', 'bg']) {
+          try {
+            await saveArtCentered(cand, artPreset(id));
+            done.push(`#${artPreset(id).key}`);
+          } catch (e) {
+            failed.push(`${artPreset(id).key}（${(e as Error).message}）`);
+            break;
+          }
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+    // 済んだものは外す（もう一度押して同じ画像を重ねて書き出さないように）
+    setUseFields(false);
+    setUseYt(false);
+    if (done.includes('#PREIMAGE')) setUseJacket(false);
+    if (done.includes('#BACKGROUND')) setUseBg(false);
+    setApplied(done);
+    if (failed.length) toast(`設定できなかったもの: ${failed.join('、')}`, 'warn', 8000);
+    if (done.length) toast(`${done.join('・')} を設定しました（曲名などは Ctrl+Z で戻せます）`, 'ok', 6000);
+    else if (!failed.length) toast('変わるものはありません', 'info');
+  };
+
+  return (
+    <div className="info-ai">
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        {result.confidence ? (
+          <span className={`ai-conf ${result.confidence}`}>{result.confidence === 'high' ? '自信度 高' : result.confidence === 'medium' ? '自信度 中' : '自信度 低'}</span>
+        ) : (
+          <span className="ai-tag">タグと iTunes から</span>
+        )}
+        {result.year && <span className="lbl">リリース {result.year}年</span>}
+        <span className="grow" />
+        {result.ai && (
+          <span className="lbl mono" title={`${result.model} · Web検索 ${result.webSearches}回`}>
+            {formatUsd(result.cost)}
+          </span>
+        )}
+      </div>
+      {result.notes && <p className="lbl" style={{ margin: '6px 0', lineHeight: 1.6 }}>{result.notes}</p>}
+      {changes.length > 0 && (
+        <div className="lbl" style={{ margin: '6px 0' }}>
+          案: {changes.map((k) => FIELD_LABEL[k]).join('・')}（左の各項目の「反映」でも選べます）
+        </div>
+      )}
+      {result.youtube.length > 0 && (
+        <div className="yt-picks">
+          <div className="lbl">公式の YouTube</div>
+          {result.youtube.map((y) => (
+            <div key={y.id} className="yt-pick">
+              <a href={y.url} target="_blank" rel="noreferrer" className="yt-thumb" title="YouTube で開く">
+                <img src={`https://i.ytimg.com/vi/${y.id}/mqdefault.jpg`} alt="" loading="lazy" />
+              </a>
+              <div className="yt-meta">
+                <div className="ellipsis" title={y.title} style={{ fontWeight: 600 }}>
+                  {y.title}
+                </div>
+                <div className="lbl ellipsis" title={y.why}>
+                  {y.channel}
+                </div>
+                <div className="row" style={{ gap: 4, marginTop: 3 }}>
+                  <span className={`ai-badge ${y.official ? 'ok' : ''}`}>{y.official ? '公式' : '公式か不明'}</span>
+                  <span className="ai-tag">{YT_KIND[y.kind]}</span>
+                  <span className="grow" />
+                  {curId === y.id ? (
+                    <span className="lbl">参照映像に設定中</span>
+                  ) : (
+                    <button className="link-btn" onClick={() => setYoutube({ url: y.url, offset: yt?.offset ?? 0 })} title="譜面の再生に合わせて動く参照映像にします">
+                      参照映像にする
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {items > 0 || changes.length > 0 || canYt || result.jacket || firstYt ? (
+        <div className="bulk-apply">
+          <div className="lbl" style={{ marginBottom: 4 }}>
+            まとめて設定
+          </div>
+          {changes.length > 0 && (
+            <label>
+              <input type="checkbox" checked={useFields} onChange={(e) => setUseFields(e.target.checked)} /> {changes.map((k) => FIELD_LABEL[k]).join('・')}
+            </label>
+          )}
+          {canYt && (
+            <label>
+              <input type="checkbox" checked={useYt} onChange={(e) => setUseYt(e.target.checked)} /> 公式動画を参照映像にする
+            </label>
+          )}
+          {result.jacket && (
+            <label title={result.jacket.label}>
+              <input type="checkbox" checked={useJacket} onChange={(e) => setUseJacket(e.target.checked)} /> ジャケットを #PREIMAGE（400×400）に{fields['PREIMAGE'] ? '（今の画像と置き換え）' : ''}
+            </label>
+          )}
+          {firstYt && (
+            <label>
+              <input type="checkbox" checked={useBg} onChange={(e) => setUseBg(e.target.checked)} /> 動画のサムネイルを #STAGEFILE・#BACKGROUND（1280×720）に
+            </label>
+          )}
+          <button className="btn small primary" style={{ marginTop: 6 }} onClick={() => void applyAll()} disabled={busy || items === 0}>
+            {busy ? '設定しています…' : 'まとめて設定'}
+          </button>
+          <span className="lbl"> {applied?.length ? `✓ ${applied.join('・')} を設定しました` : '画像は曲フォルダに PNG で書き出します'}</span>
+        </div>
+      ) : null}
+      {result.sources.length > 0 && (
+        <div className="info-src">
+          <div className="lbl">調べた先</div>
+          {result.sources.slice(0, 6).map((s) => (
+            <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="ellipsis" title={s.url}>
+              {s.title}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 // ---- サムネイル -----------------------------------------------------------------------
 
-interface Preset {
-  id: string;
-  label: string;
-  key: 'PREIMAGE' | 'STAGEFILE' | 'BACKGROUND';
-  w: number;
-  h: number;
-  file: string;
-}
-
-const PRESETS: Preset[] = [
-  { id: 'pre-sq', label: 'PREIMAGE 正方形 400×400', key: 'PREIMAGE', w: 400, h: 400, file: 'preimage.png' },
-  { id: 'pre-old', label: 'PREIMAGE 縦長 204×269（旧DTXMania）', key: 'PREIMAGE', w: 204, h: 269, file: 'preimage.png' },
-  { id: 'stage', label: 'STAGEFILE 1280×720', key: 'STAGEFILE', w: 1280, h: 720, file: 'stagefile.png' },
-  { id: 'bg', label: 'BACKGROUND 1280×720', key: 'BACKGROUND', w: 1280, h: 720, file: 'background.png' },
-];
-
 function ArtCard() {
   const yt = useSidecar((s) => s.youtube);
   const fields = useEditor((s) => s.doc.fields);
   const folder = useEditor((s) => s.folder);
+  const found = useSongInfo((s) => s.result?.art);
+  const jacket = useSongInfo((s) => s.result?.jacket ?? null);
+  const picture = useSongInfo((s) => s.picture);
   const [hits, setHits] = useState<StoreHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [sel, setSel] = useState<ArtCandidate | null>(null);
@@ -349,12 +539,16 @@ function ArtCard() {
   const fileRef = useRef<HTMLInputElement>(null);
   const id = yt ? youtubeId(yt.url) : null;
   const ytThumbs = useMemo(() => (id ? youtubeThumbs(id) : []), [id]);
+  // 調べ終わったら、おすすめのジャケットを選んでおく
+  useEffect(() => {
+    if (jacket) setSel(jacket);
+  }, [jacket]);
   // 曲フォルダの画像
   useEffect(() => {
     let alive = true;
     const made: string[] = [];
     void (async () => {
-      const imgs = folder ? [...folder.files.values()].filter((f) => IMG.test(f.name) && !/^bmp|bga/i.test(f.name)).slice(0, 8) : [];
+      const imgs = folder ? [...folder.files.values()].filter((f) => IMG.test(f.name) && !/^bmp|bga/i.test(f.name) && !/\.dtx\.\d{8,}_/i.test(f.name)).slice(0, 8) : [];
       const out: ArtCandidate[] = [];
       for (const f of imgs) {
         const u = URL.createObjectURL(await f.getFile());
@@ -384,12 +578,20 @@ function ArtCard() {
     }
   };
 
-  const cands = [...ytThumbs.slice(0, 1), ...hits.map((h) => h.art), ...local];
+  const cands: ArtCandidate[] = [];
+  const add = (c: ArtCandidate) => {
+    if (!cands.some((x) => x.big === c.big)) cands.push(c);
+  };
+  for (const c of found ?? []) add(c);
+  if (picture) add({ url: picture, big: picture, label: '原曲のファイルに入っていたジャケット', source: 'file' });
+  for (const c of ytThumbs.slice(0, 1)) add(c);
+  for (const h of hits) add(h.art);
+  for (const c of local) add(c);
   return (
     <section className="card ai-card">
       <h3>サムネイル</h3>
       <p className="lbl" style={{ margin: '4px 0 8px' }}>
-        YouTube のサムネイルと、配信サービスの公開アートワークから選びます（AIには画像を作らせません）。
+        原曲のジャケット・配信サービスの公開アートワーク・YouTube のサムネイルから選び、切り取って設定します（AIには画像を作らせません）。
       </p>
       <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
         <button className="btn small" onClick={() => void search()} disabled={searching || !(fields['TITLE'] || fields['ARTIST'])}>
@@ -419,13 +621,13 @@ function ArtCard() {
       {cands.length > 0 ? (
         <div className="art-grid">
           {cands.map((c, i) => (
-            <button key={c.big + i} className={`art-cand ${sel?.big === c.big ? 'on' : ''}`} onClick={() => setSel(c)} title={c.label}>
+            <button key={c.big + i} className={`art-cand ${sel?.big === c.big ? 'on' : ''} ${c === jacket || c.big === jacket?.big ? 'pick' : ''}`} onClick={() => setSel(c)} title={c.label}>
               <img src={c.url} alt="" loading="lazy" />
             </button>
           ))}
         </div>
       ) : (
-        <p className="lbl">{id ? '' : '参照動画（YouTube）を設定するとサムネイルも候補に出ます。'}</p>
+        <p className="lbl">{id ? '' : '「曲情報を調べる」か、参照映像（YouTube）を設定すると候補が出ます。'}</p>
       )}
       {sel && <Cropper cand={sel} />}
     </section>
@@ -433,8 +635,7 @@ function ArtCard() {
 }
 
 function Cropper({ cand }: { cand: ArtCandidate }) {
-  const folder = useEditor((s) => s.folder);
-  const [preset, setPreset] = useState<Preset>(PRESETS[0]);
+  const [preset, setPreset] = useState<ArtPreset>(ART_PRESETS[0]);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [tainted, setTainted] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -450,38 +651,14 @@ function Cropper({ cand }: { cand: ArtCandidate }) {
     setImg(null);
     setErr(null);
     setTainted(false);
-    const load = (src: string, cors: boolean) =>
-      new Promise<HTMLImageElement>((resolve, reject) => {
-        const im = new Image();
-        if (cors) im.crossOrigin = 'anonymous';
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error('読み込めませんでした'));
-        im.src = src;
-      });
-    void (async () => {
-      const srcs = cand.big !== cand.url ? [cand.big, cand.url] : [cand.url];
-      for (const src of srcs) {
-        try {
-          const im = await load(src, cand.source !== 'file');
-          // YouTube の maxres が無いときは 120×90 の灰色が返る
-          if (im.naturalWidth <= 120 && srcs.length > 1 && src !== srcs[srcs.length - 1]) continue;
-          if (alive) setImg(im);
-          return;
-        } catch {
-          try {
-            const im = await load(src, false);
-            if (alive) {
-              setImg(im);
-              setTainted(true);
-            }
-            return;
-          } catch {
-            // 次
-          }
-        }
-      }
-      if (alive) setErr('画像を読み込めませんでした');
-    })();
+    loadArtImage(cand).then(
+      (r) => {
+        if (!alive) return;
+        setImg(r.img);
+        setTainted(r.tainted);
+      },
+      () => alive && setErr('画像を読み込めませんでした'),
+    );
     setCx(0.5);
     setCy(0.5);
     setScale(1);
@@ -496,7 +673,7 @@ function Cropper({ cand }: { cand: ArtCandidate }) {
   const aspect = preset.w / preset.h;
   const fitW = Math.min(iw, ih * aspect);
   const cw = (fitW * scale) / iw;
-  const ch = (fitW / aspect) * scale / ih;
+  const ch = ((fitW / aspect) * scale) / ih;
   const clampX = (x: number) => Math.max(cw / 2, Math.min(1 - cw / 2, x));
   const clampY = (y: number) => Math.max(ch / 2, Math.min(1 - ch / 2, y));
   const x0 = clampX(cx) - cw / 2;
@@ -504,34 +681,20 @@ function Cropper({ cand }: { cand: ArtCandidate }) {
 
   const exportImage = async () => {
     if (!img) return;
-    const c = document.createElement('canvas');
-    c.width = preset.w;
-    c.height = preset.h;
-    const g = c.getContext('2d')!;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(img, x0 * iw, y0 * ih, cw * iw, ch * ih, 0, 0, preset.w, preset.h);
-    let blob: Blob | null = null;
+    setErr(null);
     try {
-      blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
-    } catch {
-      blob = null;
-    }
-    if (!blob) {
-      setErr('この画像は配信元が書き出しを許可していないため切り取れません。画像を保存してから「画像ファイルを選ぶ」で選んでください');
-      return;
-    }
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let name = preset.file;
-    if (folder) {
-      // 同じ名前があれば番号を付ける
-      for (let i = 2; findFile(folder, name) && i < 50; i++) name = preset.file.replace('.png', `_${i}.png`);
-      const where = await putFile(folder, name, bytes);
-      setFieldValue(preset.key, name, `#${preset.key} を ${name} にする`);
-      toast(where === 'written' ? `${name} を曲フォルダに書き出し、#${preset.key} に設定しました` : `${name} を作り #${preset.key} に設定しました（保存のときに曲フォルダへ書き出します）`, 'ok', 6000);
-    } else {
-      downloadBytes(name, bytes, 'image/png');
-      setFieldValue(preset.key, name, `#${preset.key} を ${name} にする`);
-      toast(`${name} をダウンロードしました。曲フォルダに入れてください`, 'ok', 6000);
+      const { name, where } = await saveArt(img, { x: x0 * iw, y: y0 * ih, w: cw * iw, h: ch * ih }, preset);
+      toast(
+        where === 'written'
+          ? `${name} を曲フォルダに書き出し、#${preset.key} に設定しました`
+          : where === 'memory'
+            ? `${name} を作り #${preset.key} に設定しました（保存のときに曲フォルダへ書き出します）`
+            : `${name} をダウンロードしました。曲フォルダに入れてください`,
+        'ok',
+        6000,
+      );
+    } catch (e) {
+      setErr((e as Error).message);
     }
   };
 
@@ -550,8 +713,11 @@ function Cropper({ cand }: { cand: ArtCandidate }) {
 
   return (
     <div className="cropper">
-      <select className="field" value={preset.id} onChange={(e) => setPreset(PRESETS.find((p) => p.id === e.target.value)!)}>
-        {PRESETS.map((p) => (
+      <div className="lbl ellipsis" title={cand.label}>
+        {cand.label}
+      </div>
+      <select className="field" value={preset.id} onChange={(e) => setPreset(artPreset(e.target.value))}>
+        {ART_PRESETS.map((p) => (
           <option key={p.id} value={p.id}>
             {p.label}
           </option>

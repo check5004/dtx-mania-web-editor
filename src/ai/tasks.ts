@@ -12,8 +12,8 @@ export interface TaskDef {
   model: string;
   effort: Effort;
   why: string;
-  /** 1回のおおよそのトークン数（入力・出力） */
-  est: { in: number; out: number };
+  /** 1回のおおよそのトークン数（入力・出力）と Web 検索の回数 */
+  est: { in: number; out: number; web?: number };
   /** 「1回の目安」の後ろに付ける単位 */
   per?: string;
 }
@@ -22,12 +22,13 @@ export const TASKS: readonly TaskDef[] = [
   {
     id: 'songinfo',
     label: '曲情報の取得',
-    sends: '曲名・アーティスト名・YouTubeの動画タイトル',
+    sends: '原曲のファイル名・タグ（曲名・アーティスト・アルバム・年）・曲の長さ・曲名・アーティスト名・YouTubeの動画タイトル',
     needs: { json: true, web: true },
     model: 'anthropic/claude-haiku-5.5',
     effort: 'low',
-    why: 'Web検索に対応していて安い',
-    est: { in: 2500, out: 900 },
+    why: 'Web検索と道具の呼び出しに対応していて安い。何度か検索して確かめる',
+    // 検索して確かめる流れで 4〜5 回やりとりする（前の結果を毎回送り直す）
+    est: { in: 24000, out: 2500, web: 3 },
   },
   {
     id: 'phrase',
@@ -116,11 +117,11 @@ const EFFORT_MUL: Record<Effort, number> = { none: 1, low: 1.4, medium: 2, high:
 export const EXA_SEARCH_COST = 0.02;
 
 /** 1回の費用の目安（ドル） */
-export function estimateCost(m: OrModel | null, tokens: { in: number; out: number }, effort: Effort, web: boolean): number | null {
+export function estimateCost(m: OrModel | null, tokens: { in: number; out: number; web?: number }, effort: Effort, web: boolean): number | null {
   if (!m) return null;
   const outMul = m.reasoning ? EFFORT_MUL[effort] : 1;
   let c = tokens.in * m.pricePrompt + tokens.out * outMul * m.priceCompletion + m.priceRequest;
-  if (web) c += m.priceWebSearch > 0 ? m.priceWebSearch : EXA_SEARCH_COST;
+  if (web) c += (m.priceWebSearch > 0 ? m.priceWebSearch : EXA_SEARCH_COST) * (tokens.web ?? 1);
   return c;
 }
 

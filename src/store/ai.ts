@@ -248,6 +248,64 @@ export interface RunResult<T> extends ChatResult {
   costUsed: number;
 }
 
+/** AI を使う1回分（何度か呼ぶ処理も、まとめて1回と数える） */
+export interface AiSession {
+  key: string;
+  cfg: TaskConfig;
+  info: OrModel | null;
+  /** 返ってきた答えの費用を記録して返す */
+  charge: (r: ChatResult) => number;
+  /** 終わったら必ず呼ぶ */
+  end: () => void;
+}
+
+/** 今月の上限に届くなら止める */
+export function checkMonthlyCap(add: number) {
+  const s = get();
+  if (freshSpend(s.spend).monthTotal + add > s.monthlyCap) {
+    throw new AiError(`今月の上限（$${s.monthlyCap.toFixed(2)}）に届くため止めました。設定 › AI で上限を変えられます`);
+  }
+}
+
+/**
+ * AI を使い始める。キーの有無・月の上限・1回の目安（est ドル）の確認を通す。断られたら null。
+ * 使い終わったら end() を呼ぶ。
+ */
+export async function beginAi(task: AiTask, est: number, quiet = false): Promise<AiSession | null> {
+  const s = get();
+  if (!hasAiKey(s)) throw new AiError(NO_KEY_TITLE);
+  const def = taskDef(task);
+  const cfg = s.tasks[task];
+  const info = modelInfo(cfg.model, s.models);
+  checkMonthlyCap(est);
+  if (!quiet && est > s.confirmOver) {
+    const ok = await confirmDialog({
+      title: `${def.label}をAIに頼みますか？`,
+      body: `1回の目安は約 $${est.toFixed(3)} です（設定の「確認する額」$${s.confirmOver.toFixed(2)} を超えています）。\nモデル: ${info?.name ?? cfg.model}`,
+      ok: '頼む',
+    });
+    if (!ok) return null;
+  }
+  set((st) => ({ running: { ...st.running, [task]: (st.running[task] ?? 0) + 1 } }));
+  let ended = false;
+  return {
+    key: s.key,
+    cfg,
+    info,
+    charge: (r: ChatResult) => {
+      const used = r.model ? modelInfo(r.model, get().models) : info;
+      const cost = r.cost ?? estimateCost(used, { in: r.promptTokens, out: r.completionTokens }, 'none', false) ?? est;
+      recordSpend(task, r.model, cost);
+      return cost;
+    },
+    end: () => {
+      if (ended) return;
+      ended = true;
+      set((st) => ({ running: { ...st.running, [task]: Math.max(0, (st.running[task] ?? 1) - 1) } }));
+    },
+  };
+}
+
 /**
  * AI を呼ぶ。キーの有無・月の上限・1回の目安の確認を通してから送り、使った額を記録する。
  * 断られたら null を返す。
@@ -260,25 +318,9 @@ export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T
   const info = modelInfo(cfg.model, s.models);
   const tokensIn = estimateTokens(o.system + o.user) + 50;
   const est = estimateCost(info, { in: tokensIn, out: o.maxTokens ? Math.min(o.maxTokens, def.est.out * 1.5) : def.est.out }, cfg.effort, !!def.needs.web) ?? 0;
-  const spend = freshSpend(s.spend);
-  if (spend.monthTotal + est > s.monthlyCap) {
-    throw new AiError(`今月の上限（$${s.monthlyCap.toFixed(2)}）に届くため止めました。設定 › AI で上限を変えられます`);
-  }
-  if (!o.quiet && est > s.confirmOver) {
-    const ok = await confirmDialog({
-      title: `${def.label}をAIに頼みますか？`,
-      body: `1回の目安は約 $${est.toFixed(3)} です（設定の「確認する額」$${s.confirmOver.toFixed(2)} を超えています）。\nモデル: ${info?.name ?? cfg.model}`,
-      ok: '頼む',
-    });
-    if (!ok) return null;
-  }
-  set((st) => ({ running: { ...st.running, [task]: (st.running[task] ?? 0) + 1 } }));
-  const spent = (r: ChatResult) => {
-    const used = r.model ? modelInfo(r.model, s.models) : info;
-    const cost = r.cost ?? estimateCost(used, { in: r.promptTokens, out: r.completionTokens }, 'none', false) ?? est;
-    recordSpend(task, r.model, cost);
-    return cost;
-  };
+  const session = await beginAi(task, est, o.quiet);
+  if (!session) return null;
+  const spent = session.charge;
   try {
     const r = await chat({
       key: s.key,
@@ -339,7 +381,7 @@ export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T
     // 出典（Web 検索の結果）は最初の答えのものを使う
     return { ...r2, citations: r.citations.length ? r.citations : r2.citations, webSearches: r.webSearches, data: fixed, costUsed: cost + cost2 };
   } finally {
-    set((st) => ({ running: { ...st.running, [task]: Math.max(0, (st.running[task] ?? 1) - 1) } }));
+    session.end();
   }
 }
 
