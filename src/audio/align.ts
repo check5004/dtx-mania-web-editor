@@ -457,6 +457,101 @@ export function searchProbe(idx: RefIndex, probe: AlignFeat, maxCands = 6): Alig
   return { cands, active, zc, pad: og.pad };
 }
 
+/** 探りの中の所ごとの似かた（localSimilarity の結果） */
+export interface LocalSim {
+  /** 探りの頭を原曲のどこに重ねたか（ずれ = 動画の秒 − 原曲の秒） */
+  o: number;
+  /** 窓 k の真ん中は、探りの頭から t0 + k * hop 秒 */
+  t0: number;
+  hop: number;
+  /** 窓ごとの似かた（打点・音色・和音の正規化相互相関の平均。原曲の外は NaN） */
+  sim: Float32Array;
+}
+
+/** 窓の中で、平均を引いた正規化相互相関（チャンネルをまとめて）。どちらかがほぼ一定なら NaN */
+function nccWin(xs: Float32Array[], x0: number, ys: Float32Array[], y0: number, len: number): number {
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let c = 0; c < xs.length; c++) {
+    const x = xs[c];
+    const y = ys[c];
+    let mx = 0;
+    let my = 0;
+    for (let t = 0; t < len; t++) {
+      mx += x[x0 + t];
+      my += y[y0 + t];
+    }
+    mx /= len;
+    my /= len;
+    for (let t = 0; t < len; t++) {
+      const a = x[x0 + t] - mx;
+      const b = y[y0 + t] - my;
+      sxy += a * b;
+      sxx += a * a;
+      syy += b * b;
+    }
+  }
+  return sxx > 1e-9 && syy > 1e-9 ? sxy / Math.sqrt(sxx * syy) : NaN;
+}
+
+/**
+ * 探りの頭を原曲の (探りの動画の秒 − o) 秒に重ねたとき、探りの中の所ごとにどれだけ似ているか。
+ * win 秒の窓を hop 秒ずつずらして比べる。編集違いの切れ目（そのずれで合わなくなる所）を探りの中で細かく決めるのに使う
+ */
+export function localSimilarity(ref: AlignFeat, probe: AlignFeat, refStart: number, o: number, win = 2, hop = 0.25): LocalSim {
+  const w = Math.round(win * ALIGN_FPS);
+  const h = Math.max(1, Math.round(hop * ALIGN_FPS));
+  const wc = Math.round(win * CHROMA_FPS);
+  const k = Math.max(0, Math.floor((probe.n - w) / h) + 1);
+  const sim = new Float32Array(k);
+  const r0 = Math.round(refStart * ALIGN_FPS);
+  const rc0 = Math.round(refStart * CHROMA_FPS);
+  const po = channelsOf(probe, 'onset').ch;
+  const pm = channelsOf(probe, 'mel').ch;
+  const pc = channelsOf(probe, 'chroma').ch;
+  const ro = channelsOf(ref, 'onset').ch;
+  const rm = channelsOf(ref, 'mel').ch;
+  const rc = channelsOf(ref, 'chroma').ch;
+  for (let i = 0; i < k; i++) {
+    const t = i * h;
+    const tc = Math.round((t / ALIGN_FPS) * CHROMA_FPS);
+    const a = r0 + t;
+    const ac = rc0 + tc;
+    if (a < 0 || a + w > ref.n || ac < 0 || ac + wc > ref.cn || tc + wc > probe.cn) {
+      sim[i] = NaN;
+      continue;
+    }
+    const parts = [nccWin(po, t, ro, a, w), nccWin(pm, t, rm, a, w), nccWin(pc, tc, rc, ac, wc)].map((x) => (Number.isFinite(x) ? x : 0));
+    sim[i] = (parts[0] + parts[1] + parts[2]) / 3;
+  }
+  return { o, t0: win / 2, hop: h / ALIGN_FPS, sim };
+}
+
+/** 合っていないときの似かたの目安を取る、関係ないずれ（秒） */
+const NULL_SHIFTS = [2.93, -4.41, 7.17];
+
+/**
+ * 探り（頭が動画の v 秒）の、ずれ os ごとの所ごとの似かたと、合っていないときの目安（関係ないずれで比べた中央値）
+ */
+export function probeLocal(ref: AlignFeat, probe: AlignFeat, v: number, os: number[]): { local: LocalSim[]; floor: number } {
+  const local = os.map((o) => localSimilarity(ref, probe, v - o, o));
+  const base = os[0] ?? 0;
+  const xs: number[] = [];
+  for (const sh of NULL_SHIFTS) for (const x of localSimilarity(ref, probe, v - base - sh, base + sh).sim) if (Number.isFinite(x)) xs.push(x);
+  xs.sort((a, b) => a - b);
+  return { local, floor: xs.length ? xs[xs.length >> 1] : 0 };
+}
+
+/** 切れ目の前後を細かく比べ直すときの窓と刻み（秒）。2 秒の窓では、切れ目の前後の音しだいで 0.2〜0.4 秒ずれる */
+export const FINE_WIN = 0.5;
+export const FINE_HOP = 0.05;
+
+/** 探り（頭が動画の v 秒）を、ずれ os ごとに短い窓で比べる（切れ目を詰めるとき用） */
+export function probeFine(ref: AlignFeat, probe: AlignFeat, v: number, os: number[]): LocalSim[] {
+  return os.map((o) => localSimilarity(ref, probe, v - o, o, FINE_WIN, FINE_HOP));
+}
+
 // ---- 何か所かの結果をまとめる --------------------------------------------------------------
 
 /** 1 回の探り（聞き取り）の結果 */
@@ -470,6 +565,17 @@ export interface ProbeResult {
   /** ずらしごとの z（AlignSearch.zc）。無ければ候補だけで判断する */
   zc?: Float32Array;
   pad?: number;
+  /** 所ごとの似かた（ずれごと。編集違いの切れ目を細かく決めるのに使う） */
+  local?: LocalSim[];
+  /** 所ごとの似かたの、合っていないときの目安（関係ないずれで比べた中央値） */
+  floor?: number;
+  /** 切れ目の近くを短い窓（FINE_WIN）で比べた似かた（ずれごと。決めた切れ目を詰めるのに使う） */
+  fine?: LocalSim[];
+  /**
+   * 編集違いの切れ目を細かく探すために聞いた所。ずれを決めるのには使わない（切った所の中は曲の別の所に似やすい）。
+   * 所ごとの似かただけを使う
+   */
+  cut?: boolean;
 }
 
 /** 原曲の時刻 a の所の、動画とのずれ（動画の秒 = a + offset + d） */
@@ -494,6 +600,22 @@ export interface AlignDecision {
   picks: (AlignMatch | null)[];
   /** 決めたずれでは全く合わないのに、ほかの探りがそろわず、ずれを変える根拠にしなかった探り（確かめ直す） */
   doubt: number[];
+  /** 編集違い（edit）の切れ目ごとの、切り替える所の探し具合 */
+  cuts?: CutState[];
+}
+
+/** 編集違いの切れ目を探す途中の様子（原曲の秒） */
+export interface CutState {
+  /** 切れ目の前と後のずれ */
+  o1: number;
+  o2: number;
+  /** 切り替えてよい所の範囲（原曲の秒。聞いた所との食い違いがいちばん少ない所）。切り替える所は lo〜hi の間 */
+  lo: number;
+  hi: number;
+  /** 切り替える所。まだ確かめ切れていなければ null（そのときは lo〜hi の真ん中で切り替える） */
+  at: number | null;
+  /** まだ決まっていなければ、次に聞くとよい所（動画の秒） */
+  next?: number;
 }
 
 /** 候補がどれだけ当てになるか（0〜1） */
@@ -605,6 +727,7 @@ export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
   const none = (): (AlignMatch | null)[] => probes.map(() => null);
   const hyps: number[] = [];
   probes.forEach((pr) => {
+    if (pr.cut) return;
     for (const c of pr.cands) if (c.z >= Z_MIN) hyps.push(pr.v - c.sec);
   });
   if (hyps.length === 0) {
@@ -612,7 +735,7 @@ export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
     let m: Pick | null = null;
     probes.forEach((pr, p) => {
       const c = pr.cands[0];
-      if (!c) return;
+      if (!c || pr.cut) return;
       const w = candWeight(c) * actOf(pr);
       if (!m || w > m.w) m = { p, c, o: pr.v - c.sec, a: c.sec + pr.len / 2, w };
     });
@@ -628,6 +751,7 @@ export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
     let score = 0;
     let first = Infinity;
     for (const pr of probes) {
+      if (pr.cut) continue;
       const z = supportZ(pr, o);
       if (z <= 0) continue;
       score += wOfZ(pr, z);
@@ -647,6 +771,7 @@ export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
   const C: number[] = [];
   const N: number[] = [];
   probes.forEach((pr, p) => {
+    if (pr.cut) return;
     if (supportZ(pr, b0) > 0) {
       const c = peakNear(pr, b0)!;
       S.push({ p, c, o: pr.v - c.sec, a: c.sec + pr.len / 2, w: wOfZ(pr, c.z) });
@@ -681,15 +806,32 @@ export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
     for (const x of ps) picks[x.p] = x.c;
     const conf = Math.min(0.8, 0.3 + 0.25 * Math.min(...ps.map((x) => x.w)) + 0.1 * ps.length);
     const used = new Set(ps.map((x) => x.p));
-    return {
-      offset,
-      anchors: ps.map((x) => ({ a: x.a, d: x.o - offset })),
-      kind,
-      conf,
-      support: ps.length,
-      picks,
-      doubt: D.filter((p) => !used.has(p)),
-    };
+    const anchors = ps.map((x) => ({ a: x.a, d: x.o - offset }));
+    const res: AlignDecision = { offset, anchors, kind, conf, support: ps.length, picks, doubt: D.filter((p) => !used.has(p)) };
+    if (kind === 'edit') {
+      // 切れ目ごとに、切り替える所の前後へアンカーを足す（anchorDelta はその真ん中で切り替える）
+      const cs = cutSearch(
+        ps.map((x) => ({ a: x.a, d: x.o - offset, p: x.p })),
+        offset,
+        probes,
+      );
+      // 所ごとに比べると、飛んだ先の探りがどれも合っていなかった: 途中で飛ぶ根拠は無い
+      if (cs.cuts.length === 0) return constResult();
+      const kept = cs.anchors.map(({ a, d }) => ({ a, d }));
+      const add: AlignAnchor[] = [];
+      for (const c of cs.cuts) {
+        const p = kept[c.i - 1];
+        const q = kept[c.i];
+        const at = Math.max(p.a + 0.1, Math.min(q.a - 0.1, c.at ?? (c.lo + Math.min(c.hi, q.a)) / 2));
+        add.push({ a: at - 0.05, d: p.d }, { a: at + 0.05, d: q.d });
+      }
+      // 曲の最初のアンカーが除かれたら、残った最初のずれを基準にする
+      const base0 = kept[0].d;
+      res.offset = offset + base0;
+      res.anchors = [...kept, ...add].map((x) => ({ a: x.a, d: x.d - base0 })).sort((x, y) => x.a - y.a);
+      res.cuts = cs.cuts.map(({ o1, o2, lo, hi, at, next }) => ({ o1, o2, lo, hi, at, next }));
+    }
+    return res;
   };
 
   // 2. 途中で飛ぶ（edit）: 否定した探りのうち 2 か所以上が同じ別のずれでそろい、基準の探りより全部あと（まえ）
@@ -774,6 +916,237 @@ export function decideOffset(probes: ProbeResult[]): AlignDecision | null {
   return constResult();
 }
 
+// ---- 編集違いの切れ目を細かく決める -------------------------------------------------------------
+
+/** 切れ目を「決まった」とみなす幅（秒）。所ごとの似かたの窓は 0.25 秒刻み */
+const CUT_TOL = 0.5;
+/** 当てはめの食い違い（窓の数）が、いちばん少ない所からこれだけ以内なら、同じくらいありうる */
+const CUT_SLACK = 2;
+/** 切れ目を確かめたとみなすには、前のずれで切れ目の前を、後のずれで切れ目の後を、それぞれこの幅（秒）は聞いていること */
+const CUT_SIDE = 2;
+
+/** 探り pr の、ずれ o での所ごとの似かた（無ければ undefined） */
+const localOf = (pr: ProbeResult, o: number) => pr.local?.find((x) => Math.abs(x.o - o) <= 0.03);
+/** 探り pr の、ずれ o での短い窓の似かた（無ければ undefined） */
+const fineOf = (pr: ProbeResult, o: number) => pr.fine?.find((x) => Math.abs(x.o - o) <= 0.03);
+
+interface Win {
+  /** 窓の真ん中の、原曲の秒 */
+  a: number;
+  /** 合っている度合い（0〜1。合わないときの目安と合うときの目安の真ん中で 0.5。原曲の外なら null） */
+  s: number | null;
+}
+
+/**
+ * 編集違い（anchors のずれが途中で飛ぶ）の切れ目ごとに、所ごとの似かたから切り替える所を決める。
+ * 切れ目 c で、前のずれ o1 は c より前で合い後で合わない、後のずれ o2 は c+g より後で合い前で合わない
+ * （g は原曲の側だけにある所の長さ。動画の側に余分があれば 0）とみて、聞いた窓との食い違いがいちばん少ない c を探す。
+ * 1 か所の窓の並びだけでは、効果音や雑音・ドラムだけの所で一瞬似なくなったのと切れ目の区別がつかないので、
+ * 前のずれで c の手前を、後のずれで c の先を、両方聞いてから決める（決まらなければ next に次に聞く所）。
+ * 両方のずれで合う所が続く（短くした所が繰り返しで、どちらの映像でも音は合う）なら、その真ん中で切り替える。
+ * 決めた所は、短い窓の似かた（ProbeResult.fine）があれば、前後 0.75 秒でもう一度当てはめて詰める。
+ * アンカーのうち、所ごとに比べるとそのずれで合っていない探り（切った所の中で、曲の別の所に少し似ただけ）は除く。
+ * 所ごとの似かたが無い探りしか無ければ、探りの長さより細かくは決めない。
+ * anchors の p は、そのアンカーの探りの番号（probes の添字）
+ */
+export function cutSearch(
+  anchors: readonly (AlignAnchor & { p?: number })[],
+  offset: number,
+  probes: ProbeResult[],
+): { anchors: (AlignAnchor & { p?: number })[]; cuts: (CutState & { i: number })[] } {
+  const len = probes[0]?.len ?? PROBE_SEC;
+  const half = len / 2;
+  // 合っているときの似かたの目安: 探り全体でそのずれに合った探りの、所ごとの似かたの中央値
+  const okSims: number[] = [];
+  for (const pr of probes) {
+    const top = pr.cands[0];
+    if (!top || !pr.local) continue;
+    for (const L of pr.local) if (Math.abs(pr.v - top.sec - L.o) <= SAME_TOL) for (const x of L.sim) if (Number.isFinite(x)) okSims.push(x);
+  }
+  okSims.sort((x, y) => x - y);
+  const hiLvl = okSims.length >= 8 ? okSims[okSims.length >> 1] : 0.8;
+  // 似かたが合わないときの目安（その探りをずらしたときの中央値）と合うときの目安の間で、合っている度合いを 0〜1 にする。
+  // ドラムの無い原曲とドラム入りの動画では、ドラムだけの所や雑音のある所は合っていても似かたが下がるので、間の値は半端に数える。
+  // 合うときの目安は、その探りでよく似る所の方が高ければそちらを使う（窓の半分が合う所がちょうど真ん中になり、切れ目が後ろへずれない）
+  const winsOf = (pr: ProbeResult, o: number, L: LocalSim | undefined): Win[] | null => {
+    if (!L) return null;
+    const f = pr.floor ?? 0;
+    const fin = Array.from(L.sim).filter((x) => Number.isFinite(x)).sort((x, y) => x - y);
+    const top = fin.length ? fin[Math.floor(0.9 * (fin.length - 1))] : 0;
+    const lvl = Math.max(hiLvl, top);
+    const mid = f + 0.5 * (lvl - f);
+    const w = Math.max(0.1, 0.25 * (lvl - f));
+    return Array.from(L.sim, (x, k) => ({
+      a: pr.v - o + L.t0 + k * L.hop,
+      s: Number.isFinite(x) ? Math.max(0, Math.min(1, (x - (mid - w)) / (2 * w))) : null,
+    }));
+  };
+  const wins = (pr: ProbeResult, o: number) => winsOf(pr, o, localOf(pr, o));
+  // ずれが飛ぶ所で区切り、区切りごとのずれ（中央値）を使う
+  const runsOf = (an: (AlignAnchor & { p?: number })[]) => {
+    const runs: { from: number; to: number; o: number }[] = [];
+    for (let i = 0; i < an.length; i++) {
+      const jump = i > 0 && Math.abs(an[i].d - an[i - 1].d) > DRIFT_MAX * Math.max(1e-6, an[i].a - an[i - 1].a);
+      if (i === 0 || jump) runs.push({ from: i, to: i, o: 0 });
+      runs[runs.length - 1].to = i;
+    }
+    for (const r of runs) {
+      const os = an.slice(r.from, r.to + 1).map((x) => offset + x.d).sort((x, y) => x - y);
+      r.o = os[os.length >> 1];
+    }
+    return runs;
+  };
+  let an = [...anchors].sort((p, q) => p.a - q.a);
+  let runs = runsOf(an);
+  // 所ごとに比べて、そのずれでは半分も合っていない探りのアンカーは除く
+  const okAnchor = an.map((x, i) => {
+    const r = runs.find((q) => i >= q.from && i <= q.to)!;
+    const w = x.p === undefined ? null : wins(probes[x.p], r.o);
+    if (!w) return true;
+    const fin = w.flatMap((y) => (y.s === null ? [] : [y.s]));
+    return fin.length === 0 || fin.reduce((t, y) => t + y, 0) >= 0.5 * fin.length;
+  });
+  if (okAnchor.some((x) => !x)) {
+    an = an.filter((_, i) => okAnchor[i]);
+    runs = runsOf(an);
+  }
+  if (runs.length < 2) return { anchors: an, cuts: [] };
+  // 決めた切れ目 at の前後を、短い窓の似かた（あれば）でもう一度当てはめて詰める。前後どちらかのずれで、at の手前と先を聞いていること
+  const refineCut = (at: number, o1: number, o2: number, g: number): number => {
+    const R = 0.75;
+    const F1: { a: number; s: number }[] = [];
+    const F2: { a: number; s: number }[] = [];
+    for (const pr of probes) {
+      for (const x of winsOf(pr, o1, fineOf(pr, o1)) ?? []) if (x.s !== null && Math.abs(x.a - at) <= 2 * R) F1.push({ a: x.a, s: x.s });
+      for (const x of winsOf(pr, o2, fineOf(pr, o2)) ?? []) if (x.s !== null && Math.abs(x.a - g - at) <= 2 * R) F2.push({ a: x.a - g, s: x.s });
+    }
+    const both = (W: { a: number }[]) => W.some((x) => x.a >= at - R && x.a < at - 0.2) && W.some((x) => x.a > at + 0.2 && x.a <= at + R);
+    if (!both(F1) && !both(F2)) return at;
+    const step = 0.025;
+    let best = Infinity;
+    let k0 = 0;
+    let k1 = 0;
+    const n = Math.round((2 * R) / step);
+    for (let k = 0; k <= n; k++) {
+      const c = at - R + k * step;
+      let e = 0;
+      for (const x of F1) e += x.a < c ? 1 - x.s : x.s;
+      for (const x of F2) e += x.a >= c ? 1 - x.s : x.s;
+      if (e < best - 1e-9) {
+        best = e;
+        k0 = k1 = k;
+      } else if (e <= best + 1e-9) k1 = k;
+    }
+    return at - R + ((k0 + k1) / 2) * step;
+  };
+  const out: (CutState & { i: number })[] = [];
+  for (let r = 1; r < runs.length; r++) {
+    const P = an[runs[r - 1].to];
+    const Q = an[runs[r].from];
+    const o1 = runs[r - 1].o;
+    const o2 = runs[r].o;
+    // 原曲の側だけにある所の長さ（動画を短くした）。動画の側に余分がある（原曲を短くした）なら 0
+    const g = Math.max(0, o1 - o2);
+    // 前のずれの窓と、後のずれの窓（g だけ前へずらし、どちらも切れ目 c の軸にそろえる）
+    const W1: { a: number; s: number }[] = [];
+    const W2: { a: number; s: number }[] = [];
+    for (const pr of probes) {
+      for (const x of wins(pr, o1) ?? []) if (x.s !== null) W1.push({ a: x.a, s: x.s });
+      for (const x of wins(pr, o2) ?? []) if (x.s !== null) W2.push({ a: x.a - g, s: x.s });
+    }
+    const cMin = P.a - half + 1;
+    const cMax = Math.max(cMin, Q.a - g + half - 1);
+    const clampAt = (x: number) => Math.max(P.a + 0.1, Math.min(Q.a - 0.1, x));
+    if (W1.length + W2.length === 0) {
+      // 似かたが無い: 探りの窓の端まで合っているとみる（探りの長さより細かくは決めない）
+      const lo = P.a + half - 1;
+      const hi = Math.max(lo, Q.a - g - half + 1);
+      const at = hi - lo <= 2 * half ? clampAt((lo + hi) / 2) : null;
+      out.push({ i: runs[r].from, o1, o2, lo, hi, at, next: at === null ? (lo + hi) / 2 + o1 - half : undefined });
+      continue;
+    }
+    // 切り替える所 c ごとの食い違いの数
+    const step = 0.125;
+    const n = Math.max(1, Math.round((cMax - cMin) / step) + 1);
+    const E = new Array<number>(n).fill(0);
+    for (let k = 0; k < n; k++) {
+      const c = cMin + k * step;
+      let e = 0;
+      for (const x of W1) e += x.a < c ? 1 - x.s : x.s;
+      for (const x of W2) e += x.a >= c ? 1 - x.s : x.s;
+      E[k] = e;
+    }
+    const eMin = Math.min(...E);
+    let kL = 0;
+    while (E[kL] > eMin + CUT_SLACK) kL++;
+    let kR = n - 1;
+    while (E[kR] > eMin + CUT_SLACK) kR--;
+    const lo = cMin + kL * step;
+    const hi = cMin + kR * step;
+    // x0〜x1 の所を、そのずれで k 窓以上聞いているか
+    const has = (W: { a: number }[], x0: number, x1: number, k = 4) => W.filter((x) => x.a >= x0 && x.a <= x1).length >= k;
+    let at: number | null = null;
+    let next: number | undefined;
+    if (hi - lo <= CUT_TOL) {
+      // 1 か所に絞れた: 前のずれで手前を、後のずれで先を聞いて確かめる
+      const c = (lo + hi) / 2;
+      if (!has(W1, c - CUT_SIDE, c - 0.25)) next = c + o1 - half - 1;
+      else if (!has(W2, c + 0.25, c + CUT_SIDE)) next = c + g + o2 - half + 1;
+      else at = clampAt(c);
+    } else {
+      // 幅がある: 聞いていない所が残っていれば、いちばん長いところの真ん中を聞く。
+      // どこも両方のずれで聞いていて食い違いが変わらない（両方のずれで合う）なら、その真ん中で切り替える
+      let gap = 0;
+      let gapMid = 0;
+      let run0 = NaN;
+      for (let c = lo; c <= hi + step / 2; c += step) {
+        const seen = has(W1, c - 0.5, c + 0.5, 2) && has(W2, c - 0.5, c + 0.5, 2);
+        if (!seen && Number.isNaN(run0)) run0 = c;
+        if ((seen || c + step > hi + step / 2) && !Number.isNaN(run0)) {
+          const end = seen ? c - step : c;
+          if (end - run0 >= gap) {
+            gap = end - run0;
+            gapMid = (run0 + end) / 2;
+          }
+          run0 = NaN;
+        }
+      }
+      if (gap <= CUT_TOL) at = clampAt((lo + hi) / 2);
+      else next = has(W1, gapMid - 0.5, gapMid + 0.5, 2) ? gapMid + g + o2 - half : gapMid + o1 - half;
+    }
+    if (at !== null) at = clampAt(refineCut(at, o1, o2, g));
+    out.push({ i: runs[r].from, o1, o2, lo, hi, at, next });
+  }
+  return { anchors: an, cuts: out };
+}
+
+/**
+ * 決まった切れ目の前後を短い窓で比べ直すのに、どの探りをどのずれで比べればよいか（まだ比べていないものだけ）。
+ * 切れ目の前後 1.5 秒にかかる探りを、前のずれ・後のずれで比べる
+ */
+export function fineNeeds(done: readonly ProbeResult[], dec: AlignDecision | null): { p: number; os: number[] }[] {
+  const out: { p: number; os: number[] }[] = [];
+  for (const c of dec?.cuts ?? []) {
+    if (c.at === null) continue;
+    const g = Math.max(0, c.o1 - c.o2);
+    done.forEach((pr, p) => {
+      const os: number[] = [];
+      for (const [o, sh] of [
+        [c.o1, 0],
+        [c.o2, g],
+      ] as const) {
+        const a0 = pr.v - o - sh;
+        if (a0 < c.at! + 1.5 && a0 + pr.len > c.at! - 1.5 && !fineOf(pr, o)) os.push(Math.round(o * 1000) / 1000);
+      }
+      if (os.length === 0) return;
+      const ex = out.find((x) => x.p === p);
+      if (ex) ex.os.push(...os.filter((o) => !ex.os.includes(o)));
+      else out.push({ p, os });
+    });
+  }
+  return out;
+}
+
 /**
  * 原曲の秒 a → そこでのずれの差 d（anchors の補間）。
  * 隣どうしのずれの差が、間の長さの 6% 以内ならなめらかにつなぎ（ライブのテンポの揺れ。外側も同じ傾きでのばす）、
@@ -801,8 +1174,10 @@ export function anchorDelta(anchors: readonly AlignAnchor[], a: number): number 
 
 /** 1 回の探りの長さ（秒） */
 export const PROBE_SEC = 8;
-/** 探りの回数の上限（ふつうは 3 回。食い違いを確かめる・ライブや編集違いを細かく見るときだけ増える） */
+/** 探りの回数の上限（ふつうは 3 回。食い違いを確かめる・ライブを細かく見るときだけ増える） */
 export const MAX_PROBES = 6;
+/** 編集違いのときの上限（切れ目の近くを聞き足して、切り替える所を絞る） */
+export const MAX_PROBES_EDIT = 9;
 /** 曲の頭・真ん中・終わりの 3 か所で合えば十分 */
 const WANT_GOOD = 3;
 
@@ -819,13 +1194,28 @@ export interface ProbePlanInput {
 
 /** 次に聞き取る所（動画の秒）。もう十分なら null */
 export function nextProbe(inp: ProbePlanInput): number | null {
+  return planProbe(inp)?.v ?? null;
+}
+
+/**
+ * 次に聞き取る所（動画の秒）と、それが編集違いの切れ目を細かく探すための聞き取りか（cut。その結果は
+ * ProbeResult.cut を付けて渡す）。もう十分なら null
+ */
+export function planProbe(inp: ProbePlanInput): { v: number; cut: boolean } | null {
+  const v = planAt(inp);
+  if (v === null) return null;
+  return typeof v === 'number' ? { v, cut: false } : v;
+}
+
+function planAt(inp: ProbePlanInput): number | { v: number; cut: boolean } | null {
   const { vdur, adur, len, done } = inp;
-  if (done.length >= MAX_PROBES || vdur < len + 0.5) return null;
+  if (done.length >= MAX_PROBES_EDIT || vdur < len + 0.5) return null;
   const maxV = Math.max(0, vdur - len - 0.25);
   const clampV = (v: number) => Math.max(0, Math.min(maxV, v));
   const near = (v: number) => done.some((d) => Math.abs(d.v - v) < len * 0.75);
-  const good = done.filter((d) => d.cands[0] && d.cands[0].z >= Z_OK && d.active >= 0.3);
+  const good = done.filter((d) => !d.cut && d.cands[0] && d.cands[0].z >= Z_OK && d.active >= 0.3);
   const dec = good.length > 0 ? decideOffset(done) : null;
+  if (done.length >= (dec?.kind === 'edit' ? MAX_PROBES_EDIT : MAX_PROBES)) return null;
   if (good.length >= WANT_GOOD) {
     if (!dec) return null;
     if (dec.kind === 'const') {
@@ -858,19 +1248,15 @@ export function nextProbe(inp: ProbePlanInput): number | null {
     }
     const an = dec.anchors;
     if (dec.kind === 'edit') {
-      // 途中で飛ぶ（編集違い）: 飛ぶ所を挟み込む（後ろのずれで間の真ん中を聞く。合えば飛ぶ所はそれより前）
-      let gap: { a: number; o: number } | null = null;
-      let widest = 0;
-      for (let i = 1; i < an.length; i++) {
-        const span = an[i].a - an[i - 1].a;
-        if (Math.abs(an[i].d - an[i - 1].d) > DRIFT_MAX * span && span > 2.5 * len && span > widest) {
-          widest = span;
-          gap = { a: (an[i].a + an[i - 1].a) / 2, o: dec.offset + an[i].d };
-        }
+      // 途中で飛ぶ（編集違い）: まだ決まっていない切れ目の、次に聞くとよい所を聞く
+      // （聞いた 8 秒の中を細かく比べ、前のずれ・後のずれで合う所と合わない所の境目を探す）
+      for (const c of dec.cuts ?? []) {
+        if (c.at !== null || c.next === undefined) continue;
+        const v = clampV(c.next);
+        if (done.some((d) => Math.abs(d.v - v) < 0.5)) continue;
+        return { v, cut: true };
       }
-      if (!gap) return null;
-      const v = clampV(gap.a + gap.o - len / 2);
-      return near(v) ? null : v;
+      return null;
     }
     // 少しずつずれる（ライブ）: いちばん広い間（端も含む）を埋める
     const pts = [0, ...an.map((x) => x.a), adur];

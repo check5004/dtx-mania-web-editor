@@ -1,5 +1,5 @@
 // 解析ワーカーへの窓口。要求ごとに Promise を返す。
-import type { AlignSearch } from './align';
+import type { AlignSearch, LocalSim } from './align';
 import type { AnalysisData } from './analysis';
 import type { FrameFeatures } from './features';
 import type { SpecMode, SpectroData } from './spectro';
@@ -88,9 +88,19 @@ export function alignRef(key: string, progress?: (p: number) => void): Promise<v
   return call<void>({ type: 'alignRef', key }, [], progress);
 }
 
-/** YouTube から聞き取った音（モノラル）を原曲と比べる */
-export function alignProbe(key: string, pcm: Float32Array, sr: number): Promise<AlignSearch> {
-  return call<AlignSearch>({ type: 'alignProbe', key, pcm, sr }, [pcm.buffer as ArrayBuffer]);
+/** YouTube から聞き取った音（モノラル）を原曲と比べる。probe は、あとで所ごとに比べ直すときの番号 */
+export function alignProbe(key: string, pcm: Float32Array, sr: number): Promise<AlignSearch & { probe: number }> {
+  return call<AlignSearch & { probe: number }>({ type: 'alignProbe', key, pcm, sr }, [pcm.buffer as ArrayBuffer]);
+}
+
+/** 聞き取った音（頭が動画の v 秒）を、ずれ os ごとに所ごとに比べる（編集違いの切れ目を細かく決める） */
+export function alignLocal(key: string, probe: number, v: number, os: number[]): Promise<{ local: LocalSim[]; floor: number }> {
+  return call<{ local: LocalSim[]; floor: number }>({ type: 'alignLocal', key, probe, v, os });
+}
+
+/** 聞き取った音を、ずれ os ごとに短い窓で比べる（決まった切れ目を詰める） */
+export async function alignFine(key: string, probe: number, v: number, os: number[]): Promise<LocalSim[]> {
+  return (await call<{ local: LocalSim[]; floor: number }>({ type: 'alignLocal', key, probe, v, os, fine: true })).local;
 }
 
 export function isLoaded(key: string) {

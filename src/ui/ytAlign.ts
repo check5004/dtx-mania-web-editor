@@ -2,12 +2,14 @@
 //
 // 1. 「このタブを共有」でタブの音を受け取る（YouTube の音は直接読めないため。Chrome・Edge）
 // 2. エンジンから小さなクリックを 4 回鳴らし、タブの音が届くまでの遅れ（Δ）を測る（2 回以上そろった値）
-// 3. 動画の何か所か（nextProbe が決める。ふつう 3 か所、ライブ・編集違いは 5 か所まで）を 8 秒ずつ再生して聞き取る。
+// 3. 動画の何か所か（nextProbe が決める。ふつう 3 か所、ライブは 6 か所まで）を 8 秒ずつ再生して聞き取る。
+//    編集違い（途中でずれが飛ぶ）なら、切れ目の近くを聞き足し、8 秒の中を 2 秒の窓で細かく比べて切り替える所を決め
+//    （前のずれで切れ目の手前、後のずれで切れ目の先を聞いて確かめる。9 か所まで）、最後に 0.5 秒の窓で詰める。
 //    聞き取った音の頭が動画の何秒かは、聞いているあいだの getCurrentTime と、出力の時刻（getOutputTimestamp）から決める
 // 4. ワーカーで原曲の全体と比べ（打点・音色・和音）、decideOffset で結果をまとめてずれ（と所ごとの差）を入れる
 // 合わせているあいだは再生との同期を止め、終わったら動画の音・音量・聴く音を元に戻す。
 import { create } from 'zustand';
-import { decideOffset, nextProbe, PROBE_SEC, type AlignDecision, type ProbeResult } from '../audio/align';
+import { decideOffset, fineNeeds, planProbe, PROBE_SEC, type AlignDecision, type ProbeResult } from '../audio/align';
 import { engine } from '../audio/engine';
 import { canCaptureTab, CaptureError, clickCluster, findClickDelay, PcmRecorder, requestTabAudio, scheduleClicks, stopStream } from '../audio/tabCapture';
 import * as wk from '../audio/workerClient';
@@ -157,6 +159,35 @@ async function listenAt(player: YTPlayer, rec: PcmRecorder, ctx: AudioContext, v
 }
 
 /**
+ * 編集違い（途中でずれが飛ぶ）と分かったら、切れ目の前後のずれで、聞いた所ごとの似かたを出しておく
+ * （8 秒の中を細かく比べて、切り替える所を絞る）
+ */
+async function addLocal(key: string, done: ProbeResult[], ids: (number | null)[]): Promise<void> {
+  const dec = decideOffset(done);
+  if (!dec?.cuts?.length) return;
+  const os = [...new Set(dec.cuts.flatMap((c) => [c.o1, c.o2]).map((o) => Math.round(o * 1000) / 1000))];
+  for (let i = 0; i < done.length; i++) {
+    const pr = done[i];
+    const id = ids[i];
+    if (id === null) continue;
+    const miss = os.filter((o) => !pr.local?.some((x) => Math.abs(x.o - o) <= 0.03));
+    if (miss.length === 0) continue;
+    const r = await wk.alignLocal(key, id, pr.v, miss);
+    pr.local = [...(pr.local ?? []), ...r.local];
+    pr.floor ??= r.floor;
+  }
+}
+
+/** 切れ目が決まったら、その前後を短い窓で比べ直して、切り替える所を詰める */
+async function addFine(key: string, done: ProbeResult[], ids: (number | null)[]): Promise<void> {
+  for (const { p, os } of fineNeeds(done, decideOffset(done))) {
+    const id = ids[p];
+    if (id === null) continue;
+    done[p].fine = [...(done[p].fine ?? []), ...(await wk.alignFine(key, id, done[p].v, os))];
+  }
+}
+
+/**
  * 自動で合わせる。ボタンを押したとき（または URL を入れたとき）にそのまま呼ぶこと
  * （ブラウザの共有の確認は、押した直後でないと出せない）
  */
@@ -222,23 +253,31 @@ export async function startAutoAlign(): Promise<void> {
     player.unMute();
     if (saved.volume < 30) player.setVolume(80);
     const done: ProbeResult[] = [];
+    /** 聞き取った音の、ワーカーでの番号（所ごとに比べ直すとき用） */
+    const ids: (number | null)[] = [];
     const vdur = ytDuration();
     const adur = ref.buf.duration;
     const hint = yt0.auto ? yt0.offset : null;
     for (;;) {
       check();
-      const v0 = nextProbe({ vdur, adur, len: PROBE_SEC, done, hint });
-      if (v0 === null) break;
-      set({ phase: 'listen', probe: done.length + 1, note: `YouTube の音を聞き取っています（${done.length + 1} か所目）…` });
-      const got = await listenAt(player, rec, ctx, v0, delta);
+      const plan = planProbe({ vdur, adur, len: PROBE_SEC, done, hint });
+      if (plan === null) break;
+      const cut = plan.cut || undefined;
+      const n = done.length + 1;
+      set({ phase: 'listen', probe: n, note: cut ? `編集で飛んでいる所を細かく聞き取っています（${n} か所目）…` : `YouTube の音を聞き取っています（${n} か所目）…` });
+      const got = await listenAt(player, rec, ctx, plan.v, delta);
       if (!got) {
-        done.push({ v: v0, len: PROBE_SEC, cands: [], active: 0 });
+        done.push({ v: plan.v, len: PROBE_SEC, cands: [], active: 0, cut });
+        ids.push(null);
         continue;
       }
       set({ phase: 'think', note: '原曲と照らし合わせています…' });
       const r = await wk.alignProbe(ref.key, got.pcm, ctx.sampleRate);
-      done.push({ v: got.v, len: PROBE_SEC, cands: r.cands, active: r.active, zc: r.zc, pad: r.pad });
+      done.push({ v: got.v, len: PROBE_SEC, cands: r.cands, active: r.active, zc: r.zc, pad: r.pad, cut });
+      ids.push(r.probe);
+      await addLocal(ref.key, done, ids);
     }
+    await addFine(ref.key, done, ids);
     const dec = decideOffset(done);
     // 調べるとき用（うまく合わないときに、コンソールのこの行を見れば様子が分かる）
     console.info(
@@ -253,6 +292,7 @@ export async function startAutoAlign(): Promise<void> {
           conf: Math.round(dec.conf * 100) / 100,
           anchors: dec.anchors.map((x) => [Math.round(x.a * 10) / 10, Math.round(x.d * 1000) / 1000]),
           doubt: dec.doubt,
+          cuts: dec.cuts?.map((c) => ({ o: [Math.round(c.o1 * 1000) / 1000, Math.round(c.o2 * 1000) / 1000], lo: Math.round(c.lo * 10) / 10, hi: Math.round(c.hi * 10) / 10, at: c.at === null ? null : Math.round(c.at * 100) / 100 })),
         },
       }),
     );

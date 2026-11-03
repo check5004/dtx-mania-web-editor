@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { ALIGN_FPS, alignFeatures, anchorDelta, buildRefIndex, decideOffset, nextProbe, searchProbe, Z_OK, type AlignMatch, type ProbeResult } from './align';
+import {
+  ALIGN_FPS,
+  alignFeatures,
+  anchorDelta,
+  buildRefIndex,
+  decideOffset,
+  FINE_HOP,
+  FINE_WIN,
+  fineNeeds,
+  MAX_PROBES_EDIT,
+  nextProbe,
+  planProbe,
+  searchProbe,
+  Z_OK,
+  type AlignMatch,
+  type LocalSim,
+  type ProbeResult,
+} from './align';
 import { applyChain, biquad } from './dsp';
 import { synth, type SynthHit } from './testSignal';
 
@@ -238,5 +255,86 @@ describe('所ごとのずれ', () => {
     expect(anchorDelta(an, 41)).toBe(20);
     expect(anchorDelta(an, 100)).toBe(20);
     expect(anchorDelta([], 5)).toBe(0);
+  });
+});
+
+describe('編集違いの切れ目を細かく決める', () => {
+  /** 動画の秒 → そこで鳴っている原曲の秒（原曲に無い所なら null） */
+  type Truth = (t: number) => number | null;
+  /** 探りの所ごとの似かた（合っている割合に比例。dip は雑音などで似かたが下がる所） */
+  const localOf = (truth: Truth, v: number, o: number, adur: number, dip?: (a: number, o: number) => number, win = 2, hop = 0.25): LocalSim => {
+    const n = Math.round((8 - win) / hop) + 1;
+    const sim = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      const a = v - o + win / 2 + k * hop;
+      if (a - win / 2 < 0 || a + win / 2 > adur) {
+        sim[k] = NaN;
+        continue;
+      }
+      let ok = 0;
+      for (let j = 0; j < 20; j++) {
+        const x = a - win / 2 + ((j + 0.5) * win) / 20;
+        const r = truth(x + o);
+        if (r !== null && Math.abs(r - x) < 0.05) ok++;
+      }
+      sim[k] = 0.05 + 0.75 * (ok / 20) * (dip ? dip(a, o) : 1);
+    }
+    return { o, t0: win / 2, hop, sim };
+  };
+  /** first から聞き始め、聞き取る所の決め方に従って最後まで聞く */
+  const simulate = (truth: Truth, vdur: number, adur: number, first: number, os: number[], dip?: (a: number, o: number) => number) => {
+    const done: ProbeResult[] = [];
+    let pl: { v: number; cut: boolean } | null = { v: first, cut: false };
+    while (pl && done.length < 20) {
+      const v = pl.v;
+      const r = truth(v + 4);
+      const cands = r === null ? [m(5, 4)] : [m(r - 4, 15)];
+      done.push({ v, len: 8, cands, active: 1, cut: pl.cut || undefined, local: os.map((o) => localOf(truth, v, o, adur, dip)), floor: 0.05 });
+      pl = planProbe({ vdur, adur, len: 8, done });
+    }
+    // 決まった切れ目の前後を短い窓で比べ直す
+    for (const { p, os: fos } of fineNeeds(done, decideOffset(done))) done[p].fine = fos.map((o) => localOf(truth, done[p].v, o, adur, dip, FINE_WIN, FINE_HOP));
+    const dec = decideOffset(done)!;
+    const at = (a: number) => a + dec.offset + anchorDelta(dec.anchors, a);
+    return { done, dec, at };
+  };
+  // 原曲は 40〜70 秒を切った版（120 秒）、動画はフル（前置き 10 秒）: 原曲の 40 秒より前はずれ 10、後はずれ 40
+  const shortRef: Truth = (t) => (t < 10 ? null : t < 50 ? t - 10 : t < 80 ? null : t - 40 <= 120 ? t - 40 : null);
+
+  it('原曲を短くした版: 切れ目の近くを聞き足して、0.1 秒以内で切り替える', () => {
+    for (const first of [26, 57.75, 100]) {
+      const { done, dec, at } = simulate(shortRef, 165, 120, first, [10, 40]);
+      expect(dec.kind).toBe('edit');
+      expect(done.length).toBeLessThanOrEqual(MAX_PROBES_EDIT);
+      expect(done.some((d) => d.cut)).toBe(true);
+      expect(done.some((d) => d.fine)).toBe(true);
+      expect(Math.abs(dec.cuts![0].at! - 40)).toBeLessThan(0.1);
+      expect(at(39.85)).toBeCloseTo(49.85, 3);
+      expect(at(40.15)).toBeCloseTo(80.15, 3);
+      expect(at(15)).toBeCloseTo(25, 3);
+      expect(at(100)).toBeCloseTo(140, 3);
+    }
+  });
+
+  it('前のずれで探りの端まで似なくなっても（ドラムだけの所・雑音）、後のずれで確かめて切れ目にしない', () => {
+    // 原曲の 25〜31 秒は、合っていても似かたがほとんど無い。最初の探りはちょうどそこで端まで似なくなる
+    const dip = (a: number, o: number) => (o === 10 && a > 25 && a < 31 ? 0.1 : 1);
+    const { dec, at } = simulate(shortRef, 165, 120, 31, [10, 40], dip);
+    expect(dec.kind).toBe('edit');
+    expect(Math.abs(dec.cuts![0].at! - 40)).toBeLessThan(0.3);
+    expect(at(30)).toBeCloseTo(40, 3);
+    expect(at(41)).toBeCloseTo(81, 3);
+  });
+
+  it('動画を短くした版: 1 か所の探りで前のずれの終わりと後のずれの始まりがそろう', () => {
+    // 原曲はフル（150 秒）、動画は原曲の 40〜60 秒を切った版: 原曲の 40 秒より前はずれ 0、60 秒より後はずれ -20
+    const shortVid: Truth = (t) => (t < 40 ? t : t + 20 <= 150 ? t + 20 : null);
+    const { dec, at } = simulate(shortVid, 130, 150, 45.5, [0, -20]);
+    expect(dec.kind).toBe('edit');
+    const c = dec.cuts![0];
+    expect(c.at! - 40).toBeGreaterThan(-0.3);
+    expect(c.at! - 40).toBeLessThan(0.3);
+    expect(at(39.6)).toBeCloseTo(39.6, 3);
+    expect(at(60.4)).toBeCloseTo(40.4, 3);
   });
 });

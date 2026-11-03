@@ -1,5 +1,5 @@
 // 原曲の解析とスロー再生用の伸長を、画面を止めないように別スレッドで行う。
-import { alignFeatures, buildRefIndex, PROBE_SEC, ALIGN_FPS, searchProbe, type RefIndex } from './align';
+import { alignFeatures, buildRefIndex, PROBE_SEC, ALIGN_FPS, probeFine, probeLocal, searchProbe, type AlignFeat, type RefIndex } from './align';
 import { analyzeAudio } from './analysis';
 import { computeFrameFeatures } from './features';
 import { renderSpectro, spectroDb, type SpecMode } from './spectro';
@@ -12,7 +12,8 @@ export type WorkerRequest =
   | { id: number; type: 'features'; key: string }
   | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number }
   | { id: number; type: 'alignRef'; key: string }
-  | { id: number; type: 'alignProbe'; key: string; pcm: Float32Array; sr: number };
+  | { id: number; type: 'alignProbe'; key: string; pcm: Float32Array; sr: number }
+  | { id: number; type: 'alignLocal'; key: string; probe: number; v: number; os: number[]; fine?: boolean };
 
 const store = new Map<string, { channels: Float32Array[]; sr: number }>();
 /** スペクトルの dB（見せ方を変えるときに測り直さない）。2曲ぶん */
@@ -20,12 +21,16 @@ const specCache = new Map<string, ReturnType<typeof spectroDb>>();
 
 /** YouTube との自動合わせに使う原曲の特徴（1曲ぶん） */
 let alignRef: { key: string; idx: RefIndex } | null = null;
+/** 聞き取った音の特徴（あとで切れ目の所を細かく比べるため。番号ごと、新しいものを少し） */
+const alignProbes = new Map<number, AlignFeat>();
+let alignSeq = 0;
 
 function alignIndex(key: string, src: { channels: Float32Array[]; sr: number }, progress?: (p: number) => void): RefIndex {
   if (alignRef?.key === key) return alignRef.idx;
   const feat = alignFeatures(src.channels, src.sr, progress);
   const idx = buildRefIndex(feat, PROBE_SEC * ALIGN_FPS);
   alignRef = { key, idx };
+  alignProbes.clear();
   return idx;
 }
 
@@ -75,8 +80,20 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     }
     if (req.type === 'alignProbe') {
       const idx = alignIndex(req.key, src);
-      const r = searchProbe(idx, alignFeatures([req.pcm], req.sr));
-      post({ id: req.id, ok: true, result: r }, r.zc ? [r.zc.buffer as ArrayBuffer] : []);
+      const feat = alignFeatures([req.pcm], req.sr);
+      const r = searchProbe(idx, feat);
+      const probe = ++alignSeq;
+      alignProbes.set(probe, feat);
+      while (alignProbes.size > 16) alignProbes.delete(alignProbes.keys().next().value!);
+      post({ id: req.id, ok: true, result: { ...r, probe } }, r.zc ? [r.zc.buffer as ArrayBuffer] : []);
+      return;
+    }
+    if (req.type === 'alignLocal') {
+      const idx = alignIndex(req.key, src);
+      const feat = alignProbes.get(req.probe);
+      if (!feat) throw new Error('聞き取った音がもうありません');
+      const r = req.fine ? { local: probeFine(idx.feat, feat, req.v, req.os), floor: 0 } : probeLocal(idx.feat, feat, req.v, req.os);
+      post({ id: req.id, ok: true, result: r }, r.local.map((x) => x.sim.buffer as ArrayBuffer));
       return;
     }
     if (req.type === 'stretch') {
