@@ -544,7 +544,7 @@ function BgaTab() {
         列を広げて画像のサムネイルを出す
       </label>
       <p className="lbl" style={{ margin: '0 0 10px', lineHeight: 1.6 }}>
-        下の一覧で素材を選び、譜面の BGA 列をクリックすると置けます。右クリックで消す、ドラッグで動かすのはドラムと同じです。
+        下の一覧で素材を選び、譜面の BGA 列をクリックすると置けます。ダブルクリックで消す、ドラッグで動かす、右クリックでメニューはドラムと同じです。
       </p>
 
       <div className="section-title">

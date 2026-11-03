@@ -27,6 +27,7 @@ import {
   zoom,
 } from '../store/editor';
 import { ChartCanvas } from './ChartCanvas';
+import { ContextMenuHost } from './ContextMenu';
 import { Footer } from './Footer';
 import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
@@ -380,6 +381,7 @@ export function Editor() {
             )}
           </div>
           <Footer />
+          <ContextMenuHost />
           {previewMode === 'full' && (
             <div className="nx-overlay">
               <NxPreview full />

@@ -139,25 +139,35 @@ export function selectedDrumIds(): number[] {
 
 /** 選んだチップのベロシティを ±delta（Alt+ホイール・Alt+↑↓） */
 export function nudgeSelection(delta: number): boolean {
-  const ids = selectedDrumIds();
+  return nudgeVel(selectedDrumIds(), delta);
+}
+
+/** チップのベロシティを ±delta（右クリックのメニューからも）。group が同じなら続けての変更は Undo 1回で戻せる */
+export function nudgeVel(ids0: readonly number[], delta: number, group = 'vel-nudge'): boolean {
+  const s = useEditor.getState();
+  const want = new Set(ids0);
+  const ids = s.doc.chips.filter((c) => want.has(c.id) && drumChannel(c.ch)).map((c) => c.id);
   if (ids.length === 0) return false;
   // 1刻みで動かすときは刻みを無視する
   const step = Math.abs(delta) < velStep() ? 1 : velStep();
-  const s = useEditor.getState();
   const idSet = new Set(ids);
   edit(
     `ベロシティを ${delta > 0 ? '+' : ''}${delta}`,
     (d) => {
       opSetVelocity(d, idSet, (cur) => cur + delta, step);
     },
-    { group: 'vel-nudge' },
+    { group },
   );
-  void s;
   return true;
 }
 
 export function setSelectionVel(v: number) {
-  applyVel(`ベロシティを ${v} にする`, selectedDrumIds(), () => v, { similar: false });
+  setVelOf(selectedDrumIds(), v);
+}
+
+/** チップのベロシティを v にする（右のパネル・右クリックのメニュー） */
+export function setVelOf(ids: readonly number[], v: number, group?: string): number {
+  return applyVel(`ベロシティを ${v} にする`, ids, () => v, { similar: false, group });
 }
 
 // ---- ベロシティの編集モード -------------------------------------------------------------

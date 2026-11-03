@@ -5,7 +5,7 @@ import { CH } from '../dtx/model';
 import { parseDtx } from '../dtx/parse';
 import { serializeDtx } from '../dtx/serialize';
 import { buildTempoMap } from '../dtx/timing';
-import { makeClip, opMove, opPaste, opPlace, setField, snapToGrid } from './ops';
+import { fittingGrid, makeClip, onGrid, opMove, opPaste, opPlace, setField, snapToGrid } from './ops';
 
 const BASE = ['#TITLE: t', '#BPM: 120', '#WAV01: a.wav', '', '#00102: 0.75', '#00112: 01000100', '#00211: 01010101'].join('\r\n');
 
@@ -66,5 +66,30 @@ describe('編集操作', () => {
     const text = serializeDtx(d);
     expect(text.indexOf('#WAV02: b.wav')).toBeGreaterThan(text.indexOf('#WAV01'));
     expect(text.indexOf('#GENRE: Rock')).toBeLessThan(text.indexOf('#BPM'));
+  });
+});
+
+describe('グリッドに乗っているか（右クリックのメニューの「この小節に合う細かさ」）', () => {
+  it('16分は 1/16 に乗り、1/12（8分の3連）には乗らない', () => {
+    expect(onGrid(frac(3, 16), 16, frac(1))).toBe(true);
+    expect(onGrid(frac(3, 16), 12, frac(1))).toBe(false);
+    expect(onGrid(frac(1, 2), 4, frac(1))).toBe(true);
+  });
+
+  it('いちばん粗いグリッドを選ぶ（3連と16分が混ざれば 1/48）', () => {
+    expect(fittingGrid([frac(0), frac(1, 4), frac(1, 2)], frac(1))).toBe(4);
+    expect(fittingGrid([frac(1, 8), frac(3, 16)], frac(1))).toBe(16);
+    expect(fittingGrid([frac(1, 12), frac(5, 24)], frac(1))).toBe(24);
+    expect(fittingGrid([frac(3, 16), frac(1, 12)], frac(1))).toBe(48);
+    expect(fittingGrid([], frac(1))).toBeNull();
+    expect(fittingGrid([frac(1, 7)], frac(1))).toBe(28);
+    expect(fittingGrid([frac(1, 9)], frac(1))).toBeNull();
+  });
+
+  it('3/4 の小節でも小節の頭から数える', () => {
+    // 3/4 の小節の 1/16 は小節の 1/12 ずつ
+    expect(onGrid(frac(1, 12), 16, frac(3, 4))).toBe(true);
+    expect(onGrid(frac(1, 16), 16, frac(3, 4))).toBe(false);
+    expect(fittingGrid([frac(1, 3), frac(2, 3)], frac(3, 4))).toBe(4);
   });
 });

@@ -1,6 +1,20 @@
 // 表示用の書式。
 import { toMeasure } from '../dtx/base36';
+import { bgaChannel, CH, drumChannel } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
+
+/** チャンネルの名前（スネア・HHオープン・BGM・BPM変化など） */
+export function channelName(ch: number): string {
+  const d = drumChannel(ch);
+  if (d) return d.name;
+  if (ch === CH.BGM) return 'BGM';
+  if (ch === CH.BPM || ch === CH.BPM_EX) return 'BPM変化';
+  if (ch === CH.FILLIN) return 'フィルイン区間';
+  if (ch === CH.FILLIN_SOUND) return 'フィルインの音';
+  const b = bgaChannel(ch);
+  if (b) return b.name;
+  return `SE（ch ${ch.toString(16).toUpperCase()}）`;
+}
 
 export function chipBpmLabel(bpm: number): string {
   return Number.isInteger(bpm) ? String(bpm) : String(Math.round(bpm * 100) / 100);

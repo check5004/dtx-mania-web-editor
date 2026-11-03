@@ -162,7 +162,10 @@ export function Home() {
           <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>操作のきほん</h3>
           <div className="flow">
             <div>
-              <b>置く・消す</b>レーンをクリックで置く、右クリックで消す。<kbd>Shift</kbd>でHHオープン・左バスドラム。
+              <b>置く・消す</b>レーンをクリックで置く、ダブルクリックで消す。<kbd>Shift</kbd>でHHオープン・左バスドラム。
+            </div>
+            <div>
+              <b>右クリック</b>チップの上ならベロシティ・HHオープン/クローズ・レーン・削除のメニュー。何もない所ならグリッドをボタン1回で切り替え。
             </div>
             <div>
               <b>選ぶ・動かす</b>空いた所をドラッグで範囲選択、チップをドラッグか矢印キーで移動。<kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd>でコピー。

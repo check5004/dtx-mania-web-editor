@@ -44,6 +44,18 @@ export function snapToGrid(tempo: TempoMap, beat: number, div: number, mode: 'ro
   return { m, f: frac(k * bl.d, div * bl.n) };
 }
 
+/** 小節の中の位置 f（0〜1）が、グリッド div（全音符の分割数）に乗っているか。bl は小節の長さ（4/4 = 1） */
+export function onGrid(f: Frac, div: number, bl: Frac): boolean {
+  // f = k / (div × bl) となる整数 k があるか
+  return (f.n * div * bl.n) % (f.d * bl.d) === 0;
+}
+
+/** 位置がすべて乗る一番粗いグリッド（GRID_DIVS から）。位置が無い・どれにも乗らないときは null */
+export function fittingGrid(fs: readonly Frac[], bl: Frac): number | null {
+  if (fs.length === 0) return null;
+  return GRID_DIVS.find((div) => fs.every((f) => onGrid(f, div, bl))) ?? null;
+}
+
 export function posToBeatFrac(tempo: TempoMap, p: Pos): Frac {
   return tempo.beatOfFrac(p.m, p.f);
 }

@@ -24,6 +24,7 @@ import {
   type ClipItem,
   type Pos,
 } from '../edit/ops';
+import { opRelane, type AltMode } from '../edit/transform';
 import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
@@ -521,11 +522,12 @@ export function cutSelection() {
   if (copySelection() > 0) deleteSelection();
 }
 
-export function paste() {
+/** 貼り付ける。atBeat を省くとカーソル（▶）の位置（右クリックのメニューからは右クリックした所） */
+export function paste(atBeat0?: number) {
   const s = get();
   if (s.clipboard.length === 0) return;
   const tempo = tempoOf(s.doc);
-  const at = snapToGrid(tempo, s.cursorBeat, s.view.div);
+  const at = snapToGrid(tempo, typeof atBeat0 === 'number' ? atBeat0 : s.cursorBeat, s.view.div);
   const atBeat = tempo.beatOfFrac(at.m, at.f);
   let ids: number[] = [];
   edit(`${s.clipboard.length}個のチップを貼り付け`, (d) => {
@@ -538,11 +540,36 @@ export function selectAll() {
   set((s) => ({ selection: chipViews(s.doc).filter((v) => v.col >= 0).map((v) => v.c.id) }));
 }
 
-export function setKind(kind: 'normal' | 'hidden' | 'nochip') {
-  const ids = new Set(get().selection);
+export function setKind(kind: 'normal' | 'hidden' | 'nochip', ids0: readonly number[] = get().selection) {
+  const ids = new Set(ids0);
   edit(kind === 'normal' ? '通常チップにする' : kind === 'hidden' ? '不可視チップにする' : '音だけのチップにする', (d) =>
     opSetKind(d, ids, kind),
   );
+}
+
+/**
+ * チップを lane へ移す（同じ時刻のまま）。alt: HHオープン・左バスドラムにするか（keep は今のまま）。
+ * レーンや種類が変わったチップは、音もそのレーンの音にする（ベロシティは保つ）。移した先にあったチップは上書き
+ */
+export function relaneChips(ids0: readonly number[], lane: number, alt: AltMode = 'keep'): number {
+  const ids = new Set(ids0);
+  const def = DRUM_LANES[lane];
+  if (!def || ids.size === 0) return 0;
+  const before = new Map(get().doc.chips.filter((c) => ids.has(c.id)).map((c) => [c.id, c.ch]));
+  const hadKit = Object.keys(get().doc.fields).length;
+  const name = alt === 'alt' && def.altName ? def.altName : alt === 'main' && def.alt !== undefined ? def.mainName : def.name;
+  let n = 0;
+  edit(`${ids.size === 1 ? 'チップ' : `${ids.size}個のチップ`}を${name}にする`, (d) => {
+    n = opRelane(d, ids, lane, alt);
+    for (const c of d.chips) {
+      if (!ids.has(c.id) || before.get(c.id) === c.ch) continue;
+      const info = drumChannel(c.ch);
+      if (!info) continue;
+      c.v = wavVariant(d, wavForChannel(d, info.base), velOfWav(d.fields, c.v));
+    }
+  });
+  if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
+  return n;
 }
 
 export function setSelectionWav(v: number) {

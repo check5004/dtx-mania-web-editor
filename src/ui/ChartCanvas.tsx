@@ -17,7 +17,6 @@ import {
   endLoopDrag,
   loopGrab,
   setBandFilter,
-  setLoop,
   setWaveMode,
   useAssist,
   LOOP_DIV,
@@ -67,6 +66,7 @@ import { chipBpmLabel, formatTime, meterLabel } from './format';
 import { SectionPopover } from './SectionPopover';
 import { SPEC_ZONES, zoneLut, type SpecZone } from './specColors';
 import { pickBgmFile } from '../app/fileActions';
+import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
 
 export const GEO = {
   head: 30,
@@ -159,6 +159,8 @@ type Drag =
   | { type: 'velLine'; idx: number; y0: number; v0: number; y1: number; v1: number }
   | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean }
   | { type: 'erase'; ids: Set<number> }
+  /** 右ボタンを押している：動かさずに離せばメニュー、チップの上からなぞれば消す（erase へ） */
+  | { type: 'rpress'; x0: number; y0: number; cx: number; cy: number; hit: Hit; beat: number; shift: boolean }
   | { type: 'cursor' }
   | { type: 'loop'; ld: LoopDrag; y0: number; where: 'chart' | 'mini' }
   | { type: 'mini' }
@@ -200,10 +202,20 @@ interface Local {
   mini: { canvas: HTMLCanvasElement; doc: unknown; h: number; endBeat: number; sections: unknown } | null;
   spec: SpecTiles | null;
   pointer: { x: number; y: number } | null;
+  /** 直前の2回の左クリックで掴んだチップ（ダブルクリックで消すのは、1回目の前からあったチップだけ） */
+  down0: number | null;
+  down1: number | null;
 }
 
 /** 右のパネルから「表示中の範囲」を知るための値 */
 const viewport = { h: 600, w: 1000, follow: null as number | null };
+
+let sectionOpener: ((m: number) => void) | null = null;
+
+/** 小節 m のセクション名を付ける小窓を開く（右クリックのメニューから） */
+export function openSectionEditor(m: number) {
+  sectionOpener?.(m);
+}
 
 /** 譜面で見えている拍の範囲 */
 /** TAB補完の点線（小節 from から len 小節）が見えていなければ、見える所までスクロールする */
@@ -266,7 +278,7 @@ function velFromX(rx: number, i: number): number {
 export function ChartCanvas() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const L = useRef<Local>({ w: 0, h: 0, dpr: 1, dirty: true, drag: null, hover: null, followScroll: null, mini: null, spec: null, pointer: null });
+  const L = useRef<Local>({ w: 0, h: 0, dpr: 1, dirty: true, drag: null, hover: null, followScroll: null, mini: null, spec: null, pointer: null, down0: null, down1: null });
   const [popover, setPopover] = useState<{ m: number; x: number; y: number } | null>(null);
   const [help, setHelp] = useState<{ x: number; y: number } | null>(null);
   const [tip, setTipState] = useState<Tip | null>(null);
@@ -338,6 +350,12 @@ export function ChartCanvas() {
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
+    sectionOpener = (m) => {
+      const s = useEditor.getState();
+      const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+      const y = g.beatToY(tempoOf(s.doc).measureStart(m));
+      setPopover({ m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, Math.min(l.h - 190, y - 10)) });
+    };
     const unsubs = [
       useEditor.subscribe(() => {
         l.dirty = true;
@@ -405,6 +423,8 @@ export function ChartCanvas() {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      // 右クリックのメニューは、譜面が動くと指していた所とずれるので閉じる
+      closeCtxMenu();
       const s = useEditor.getState();
       const g = geom(l, s.view.scrollBeat, s.view.pxPerBeat);
       if (e.altKey) {
@@ -434,6 +454,7 @@ export function ChartCanvas() {
       ro.disconnect();
       unsubs.forEach((u) => u());
       canvas.removeEventListener('wheel', onWheel);
+      sectionOpener = null;
     };
   }, []);
 
@@ -449,9 +470,16 @@ export function ChartCanvas() {
     setPopover(null);
     setHelp(null);
     showTip(null);
+    if (e.button === 0) {
+      l.down0 = l.down1;
+      l.down1 = null;
+    }
+    // 右クリックのメニューを閉じるための押下は、譜面に効かせない（うっかりチップを置かないように）
+    const dismissed = dismissedBy(e.timeStamp) || closeCtxMenu();
+    if (dismissed && e.button === 0) return;
     if (!h) return;
     // 見出しのボタン
-    if (h.kind === 'header') {
+    if (h.kind === 'header' && e.button === 0) {
       const rx = x - g.ox;
       if (useAssist.getState().audioCols && rx >= GEO.hitsX && rx < GEO.hitsX + GEO.hitsW) {
         setHelp({ x: g.ox + GEO.hitsX, y: GEO.head + 4 });
@@ -473,9 +501,9 @@ export function ChartCanvas() {
       setPopover({ m: h.m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, y - 10) });
       return;
     }
-    // ✨：小節の生成（Shift で範囲を広げる）
-    if (h.kind === 'genBtn') {
-      if (e.button === 0) openMeasureGen(h.m, { extend: e.shiftKey });
+    // ✨：小節の生成（Shift で範囲を広げる）。右クリックは小節のメニュー（下の右ボタンの所）
+    if (h.kind === 'genBtn' && e.button === 0) {
+      openMeasureGen(h.m, { extend: e.shiftKey });
       return;
     }
     // 生成の案：点線をクリックで外す・戻す、消えるチップ（赤い ×）をクリックで残す
@@ -491,8 +519,16 @@ export function ChartCanvas() {
         return;
       }
     }
+    if (e.button !== 0 && e.button !== 2) return;
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
     l.pointer = { x, y };
+    if (e.button === 2) {
+      // 右ボタン：動かさずに離したら、右クリックした物のメニュー（チップ・何もない所・小節番号・ループの帯・END）。
+      // チップの上から押したままなぞると、なぞったチップを消す（以前の右ドラッグ）
+      const beat = h.kind === 'miniLoop' || h.kind === 'mini' ? miniGeom(l).beatAt(y) : Math.max(0, g.yToBeat(y));
+      l.drag = { type: 'rpress', x0: x, y0: y, cx: e.clientX, cy: e.clientY, hit: h, beat, shift: e.shiftKey };
+      return;
+    }
     if (h.kind === 'vel' || h.kind === 'velChip') {
       if (e.button !== 0) return;
       const tool = useVel.getState().tool;
@@ -526,18 +562,6 @@ export function ChartCanvas() {
       l.drag = { type: 'end', group: `song-end-${Date.now()}`, grab: eb === null ? 0 : g.yToBeat(y) - eb };
       return;
     }
-    if (e.button === 2) {
-      if (h.kind === 'loop' || h.kind === 'miniLoop') {
-        setLoop(null);
-        return;
-      }
-      if (h.kind === 'chip') {
-        l.drag = { type: 'erase', ids: new Set([h.view.c.id]) };
-        l.dirty = true;
-      }
-      return;
-    }
-    if (e.button !== 0) return;
     if (h.kind === 'mini') {
       l.drag = { type: 'mini' };
       scrollFromMini(l, y);
@@ -569,6 +593,7 @@ export function ChartCanvas() {
     }
     if (h.kind === 'chip') {
       const id = h.view.c.id;
+      l.down1 = id;
       const additive = e.ctrlKey || e.metaKey || e.shiftKey;
       const already = s.selection.includes(id);
       if (e.ctrlKey || e.metaKey) {
@@ -674,6 +699,22 @@ export function ChartCanvas() {
       d.v1 = velFromX(x - g.ox, d.idx);
       return;
     }
+    if (d.type === 'rpress') {
+      if (Math.hypot(x - d.x0, y - d.y0) <= 5) return;
+      // 動かした：チップ・レーンの上から押していれば、なぞったチップを消す。それ以外はメニューを出さずに終わる
+      const k = d.hit.kind;
+      if (k === 'chip' || k === 'lane' || k === 'bgm' || k === 'bpm' || k === 'bga') {
+        const ids = new Set<number>();
+        if (d.hit.kind === 'chip') ids.add(d.hit.view.c.id);
+        const h = hitTest(l, g, x, y);
+        if (h?.kind === 'chip') ids.add(h.view.c.id);
+        l.drag = { type: 'erase', ids };
+        canvasRef.current!.style.cursor = 'crosshair';
+      } else {
+        l.drag = null;
+      }
+      return;
+    }
     if (d.type === 'erase') {
       const h = hitTest(l, g, x, y);
       if (h?.kind === 'chip') d.ids.add(h.view.c.id);
@@ -753,6 +794,11 @@ export function ChartCanvas() {
     }
     if (d.type === 'erase') {
       deleteChips([...d.ids]);
+      canvasRef.current!.style.cursor = 'default';
+      return;
+    }
+    if (d.type === 'rpress') {
+      openMenuFor(d);
       return;
     }
     if (d.type === 'cursor') {
@@ -777,6 +823,48 @@ export function ChartCanvas() {
     }
   };
 
+  /** 右ボタンを動かさずに離した：右クリックした物のメニューを出す */
+  const openMenuFor = (d: Extract<Drag, { type: 'rpress' }>) => {
+    const s = useEditor.getState();
+    const h = d.hit;
+    const tempo = tempoOf(s.doc);
+    const open = (t: Parameters<typeof openCtxMenu>[0]) => openCtxMenu(t, d.cx, d.cy);
+    switch (h.kind) {
+      case 'chip':
+      case 'velChip': {
+        // 選んでいるチップなら選んでいるもの全部、そうでなければそのチップだけを選んで
+        const id = h.view.c.id;
+        const ids = s.selection.includes(id) ? [...s.selection] : [id];
+        if (!s.selection.includes(id)) useEditor.setState({ selection: ids });
+        open({ kind: 'chips', ids, anchor: id });
+        return;
+      }
+      case 'lane':
+      case 'bgm':
+      case 'bpm':
+      case 'bga':
+      case 'audio': {
+        const pos = snapToGrid(tempo, d.beat, s.view.div);
+        open({ kind: 'space', pos, beat: tempo.beatOf(pos.m, pos.f), col: h.kind, lane: h.kind === 'lane' ? h.lane : undefined, alt: h.kind === 'lane' && d.shift });
+        return;
+      }
+      case 'gutter':
+        open({ kind: 'measure', m: tempo.locate(d.beat).m });
+        return;
+      case 'genBtn':
+        open({ kind: 'measure', m: h.m });
+        return;
+      case 'loop':
+      case 'miniLoop':
+        open({ kind: 'loop', beat: d.beat });
+        return;
+      case 'end':
+        showTip(null);
+        open({ kind: 'end' });
+        return;
+    }
+  };
+
   const onDoubleClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     const l = local();
     const s = useEditor.getState();
@@ -784,6 +872,21 @@ export function ChartCanvas() {
     const y = e.nativeEvent.offsetY;
     const g = geom(l, currentScroll(l), s.view.pxPerBeat);
     const h = hitTest(l, g, x, y);
+    if (h?.kind === 'chip') {
+      // チップのダブルクリック：消す（BPM 変化は値を変える）。1回目のクリックで置いたばかりのチップは消さない
+      const id = h.view.c.id;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || l.down0 !== id || l.down1 !== id) return;
+      const gv = genView();
+      if (gv && genTargetAt(g, h, x, y, gv)) return;
+      const c = h.view.c;
+      if (c.ch === CH.BPM || c.ch === CH.BPM_EX) {
+        await editBpmAt({ m: c.m, f: c.f });
+        return;
+      }
+      deleteChips([id]);
+      l.down0 = l.down1 = null;
+      return;
+    }
     if (h?.kind === 'end') {
       // END の札のダブルクリック：決めた終わりをやめて、原曲の鳴り終わりに合わせる
       showTip(null);
@@ -804,17 +907,7 @@ export function ChartCanvas() {
       return;
     }
     if (h?.kind !== 'bpm') return;
-    const tempo = tempoOf(s.doc);
-    const pos = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
-    const cur = tempo.bpmAt(tempo.beatOf(pos.m, pos.f));
-    const v = await promptDialog({
-      title: `小節 ${toMeasure(pos.m)} にBPM変化を置く`,
-      body: 'この位置からのBPMを入力してください（#BPMzz と ch08 で書き出します）。',
-      value: String(Math.round(cur * 100) / 100),
-      ok: '置く',
-    });
-    const bpm = v ? Number(v) : NaN;
-    if (Number.isFinite(bpm) && bpm > 0) placeBpmChange(pos, bpm);
+    await editBpmAt(snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div));
   };
 
   return (
@@ -1563,16 +1656,27 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       const [me, other, key] = mk.side === 'a' ? ['A', 'B', 'O'] : ['B', 'A', 'I'];
       return at(`loop:${mk.side}`, 'hint', `ループの帯（${me} だけ）`, [
         `${other}（${key} キー・上のバーの ${other}）を決めるとループします`,
-        `${me} の印をドラッグ: 動かす / 右クリック: 消す`,
+        `${me} の印をドラッグ: 動かす / 右クリック: メニュー（印を消す・ここを ${other} に）`,
         'ドラッグ: 新しい範囲 / クリック: その小節をループ',
       ]);
     }
     return at(loop ? 'loop' : 'loop:none', 'hint', 'ループの帯', loop
-      ? ['ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', '範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', '右クリック: ループを消す']
-      : ['ドラッグしてループ（A–B）の範囲を作ります', 'クリックだけならその小節をループ', 'I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます']);
+      ? ['ドラッグ: 新しい範囲 / A・B の印をドラッグ: 端を動かす', '範囲の中をドラッグ: 範囲ごと動かす / クリック: オン・オフ', '右クリック: メニュー（ループを消す・ここを A・B に）']
+      : [
+          'ドラッグしてループ（A–B）の範囲を作ります',
+          'クリックだけならその小節をループ',
+          'I・O キー（上のバーの A・B）で始まりと終わりを1つずつ決めても作れます',
+          '右クリック: メニュー（ここを A・B に）',
+        ]);
   }
   if (h.kind === 'end') return endTip(x, y, false);
-  if (h.kind === 'gutter') return at('gutter', 'hint', '小節番号の列', ['クリック・ドラッグ: 再生を始める位置（▶）を置く', 'ダブルクリック: セクション名を付ける']);
+  if (h.kind === 'gutter') {
+    return at('gutter', 'hint', '小節番号の列', [
+      'クリック・ドラッグ: 再生を始める位置（▶）を置く',
+      'ダブルクリック: セクション名を付ける',
+      '右クリック: 小節のメニュー（生成・ループ・挿入・削除）',
+    ]);
+  }
   if (h.kind === 'genBtn') {
     const gs = useMeasureGen.getState();
     const mine = gs.open && h.m >= gs.from && h.m <= gs.to;
@@ -1580,6 +1684,7 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       mine && gs.from === gs.to ? 'クリック: 生成をやめる' : 'クリック: この小節の案を作る（AI・採譜・写す）',
       gs.open && !mine ? `Shift+クリック: 生成の範囲をここまで広げる（${toMeasure(Math.min(gs.from, h.m))}〜${toMeasure(Math.max(gs.to, h.m))}、4小節まで）` : 'Shift+クリック: 生成の範囲を広げる（4小節まで）',
       '入れるまで譜面は変わりません。Alt+G で ▶ の小節',
+      '右クリック: 小節のメニュー',
     ]);
   }
   {
@@ -1627,8 +1732,24 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
       'ダブルクリック: そこから再生',
     ]);
   }
-  if (h.kind === 'audio') return at('audio', 'hint', '原曲の打点・波形', ['クリック: 再生を始める位置（▶）を置く', 'ダブルクリック: そこから再生']);
+  if (h.kind === 'audio') return at('audio', 'hint', '原曲の打点・波形', ['クリック: 再生を始める位置（▶）を置く', 'ダブルクリック: そこから再生', '右クリック: メニュー（グリッド・ループなど）']);
   return null;
+}
+
+/** BPM 変化を置く・値を変える（BPM の列のダブルクリック） */
+async function editBpmAt(pos: Pos) {
+  const doc = useEditor.getState().doc;
+  const tempo = tempoOf(doc);
+  const cur = tempo.bpmAt(tempo.beatOf(pos.m, pos.f));
+  const had = doc.chips.some((c) => (c.ch === CH.BPM || c.ch === CH.BPM_EX) && c.m === pos.m && c.f.n * pos.f.d === pos.f.n * c.f.d);
+  const v = await promptDialog({
+    title: had ? `小節 ${toMeasure(pos.m)} の BPM 変化を変える` : `小節 ${toMeasure(pos.m)} にBPM変化を置く`,
+    body: 'この位置からのBPMを入力してください（#BPMzz と ch08 で書き出します）。',
+    value: String(Math.round(cur * 100) / 100),
+    ok: had ? '変える' : '置く',
+  });
+  const bpm = v ? Number(v) : NaN;
+  if (Number.isFinite(bpm) && bpm > 0) placeBpmChange(pos, bpm);
 }
 
 const END_HOW = { set: '', audio: '原曲の鳴り終わり', video: '参照映像の終わり', chips: '最後のチップのすぐ後' } as const;
@@ -1647,7 +1768,7 @@ function endTip(x: number, y: number, dragging: boolean): Tip {
         head,
         m <= minSongEnd(doc) ? '最後のチップより前にはできません' : `${back}の所に来ると、${back === '原曲の鳴り終わり' ? '原曲に合わせる（原曲を差し替えても付いていく）' : 'そこで止まります'}`,
       ]
-    : [head, 'NX もここで演奏を終えます（最後の小節線）。DTX にも書き出します', `ドラッグ: 動かす（小節の頭に吸着） / ダブルクリック: ${back}に合わせる`];
+    : [head, 'NX もここで演奏を終えます（最後の小節線）。DTX にも書き出します', `ドラッグ: 動かす（小節の頭に吸着） / ダブルクリック: ${back}に合わせる`, '右クリック: メニュー（最後のチップのすぐ後・▶ の所に）'];
   return { key: dragging ? 'end:drag' : `end:${m}:${why}`, x, y, level: 'hint', title: '曲の終わり（END）', lines, now: dragging };
 }
 

@@ -2,7 +2,7 @@ import { sameMeasures } from '../assist/similar';
 import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
-import { bgaChannel, CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
 import { applySimilar, clearSimilarPin, setBandFilter, setSpecGain, setSpecMode, setWaveMode, useAssist } from '../store/assist';
 import type { SpecMode } from '../audio/spectro';
 import { SPEC_ZONES } from './specColors';
@@ -19,7 +19,7 @@ import { drumStatusText, setDrumsEnabled, useDrums } from '../store/drums';
 import { ADTOF } from '../transcribe/model';
 import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
-import { chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
+import { channelName, chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
 import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
 import { promptDialog } from './dialogs';
 import { usePlayBeat } from './hooks';
@@ -44,18 +44,6 @@ export function RightPanel() {
   );
 }
 
-function channelName(ch: number): string {
-  const d = drumChannel(ch);
-  if (d) return d.name;
-  if (ch === CH.BGM) return 'BGM';
-  if (ch === CH.BPM || ch === CH.BPM_EX) return 'BPM変化';
-  if (ch === CH.FILLIN) return 'フィルイン区間';
-  if (ch === CH.FILLIN_SOUND) return 'フィルインの音';
-  const b = bgaChannel(ch);
-  if (b) return b.name;
-  return `SE（ch ${ch.toString(16).toUpperCase()}）`;
-}
-
 function SelectionCard() {
   const doc = useEditor((s) => s.doc);
   const selection = useEditor((s) => s.selection);
@@ -78,7 +66,8 @@ function SelectionCard() {
           <div>
             <kbd>Shift</kbd>+クリック … HHオープン／左バスドラム
           </div>
-          <div>右クリック（ドラッグ） … 消す</div>
+          <div>ダブルクリック … 消す（右ボタンでなぞるとまとめて消す）</div>
+          <div>右クリック … メニュー（チップならベロシティ・レーン・削除、何もない所ならグリッド）</div>
           <div>空いた所をドラッグ … 範囲を選ぶ</div>
           <div>チップをドラッグ／<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> … 動かす</div>
           <div>

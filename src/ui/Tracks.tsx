@@ -5,7 +5,8 @@ import { computePeaks, stemKindInfo } from '../audio/stems';
 import { engine } from '../audio/engine';
 import { DRUM_LANES, drumChannel } from '../dtx/model';
 import { pickBgmFile } from '../app/fileActions';
-import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setLoop, setSpecSource, setWaveMode, useAssist, type LoopDrag } from '../store/assist';
+import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setSpecSource, setWaveMode, useAssist, type LoopDrag } from '../store/assist';
+import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
 import { bgmSource, tempoOf, wavPath } from '../store/derived';
 import { dragSongEnd, openPage, playFrom, resetSongEnd, setCursorBeat, setView, useEditor } from '../store/editor';
 import { maxTracksH, SEEK_CLOSED_H, togglePanel, useLayout } from '../store/layout';
@@ -114,7 +115,13 @@ function peaksOfOrig(): Float32Array | null {
 
 // ---- 操作（シーク・ループ） --------------------------------------------------------
 
-type SeekDrag = { type: 'seek' } | { type: 'loop'; ld: LoopDrag; x0: number } | { type: 'end'; group: string } | null;
+type SeekDrag =
+  | { type: 'seek' }
+  | { type: 'loop'; ld: LoopDrag; x0: number }
+  | { type: 'end'; group: string }
+  /** 右ボタン：離したらループの帯・END のメニュー */
+  | { type: 'menu'; what: 'loop' | 'end'; beat: number; cx: number; cy: number }
+  | null;
 
 /** 上の帯の「END」の札の幅 */
 const END_TAB_W = 26;
@@ -175,11 +182,18 @@ function useSeekPointer(span: number, ruler: boolean) {
     onPointerDown: (e: React.PointerEvent<HTMLCanvasElement>) => {
       const c = e.currentTarget;
       const g = geomAt(c, e.clientX, e.clientY);
+      // 右クリックのメニューを閉じるための押下は、ここでは何もしない
+      const dismissed = dismissedBy(e.timeStamp) || closeCtxMenu();
       if (e.button === 2) {
-        if (inBand(g.y)) setLoop(null);
+        // 上の帯・END の線の右クリック：譜面の左端の帯と同じメニュー（離したときに出す）
+        const what = inBand(g.y) ? 'loop' : nearEnd(g.x, g.y, g.w) ? 'end' : null;
+        if (what) {
+          c.setPointerCapture(e.pointerId);
+          drag.current = { type: 'menu', what, beat: g.beat, cx: e.clientX, cy: e.clientY };
+        }
         return;
       }
-      if (e.button !== 0) return;
+      if (e.button !== 0 || dismissed) return;
       c.setPointerCapture(e.pointerId);
       const near = nearHandle(g.x, g.w);
       if (inBand(g.y) || near) {
@@ -210,7 +224,9 @@ function useSeekPointer(span: number, ruler: boolean) {
       }
       if (d.type === 'seek') seek(c, e.clientX, false);
       else if (d.type === 'end') dragSongEnd(g.beat, d.group);
-      else dragLoop(d.ld, g.beat, LOOP_DIV, Math.abs(e.clientX - d.x0) > 3);
+      else if (d.type === 'menu') {
+        if (Math.hypot(e.clientX - d.cx, e.clientY - d.cy) > 5) drag.current = null;
+      } else dragLoop(d.ld, g.beat, LOOP_DIV, Math.abs(e.clientX - d.x0) > 3);
     },
     onPointerUp: (e: React.PointerEvent<HTMLCanvasElement>) => {
       const d = drag.current;
@@ -218,6 +234,7 @@ function useSeekPointer(span: number, ruler: boolean) {
       if (!d) return;
       if (d.type === 'seek') seek(e.currentTarget, e.clientX, true);
       else if (d.type === 'loop') endLoopDrag(d.ld);
+      else if (d.type === 'menu') openCtxMenu(d.what === 'loop' ? { kind: 'loop', beat: d.beat } : { kind: 'end' }, d.cx, d.cy);
     },
     onDoubleClick: (e: React.MouseEvent<HTMLCanvasElement>) => {
       const g = geomAt(e.currentTarget, e.clientX, e.clientY);
@@ -532,7 +549,7 @@ function Ruler({ length, span }: { length: number; span: number }) {
       className="tracks-ruler"
       {...handlers}
       aria-label="ループの帯とセクション。クリックで再生を始める位置、上の帯のドラッグでループの範囲、END の札のドラッグで曲の終わり"
-      title="クリック: 再生を始める位置（▶）/ 上の帯をドラッグ: ループ（A–B）の範囲、A・B の印をドラッグで端を動かす / 右クリック（上の帯）: ループを消す / END の札をドラッグ: 曲の終わりを動かす（ダブルクリックで原曲の終わりに戻す）"
+      title="クリック: 再生を始める位置（▶）/ 上の帯をドラッグ: ループ（A–B）の範囲、A・B の印をドラッグで端を動かす / 右クリック（上の帯）: ループのメニュー（消す・ここを A・B に）/ END の札をドラッグ: 曲の終わりを動かす（ダブルクリックで原曲の終わりに戻す、右クリックでメニュー）"
     />
   );
 }
