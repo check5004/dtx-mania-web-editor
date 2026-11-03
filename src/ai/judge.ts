@@ -229,9 +229,11 @@ export function planPrompt(o: {
     'あなたは DTXMania（ドラム）の譜面作者です。完成した MASTER 譜面から低い難易度を作るときの「どこをどう簡略化するか」だけを決めます。',
     'ノーツの配置はルールエンジンが行います。あなたはセクションごとに、全体の簡略化の段からの増減（shift）とフィルの扱いなどを選んでください。',
     '音楽性を壊さないこと: 曲の山場（サビ）らしさ、キメ、ノリは残し、静かな所はより簡単にしてよい。同じ形のセクションには同じ方針を。',
+    '目標のレベルに入ることが最優先です。shift の -（元の譜面に近く）は山場の一部だけにし、そのぶん静かな所を + にして釣り合わせてください。',
     `フィルの扱い: ${Object.entries(FILL_STYLES)
       .map(([k, v]) => `${k}=${v.label}`)
       .join('、')}`,
+    `フィルの細かさの上限: ADVANCED は ${FILL_LIMIT.ADVANCED} まで、BASIC は ${FILL_LIMIT.BASIC} まで（それより細かい指定は ${FILL_LIMIT.BASIC}・${FILL_LIMIT.ADVANCED} に直します）。`,
     '答えは指定の JSON だけで返してください。sections は与えたセクションと同じ範囲で、すべて返してください。',
   ].join('\n');
   const lines: string[] = [];
@@ -250,11 +252,16 @@ export function planPrompt(o: {
   return { system, user: lines.join('\n') };
 }
 
-export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpan[]): DifficultyPlan {
+/** 難易度ごとのフィルの細かさの上限（BASIC に 16分のフィルを残すと目標のレベルに届かない） */
+const FILL_ORDER: NonNullable<SectionPlan['fill']>[] = ['keep', 'thin', 'short', 'last'];
+export const FILL_LIMIT: Record<Difficulty, NonNullable<SectionPlan['fill']>> = { EXTREME: 'keep', ADVANCED: 'thin', BASIC: 'short' };
+
+export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpan[], diff?: Difficulty): DifficultyPlan {
   const got = Array.isArray(raw?.sections) ? raw!.sections : [];
   const sections: SectionPlan[] = spans.map((s) => {
     const r = got.find((x) => x && Number(x.from) === s.from) ?? got.find((x) => x && x.name === s.name);
-    const fill = r?.fill && r.fill in FILL_STYLES ? r.fill : undefined;
+    let fill = r?.fill && r.fill in FILL_STYLES ? r.fill : undefined;
+    if (fill && diff && FILL_ORDER.indexOf(fill) < FILL_ORDER.indexOf(FILL_LIMIT[diff])) fill = FILL_LIMIT[diff];
     return {
       name: s.name,
       from: s.from,

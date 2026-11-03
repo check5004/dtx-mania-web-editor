@@ -133,6 +133,21 @@ function defaultPlan(spans: SectionSpan[]): DifficultyPlan {
   return { summary: '標準の方針です。機械的な推定が目標のレベルに入るまで簡略化の段を上げ下げし、段のあいだは4小節のうち何小節かだけ次の段にして合わせます。', sections: spans.map((s) => ({ name: s.name, from: s.from, to: s.to, shift: 0 })) };
 }
 
+/** 目標より難しくなる指定（元に近く・フィルを残す・ライドを残す）を外した方針。外すものが無ければ null */
+export function relaxPlan(plan: DifficultyPlan): DifficultyPlan | null {
+  const strong = (s: DifficultyPlan['sections'][number]) => s.shift < 0 || s.fill === 'keep' || s.fill === 'thin' || !!s.keepRide;
+  if (!plan.sections.some(strong)) return null;
+  return {
+    summary: `${plan.summary}${plan.summary ? ' ' : ''}（この方針では目標のレベルまで簡単にできなかったので、「元の譜面に近く」「フィルを残す」「ライドを残す」の指定を外して作りました）`,
+    sections: plan.sections.map((s) => ({ ...s, shift: Math.max(0, s.shift), fill: s.fill === 'keep' || s.fill === 'thin' ? undefined : s.fill, keepRide: false })),
+  };
+}
+
+/** 目標の帯からどれだけ外れているか（中なら 0） */
+function targetGap(lv: number, t: { min: number; max: number }) {
+  return lv < t.min ? t.min - lv : lv > t.max ? lv - t.max : 0;
+}
+
 function inTarget(lv: number, t: { min: number; max: number }) {
   return lv >= t.min - 1e-9 && lv <= t.max + 1e-9;
 }
@@ -182,37 +197,54 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
         return;
       }
       cost += r.costUsed;
-      plan = cleanPlan(r.data, g.spans);
+      plan = cleanPlan(r.data, g.spans, diff);
       planSource = 'ai';
     }
     patchDiff(diff, { status: 'building', plan, planSource, cost });
     // 2. 配置と再調整（機械的な推定で）
-    const base = { doc: master, sections: plan.sections, keep: get().keep, overrides: get().diffs[diff].overrides };
+    let base = { doc: master, sections: plan.sections, keep: get().keep, overrides: get().diffs[diff].overrides };
     const calib = g.calib;
-    let result = generateToTarget(base, DEFAULT_RUNG[diff], { min: ds.target.min / calib, max: ds.target.max / calib });
-    // 3. AI 判定。外れたら段を1つ動かして1回だけ作り直す
+    const rawTarget = { min: ds.target.min / calib, max: ds.target.max / calib };
+    let result = generateToTarget(base, DEFAULT_RUNG[diff], rawTarget);
+    // AI の方針（元に近く・フィルを残す・ライドを残す）が強すぎて、いちばん簡単な段でも目標に届かないときは、それを外して作り直す
+    if (result.level > rawTarget.max + 1e-9) {
+      const relaxed = relaxPlan(plan);
+      if (relaxed) {
+        const base2 = { ...base, sections: relaxed.sections };
+        const r2 = generateToTarget(base2, DEFAULT_RUNG[diff], rawTarget);
+        if (r2.level < result.level) {
+          result = r2;
+          base = base2;
+          plan = relaxed;
+        }
+      }
+    }
+    // 3. AI 判定。外れたら、AI と計算のずれのぶん狙いを動かして1回だけ作り直す（段のあいだの細かい調整も使う）。
+    //    AI の判定は 0.1〜0.2 ほどぶれるので、作り直しは目標の真ん中を狙い、2つのうち目標に近い方を採る。
     let judge: JudgeResult | null = null;
     if (useAi) {
       patchDiff(diff, { status: 'judging', result, issues: issueCount(result.doc) });
-      judge = await judgeDoc(result.doc, { title, label: diff, sections: useSidecar.getState().sections, mech: result.level * calib, quiet: true });
+      const sections = useSidecar.getState().sections;
+      judge = await judgeDoc(result.doc, { title, label: diff, sections, mech: result.level * calib, quiet: true });
       if (judge) {
         cost += judge.cost;
         if (!inTarget(judge.level, ds.target)) {
-          const next = result.rung + (judge.level > ds.target.max ? 1 : -1);
-          if (next >= 0 && next <= MAX_RUNG) {
-            const r2 = simplify({ ...base, rung: next });
-            const lv2 = levelOfDoc(r2.doc);
-            result = { ...r2, rung: next, level: lv2, ease: 0, tries: [...result.tries, { rung: next, level: lv2 }] };
-            const j2 = await judgeDoc(result.doc, { title, label: diff, sections: useSidecar.getState().sections, mech: lv2 * calib, quiet: true });
+          const center = ds.target.center - (judge.level - result.level * calib);
+          const r2 = generateToTarget(base, result.rung, { min: (center - 0.1) / calib, max: (center + 0.1) / calib });
+          if (r2.rung !== result.rung || r2.ease !== result.ease) {
+            const j2 = await judgeDoc(r2.doc, { title, label: diff, sections, mech: r2.level * calib, quiet: true });
             if (j2) {
               cost += j2.cost;
-              judge = j2;
+              if (targetGap(j2.level, ds.target) <= targetGap(judge.level, ds.target)) {
+                result = { ...r2, tries: [...result.tries, ...r2.tries] };
+                judge = j2;
+              }
             }
           }
         }
       }
     }
-    patchDiff(diff, { status: 'done', result, judge, issues: issueCount(result.doc), cost });
+    patchDiff(diff, { status: 'done', plan, result, judge, issues: issueCount(result.doc), cost });
   } catch (e) {
     patchDiff(diff, { status: 'error', error: e instanceof AiError ? e.message : `作れませんでした: ${(e as Error).message}`, cost });
   }
@@ -325,6 +357,16 @@ export function buildSetDef(existing: string | null, title: string, masterFile: 
   return lines.join('\r\n') + '\r\n';
 }
 
+/** set.def に今ある難易度のうち、作った譜面に置き換わるもの（同じ難易度名で別のファイル） */
+export function replacedInSetDef(existing: string | null, masterFile: string, made: { diff: Difficulty; file: string }[]): { label: string; file: string }[] {
+  if (!existing) return [];
+  const blocks = parseSetDef(existing);
+  const block = blocks.find((b) => b.levels.some((l) => l.file.toLowerCase() === masterFile.toLowerCase())) ?? blocks[0];
+  if (!block) return [];
+  const madeFiles = new Set(made.map((m) => m.file.toLowerCase()));
+  return block.levels.filter((l) => !madeFiles.has(l.file.toLowerCase()) && l.file.toLowerCase() !== masterFile.toLowerCase() && made.some((m) => m.diff === l.label.toUpperCase()));
+}
+
 /** 作った難易度を曲フォルダに書き出し、set.def を更新する */
 export async function writeOut(): Promise<boolean> {
   const g = get();
@@ -341,9 +383,24 @@ export async function writeOut(): Promise<boolean> {
     return false;
   }
   const files = made.map((d) => ({ diff: d, file: outFileName(g.masterFile, d) }));
+  let existing: string | null = null;
+  const sd = findFile(folder, 'set.def');
+  if (sd) {
+    try {
+      existing = decodeDtx(new Uint8Array(await (await sd.getFile()).arrayBuffer())).text;
+    } catch {
+      existing = null;
+    }
+  }
   const exists = files.filter((f) => findFile(folder, f.file));
-  if (exists.length) {
-    const ok = await confirmDialog({ title: '同じ名前の譜面があります', body: `${exists.map((f) => f.file).join('、')} を上書きします。よろしいですか？`, ok: '上書き', danger: true });
+  const replaced = replacedInSetDef(existing, g.masterFile, files);
+  if (exists.length || replaced.length) {
+    const body = [
+      exists.length ? `${exists.map((f) => f.file).join('、')} を上書きします。` : '',
+      replaced.length ? `set.def の ${replaced.map((l) => `${l.label}（${l.file}）`).join('、')} を、作った譜面に置き換えます（元の譜面のファイルは消しません）。` : '',
+      'よろしいですか？',
+    ].filter(Boolean).join('\n');
+    const ok = await confirmDialog({ title: exists.length ? '同じ名前の譜面があります' : 'set.def の難易度を置き換えます', body, ok: exists.length ? '上書き' : '置き換える', danger: true });
     if (!ok) return false;
   }
   let memory = false;
@@ -354,15 +411,6 @@ export async function writeOut(): Promise<boolean> {
     setField(doc, 'DLEVEL', levelToField(lv));
     const { bytes } = encodeDtx(serializeDtx(doc), 'shift_jis');
     if ((await putFile(folder, file, bytes)) === 'memory') memory = true;
-  }
-  let existing: string | null = null;
-  const sd = findFile(folder, 'set.def');
-  if (sd) {
-    try {
-      existing = decodeDtx(new Uint8Array(await (await sd.getFile()).arrayBuffer())).text;
-    } catch {
-      existing = null;
-    }
   }
   const text = buildSetDef(existing, g.master.fields['TITLE'] || g.masterFile, g.masterFile, g.masterLabel, files);
   if ((await putFile(folder, 'set.def', encodeDtx(text, 'shift_jis').bytes)) === 'memory') memory = true;

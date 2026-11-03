@@ -159,5 +159,37 @@ export function songInfoPrompt(input: { title: string; artist: string; youtubeTi
   if (input.genre) lines.push(`今のジャンル: ${input.genre}`);
   if (input.bpm) lines.push(`BPM: ${input.bpm}`);
   lines.push('', '正式な曲名・アーティスト・ジャンル・リリース年を調べ、選曲画面のコメントと演奏中のパネル文を日本語で下書きしてください。');
+  // Web 検索を使うと response_format が効かないモデルがあるので、キー名を文でも伝える
+  lines.push(
+    '',
+    '答えは次のキーを持つ JSON 1つだけ（キー名は英語のまま）:',
+    'title（正式な曲名）, artist（正式なアーティスト表記）, genre（短いジャンル）, year（リリース年を4桁、分からなければ空）, comment（選曲画面のコメント、60字以内）, panel（演奏中のパネル文、40字以内）, confidence（high / medium / low）, notes（確かめたこと・分からなかったこと）',
+    'comment・panel・notes に URL やリンクの記法は入れないでください。',
+  );
   return { system, user: lines.join('\n') };
+}
+
+const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').trim();
+/** [文字](URL) は文字だけにし、むき出しの URL は消す */
+const noLinks = (t: string) =>
+  t
+    .replace(/\[([^\]]*)\]\((?:https?:)?[^)]*\)/g, '$1')
+    .replace(/[（(]?\s*https?:\/\/[^\s)）]+\s*[)）]?/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+/** AI の答えを画面と DTX に入れられる形にそろえる（型の違い・年の書き方・リンクの混入） */
+export function cleanSongInfo(raw: Partial<Record<keyof SongInfoAnswer, unknown>> | null | undefined): SongInfoAnswer {
+  const r = raw ?? {};
+  const conf = r.confidence === 'high' || r.confidence === 'medium' ? r.confidence : 'low';
+  return {
+    title: str(r.title),
+    artist: str(r.artist),
+    genre: str(r.genre),
+    year: /(?:19|20)\d{2}/.exec(str(r.year))?.[0] ?? '',
+    comment: noLinks(str(r.comment)),
+    panel: noLinks(str(r.panel)),
+    confidence: conf,
+    notes: noLinks(str(r.notes)),
+  };
 }

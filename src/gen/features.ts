@@ -219,11 +219,14 @@ export function sectionSummaries(doc: DtxDoc, sections: { name: string; from: nu
   const notes = drumNotes(doc, tempo);
   return sections.map((s) => {
     const ns = notes.filter((n) => n.m >= s.from && n.m <= s.to);
-    if (ns.length === 0) return `${s.name}（${s.from}〜${s.to}小節）: ノーツなし`;
+    // 名前が「0〜7小節」のような範囲そのものなら、範囲を重ねて書かない
+    const span = `${s.from}〜${s.to}小節`;
+    const head = s.name === span ? span : `${s.name}（${span}）`;
+    if (ns.length === 0) return `${head}: ノーツなし`;
     const secs = Math.max(0.5, tempo.beatToSec(tempo.measureStart(s.to + 1)) - tempo.beatToSec(tempo.measureStart(s.from)));
     const per = LANE_KEYS.map((k, i) => [k, ns.filter((n) => n.lane === i).length] as const).filter(([, c]) => c > 0);
     const fine = ns.filter((n) => !onGrid(n.inBeat, 0.5)).length;
-    return `${s.name}（${s.from}〜${s.to}小節）: ${ns.length}ノーツ, ${(ns.length / secs).toFixed(1)}打/秒, 8分より細かい音 ${Math.round((fine / ns.length) * 100)}%, レーン別 ${per.map(([k, c]) => `${k}${c}`).join(' ')}`;
+    return `${head}: ${ns.length}ノーツ, ${(ns.length / secs).toFixed(1)}打/秒, 8分より細かい音 ${Math.round((fine / ns.length) * 100)}%, レーン別 ${per.map(([k, c]) => `${k}${c}`).join(' ')}`;
   });
 }
 

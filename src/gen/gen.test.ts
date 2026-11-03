@@ -87,6 +87,23 @@ describe('簡略化', () => {
     for (const n of ns) counts.set(Math.round(n.beat * 96), (counts.get(Math.round(n.beat * 96)) ?? 0) + 1);
     expect(Math.max(...counts.values())).toBeLessThanOrEqual(3);
   });
+  it('2・4拍にスネアが無いグルーヴでは、裏拍のスネアをバックビートとして残す', () => {
+    // 実曲（ブレス・ユア・ブレス MASTER）の形：SD は16分の 3・6・9・11・14、BD は4分、ライドは4分
+    const chips = [];
+    let id = 1;
+    for (let m = 0; m < 4; m++) {
+      for (const k of [0, 4, 8, 12]) chips.push(chip(id++, CH.BD, m, k, 16), chip(id++, CH.RD, m, k, 16));
+      for (const k of [3, 6, 9, 11, 14]) chips.push(chip(id++, CH.SD, m, k, 16));
+      for (const k of [2, 6, 10, 14]) chips.push(chip(id++, CH.LP, m, k, 16));
+    }
+    const d: DtxDoc = { ...emptyDoc(), fields: { BPM: '152' }, chips, nextId: id };
+    const sec = [{ name: 'A', from: 0, to: 3, shift: 0 }];
+    // 人が作った BASIC と同じく、2拍目の裏と4拍目の裏だけ残る（拍で 1.5 と 3.5）
+    expect(at(simplify({ doc: d, rung: 8, sections: sec, keep: DEFAULT_KEEP }).doc, 1, CH.SD)).toEqual([1.5, 3.5]);
+    expect(at(simplify({ doc: d, rung: 6, sections: sec, keep: { ...DEFAULT_KEEP, backbeat: false } }).doc, 1, CH.SD)).toEqual([1.5, 3.5]);
+    // ふつうの8ビートは今までどおり2・4拍
+    expect(at(simplify({ doc: song(), rung: 8, sections, keep: DEFAULT_KEEP }).doc, 1, CH.SD)).toEqual([1, 3]);
+  });
   it('同じ中身の小節は同じ結果', () => {
     const r = simplify({ doc: song(), rung: 5, sections, keep: DEFAULT_KEEP });
     const pat = (m: number) =>

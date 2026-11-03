@@ -3,9 +3,10 @@ import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures } from '../gen/features';
 import { bandStats, levelOfField, predictLevel, type ChartEntry } from '../store/guideline';
-import { buildSetDef, outFileName } from '../store/gen';
+import { buildSetDef, outFileName, relaxPlan, replacedInSetDef } from '../store/gen';
 import { cleanJudgement, cleanPlan, sectionSpans } from './judge';
-import { buildChatBody, parseJsonLoose, parseModels } from './openrouter';
+import { buildChatBody, isChatModel, missingKeys, parseJsonLoose, parseModels, repairPrompt } from './openrouter';
+import { cleanSongInfo, SONG_INFO_SCHEMA } from './songInfo';
 import { decodeCandidates, enforcePlayable, measureGrid, ruleCandidates } from './phrase';
 import { estimateCost, meetsNeeds, modelInfo, taskDef } from './tasks';
 import { frac } from '../dtx/fraction';
@@ -149,6 +150,21 @@ describe('レベル判定と方針', () => {
     expect(p.sections[0].shift).toBe(0);
     expect(cleanJudgement({ level: 12, reasons: ['a'] }).level).toBe(9.99);
   });
+  it('低い難易度では細かいフィルの指定を上限までにする（BASIC に16分のフィルを残さない）', () => {
+    const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
+    const raw = { summary: 's', sections: [{ name: 'A', from: 0, to: 7, shift: 0, fill: 'keep' as const, keepRide: false, keepOpenHH: false, comment: '' }, { name: 'サビ', from: 8, to: 15, shift: -1, fill: 'last' as const, keepRide: true, keepOpenHH: false, comment: '' }] };
+    expect(cleanPlan(raw, spans, 'BASIC').sections.map((x) => x.fill)).toEqual(['short', 'last']);
+    expect(cleanPlan(raw, spans, 'ADVANCED').sections.map((x) => x.fill)).toEqual(['thin', 'last']);
+    expect(cleanPlan(raw, spans, 'EXTREME').sections.map((x) => x.fill)).toEqual(['keep', 'last']);
+  });
+  it('方針が強すぎて目標に届かないときは、元に近く・フィル・ライドの指定を外せる', () => {
+    const plan = { summary: 'x', sections: [{ name: 'A', from: 0, to: 7, shift: -1, fill: 'thin' as const, keepRide: true, keepOpenHH: true }, { name: 'B', from: 8, to: 15, shift: 1, fill: 'last' as const }] };
+    const r = relaxPlan(plan)!;
+    expect(r.sections[0]).toMatchObject({ shift: 0, fill: undefined, keepRide: false, keepOpenHH: true });
+    expect(r.sections[1]).toMatchObject({ shift: 1, fill: 'last' });
+    expect(r.summary).toContain('指定を外して');
+    expect(relaxPlan({ summary: '', sections: [{ name: 'B', from: 0, to: 7, shift: 1, fill: 'short' }] })).toBeNull();
+  });
 });
 
 describe('ガイドライン', () => {
@@ -189,5 +205,38 @@ describe('書き出し', () => {
     expect(out).toContain('#L2LABEL ADVANCED');
     expect(out).toContain('#L4LABEL MASTER\r\n#L4FILE song.dtx');
     expect(out).toContain('#L3LABEL NOVICE\r\n#L3FILE nov.dtx');
+  });
+  it('set.def で置き換わる難易度を知らせる（DTXCreatorAL の「#L1LABEL: Basic」形式）', () => {
+    const setdef = '#TITLE: 曲\r\n#L1LABEL: Basic\r\n#L1FILE: s-bas.dtx\r\n#L2LABEL: Advanced\r\n#L2FILE: s-adv.dtx\r\n#L4LABEL: Master\r\n#L4FILE: s-mas.dtx\r\n';
+    const made = [{ diff: 'BASIC' as const, file: 's_bsc.dtx' }];
+    expect(replacedInSetDef(setdef, 's-mas.dtx', made)).toEqual([{ label: 'Basic', file: 's-bas.dtx' }]);
+    expect(replacedInSetDef(null, 's-mas.dtx', made)).toEqual([]);
+  });
+});
+
+describe('AIの答えの形', () => {
+  it(':batch のモデルは一覧に出さない（chat/completions では呼べない）', () => {
+    expect(isChatModel('anthropic/claude-haiku-5.5')).toBe(true);
+    expect(isChatModel('anthropic/claude-haiku-5.5:batch')).toBe(false);
+    const ms = parseModels({ data: [{ id: 'a/x' }, { id: 'a/x:batch' }] });
+    expect(ms.map((m) => m.id)).toEqual(['a/x']);
+  });
+  it('Web検索のときに勝手なキー名で返ってきたら、足りないキーを見つける', () => {
+    // 実際に Claude Haiku 5.5 + openrouter:web_search で返ってきた形
+    const got = parseJsonLoose('```json\n{"title":"ブレス・ユア・ブレス","artist":"和田たけあき feat. 初音ミク","genre":"ロック","release_year":"2019","song_comment_select_screen":"…","notes":"…"}\n```');
+    expect(missingKeys(SONG_INFO_SCHEMA.schema, got)).toEqual(['year', 'comment', 'panel', 'confidence']);
+    expect(missingKeys(SONG_INFO_SCHEMA.schema, { title: '', artist: '', genre: '', year: '', comment: '', panel: '', confidence: 'low', notes: '' })).toEqual([]);
+    expect(missingKeys({ required: ['candidates'], properties: { candidates: { type: 'array' } } }, { candidates: 'x' })).toEqual(['candidates']);
+    expect(missingKeys({ required: ['a'] }, null)).toEqual(['a']);
+  });
+  it('直す頼み方にはスキーマと元の答えが入る', () => {
+    const p = repairPrompt(SONG_INFO_SCHEMA, '{"release_year":"2019"}');
+    expect(p.system).toContain('title, artist, genre, year');
+    expect(p.user).toContain('release_year');
+  });
+  it('曲情報の答えをそろえる（年は4桁、リンクは外す、自信度の既定は低）', () => {
+    const a = cleanSongInfo({ title: ' X ', year: '2019年', comment: '「マジカルミライ 2019」テーマソング。[piapro.net](https://blog.piapro.net/2019/05/q190531-1.html)', panel: '曲 (https://example.com/a) 終', confidence: 'maybe', notes: 'n' });
+    expect(a).toMatchObject({ title: 'X', year: '2019', comment: '「マジカルミライ 2019」テーマソング。piapro.net', panel: '曲 終', confidence: 'low' });
+    expect(cleanSongInfo({ year: 2020 as unknown as string }).year).toBe('2020');
   });
 });

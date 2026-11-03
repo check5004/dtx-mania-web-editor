@@ -134,6 +134,39 @@ export const FILL_STYLES: Record<NonNullable<SectionPlan['fill']>, { early: Step
   last: { early: null, last: 1, label: 'フィルは最後の拍だけ' },
 };
 
+/**
+ * バックビートとして残すスネア。ふつうは2・4拍（0 から数えて奇数の拍）のスネア。
+ * 2・4拍にスネアが無いグルーヴ（2拍目・4拍目の裏だけで鳴らすなど）では、その半小節のスネアのうち
+ * 8分の位置にあって2・4拍にいちばん近いものを代わりにする（無ければ16分の位置のもの）。フィルの中は見ない。
+ */
+export function backbeatSnares(notes: Note[], fills: ReadonlyMap<number, number>): Set<number> {
+  const out = new Set<number>();
+  const byM = new Map<number, Note[]>();
+  for (const n of notes) {
+    if (n.ch !== CH.SD) continue;
+    const f = fills.get(n.m);
+    if (f !== undefined && n.inBeat >= f - EPS) continue;
+    let a = byM.get(n.m);
+    if (!a) byM.set(n.m, (a = []));
+    a.push(n);
+  }
+  for (const ns of byM.values()) {
+    const beats = Math.round(ns[0].mBeats);
+    for (let b = 1; b < beats; b += 2) {
+      const on = ns.filter((n) => Math.abs(n.inBeat - b) < EPS);
+      if (on.length) {
+        for (const n of on) out.add(n.id);
+        continue;
+      }
+      const near = ns.filter((n) => n.inBeat >= b - 1 - EPS && n.inBeat < b + 1 - EPS);
+      const rank = (n: Note) => (onGrid(n.inBeat, 0.5) ? 0 : 10) + Math.abs(n.inBeat - b) + (n.inBeat > b ? 0 : 0.01);
+      const best = near.sort((x, y) => rank(x) - rank(y))[0];
+      if (best) out.add(best.id);
+    }
+  }
+  return out;
+}
+
 /** フィルの範囲：タムが2打以上ある小節で、最初のタム（か直前のスネアの連続）から小節の終わりまで */
 export function detectFills(notes: Note[]): Map<number, number> {
   const byM = new Map<number, Note[]>();
@@ -146,11 +179,11 @@ export function detectFills(notes: Note[]): Map<number, number> {
   for (const [m, ns] of byM) {
     const toms = ns.filter((n) => TOM_LANES.has(n.lane));
     const half = ns[0].mBeats / 2;
-    // 後半のスネアの16分の連続（4打以上）
-    const sd = ns.filter((n) => n.lane === 3 && n.inBeat >= half - EPS && !onGrid(n.inBeat, 0.5));
-    if (toms.length < 2 && sd.length < 2) continue;
+    // 後半のスネアの連打（16分以下の間隔で3打以上続く）。16分の裏に散らばるだけのスネア（シンコペーションのグルーヴ）はフィルにしない
+    const roll = snareRoll(ns.filter((n) => n.lane === 3 && n.inBeat >= half - EPS).map((n) => n.inBeat));
+    if (toms.length < 2 && roll === null) continue;
     let start = toms.length >= 2 ? toms[0].inBeat : Infinity;
-    if (sd.length >= 2) start = Math.min(start, Math.floor(sd[0].inBeat - EPS));
+    if (roll !== null) start = Math.min(start, Math.floor(roll + EPS));
     // 直前のスネアの連続を含める（同じ拍の中だけ）
     const limit = Math.floor(start + EPS);
     const snares = ns.filter((n) => n.lane === 3 && n.inBeat < start - EPS && n.inBeat >= limit - EPS).map((n) => n.inBeat);
@@ -163,6 +196,17 @@ export function detectFills(notes: Note[]): Map<number, number> {
     out.set(m, Math.max(0, Math.floor(start * 4 + EPS) / 4));
   }
   return out;
+}
+
+/** 16分以下の間隔で3打以上続くスネアの最初の位置（拍）。無ければ null */
+function snareRoll(beats: number[]): number | null {
+  const b = [...new Set(beats.map((x) => Math.round(x * 960) / 960))].sort((x, y) => x - y);
+  let runStart = 0;
+  for (let i = 1; i < b.length; i++) {
+    if (b[i] - b[i - 1] > 0.25 + EPS) runStart = i;
+    else if (i - runStart + 1 >= 3) return b[runStart];
+  }
+  return null;
 }
 
 const PRIORITY: Record<number, number> = {
@@ -186,6 +230,7 @@ export function simplify(input: SimplifyInput): SimplifyResult {
   const tempo = buildTempoMap(doc);
   const notes = drumNotes(doc, tempo);
   const fills = detectFills(notes);
+  const backbeat = backbeatSnares(notes, fills);
   const sectionHeads = new Set(input.sections.map((s) => s.from));
   const planOf = (m: number) => input.sections.find((s) => m >= s.from && m <= s.to);
   const fate = new Map<number, ChipFate>();
@@ -203,7 +248,7 @@ export function simplify(input: SimplifyInput): SimplifyResult {
     let ok: boolean;
     // 必ず残すもの
     if (keep.kick1 && n.ch === CH.BD && isHead) protect = true;
-    if (keep.backbeat && n.ch === CH.SD && !inFill && Math.abs(n.inBeat - Math.round(n.inBeat)) < EPS && Math.round(n.inBeat) % 2 === 1) protect = true;
+    if (keep.backbeat && n.ch === CH.SD && !inFill && backbeat.has(n.id)) protect = true;
     if (keep.sectionCrash && (n.ch === CH.CY || n.ch === CH.LC) && isHead && sectionHeads.has(n.m)) protect = true;
     if (keep.fillLanding && landing && (n.ch === CH.CY || n.ch === CH.LC || n.ch === CH.BD)) protect = true;
 
@@ -233,7 +278,7 @@ export function simplify(input: SimplifyInput): SimplifyResult {
           if (n.lane === 0 && p.leftCymbal === 'toRight') ch = CH.CY;
           break;
         case 3: // スネア
-          ok = p.snare === 'backbeat' ? Math.abs(n.inBeat - Math.round(n.inBeat)) < EPS && Math.round(n.inBeat) % 2 === 1 : onGrid(n.inBeat, p.snare);
+          ok = p.snare === 'backbeat' ? backbeat.has(n.id) : onGrid(n.inBeat, p.snare);
           break;
         case 5: // バスドラム
           ok = onGrid(n.inBeat, p.kick);

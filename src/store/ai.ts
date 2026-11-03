@@ -1,7 +1,7 @@
 // AI（OpenRouter）の設定と呼び出し。キー・処理ごとのモデル・使いすぎ防止・使った額の記録。
 // キーは暗号化されないので、「保存しない」を選ぶとタブを閉じたら消える（sessionStorage）。
 import { create } from 'zustand';
-import { AiError, chat, estimateTokens, fetchKeyInfo, fetchModels, parseJsonLoose, type ChatResult, type Effort, type KeyInfo, type OrModel } from '../ai/openrouter';
+import { AiError, chat, estimateTokens, fetchKeyInfo, fetchModels, isChatModel, missingKeys, parseJsonLoose, repairPrompt, type ChatResult, type Effort, type KeyInfo, type OrModel } from '../ai/openrouter';
 import { estimateCost, modelInfo, taskDef, TASKS, type AiTask } from '../ai/tasks';
 import { confirmDialog } from '../ui/dialogs';
 
@@ -97,6 +97,12 @@ function initial(): AiState {
   const cache = readJson<{ at: number; models: OrModel[] }>(ls, K_MODELS);
   const tasks = defaultTasks();
   for (const t of TASKS) if (saved.tasks?.[t.id]) tasks[t.id] = { ...tasks[t.id], ...saved.tasks[t.id] };
+  // 以前の版で選べてしまった :batch（チャットでは呼べない）は直す
+  for (const t of TASKS) {
+    const c = tasks[t.id];
+    if (!isChatModel(c.model)) tasks[t.id] = { ...c, model: t.model };
+    if (c.fallback && !isChatModel(c.fallback)) tasks[t.id] = { ...tasks[t.id], fallback: null };
+  }
   return {
     key,
     remember,
@@ -267,6 +273,12 @@ export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T
     if (!ok) return null;
   }
   set((st) => ({ running: { ...st.running, [task]: (st.running[task] ?? 0) + 1 } }));
+  const spent = (r: ChatResult) => {
+    const used = r.model ? modelInfo(r.model, s.models) : info;
+    const cost = r.cost ?? estimateCost(used, { in: r.promptTokens, out: r.completionTokens }, 'none', false) ?? est;
+    recordSpend(task, r.model, cost);
+    return cost;
+  };
   try {
     const r = await chat({
       key: s.key,
@@ -285,11 +297,47 @@ export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T
       maxTokens: o.maxTokens,
       signal: o.signal,
     });
-    const used = r.model ? modelInfo(r.model, s.models) : info;
-    const cost = r.cost ?? estimateCost(used, { in: r.promptTokens, out: r.completionTokens }, 'none', false) ?? est;
-    recordSpend(task, r.model, cost);
-    const data = o.schema ? parseJsonLoose<T>(r.text) : (r.text as unknown as T);
-    return { ...r, data, costUsed: cost };
+    const cost = spent(r);
+    if (!o.schema) return { ...r, data: r.text as unknown as T, costUsed: cost };
+    let data: T | null = null;
+    try {
+      data = parseJsonLoose<T>(r.text);
+    } catch {
+      data = null;
+    }
+    if (data !== null && missingKeys(o.schema.schema, data).length === 0) return { ...r, data, costUsed: cost };
+    if (!r.text.trim()) {
+      throw new AiError(
+        r.finish === 'length'
+          ? 'AIが考えている途中で出力の上限に届き、答えが空でした。推論の強さを下げるか、別のモデルを選んでください'
+          : 'AIの答えが空でした。もう一度試すか、別のモデルを選んでください',
+      );
+    }
+    // 形が崩れていたら（Web 検索を使うと指定の形を無視するモデルがある）、同じモデルに形だけ直してもらう。
+    // Web 検索なし・推論は低めなので費用はわずか。
+    const rp = repairPrompt(o.schema, r.text);
+    const r2 = await chat({
+      key: s.key,
+      model: cfg.model,
+      fallback: cfg.fallback,
+      messages: [
+        { role: 'system', content: rp.system },
+        { role: 'user', content: rp.user },
+      ],
+      effort: 'low',
+      reasoning: info ? info.reasoning : undefined,
+      schema: o.schema,
+      structured: info?.structured ?? false,
+      json: info ? info.json : true,
+      maxTokens: o.maxTokens,
+      signal: o.signal,
+    });
+    const cost2 = spent(r2);
+    const fixed = parseJsonLoose<T>(r2.text);
+    const still = missingKeys(o.schema.schema, fixed);
+    if (still.length) throw new AiError(`AIの答えに必要な項目（${still.join('、')}）がありませんでした。もう一度試すか、別のモデルを選んでください`);
+    // 出典（Web 検索の結果）は最初の答えのものを使う
+    return { ...r2, citations: r.citations.length ? r.citations : r2.citations, webSearches: r.webSearches, data: fixed, costUsed: cost + cost2 };
   } finally {
     set((st) => ({ running: { ...st.running, [task]: Math.max(0, (st.running[task] ?? 1) - 1) } }));
   }

@@ -42,6 +42,8 @@ export function parseModels(raw: { data?: RawModel[] }): OrModel[] {
   const out: OrModel[] = [];
   for (const m of raw.data ?? []) {
     if (!m?.id) continue;
+    // :batch はバッチ API 専用で、chat/completions では 404 になる
+    if (!isChatModel(m.id)) continue;
     const outMod = m.architecture?.output_modalities;
     if (outMod && !outMod.includes('text')) continue;
     const params = m.supported_parameters ?? [];
@@ -64,6 +66,11 @@ export function parseModels(raw: { data?: RawModel[] }): OrModel[] {
     });
   }
   return out;
+}
+
+/** chat/completions で呼べるモデルか（バッチ専用の :batch は呼べない） */
+export function isChatModel(id: string): boolean {
+  return !/:batch$/i.test(id);
 }
 
 export async function fetchModels(signal?: AbortSignal): Promise<OrModel[]> {
@@ -170,6 +177,8 @@ export interface ChatResult {
   /** OpenRouter が返した費用（ドル）。無ければ null */
   cost: number | null;
   webSearches: number;
+  /** 止まった理由（stop・length など） */
+  finish: string;
 }
 
 export function buildChatBody(req: Omit<ChatRequest, 'key' | 'signal'>): Record<string, unknown> {
@@ -211,7 +220,7 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
   const j = (await r.json()) as {
     model?: string;
     error?: { message?: string };
-    choices?: { message?: { content?: unknown; annotations?: { type?: string; url_citation?: { url?: string; title?: string } }[] } }[];
+    choices?: { finish_reason?: string; message?: { content?: unknown; annotations?: { type?: string; url_citation?: { url?: string; title?: string } }[] } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number; server_tool_use?: { web_search_requests?: number } };
   };
   if (j.error) throw new AiError(j.error.message ?? 'モデルがエラーを返しました');
@@ -231,6 +240,7 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
     completionTokens: j.usage?.completion_tokens ?? 0,
     cost: typeof j.usage?.cost === 'number' ? j.usage.cost : null,
     webSearches: j.usage?.server_tool_use?.web_search_requests ?? (req.web ? 1 : 0),
+    finish: j.choices?.[0]?.finish_reason ?? '',
   };
 }
 
@@ -253,6 +263,40 @@ export function parseJsonLoose<T = unknown>(text: string): T {
     }
   }
   throw new AiError('AIの答えをJSONとして読めませんでした。もう一度試すか、別のモデルを選んでください');
+}
+
+/**
+ * 答えが JSON Schema の形になっているか（一番外の必須キーと型だけ見る）。足りないキーを返す。
+ * Web 検索などのツールを使うと、モデルによっては response_format の指定が効かず、勝手なキー名で返してくる。
+ */
+export function missingKeys(schema: object, data: unknown): string[] {
+  const sc = schema as { required?: string[]; properties?: Record<string, { type?: string }> };
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return sc.required?.length ? [...sc.required] : ['(object)'];
+  const d = data as Record<string, unknown>;
+  const out: string[] = [];
+  for (const k of sc.required ?? []) {
+    const v = d[k];
+    const t = sc.properties?.[k]?.type;
+    if (v === undefined || v === null) out.push(k);
+    else if (t === 'array' && !Array.isArray(v)) out.push(k);
+    else if (t === 'string' && typeof v !== 'string') out.push(k);
+    else if ((t === 'number' || t === 'integer') && typeof v !== 'number') out.push(k);
+  }
+  return out;
+}
+
+/** 形の崩れた答えを、指定の JSON の形に直してもらうための頼み方 */
+export function repairPrompt(schema: { name: string; schema: object }, text: string): { system: string; user: string } {
+  const keys = Object.keys((schema.schema as { properties?: object }).properties ?? {});
+  return {
+    system: [
+      'あなたは JSON の形をそろえる係です。',
+      '下の「AIの答え」の中身を変えずに、指定の JSON Schema の形に直してください。',
+      `一番外のキーは ${keys.join(', ')} です。キー名が違うものは意味の合うキーに移し、答えに無い項目は空の文字列（数なら 0、配列なら空）にしてください。`,
+      '新しい事実を足したり、推測で埋めたりしないでください。直したことの説明はどの項目にも書かないでください。答えは JSON だけで返してください。',
+    ].join('\n'),
+    user: `JSON Schema:\n${JSON.stringify(schema.schema)}\n\nAIの答え:\n${text.slice(0, 12000)}`,
+  };
 }
 
 /** 文字数からトークン数をおおまかに見積もる（日本語は1文字≒1トークン、英数字は4文字≒1トークン） */

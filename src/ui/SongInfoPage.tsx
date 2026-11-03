@@ -1,7 +1,7 @@
 // 曲情報の画面：ヘッダの全項目、AI による取得（Web検索で裏を取る）、サムネイルの選択とトリミング。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AiError } from '../ai/openrouter';
-import { itunesSearch, SONG_INFO_SCHEMA, songInfoPrompt, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type SongInfoAnswer, type StoreHit } from '../ai/songInfo';
+import { cleanSongInfo, itunesSearch, SONG_INFO_SCHEMA, songInfoPrompt, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type SongInfoAnswer, type StoreHit } from '../ai/songInfo';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { setField } from '../edit/ops';
 import { downloadBytes, findFile, putFile } from '../fs/folder';
@@ -218,9 +218,9 @@ function AiCard({
       return;
     }
     try {
-      const r = await runAi<SongInfoAnswer>('songinfo', { ...p, schema: SONG_INFO_SCHEMA, maxTokens: 1500 });
+      const r = await runAi<Partial<SongInfoAnswer>>('songinfo', { ...p, schema: SONG_INFO_SCHEMA, maxTokens: 1500 });
       if (!r) return;
-      onResult({ answer: r.data, sources: r.citations, cost: r.costUsed, model: r.model });
+      onResult({ answer: cleanSongInfo(r.data), sources: r.citations, cost: r.costUsed, model: r.model });
     } catch (e) {
       setErr(e instanceof AiError ? e.message : `失敗しました: ${(e as Error).message}`);
     }

@@ -6,7 +6,7 @@ import { toMeasure } from '../dtx/base36';
 import { DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures, FEATURE_DEFS, lastMeasure } from '../gen/features';
-import { describePolicy, DIFFICULTIES, FILL_STYLES, MAX_RUNG, policyFor, type ChipFate } from '../gen/simplify';
+import { DEFAULT_RUNG, describePolicy, DIFFICULTIES, FILL_STYLES, MAX_RUNG, policyFor, type ChipFate } from '../gen/simplify';
 import { slotOf, useInputSettings } from '../input/settings';
 import { NO_KEY_TITLE, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { goBack, openPage, openSettings } from '../store/editor';
@@ -218,6 +218,11 @@ export function AiGenPage() {
                     </span>
                   </div>
                   <div>{ds.plan.summary}</div>
+                  {ds.result && ds.result.rung !== DEFAULT_RUNG[ds.diff] && (
+                    <div className="lbl" style={{ marginTop: 6 }}>
+                      方針は段 {DEFAULT_RUNG[ds.diff]} を基準に書かれています。目標のレベルに合わせて、全体を段 {ds.result.rung} に変えて作りました（セクションごとの差はそのまま）。
+                    </div>
+                  )}
                 </div>
               )}
               {ds.plan.sections
