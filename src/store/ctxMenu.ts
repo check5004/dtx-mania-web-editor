@@ -54,6 +54,11 @@ export function dismissCtxMenu(stamp: number) {
   if (closeCtxMenu()) dismissStamp = stamp;
 }
 
+/** ほかのメニュー（上のメニューなど）を外を押して閉じたときも、その押下を譜面に効かせない */
+export function markDismissPress(stamp: number) {
+  dismissStamp = stamp;
+}
+
 /** この押下でメニューを閉じたか。閉じるための押下は譜面に効かせない（うっかりチップを置かないように） */
 export function dismissedBy(stamp: number): boolean {
   return stamp === dismissStamp;

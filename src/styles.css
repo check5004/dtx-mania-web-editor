@@ -289,18 +289,22 @@ kbd {
   font-weight: 800;
 }
 
-.menus {
+.menubar {
   display: flex;
   gap: 2px;
+  flex: none;
 }
 
 .menu-btn {
+  flex: none;
   height: 30px;
   padding: 0 9px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text3);
+  white-space: nowrap;
+  user-select: none;
 }
 
 .menu-btn:hover,
@@ -309,47 +313,106 @@ kbd {
   color: var(--text);
 }
 
+.menu-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 項目は光らせて示す（フォーカスの枠は出さない） */
+.menu-item:focus {
+  outline: none;
+}
+
+/* 上のメニューの中身。幅は中身に合わせる（折り返さない）。位置と高さは MenuBar が画面に収める */
 .menu-pop {
-  position: absolute;
-  z-index: 50;
-  min-width: 260px;
+  position: fixed;
+  z-index: 95;
+  width: max-content;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #151a22;
   border: 1px solid var(--line3);
   border-radius: 10px;
   padding: 5px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  user-select: none;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
   width: 100%;
-  gap: 10px;
-  height: 30px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 12px 0 10px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text2);
   text-align: left;
+  white-space: nowrap;
 }
 
-.menu-item:hover:not(:disabled) {
+.menu-pop.with-checks .menu-item {
+  padding-left: 4px;
+}
+
+.menu-item.active:not(:disabled) {
   background: #1f2732;
   color: var(--text);
 }
 
+.menu-item .menu-check {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.menu-item .menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .menu-item .key {
-  margin-left: auto;
+  flex: none;
+  margin-left: 32px;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--dim);
+}
+
+.menu-item.active:not(:disabled) .key {
+  color: var(--mute);
 }
 
 .menu-sep {
   height: 1px;
   background: var(--line2);
   margin: 4px 6px;
+}
+
+/* AI難易度生成（上のバー）。デザインの「AI難易度」と同じ琥珀色 */
+.btn.ai-gen {
+  flex: none;
+  gap: 6px;
+  padding: 0 11px 0 10px;
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.btn.ai-gen:hover:not(:disabled) {
+  border-color: #8a6b31;
+  background: #2a2416;
+  color: #ffd38a;
 }
 
 .song-head {
@@ -390,19 +453,40 @@ kbd {
   display: none;
 }
 
-@media (max-width: 1500px) {
-  .diff-tabs .diff-full {
-    display: none;
-  }
-  .diff-tabs .diff-abbr {
-    display: inline;
-  }
+/* 上のバーが狭いときに畳む（TopBar の useTopbarFit が実際の幅を測って段を決める） */
+.topbar.fit-logo .logo-text {
+  display: none;
 }
 
-@media (max-width: 1400px) {
-  .logo-text {
-    display: none;
-  }
+.topbar.fit-diff .diff-tabs .diff-full {
+  display: none;
+}
+
+.topbar.fit-diff .diff-tabs .diff-abbr {
+  display: inline;
+}
+
+.topbar.fit-ai .ai-gen-label {
+  display: none;
+}
+
+.topbar.fit-ai .btn.ai-gen {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+.topbar.fit-art .song-art,
+.topbar.fit-title .song-text,
+.topbar.fit-song .song-head,
+.topbar.fit-tools .tb-preview {
+  display: none;
+}
+
+.topbar-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: -10px;
 }
 
 @media (max-width: 1200px) {
