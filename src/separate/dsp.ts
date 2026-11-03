@@ -29,6 +29,7 @@ export class Fft {
   private sin: Float64Array;
 
   constructor(n: number) {
+    // 設定の誤り（画面には出ない）なので訳さない i18n-ignore
     if (n < 2 || (n & (n - 1)) !== 0) throw new Error(`FFT の長さは 2 のべき乗にしてください（${n}）`);
     this.n = n;
     const bits = Math.round(Math.log2(n));
@@ -121,6 +122,7 @@ export class SegmentStft {
     this.nfft = g.nfft;
     this.hop = g.hop;
     this.length = g.input ?? g.chunk;
+    // 設定の誤り（画面には出ない）なので訳さない i18n-ignore
     if (this.length % g.hop !== 0) throw new Error(`モデルの入力の長さ ${this.length} が hop ${g.hop} で割り切れません`);
     this.bins = g.nfft / 2 + 1;
     this.frames = this.length / g.hop + 1;

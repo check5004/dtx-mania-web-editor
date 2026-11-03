@@ -1,6 +1,7 @@
 // 原曲をブラウザの中でステムに分解する（ドラムと、ドラム抜き。または楽器ごと）。
 // 分解した音は OGG にして曲フォルダの stems/ に置き、ステムのトラックとして読み込む。
 // そのあと「ドラム抜きを BGM にする」（細かく決めるならステムとミックスの書き出しの BGM用）で DTX の BGM にできる。
+import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { encodeAudio } from '../audio/stems';
 import { AUDIO_EXT, findFile, putFile, type FolderFile } from '../fs/folder';
@@ -148,7 +149,7 @@ export async function clearModels() {
   if (separating()) return;
   await clearSavedModels();
   await refreshSavedModels();
-  toast('ブラウザに保存した分解のモデルを消しました', 'info');
+  toast(tr('ブラウザに保存した分解のモデルを消しました', 'Deleted the saved separation models from this browser'), 'info');
 }
 
 export function separating(): boolean {
@@ -211,8 +212,19 @@ export function separationSource(): SepSource | { error: string } {
   if (!bgm) {
     const s = useEditor.getState();
     const b = bgmSource(s.doc);
-    if (!b) return { error: '原曲（BGM）がありません。右のパネルの「原曲」から音声ファイルを読み込んでください' };
-    return { error: `原曲のファイル「${wavPath(s.doc, b.wav) || '（なし）'}」が曲フォルダに見つかりません` };
+    if (!b)
+      return {
+        error: tr(
+          '原曲（BGM）がありません。右のパネルの「原曲」から音声ファイルを読み込んでください',
+          'There is no original (BGM). Load an audio file from "Original" in the right panel',
+        ),
+      };
+    return {
+      error: tr(
+        `原曲のファイル「${wavPath(s.doc, b.wav) || '（なし）'}」が曲フォルダに見つかりません`,
+        `The original file "${wavPath(s.doc, b.wav) || '(none)'}" isn't in the song folder`,
+      ),
+    };
   }
   if (!bgm.drumless) return bgm;
   return list.find((x) => !x.drumless && x.base.toLowerCase() === bgm.base.toLowerCase()) ?? bgm;
@@ -228,12 +240,13 @@ export function cancelSeparation() {
   abort?.abort();
 }
 
-const STAGE_TEXT: Record<SepProgress['stage'], string> = {
-  check: 'GPU を調べています…',
-  download: 'モデルを読み込んでいます…',
-  compile: 'モデルを準備しています…',
-  run: '分解しています…',
-};
+const stageText = (k: SepProgress['stage']): string =>
+  ({
+    check: tr('GPU を調べています…', 'Checking the GPU…'),
+    download: tr('モデルを読み込んでいます…', 'Loading the model…'),
+    compile: tr('モデルを準備しています…', 'Preparing the model…'),
+    run: tr('分解しています…', 'Splitting…'),
+  })[k];
 
 /** 原曲を分解して、ステムのトラックにする */
 export async function startSeparation(): Promise<boolean> {
@@ -249,14 +262,14 @@ export async function startSeparation(): Promise<boolean> {
   const t0 = performance.now();
   abort = new AbortController();
   const signal = abort.signal;
-  set({ phase: 'read', progress: 0, detail: `${src.name} を読み込んでいます…`, error: null, runStart: 0, bgmSet: null });
+  set({ phase: 'read', progress: 0, detail: tr(`${src.name} を読み込んでいます…`, `Reading ${src.name}…`), error: null, runStart: 0, bgmSet: null });
   const opened = openedDocs;
   try {
     const folder0 = useEditor.getState().folder;
     const ff = findFile(folder0, src.path);
-    if (!ff) throw new SeparateError('run', '原曲のファイルが見つかりません');
+    if (!ff) throw new SeparateError('run', tr('原曲のファイルが見つかりません', "Can't find the original file"));
     const audio = await decodeForSeparation(await (await ff.getFile()).arrayBuffer());
-    if (signal.aborted) throw new SeparateError('abort', '中止しました');
+    if (signal.aborted) throw new SeparateError('abort', tr('中止しました', 'Canceled'));
     const songSec = audio.duration;
     const want = plan.flatMap((p) => (p.stem === 'rest' ? [] : [p.stem]));
     const r = await separate(audio.left, audio.right, {
@@ -267,13 +280,18 @@ export async function startSeparation(): Promise<boolean> {
       onProgress: (p) => {
         const s = get();
         const runStart = p.stage === 'run' && !s.runStart ? performance.now() : s.runStart;
-        let detail = STAGE_TEXT[p.stage];
-        if (p.stage === 'download') detail = p.cached ? 'ブラウザに保存したモデルを読み込んでいます…' : `モデルをダウンロードしています… ${Math.round(p.done / 2 ** 20)} / ${Math.round(p.total / 2 ** 20)} MB（初回だけ）`;
+        let detail = stageText(p.stage);
+        if (p.stage === 'download') {
+          const mb = `${Math.round(p.done / 2 ** 20)} / ${Math.round(p.total / 2 ** 20)} MB`;
+          detail = p.cached
+            ? tr('ブラウザに保存したモデルを読み込んでいます…', 'Loading the model saved in this browser…')
+            : tr(`モデルをダウンロードしています… ${mb}（初回だけ）`, `Downloading the model… ${mb} (first time only)`);
+        }
         if (p.stage === 'run' && p.total) {
-          detail = `分解しています… ${p.done} / ${p.total} 区切り`;
+          detail = tr(`分解しています… ${p.done} / ${p.total} 区切り`, `Splitting… ${p.done} / ${p.total} ${pl(p.total, 'segment')}`);
           if (p.done > 0) {
             const left = ((performance.now() - runStart) / p.done) * (p.total - p.done);
-            detail += `（残り 約${formatSec(left / 1000)}）`;
+            detail += tr(`（残り 約${formatSec(left / 1000)}）`, ` (about ${formatSec(left / 1000)} left)`);
           }
         }
         set({ phase: p.stage, progress: p.total ? p.done / p.total : 0, detail, runStart });
@@ -281,23 +299,23 @@ export async function startSeparation(): Promise<boolean> {
     });
     // 分解している間に別の譜面を開いたら、その譜面には入れない
     const moved = () => openedDocs !== opened;
-    if (moved()) throw new SeparateError('run', '分解している間に別の譜面を開いたので、分けた音は読み込みませんでした');
+    if (moved()) throw new SeparateError('run', movedText());
     // OGG にする
     const files: File[] = [];
     for (const [i, p] of plan.entries()) {
       const ch = p.stem === 'rest' ? r.rest : r.stems[p.stem];
       if (!ch) continue;
-      set({ phase: 'encode', progress: i / plan.length, detail: `${p.name} を書き出しています…` });
+      set({ phase: 'encode', progress: i / plan.length, detail: tr(`${p.name} を書き出しています…`, `Writing ${p.name}…`) });
       const buf = new AudioBuffer({ numberOfChannels: 2, length: ch[0].length, sampleRate: SEP_SR });
       buf.copyToChannel(ch[0] as Float32Array<ArrayBuffer>, 0);
       buf.copyToChannel(ch[1] as Float32Array<ArrayBuffer>, 1);
       const bytes = await encodeAudio(buf, 'ogg', (q) => set({ progress: (i + q) / plan.length }));
-      if (signal.aborted) throw new SeparateError('abort', '中止しました');
+      if (signal.aborted) throw new SeparateError('abort', tr('中止しました', 'Canceled'));
       files.push(new File([bytes as Uint8Array<ArrayBuffer>], p.name, { type: 'audio/ogg' }));
     }
-    if (moved()) throw new SeparateError('run', '分解している間に別の譜面を開いたので、分けた音は読み込みませんでした');
+    if (moved()) throw new SeparateError('run', movedText());
     // 曲フォルダの stems/ に置いて、トラックにする
-    set({ phase: 'import', progress: 0, detail: 'ステムのトラックにしています…' });
+    set({ phase: 'import', progress: 0, detail: tr('ステムのトラックにしています…', 'Adding the stem tracks…') });
     const targets = new Set(files.map((f) => `stems/${f.name}`.toLowerCase()));
     for (const t of [...useSidecar.getState().stems]) {
       // 前に分解した同じ名前のトラックは置き換える。ほかのステムは「置き換える」のときだけ外す（ファイルは消さない）
@@ -315,21 +333,25 @@ export async function startSeparation(): Promise<boolean> {
       detail: '',
       last: { model: modelId, outputs, backend: r.backend, precision: r.precision, gpu: r.gpu, seconds, songSec, files: files.map((f) => f.name) },
     });
-    toast(`${model.name} で ${n} 本に分けました（${formatSec(seconds)}）`, 'ok', 6000);
+    toast(tr(`${model.name} で ${n} 本に分けました（${formatSec(seconds)}）`, `Split into ${n} ${pl(n, 'stem')} with ${model.name} (${formatSec(seconds)})`), 'ok', 6000);
     void refreshSavedModels();
     return true;
   } catch (e) {
     const err = e as SeparateError;
     if (err?.code === 'abort') {
       set({ phase: 'idle', progress: 0, detail: '', error: null });
-      toast('分解を中止しました', 'info');
+      toast(tr('分解を中止しました', 'Canceled the separation'), 'info');
       return false;
     }
     let msg = err?.message || String(e);
-    if (err?.code === 'no-webgpu') msg += '。Chrome か Edge の新しい版で開くか、SCNet small（CPU でも動く）を選んでください';
+    if (err?.code === 'no-webgpu')
+      msg += tr('。Chrome か Edge の新しい版で開くか、SCNet small（CPU でも動く）を選んでください', '. Open this page in a recent Chrome or Edge, or pick SCNet small (it also runs on the CPU)');
     // GPU のメモリが足りないなど：軽いモデルを勧める
-    else if ((err?.code === 'compile' || err?.code === 'run') && modelId !== 'scnet_small')
-      msg += `${/メモリ/.test(msg) ? '' : '。GPU のメモリが足りない可能性があります'}。ほかのタブを閉じるか、軽いモデル（SCNet XL・SCNet small）で試してください`;
+    else if ((err?.code === 'compile' || err?.code === 'run') && modelId !== 'scnet_small') {
+      // i18n-ignore
+      if (!/メモリ|memory/i.test(msg)) msg += tr('。GPU のメモリが足りない可能性があります', '. The GPU may be out of memory');
+      msg += tr('。ほかのタブを閉じるか、軽いモデル（SCNet XL・SCNet small）で試してください', '. Close other tabs or try a lighter model (SCNet XL or SCNet small)');
+    }
     set({ phase: 'error', error: msg, detail: '' });
     return false;
   } finally {
@@ -337,6 +359,9 @@ export async function startSeparation(): Promise<boolean> {
     void refreshSavedModels();
   }
 }
+
+const movedText = () =>
+  tr('分解している間に別の譜面を開いたので、分けた音は読み込みませんでした', 'Another chart was opened during the separation, so the stems were not loaded');
 
 /** ドラム抜きの BGM のファイル名（曲フォルダの直下。原曲は上書きしない名前） */
 export function drumlessBgmName(): string {
@@ -353,7 +378,7 @@ export async function registerDrumlessBgm(fileName = drumlessBgmName()): Promise
   const pool = mine.size ? stems.filter((t) => mine.has(t.file.toLowerCase())) : stems;
   const include = pool.filter((t) => t.kind !== 'drums').map((t) => t.file);
   if (!include.length) {
-    toast('ドラム以外のステムがありません', 'warn');
+    toast(tr('ドラム以外のステムがありません', 'There are no stems other than drums'), 'warn');
     return null;
   }
   const written = await exportStems({ mode: 'bgm', include, useTrackSettings: false, normalize: false, range: 'song', format: 'ogg', fileName, register: 'bgm' });
@@ -364,8 +389,8 @@ export async function registerDrumlessBgm(fileName = drumlessBgmName()): Promise
 
 export function formatSec(s: number): string {
   if (!Number.isFinite(s) || s < 0) return '—';
-  if (s < 60) return `${Math.max(1, Math.round(s))}秒`;
+  if (s < 60) return tr(`${Math.max(1, Math.round(s))}秒`, `${Math.max(1, Math.round(s))} s`);
   const m = Math.floor(s / 60);
   const r = Math.round(s - m * 60);
-  return r ? `${m}分${r}秒` : `${m}分`;
+  return r ? tr(`${m}分${r}秒`, `${m} min ${r} s`) : tr(`${m}分`, `${m} min`);
 }

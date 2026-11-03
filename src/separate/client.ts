@@ -1,5 +1,6 @@
 // ステム分解の窓口。音を 44.1kHz のステレオにそろえ、ワーカーで分解する。
 // 分解は1曲に数十秒〜数分かかるので、ワーカーはしばらく残してモデルを使い回し、使わなくなったら閉じて GPU のメモリを返す。
+import { tr, getLang } from '../i18n';
 import { SEP_CACHE, SEP_MODELS, SEP_SR, type SepModelId, type SepPrecision, type SepStem } from './models';
 import type { SepBackend, SepErrorCode, SepMessage, SepRequest, SepStage } from './worker';
 
@@ -122,7 +123,8 @@ function getWorker(): Worker {
     scheduleIdle();
   };
   worker.onerror = (e) => {
-    for (const p of pending.values()) p.reject(new SeparateError('run', e.message || '分解の処理が止まりました（メモリが足りない可能性があります）'));
+    for (const p of pending.values())
+      p.reject(new SeparateError('run', e.message || tr('分解の処理が止まりました（メモリが足りない可能性があります）', 'The separation stopped (possibly out of memory)')));
     pending.clear();
     closeWorker();
   };
@@ -145,7 +147,7 @@ function scheduleIdle() {
 
 /** 音（左・右、44.1kHz）を分解する。left・right はワーカーへ渡すので、呼んだ後は使えなくなる */
 export function separate(left: Float32Array, right: Float32Array, opts: SeparateOptions): Promise<SeparateResult> {
-  if (opts.signal?.aborted) return Promise.reject(new SeparateError('abort', '中止しました'));
+  if (opts.signal?.aborted) return Promise.reject(new SeparateError('abort', tr('中止しました', 'Canceled')));
   const w = getWorker();
   const id = nextId++;
   return new Promise<SeparateResult>((resolve, reject) => {
@@ -154,9 +156,9 @@ export function separate(left: Float32Array, right: Float32Array, opts: Separate
       pending.delete(id);
       // 計算中の GPU を止めるにはワーカーごと閉じるしかない
       closeWorker();
-      for (const p of pending.values()) p.reject(new SeparateError('abort', '中止しました'));
+      for (const p of pending.values()) p.reject(new SeparateError('abort', tr('中止しました', 'Canceled')));
       pending.clear();
-      reject(new SeparateError('abort', '中止しました'));
+      reject(new SeparateError('abort', tr('中止しました', 'Canceled')));
     };
     opts.signal?.addEventListener('abort', onAbort, { once: true });
     pending.set(id, {
@@ -181,6 +183,7 @@ export function separate(left: Float32Array, right: Float32Array, opts: Separate
       want: opts.want,
       rest: opts.rest ?? false,
       overlap: opts.overlap ?? 0.25,
+      lang: getLang(),
     };
     w.postMessage(msg, [left.buffer, right.buffer]);
   });

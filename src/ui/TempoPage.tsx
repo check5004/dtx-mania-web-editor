@@ -1,4 +1,6 @@
 // テンポ合わせ画面: 原曲の波形の上で「小節の頭」を合わせて、BPMと原曲（BGMチップ）の位置を決める。
+import { tr, isJa } from '../i18n';
+import { useLang } from '../i18n/useLang';
 import { useEffect, useRef } from 'react';
 import { combinedOdf } from '../audio/analysis';
 import { engine } from '../audio/engine';
@@ -109,25 +111,31 @@ export function TempoPage() {
     <div className="tempo-page">
       <header className="tempo-head">
         <button className="btn small ghost" onClick={backToChart}>
-          {Icon.back(14)} エディタに戻る
+          {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
-        <h1>テンポと開始位置</h1>
+        <h1>{tr('テンポと開始位置', 'Tempo & start position')}</h1>
         <span className="lbl ellipsis" style={{ minWidth: 0 }}>
-          {srcName ? `${srcName} · ${formatTime(duration, false)}` : '原曲なし'}
-          {status === 'loading' && ` · 解析中 ${Math.round(progress * 100)}%`}
-          {status === 'ready' && ui.beats.length > 0 && ' · 拍の位置を推定済み'}
-          {ui.fromEstimate && ' · 推定から作った案です'}
+          {srcName ? `${srcName} · ${formatTime(duration, false)}` : tr('原曲なし', 'No original audio')}
+          {status === 'loading' && tr(` · 解析中 ${Math.round(progress * 100)}%`, ` · analyzing ${Math.round(progress * 100)}%`)}
+          {status === 'ready' && ui.beats.length > 0 && tr(' · 拍の位置を推定済み', ' · beat positions estimated')}
+          {ui.fromEstimate && tr(' · 推定から作った案です', ' · this plan comes from the estimate')}
         </span>
         <span className="grow" />
-        <button className={`btn small ${ui.playing ? 'on-amber' : ''}`} onClick={() => (ui.playing ? stopPlan() : playPlan(ui.view.from))} disabled={!bgm} title="拡大している所からクリック付きで再生（Space）">
-          {ui.playing ? Icon.stop(14) : Icon.play(14)} {ui.playing ? '停止' : '確認再生'}
+        <button
+          className={`btn small ${ui.playing ? 'on-amber' : ''}`}
+          onClick={() => (ui.playing ? stopPlan() : playPlan(ui.view.from))}
+          disabled={!bgm}
+          title={tr('拡大している所からクリック付きで再生（Space）', 'Play with a click from the zoomed area (Space)')}
+        >
+          {ui.playing ? Icon.stop(14) : Icon.play(14)} {ui.playing ? tr('停止', 'Stop') : tr('確認再生', 'Check playback')}
         </button>
-        <button className="btn small" onClick={tap} title="曲に合わせて T キーを4回以上たたく">
-          {Icon.tap(14)} タップでBPMを測る（T）{ui.tapBpm ? `: ${ui.tapBpm}` : ''}
+        <button className="btn small" onClick={tap} title={tr('曲に合わせて T キーを4回以上たたく', 'Tap the T key 4 or more times along with the song')}>
+          {Icon.tap(14)} {tr('タップでBPMを測る（T）', 'Tap tempo (T)')}
+          {ui.tapBpm ? `: ${ui.tapBpm}` : ''}
         </button>
         <button className="btn small" onClick={resetToEstimate} disabled={!data}>
-          推定をやり直す
+          {tr('推定をやり直す', 'Re-estimate')}
         </button>
         <button
           className="btn small primary"
@@ -136,7 +144,7 @@ export function TempoPage() {
           }}
           disabled={!bgm || anchors.length === 0}
         >
-          譜面に反映
+          {tr('譜面に反映', 'Apply to chart')}
         </button>
       </header>
 
@@ -144,10 +152,13 @@ export function TempoPage() {
         <div className="tempo-empty">
           <div className="card" style={{ maxWidth: 520 }}>
             <div className="section-title" style={{ marginBottom: 8 }}>
-              原曲（BGM）を選んでください
+              {tr('原曲（BGM）を選んでください', 'Choose the original audio (BGM)')}
             </div>
             <p className="lbl" style={{ lineHeight: 1.7, margin: '0 0 10px' }}>
-              この譜面には原曲を鳴らすチップ（ch01）がありません。WAVリストの中から原曲を選ぶと、波形を解析してBPMと曲の始まりを合わせられます。
+              {tr(
+                'この譜面には原曲を鳴らすチップ（ch01）がありません。WAVリストの中から原曲を選ぶと、波形を解析してBPMと曲の始まりを合わせられます。',
+                "This chart has no chip that plays the original (ch01). Choose the original from the WAV list to analyze its waveform and line up the BPM and the start of the song.",
+              )}
             </p>
             {wavs.length ? (
               <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
@@ -158,7 +169,7 @@ export function TempoPage() {
                 ))}
               </div>
             ) : (
-              <div className="notice info">WAVが登録されていません。曲フォルダを開くか、左の「WAV」タブで原曲のファイルを登録してください。</div>
+              <div className="notice info">{tr('WAVが登録されていません。曲フォルダを開くか、左の「WAV」タブで原曲のファイルを登録してください。', 'No WAVs are defined. Open a song folder, or add the original audio file on the "WAV" tab on the left.')}</div>
             )}
           </div>
         </div>
@@ -167,15 +178,15 @@ export function TempoPage() {
           <main className="tempo-main scroll">
             <section className="tempo-card">
               <div className="row" style={{ marginBottom: 8 }}>
-                <h2>曲全体のテンポマップ</h2>
+                <h2>{tr('曲全体のテンポマップ', 'Tempo map of the whole song')}</h2>
                 <span className="grow" />
                 <span className="legend">
                   <i className="dia" style={{ background: COL.anchor }} />
-                  確定アンカー
+                  {tr('確定アンカー', 'Anchors')}
                 </span>
                 <span className="legend">
                   <i className="dia" style={{ border: `1.5px solid ${COL.cand}` }} />
-                  推定の候補（クリックで確定）
+                  {tr('推定の候補（クリックで確定）', 'Suggested (click to set)')}
                 </span>
               </div>
               <Overview r={r} />
@@ -183,25 +194,28 @@ export function TempoPage() {
             <section className="tempo-card">
               <div className="row" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
                 <h2>
-                  拡大 <span className="mono lbl">{zoomLabel(r, ui.view)}</span>
+                  {tr('拡大', 'Zoom')} <span className="mono lbl">{zoomLabel(r, ui.view)}</span>
                 </h2>
                 <span className="grow" />
                 <label className="row lbl" style={{ gap: 6 }}>
                   <input type="checkbox" checked={ui.ghostGrid} onChange={(e) => useTempo.setState({ ghostGrid: e.target.checked })} />
-                  アンカーなしの拍線（BPM {chipBpmLabel(ui.plan.bpm)} 固定）を重ねる
+                  {tr(`アンカーなしの拍線（BPM ${chipBpmLabel(ui.plan.bpm)} 固定）を重ねる`, `Overlay beat lines without anchors (fixed BPM ${chipBpmLabel(ui.plan.bpm)})`)}
                 </label>
               </div>
               <Zoom r={r} />
               <ZoomStats r={r} />
               <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
-                小節線をドラッグすると、その小節の頭を原曲に合わせます（アンカー）。アンカーが2つ以上あると、間のBPMを計算して小節の頭でBPMを変えます。右クリックでアンカーを外す。ホイールで拡大、Shift+ホイールか ← → で移動。
+                {tr(
+                  '小節線をドラッグすると、その小節の頭を原曲に合わせます（アンカー）。アンカーが2つ以上あると、間のBPMを計算して小節の頭でBPMを変えます。右クリックでアンカーを外す。ホイールで拡大、Shift+ホイールか ← → で移動。',
+                  'Drag a bar line to line up the start of that measure with the original (an anchor). With 2 or more anchors, the BPM between them is calculated and changed at measure starts. Right-click to remove an anchor. Wheel to zoom; Shift+wheel or ← → to move.',
+                )}
               </p>
             </section>
           </main>
           <aside className="tempo-side scroll">
             <section className="card">
               <div className="section-title" style={{ marginBottom: 8 }}>
-                開始位置（{first ? toMeasure(first.m) : '001'}小節の頭）
+                {tr(`開始位置（${first ? toMeasure(first.m) : '001'}小節の頭）`, `Start position (start of measure ${first ? toMeasure(first.m) : '001'})`)}
               </div>
               <div className="row" style={{ gap: 6 }}>
                 {[-0.01, -0.001].map((d) => (
@@ -214,43 +228,59 @@ export function TempoPage() {
                 </span>
                 {[0.001, 0.01].map((d) => (
                   <button key={d} className="btn small" onClick={() => nudgeFirst(d)} disabled={!first}>
-                    ＋{d * 1000}
+                    +{d * 1000}
                   </button>
                 ))}
               </div>
               <div className="tempo-note">
                 {r.bgm ? (
                   <>
-                    DTXへの書き出し: BGMチップ（ch01）を <span className="mono">{toMeasure(r.bgm.m)}</span>小節の{' '}
-                    <span className="mono">
-                      {r.bgm.n}/{BGM_DIV}
-                    </span>{' '}
-                    に置く
+                    {isJa() ? (
+                      <>
+                        DTXへの書き出し: BGMチップ（ch01）を <span className="mono">{toMeasure(r.bgm.m)}</span>小節の{' '}
+                        <span className="mono">
+                          {r.bgm.n}/{BGM_DIV}
+                        </span>{' '}
+                        に置く
+                      </>
+                    ) : (
+                      <>
+                        Saved to DTX: the BGM chip (ch01) goes in measure <span className="mono">{toMeasure(r.bgm.m)}</span> at{' '}
+                        <span className="mono">
+                          {r.bgm.n}/{BGM_DIV}
+                        </span>
+                      </>
+                    )}
                     <br />
                     <span className="lbl">
-                      誤差 <span className="mono">{r.bgm.errMs.toFixed(1)} ms</span>
-                      {first && first.m > 0 && ` · ${first.m === 1 ? toMeasure(0) : `${toMeasure(0)}〜${toMeasure(first.m - 1)}`}小節は前奏・空き`}
+                      {tr('誤差', 'Error')} <span className="mono">{r.bgm.errMs.toFixed(1)} ms</span>
+                      {first &&
+                        first.m > 0 &&
+                        tr(
+                          ` · ${first.m === 1 ? toMeasure(0) : `${toMeasure(0)}〜${toMeasure(first.m - 1)}`}小節は前奏・空き`,
+                          ` · ${first.m === 1 ? `measure ${toMeasure(0)} is` : `measures ${toMeasure(0)}–${toMeasure(first.m - 1)} are`} intro or empty`,
+                        )}
                     </span>
                   </>
                 ) : first ? (
                   <>
-                    <span style={{ color: 'var(--amber)' }}>原曲の始まりから遠すぎて、BGMチップを置けません。</span>
+                    <span style={{ color: 'var(--amber)' }}>{tr('原曲の始まりから遠すぎて、BGMチップを置けません。', "It's too far from the start of the original to place the BGM chip.")}</span>
                     <button className="btn small" style={{ marginTop: 6 }} onClick={() => shiftAnchors(r.shift)}>
-                      小節番号を {r.shift} 個うしろにする
+                      {tr(`小節番号を ${r.shift} 個うしろにする`, `Move measure numbers ${r.shift} later`)}
                     </button>
                   </>
                 ) : (
-                  '拡大した波形の上で、1小節目の頭をクリックしてください。'
+                  tr('拡大した波形の上で、1小節目の頭をクリックしてください。', 'Click the start of measure 1 on the zoomed waveform.')
                 )}
               </div>
               <button className={`btn small ${ui.pickStart ? 'primary' : ''}`} style={{ justifyContent: 'center' }} onClick={() => useTempo.setState({ pickStart: !ui.pickStart })}>
-                {ui.pickStart ? '波形をクリック…（Escでやめる）' : '波形上で1小節目の頭をクリックして指定'}
+                {ui.pickStart ? tr('波形をクリック…（Escでやめる）', 'Click the waveform… (Esc to cancel)') : tr('波形上で1小節目の頭をクリックして指定', 'Click the start of measure 1 on the waveform')}
               </button>
             </section>
             <BpmCard />
             <section className="card">
               <div className="section-title" style={{ marginBottom: 8 }}>
-                変化点とDTXへの書き出し
+                {tr('変化点とDTXへの書き出し', 'Changes and what is saved to DTX')}
               </div>
               <div className="map-table">
                 {r.segs.map((s, i) => (
@@ -261,7 +291,13 @@ export function TempoPage() {
                     </span>
                     <span className="col">
                       <span className="mono">{i === 0 ? `#BPM ${chipBpmLabel(s.bpm)}` : `#BPMzz ${chipBpmLabel(s.bpm)} · #${toMeasure(s.m)}08`}</span>
-                      <span className="lbl">{s.src === 'base' ? '選んだBPM' : i === 0 ? '曲頭（最初のアンカーの区間から計算）' : 'アンカーから計算'}</span>
+                      <span className="lbl">
+                        {s.src === 'base'
+                          ? tr('選んだBPM', 'Chosen BPM')
+                          : i === 0
+                            ? tr('曲頭（最初のアンカーの区間から計算）', 'Song start (calculated from the first anchor span)')
+                            : tr('アンカーから計算', 'Calculated from anchors')}
+                      </span>
                     </span>
                   </div>
                 ))}
@@ -275,13 +311,16 @@ export function TempoPage() {
                       <span className="mono">
                         #{toMeasure(r.bgm.m)}01 · {r.bgm.n}/{BGM_DIV}
                       </span>
-                      <span className="lbl">原曲を鳴らし始める位置</span>
+                      <span className="lbl">{tr('原曲を鳴らし始める位置', 'Where the original starts playing')}</span>
                     </span>
                   </div>
                 )}
               </div>
               <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-                反映すると、今のBPM変化チップは置き直します（Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。
+                {tr(
+                  '反映すると、今のBPM変化チップは置き直します（Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
+                  'Applying replaces the current BPM change chips (Ctrl+Z undoes it). Anchors are kept in the work file (.dtxe.json).',
+                )}
               </p>
             </section>
           </aside>
@@ -307,15 +346,15 @@ function BpmCard() {
   const best = cands[0]?.score || 1;
   const rows: { bpm: number; note: string; conf: string; good: boolean }[] = cands.slice(0, 4).map((c) => ({
     bpm: Math.round(c.bpm * 100) / 100,
-    note: c.kind === 'best' ? 'いちばん合う' : c.kind === 'half' ? '半分' : c.kind === 'double' ? '倍' : 'ほかの候補',
-    conf: c.score / best > 0.85 ? '高' : c.score / best > 0.6 ? '中' : '低',
+    note: c.kind === 'best' ? tr('いちばん合う', 'Best match') : c.kind === 'half' ? tr('半分', 'Half') : c.kind === 'double' ? tr('倍', 'Double') : tr('ほかの候補', 'Other'),
+    conf: c.score / best > 0.85 ? tr('高', 'high') : c.score / best > 0.6 ? tr('中', 'medium') : tr('低', 'low'),
     good: c.score / best > 0.85,
   }));
-  if (tapBpm) rows.push({ bpm: tapBpm, note: 'タップで測った値', conf: '', good: false });
+  if (tapBpm) rows.push({ bpm: tapBpm, note: tr('タップで測った値', 'Tapped'), conf: '', good: false });
   return (
     <section className="card">
       <div className="section-title" style={{ marginBottom: 8 }}>
-        BPMの推定結果
+        {tr('BPMの推定結果', 'BPM estimates')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {rows.map((c, i) => {
@@ -328,14 +367,14 @@ function BpmCard() {
               </span>
               <span className="lbl grow">{c.note}</span>
               <span className="lbl" style={{ color: c.good ? 'var(--ok)' : undefined }}>
-                {c.conf && `確からしさ ${c.conf}`}
+                {c.conf && tr(`確からしさ ${c.conf}`, `confidence ${c.conf}`)}
               </span>
             </button>
           );
         })}
-        {rows.length === 0 && <div className="lbl">原曲の解析が終わると候補が出ます。</div>}
+        {rows.length === 0 && <div className="lbl">{tr('原曲の解析が終わると候補が出ます。', 'Candidates appear once the original is analyzed.')}</div>}
         <label className="row">
-          <span className="lbl">BPMを入力</span>
+          <span className="lbl">{tr('BPMを入力', 'Enter BPM')}</span>
           <input
             className="field mono"
             style={{ height: 28, width: 100 }}
@@ -353,8 +392,12 @@ function BpmCard() {
         </label>
       </div>
       <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-        倍・半分の取り違えは自動では決めきれないので、確認再生して耳で選んでください。
-        {multi && ' アンカーが2つ以上あるときは、アンカーの間から計算したBPMを使います（ここで選んだ値は拍線の重ね表示と推定に使います）。'}
+        {tr('倍・半分の取り違えは自動では決めきれないので、確認再生して耳で選んでください。', "Double/half mix-ups can't be settled automatically, so use check playback and choose by ear.")}
+        {multi &&
+          tr(
+            ' アンカーが2つ以上あるときは、アンカーの間から計算したBPMを使います（ここで選んだ値は拍線の重ね表示と推定に使います）。',
+            ' With 2 or more anchors, the BPM calculated between anchors is used (the value chosen here is used for the beat-line overlay and suggestions).',
+          )}
       </p>
     </section>
   );
@@ -408,6 +451,7 @@ function candidates(r: PlanResult, downbeats: number[], from: number, to: number
 function Overview({ r }: { r: PlanResult }) {
   const data = useAssist((s) => s.data);
   const ui = useTempo();
+  const lang = useLang();
   const dragging = useRef(false);
   const bgmWav = bgmSource(useEditor.getState().doc)?.wav;
   const total = Math.max(data?.duration ?? (bgmWav !== undefined ? engine.duration(bgmWav) : 0), 30);
@@ -422,10 +466,10 @@ function Overview({ r }: { r: PlanResult }) {
       ctx.fillStyle = COL.text;
       ctx.textAlign = 'left';
       const rows = [
-        ['小節', 0, OV.ruler],
+        [tr('小節', 'Measure'), 0, OV.ruler],
         ['BPM', OV.ruler + OV.gap, OV.bpm],
-        ['アンカー', OV.ruler + OV.bpm + OV.gap * 2, OV.anch],
-        ['波形', OV.ruler + OV.bpm + OV.anch + OV.gap * 3, OV.wave],
+        [tr('アンカー', 'Anchors'), OV.ruler + OV.bpm + OV.gap * 2, OV.anch],
+        [tr('波形', 'Wave'), OV.ruler + OV.bpm + OV.anch + OV.gap * 3, OV.wave],
       ] as const;
       ctx.font = '11px system-ui, sans-serif';
       for (const [label, y, h] of rows) ctx.fillText(label, 0, y + h / 2);
@@ -503,7 +547,7 @@ function Overview({ r }: { r: PlanResult }) {
         ctx.fillRect(X(p), OV.ruler, 2, H - OV.ruler);
       }
     },
-    [r, ui, data, total],
+    [r, ui, data, total, lang],
     ui.playing,
   );
 
@@ -544,7 +588,7 @@ function Overview({ r }: { r: PlanResult }) {
       onPointerUp={() => {
         dragging.current = false;
       }}
-      aria-label="曲全体のテンポマップ"
+      aria-label={tr('曲全体のテンポマップ', 'Tempo map of the whole song')}
     />
   );
 }
@@ -557,6 +601,7 @@ const Z_TOP = 30;
 type ZDrag = { kind: 'anchor'; m: number; t: number; moved: boolean; x0: number } | { kind: 'pan'; x0: number; from: number; to: number } | null;
 
 function Zoom({ r }: { r: PlanResult }) {
+  const lang = useLang();
   const data = useAssist((s) => s.data);
   const ui = useTempo();
   const drag = useRef<ZDrag>(null);
@@ -691,7 +736,7 @@ function Zoom({ r }: { r: PlanResult }) {
         const xb = Math.min(W, X(b));
         if (xb - xa < 60) return;
         ctx.fillStyle = s.src === 'anchor' && r.segs.length > 1 ? '#FFC768' : '#C9D1DC';
-        ctx.fillText(`BPM ${chipBpmLabel(s.bpm)}${s.src === 'anchor' ? '（アンカーから計算）' : ''}`, (xa + xb) / 2, 22);
+        ctx.fillText(`BPM ${chipBpmLabel(s.bpm)}${s.src === 'anchor' ? tr('（アンカーから計算）', ' (from anchors)') : ''}`, (xa + xb) / 2, 22);
       });
       // 再生位置
       const p = playAudioSec();
@@ -705,7 +750,7 @@ function Zoom({ r }: { r: PlanResult }) {
         ctx.fillRect(hover.current.x - 1, 0, 2, ZH);
       }
     },
-    [r, ui, data],
+    [r, ui, data, lang],
     ui.playing,
   );
 
@@ -827,7 +872,7 @@ function Zoom({ r }: { r: PlanResult }) {
         hover.current = null;
         redraw();
       }}
-      aria-label="拡大した原曲の波形と小節線"
+      aria-label={tr('拡大した原曲の波形と小節線', 'Zoomed waveform of the original with bar lines')}
     />
   );
 }
@@ -867,7 +912,7 @@ function ZoomStats({ r }: { r: PlanResult }) {
     <div className="row lbl" style={{ marginTop: 8, gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
       {maxDiff !== null && (
         <span>
-          推定の拍との最大のずれ{' '}
+          {tr('推定の拍との最大のずれ', 'Max offset from estimated beats')}{' '}
           <span className="mono" style={{ color: maxDiff < 0.015 ? 'var(--ok)' : 'var(--amber)' }}>
             {Math.round(maxDiff * 1000)} ms
           </span>
@@ -875,21 +920,22 @@ function ZoomStats({ r }: { r: PlanResult }) {
       )}
       {ui.ghostGrid && drift !== null && Math.abs(drift) >= 5 && (
         <span>
-          BPM固定だと {toMeasure(driftM)} の頭で{' '}
+          {tr(`BPM固定だと ${toMeasure(driftM)} の頭で`, `With a fixed BPM, measure ${toMeasure(driftM)} starts`)}{' '}
           <span className="mono" style={{ color: '#FF8A8F' }}>
             {drift > 0 ? '+' : ''}
             {Math.round(drift)} ms
           </span>{' '}
-          ずれる（赤の点線）
+          {tr('ずれる（赤の点線）', 'off (red dotted line)')}
         </span>
       )}
       <span>
-        アンカー <span className="mono">{anchors.length}</span> 個
+        {tr('アンカー', 'Anchors')} <span className="mono">{anchors.length}</span>
+        {tr(' 個', '')}
       </span>
       <span className="grow" />
       <span>
-        <kbd>Space</kbd> 確認再生 <kbd>T</kbd> タップ <kbd>←</kbd>
-        <kbd>→</kbd> 移動
+        <kbd>Space</kbd> {tr('確認再生', 'check playback')} <kbd>T</kbd> {tr('タップ', 'tap')} <kbd>←</kbd>
+        <kbd>→</kbd> {tr('移動', 'move')}
       </span>
     </div>
   );

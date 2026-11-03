@@ -1,5 +1,6 @@
 // 原曲をブラウザの中でステムに分解するカード（ステムとミックスの画面）。
 // 遊ぶ用の DTX ではドラムを譜面の音で鳴らすので、BGM はドラム抜きにしたい。その元になるドラムとドラム抜きの音を作る。
+import { tr, pl, isJa } from '../i18n';
 import { useEffect, useState } from 'react';
 import { SEP_MODELS, type SepModelId } from '../separate/models';
 import { stemsInOrder } from '../separate/names';
@@ -31,7 +32,7 @@ import { Icon } from './icons';
 /** 画面に出すモデルの順（上がおすすめ） */
 const ORDER: SepModelId[] = ['bs_roformer_sw', 'scnet_xl_wide_v5', 'scnet_small'];
 
-const mb = (b: number) => `${Math.round(b / 2 ** 20)}MB`;
+const mb = (b: number) => `${Math.round(b / 2 ** 20)}${isJa() ? '' : ' '}MB`;
 
 export function SeparatePanel({ onClose }: { onClose?: () => void }) {
   const s = useSeparate();
@@ -67,7 +68,12 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
   const toBgm = async () => {
     const name = drumlessBgmName();
     if (fileExists(name)) {
-      const ok = await confirmDialog({ title: `${name} を上書きしますか？`, body: '曲フォルダに同じ名前のファイルがあります。', ok: '上書き', danger: true });
+      const ok = await confirmDialog({
+        title: tr(`${name} を上書きしますか？`, `Overwrite ${name}?`),
+        body: tr('曲フォルダに同じ名前のファイルがあります。', 'A file with the same name is already in the song folder.'),
+        ok: tr('上書き', 'Overwrite'),
+        danger: true,
+      });
       if (!ok) return;
     }
     await registerDrumlessBgm(name);
@@ -77,18 +83,27 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
     <section className="card sep-card">
       <div className="row" style={{ gap: 8 }}>
         <span className="sep-ic">{Icon.layers(16)}</span>
-        <b style={{ fontSize: 14 }}>原曲をステムに分解</b>
-        <span className="lbl">ブラウザの中で計算します（音はどこにも送りません）</span>
+        <b style={{ fontSize: 14 }}>{tr('原曲をステムに分解', 'Split the original into stems')}</b>
+        <span className="lbl">{tr('ブラウザの中で計算します（音はどこにも送りません）', 'Runs inside your browser (the audio is never uploaded)')}</span>
         <span className="grow" />
         {onClose && !running && (
-          <button className="ib" onClick={onClose} title="閉じる" aria-label="閉じる">
+          <button className="ib" onClick={onClose} title={tr('閉じる', 'Close')} aria-label={tr('閉じる', 'Close')}>
             {Icon.close(14)}
           </button>
         )}
       </div>
       <p className="lbl" style={{ margin: '6px 0 10px', lineHeight: 1.65 }}>
-        原曲からドラムを取り出し、<b>ドラム</b>と<b>ドラム抜き</b>のステムを作ります。NX で遊ぶときはドラムを譜面の音で鳴らすので、BGM はドラム抜きにすると叩いている感じが出ます。
-        分けたあとは右の「書き出し」の <b>BGM用（ドラム抜き）</b> で DTX の BGM に登録できます。ドラムのステムは原曲の打点（採譜）にも使います。
+        {isJa() ? (
+          <>
+            原曲からドラムを取り出し、<b>ドラム</b>と<b>ドラム抜き</b>のステムを作ります。NX で遊ぶときはドラムを譜面の音で鳴らすので、BGM はドラム抜きにすると叩いている感じが出ます。
+            分けたあとは右の「書き出し」の <b>BGM用（ドラム抜き）</b> で DTX の BGM に登録できます。ドラムのステムは原曲の打点（採譜）にも使います。
+          </>
+        ) : (
+          <>
+            Pulls the drums out of the original and makes a <b>drums</b> stem and a <b>no-drums</b> stem. In NX the drums are played by the chart&apos;s own sounds, so a no-drums BGM makes it feel like you are the one playing.
+            Afterwards, use <b>BGM (no drums)</b> under &quot;Export&quot; on the right to set it as the DTX BGM. The drums stem is also used for detecting hits in the original.
+          </>
+        )}
       </p>
 
       {'error' in src ? (
@@ -98,7 +113,7 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
       ) : (
         <>
           <div className="row lbl" style={{ gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-            分ける音：
+            {tr('分ける音：', 'Audio to split:')}
             {sources.length > 1 ? (
               <select
                 className="field mono"
@@ -106,23 +121,27 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
                 value={src.path}
                 disabled={running}
                 onChange={(e) => setSeparationSource(e.target.value)}
-                aria-label="分ける音"
+                aria-label={tr('分ける音', 'Audio to split')}
               >
                 {sources.map((x) => (
                   <option key={x.path} value={x.path}>
                     {x.path}
-                    {x.bgm ? '（今の BGM）' : ''}
+                    {x.bgm ? tr('（今の BGM）', ' (current BGM)') : ''}
                   </option>
                 ))}
               </select>
             ) : (
               <b className="mono">{src.name}</b>
             )}
-            {sources.length <= 1 && src.bgm && <span>（BGM）</span>}
+            {sources.length <= 1 && src.bgm && <span>{tr('（BGM）', '(BGM)')}</span>}
           </div>
           {src.drumless && (
             <div className="notice" style={{ marginBottom: 10 }}>
-              {Icon.warn(14)} この音はファイル名からドラム抜きのようです。ドラムの入った原曲を選んでください（分けてもドラムはほとんど出てきません）。
+              {Icon.warn(14)}{' '}
+              {tr(
+                'この音はファイル名からドラム抜きのようです。ドラムの入った原曲を選んでください（分けてもドラムはほとんど出てきません）。',
+                'From its file name, this audio already has no drums. Pick the original with drums (splitting this would give almost no drums).',
+              )}
             </div>
           )}
         </>
@@ -130,13 +149,17 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
 
       {s.gpu && !s.gpu.ok && (
         <div className="notice" style={{ marginBottom: 10 }}>
-          {Icon.warn(14)} このブラウザでは WebGPU（GPU で計算する仕組み）が使えないので、高精度のモデルは動きません。Chrome か Edge の新しい版で開くか、「軽い」モデルを選んでください（CPU で動くので時間がかかります）。
+          {Icon.warn(14)}{' '}
+          {tr(
+            'このブラウザでは WebGPU（GPU で計算する仕組み）が使えないので、高精度のモデルは動きません。Chrome か Edge の新しい版で開くか、「軽い」モデルを選んでください（CPU で動くので時間がかかります）。',
+            "WebGPU (computing on the GPU) isn't available in this browser, so the accurate models can't run. Open this page in a recent Chrome or Edge, or pick the \"Light\" model (it runs on the CPU, so it takes longer).",
+          )}
         </div>
       )}
 
       <div className="sep-grid">
         <div>
-          <div className="sep-h">モデル</div>
+          <div className="sep-h">{tr('モデル', 'Model')}</div>
           <div className="mode-cards">
             {ORDER.map((id) => {
               const m = SEP_MODELS[id];
@@ -149,15 +172,16 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
                   onClick={() => setSeparateModel(id)}
                   disabled={running || off}
                   aria-pressed={s.model === id}
-                  title={off ? 'WebGPU が使えないので動きません' : undefined}
+                  title={off ? tr('WebGPU が使えないので動きません', "Can't run without WebGPU") : undefined}
                 >
                   <span className={`radio-dot ${s.model === id ? 'on' : ''}`} />
                   <span>
                     <b>{m.name}</b>
-                    {id === 'bs_roformer_sw' && <span className="badge-ok">おすすめ</span>}
+                    {id === 'bs_roformer_sw' && <span className="badge-ok">{tr('おすすめ', 'Recommended')}</span>}
                     <span className="d">
-                      {m.summary}・初回だけ {mb(f.bytes)} を読み込み{m.webgpuOnly ? '・GPU が必要' : '・CPU でも動く'}
-                      ・ドラムの分離 {m.drumsSdr.toFixed(1)} dB
+                      {isJa()
+                        ? `${m.summary}・初回だけ ${mb(f.bytes)} を読み込み${m.webgpuOnly ? '・GPU が必要' : '・CPU でも動く'}・ドラムの分離 ${m.drumsSdr.toFixed(1)} dB`
+                        : `${m.summaryEn} · downloads ${mb(f.bytes)} the first time · ${m.webgpuOnly ? 'needs a GPU' : 'also runs on the CPU'} · drum separation ${m.drumsSdr.toFixed(1)} dB`}
                     </span>
                   </span>
                 </button>
@@ -165,42 +189,64 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
             })}
           </div>
           <div className="lbl" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.6 }}>
-            ドラムの分離＝正解付きの曲（MUSDB18 の30曲）で測った SDR。大きいほど良く、3 dB 上がると残る誤差がおよそ半分です。
+            {tr(
+              'ドラムの分離＝正解付きの曲（MUSDB18 の30曲）で測った SDR。大きいほど良く、3 dB 上がると残る誤差がおよそ半分です。',
+              'Drum separation = SDR measured on songs with known answers (30 songs from MUSDB18). Higher is better; +3 dB roughly halves the remaining error.',
+            )}
           </div>
         </div>
         <div>
-          <div className="sep-h">分け方</div>
+          <div className="sep-h">{tr('分け方', 'Output')}</div>
           <div className="mode-cards">
             <button className={`mode-card ${s.outputs === 'two' ? 'on' : ''}`} onClick={() => setSeparateOutputs('two')} disabled={running} aria-pressed={s.outputs === 'two'}>
               <span className={`radio-dot ${s.outputs === 'two' ? 'on' : ''}`} />
               <span>
-                <b>ドラムとドラム抜き（2本）</b>
-                <span className="badge-ok">おすすめ</span>
-                <span className="d">ドラム抜き＝原曲からドラムだけを引いた音。足すと原曲にぴったり戻ります。</span>
+                <b>{tr('ドラムとドラム抜き（2本）', 'Drums and no-drums (2 stems)')}</b>
+                <span className="badge-ok">{tr('おすすめ', 'Recommended')}</span>
+                <span className="d">
+                  {tr(
+                    'ドラム抜き＝原曲からドラムだけを引いた音。足すと原曲にぴったり戻ります。',
+                    'No-drums = the original minus the drums. Adding the two gives back the original exactly.',
+                  )}
+                </span>
               </span>
             </button>
             <button className={`mode-card ${s.outputs === 'all' ? 'on' : ''}`} onClick={() => setSeparateOutputs('all')} disabled={running} aria-pressed={s.outputs === 'all'}>
               <span className={`radio-dot ${s.outputs === 'all' ? 'on' : ''}`} />
               <span>
-                <b>楽器ごと（{model.stems.length}本）</b>
+                <b>{tr(`楽器ごと（${model.stems.length}本）`, `Each instrument (${model.stems.length} stems)`)}</b>
                 <span className="d">
                   {stemsInOrder(s.model)
-                    .map((x) => STEM_LABEL[x])
-                    .join('・')}
-                  。ベースだけ聴いてバスドラムと聞き分ける、などに。その他は、原曲からほかを全部引いた残りです。
+                    .map((x) => stemLabel(x))
+                    .join(tr('・', ', '))}
+                  {tr(
+                    '。ベースだけ聴いてバスドラムと聞き分ける、などに。その他は、原曲からほかを全部引いた残りです。',
+                    '. Handy for things like soloing the bass to tell it apart from the kick. "Other" is the original minus all the rest.',
+                  )}
                 </span>
               </span>
             </button>
           </div>
           {files.length > 0 && (
             <div className="lbl" style={{ marginTop: 8, lineHeight: 1.6 }}>
-              曲フォルダの stems/ に <span className="mono">{files.map((f) => f.name).join('、')}</span>（OGG）を作ります。
+              {isJa() ? (
+                <>
+                  曲フォルダの stems/ に <span className="mono">{files.map((f) => f.name).join('、')}</span>（OGG）を作ります。
+                </>
+              ) : (
+                <>
+                  Creates <span className="mono">{files.map((f) => f.name).join(', ')}</span> (OGG) in stems/ in the song folder.
+                </>
+              )}
             </div>
           )}
           {others.length > 0 && (
             <label className="row" style={{ gap: 6, marginTop: 8, fontSize: 12 }}>
               <input type="checkbox" checked={s.replace} onChange={(e) => setSeparateReplace(e.target.checked)} disabled={running} />
-              今のステム {others.length} 本を外して置き換える（ファイルは消しません）
+              {tr(
+                `今のステム ${others.length} 本を外して置き換える（ファイルは消しません）`,
+                `Replace the current ${others.length} ${pl(others.length, 'stem')} (the files are kept)`,
+              )}
             </label>
           )}
         </div>
@@ -222,16 +268,22 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
               </div>
             </div>
             <button className="btn small" onClick={cancelSeparation}>
-              中止
+              {tr('中止', 'Cancel')}
             </button>
           </>
         ) : (
           <>
             <button className="btn primary" disabled={!canRun} onClick={() => void startSeparation()}>
-              {Icon.layers(14)} {stems.length ? '分解し直す' : '分解する'}
+              {Icon.layers(14)} {stems.length ? tr('分解し直す', 'Split again') : tr('分解する', 'Split')}
             </button>
             <span className="lbl" style={{ lineHeight: 1.5 }}>
-              {model.webgpuOnly ? 'GPU の速さしだいで、1曲 1〜数分。' : 'CPU なら曲の長さと同じくらい〜数倍かかります。'}モデルは初回だけ読み込み、ブラウザに保存します。分解中も譜面の編集はできます。
+              {model.webgpuOnly
+                ? tr('GPU の速さしだいで、1曲 1〜数分。', 'One to a few minutes per song, depending on your GPU. ')
+                : tr('CPU なら曲の長さと同じくらい〜数倍かかります。', 'On the CPU it takes about the song length or several times that. ')}
+              {tr(
+                'モデルは初回だけ読み込み、ブラウザに保存します。分解中も譜面の編集はできます。',
+                'The model is downloaded once and kept in your browser. You can keep editing the chart while it runs.',
+              )}
             </span>
           </>
         )}
@@ -239,24 +291,36 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
 
       {s.phase === 'error' && s.error && (
         <div className="notice" style={{ marginTop: 10 }}>
-          {Icon.warn(14)} 分解できませんでした：{s.error}
+          {Icon.warn(14)} {tr('分解できませんでした：', "Couldn't split: ")}
+          {s.error}
         </div>
       )}
       {s.phase === 'done' && s.last && (
         <div className="notice info" style={{ marginTop: 10, lineHeight: 1.6 }}>
           {Icon.info(14)}
           <span style={{ flex: 1, minWidth: 0 }}>
-            {SEP_MODELS[s.last.model].name} で {s.last.files.length} 本に分けました（{formatSec(s.last.seconds)}・曲 {formatSec(s.last.songSec)}・{s.last.backend === 'webgpu' ? s.last.gpu : 'CPU'}）。
+            {isJa()
+              ? `${SEP_MODELS[s.last.model].name} で ${s.last.files.length} 本に分けました（${formatSec(s.last.seconds)}・曲 ${formatSec(s.last.songSec)}・${s.last.backend === 'webgpu' ? s.last.gpu : 'CPU'}）。`
+              : `Split into ${s.last.files.length} ${pl(s.last.files.length, 'stem')} with ${SEP_MODELS[s.last.model].name} (${formatSec(s.last.seconds)}, song ${formatSec(s.last.songSec)}, ${s.last.backend === 'webgpu' ? s.last.gpu : 'CPU'}). `}
             {s.bgmSet ? (
-              <>
-                ドラム抜きを <b className="mono">{s.bgmSet}</b> に書き出し、DTX の BGM に登録しました（元の原曲のファイルは残しています）。
-              </>
+              isJa() ? (
+                <>
+                  ドラム抜きを <b className="mono">{s.bgmSet}</b> に書き出し、DTX の BGM に登録しました（元の原曲のファイルは残しています）。
+                </>
+              ) : (
+                <>
+                  Wrote the no-drums mix to <b className="mono">{s.bgmSet}</b> and set it as the DTX BGM (the original file is kept).
+                </>
+              )
             ) : (
               <>
-                NX で遊ぶ用に、ドラム抜きを BGM にできます（原曲と同じ音量のまま。細かく決めるなら右の「書き出し」）。
+                {tr(
+                  'NX で遊ぶ用に、ドラム抜きを BGM にできます（原曲と同じ音量のまま。細かく決めるなら右の「書き出し」）。',
+                  'For playing in NX, you can use the no-drums mix as the BGM (same volume as the original; use "Export" on the right for more control).',
+                )}
                 <span className="row" style={{ gap: 8, marginTop: 6 }}>
                   <button className="btn small primary" disabled={!!busy} onClick={() => void toBgm()}>
-                    {Icon.download(13)} ドラム抜きを BGM にする
+                    {Icon.download(13)} {tr('ドラム抜きを BGM にする', 'Use no-drums as BGM')}
                   </button>
                   <span className="mono lbl">→ {drumlessBgmName()}</span>
                 </span>
@@ -266,13 +330,21 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
         </div>
       )}
       <div className="lbl" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.6 }}>
-        モデル：{model.credit}。ブラウザ用に書き出したもの（unblend、R. Fahey）を Hugging Face から読みます。{model.license}。
+        {isJa()
+          ? `モデル：${model.credit}。ブラウザ用に書き出したもの（unblend、R. Fahey）を Hugging Face から読みます。${model.license}。`
+          : `Model: ${model.creditEn}. The browser export (unblend, R. Fahey) is downloaded from Hugging Face; ${model.licenseEn}.`}
         {!!s.saved?.length && (
           <>
             {' '}
-            ブラウザに保存したモデル：{s.saved.map((x) => `${SEP_MODELS[x.model].name}（${mb(x.bytes)}）`).join('・')}{' '}
-            <button className="link-btn" disabled={running} onClick={() => void clearModels()} title="ブラウザに保存した分解のモデルを消します（次に分解するとき、また読み込みます）">
-              消す
+            {tr('ブラウザに保存したモデル：', 'Models saved in this browser: ')}
+            {s.saved.map((x) => (isJa() ? `${SEP_MODELS[x.model].name}（${mb(x.bytes)}）` : `${SEP_MODELS[x.model].name} (${mb(x.bytes)})`)).join(tr('・', ', '))}{' '}
+            <button
+              className="link-btn"
+              disabled={running}
+              onClick={() => void clearModels()}
+              title={tr('ブラウザに保存した分解のモデルを消します（次に分解するとき、また読み込みます）', 'Deletes the saved separation models from this browser (they are downloaded again next time)')}
+            >
+              {tr('消す', 'Delete')}
             </button>
           </>
         )}
@@ -281,4 +353,12 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
   );
 }
 
-const STEM_LABEL: Record<string, string> = { drums: 'ドラム', bass: 'ベース', vocals: 'ボーカル', guitar: 'ギター', piano: 'ピアノ', other: 'その他' };
+const stemLabel = (k: string): string =>
+  ({
+    drums: tr('ドラム', 'drums'),
+    bass: tr('ベース', 'bass'),
+    vocals: tr('ボーカル', 'vocals'),
+    guitar: tr('ギター', 'guitar'),
+    piano: tr('ピアノ', 'piano'),
+    other: tr('その他', 'other'),
+  })[k] ?? k;

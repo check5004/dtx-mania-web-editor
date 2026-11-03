@@ -17,8 +17,9 @@ export interface SepModel {
   id: SepModelId;
   /** 画面に出す名前 */
   name: string;
-  /** 一言で */
+  /** 一言で（summaryEn は英語） */
   summary: string;
+  summaryEn: string;
   /** 出力の並び（モデルの出力の順） */
   stems: readonly SepStem[];
   nfft: number;
@@ -38,7 +39,9 @@ export interface SepModel {
    */
   drumsSdr: number;
   credit: string;
+  creditEn: string;
   license: string;
+  licenseEn: string;
   page: string;
 }
 
@@ -53,7 +56,9 @@ export const SEP_MODELS: Record<SepModelId, SepModel> = {
   bs_roformer_sw: {
     id: 'bs_roformer_sw',
     name: 'BS-RoFormer SW',
+    // 英語は summaryEn i18n-ignore
     summary: '高精度（6種：ドラム・ベース・ボーカル・ギター・ピアノ・その他）',
+    summaryEn: 'Most accurate (6 stems: drums, bass, vocals, guitar, piano, other)',
     stems: ['bass', 'drums', 'other', 'vocals', 'guitar', 'piano'],
     nfft: 2048,
     hop: 512,
@@ -66,14 +71,20 @@ export const SEP_MODELS: Record<SepModelId, SepModel> = {
       fp32: { url: HF + 'bs_roformer_sw_fp32.onnx', bytes: 700419210, sha256: '09585bc2a70dec895ff8a2dd316314850cce4e620304eb46d6926a4e62d12461' },
     },
     drumsSdr: 12.1,
+    // 英語は creditEn・licenseEn i18n-ignore-start
     credit: 'BS-RoFormer SW（jarredou ほか。BS-RoFormer は W.-T. Lu ほか）',
     license: '重みの利用条件の明示なし（非商用の個人利用として使う）',
+    // i18n-ignore-end
+    creditEn: 'BS-RoFormer SW (jarredou et al.; BS-RoFormer by W.-T. Lu et al.)',
+    licenseEn: 'no license stated for the weights (used for non-commercial personal use)',
     page: 'https://huggingface.co/Ryan5453/unblend',
   },
   scnet_xl_wide_v5: {
     id: 'scnet_xl_wide_v5',
     name: 'SCNet XL',
+    // i18n-ignore
     summary: '中くらい（4種：ドラム・ベース・ボーカル・その他）',
+    summaryEn: 'Medium (4 stems: drums, bass, vocals, other)',
     stems: ['drums', 'bass', 'other', 'vocals'],
     nfft: 4096,
     hop: 1024,
@@ -87,14 +98,20 @@ export const SEP_MODELS: Record<SepModelId, SepModel> = {
       fp32: { url: HF + 'scnet_xl_wide_v5_fp32.onnx', bytes: 221482626, sha256: '6e2e46b669fa368247afbe867aaa61317425f3f0568309fd6e0c79671c39f0b6' },
     },
     drumsSdr: 11.2,
+    // i18n-ignore-start
     credit: 'SCNet（W. Tong ほか）XL',
     license: '重みの利用条件の明示なし（非商用の個人利用として使う）',
+    // i18n-ignore-end
+    creditEn: 'SCNet (W. Tong et al.) XL',
+    licenseEn: 'no license stated for the weights (used for non-commercial personal use)',
     page: 'https://huggingface.co/Ryan5453/unblend',
   },
   scnet_small: {
     id: 'scnet_small',
     name: 'SCNet small',
+    // i18n-ignore
     summary: '軽い（4種：ドラム・ベース・ボーカル・その他）',
+    summaryEn: 'Light (4 stems: drums, bass, vocals, other)',
     stems: ['drums', 'bass', 'other', 'vocals'],
     nfft: 4096,
     hop: 1024,
@@ -108,8 +125,12 @@ export const SEP_MODELS: Record<SepModelId, SepModel> = {
       fp32: { url: HF + 'scnet_small_fp32.onnx', bytes: 48101059, sha256: 'eee1bf82b7c9d756a388e00fc142ba1c427444b53a07d626cfa903a450f83281' },
     },
     drumsSdr: 10.0,
+    // i18n-ignore-start
     credit: 'SCNet（W. Tong ほか）small',
     license: '重みの利用条件の明示なし（非商用の個人利用として使う）',
+    // i18n-ignore-end
+    creditEn: 'SCNet (W. Tong et al.) small',
+    licenseEn: 'no license stated for the weights (used for non-commercial personal use)',
     page: 'https://huggingface.co/Ryan5453/unblend',
   },
 };

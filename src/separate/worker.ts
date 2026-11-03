@@ -1,5 +1,6 @@
 // ステム分解を別スレッドで動かす。ONNX Runtime Web でモデルを動かし（WebGPU、無ければ WASM）、
 // 前後の STFT・逆 STFT と区切りの重ね合わせ（dsp.ts）もここでやる。画面は止まらない。
+import { tr, setLang, type Lang } from '../i18n';
 import * as ort from 'onnxruntime-web';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
 import { OverlapAdd, SegmentStft, inverseWeightSum, planSegments, readWindow, splitWeight } from './dsp';
@@ -22,6 +23,8 @@ export interface SepRequest {
   /** 原曲から取り出したステムを引いた残り（rest）も返す。ステムと rest を足すと原曲にぴったり戻る */
   rest: boolean;
   overlap: number;
+  /** エラーの文の言語（ワーカーは画面の言語を知らないので渡す） */
+  lang: Lang;
 }
 
 export type SepStage = 'check' | 'download' | 'compile' | 'run';
@@ -119,9 +122,9 @@ async function modelBytes(file: { url: string; bytes: number; sha256: string }, 
   try {
     res = await fetch(file.url, { mode: 'cors' });
   } catch {
-    throw new SepError('download', 'モデルを読み込めませんでした（インターネットにつながっているか確かめてください）');
+    throw new SepError('download', tr('モデルを読み込めませんでした（インターネットにつながっているか確かめてください）', "Couldn't download the model (check your internet connection)"));
   }
-  if (!res.ok || !res.body) throw new SepError('download', `モデルを読み込めませんでした（${res.status}）`);
+  if (!res.ok || !res.body) throw new SepError('download', tr(`モデルを読み込めませんでした（${res.status}）`, `Couldn't download the model (${res.status})`));
   // 大きいので、先に入れ物を用意して流し込む（部品を集めてから繋ぐと2倍のメモリを使う）
   const buf = new Uint8Array(file.bytes);
   const reader = res.body.getReader();
@@ -130,7 +133,7 @@ async function modelBytes(file: { url: string; bytes: number; sha256: string }, 
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (got + value.length > buf.length) throw new SepError('download', 'モデルの大きさが想定と違います（読み込み直してください）');
+    if (got + value.length > buf.length) throw new SepError('download', tr('モデルの大きさが想定と違います（読み込み直してください）', 'The model has an unexpected size (try downloading it again)'));
     buf.set(value, got);
     got += value.length;
     if (got - last > 1 << 20) {
@@ -138,11 +141,11 @@ async function modelBytes(file: { url: string; bytes: number; sha256: string }, 
       progress(got, file.bytes, false);
     }
   }
-  if (got !== file.bytes) throw new SepError('download', `モデルを最後まで読み込めませんでした（${got} / ${file.bytes} バイト）`);
+  if (got !== file.bytes) throw new SepError('download', tr(`モデルを最後まで読み込めませんでした（${got} / ${file.bytes} バイト）`, `The model download stopped early (${got} / ${file.bytes} bytes)`));
   progress(got, file.bytes, false);
   if (crypto?.subtle) {
     const h = hex(await crypto.subtle.digest('SHA-256', buf));
-    if (h !== file.sha256) throw new SepError('download', 'モデルの中身が想定と違います（読み込み直してください）');
+    if (h !== file.sha256) throw new SepError('download', tr('モデルの中身が想定と違います（読み込み直してください）', "The model's contents don't match (try downloading it again)"));
   }
   try {
     await cache?.put(file.url, new Response(buf, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(buf.length) } }));
@@ -164,7 +167,7 @@ async function getSession(req: SepRequest, progress: (stage: SepStage, done: num
   let backend: SepBackend;
   if (gpu) backend = 'webgpu';
   else if (req.allowWasm && !model.webgpuOnly) backend = 'wasm';
-  else throw new SepError('no-webgpu', 'このブラウザでは WebGPU（GPU で計算する仕組み）が使えません');
+  else throw new SepError('no-webgpu', tr('このブラウザでは WebGPU（GPU で計算する仕組み）が使えません', "WebGPU (computing on the GPU) isn't available in this browser"));
   const precision: SepPrecision = req.precision !== 'auto' ? req.precision : backend === 'webgpu' && gpu?.f16 ? 'fp16' : 'fp32';
   const key = `${model.id}|${precision}|${backend}`;
   if (current?.key === key) return current;
@@ -184,9 +187,11 @@ async function getSession(req: SepRequest, progress: (stage: SepStage, done: num
   try {
     session = await ort.InferenceSession.create(bytes, { executionProviders: [backend], graphOptimizationLevel: 'all' });
   } catch (e) {
-    throw new SepError('compile', `モデルを準備できませんでした（${(e as Error)?.message || e}）`);
+    throw new SepError('compile', tr(`モデルを準備できませんでした（${(e as Error)?.message || e}）`, `Couldn't prepare the model (${(e as Error)?.message || e})`));
   }
-  current = { key, session, backend, precision, gpu: backend === 'webgpu' && gpu ? `${gpu.name}（1バッファ ${gpu.maxBufferMb}MB まで${gpu.f16 ? '・fp16 可' : ''}）` : 'CPU' };
+  const gpuText = (g: NonNullable<typeof gpu>) =>
+    tr(`${g.name}（1バッファ ${g.maxBufferMb}MB まで${g.f16 ? '・fp16 可' : ''}）`, `${g.name} (buffers up to ${g.maxBufferMb} MB${g.f16 ? ', fp16 OK' : ''})`);
+  current = { key, session, backend, precision, gpu: backend === 'webgpu' && gpu ? gpuText(gpu) : 'CPU' };
   return current;
 }
 
@@ -224,7 +229,7 @@ async function run(req: SepRequest) {
     try {
       out = await s.session.run(feeds);
     } catch (e) {
-      throw new SepError('run', `分解の計算に失敗しました（${(e as Error)?.message || e}）`);
+      throw new SepError('run', tr(`分解の計算に失敗しました（${(e as Error)?.message || e}）`, `The separation failed (${(e as Error)?.message || e})`));
     }
     modelMs += performance.now() - t;
     const oRe = out.out_spec_real.data as Float32Array;
@@ -261,6 +266,7 @@ async function run(req: SepRequest) {
 self.onmessage = (e: MessageEvent<SepRequest>) => {
   const req = e.data;
   if (req.type !== 'run') return;
+  setLang(req.lang, false);
   run(req).then(
     (r) => {
       const transfer = [...Object.values(r.stems), r.rest].flatMap((p) => (p ? [p[0].buffer, p[1].buffer] : []));
