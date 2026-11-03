@@ -249,3 +249,69 @@ describe('左右のシンバル（同じ重さで扱う）', () => {
     }
   });
 });
+
+describe('楽器・奏法を置き換えない（易しくするのは間引くことだけ）', () => {
+  const sec: SectionPlan[] = [{ name: 'A', from: 0, to: 3, shift: 0 }];
+
+  /** 8分の刻みの8ビート。ride なら刻みはライド、そうでなければ HH で、2拍目の頭と4拍目の裏はオープンHH */
+  function groove(ride: boolean): DtxDoc {
+    const chips = [];
+    let id = 1;
+    for (let m = 0; m < 4; m++) {
+      for (let k = 0; k < 8; k++) {
+        chips.push(chip(id++, ride ? CH.RD : k === 2 || k === 7 ? CH.HHO : CH.HHC, m, k, 8));
+        if (k === 0 || k === 4) chips.push(chip(id++, CH.BD, m, k, 8));
+        if (k === 2 || k === 6) chips.push(chip(id++, CH.SD, m, k, 8));
+      }
+    }
+    return { ...emptyDoc(), fields: { BPM: '140' }, chips, nextId: id };
+  }
+  const rideSong = () => groove(true);
+  const hhSong = () => groove(false);
+
+  it('ライドはどの段でもライドのまま、ハイハットと同じ細かさまで残す', () => {
+    for (let rung = 0; rung <= MAX_RUNG; rung++) {
+      const r = simplify({ doc: rideSong(), rung, sections: sec, keep: DEFAULT_KEEP });
+      expect(r.doc.chips.some((c) => c.ch === CH.HHC)).toBe(false);
+    }
+    expect(at(simplify({ doc: rideSong(), rung: 6, sections: sec, keep: DEFAULT_KEEP }).doc, 1, CH.RD)).toEqual([0, 1, 2, 3]);
+    expect(at(simplify({ doc: rideSong(), rung: 8, sections: sec, keep: DEFAULT_KEEP }).doc, 1, CH.RD)).toEqual([0, 2]);
+  });
+
+  it('オープンHHはどの段でもオープンのまま。「オープンHHのアクセント」を必ず残すなら8分の位置も残す', () => {
+    for (let rung = 0; rung <= MAX_RUNG; rung++) {
+      const r = simplify({ doc: hhSong(), rung, sections: sec, keep: DEFAULT_KEEP });
+      expect(at(r.doc, 1, CH.HHC)).not.toContain(1);
+    }
+    const r6 = simplify({ doc: hhSong(), rung: 6, sections: sec, keep: DEFAULT_KEEP });
+    expect(at(r6.doc, 1, CH.HHO)).toEqual([1]);
+    expect(at(r6.doc, 1, CH.HHC)).toEqual([0, 2, 3]);
+    // 必ず残すもの「オープンHHのアクセント」では、4拍目の裏も残る
+    expect(at(simplify({ doc: hhSong(), rung: 6, sections: sec, keep: { ...DEFAULT_KEEP, openHH: true } }).doc, 1, CH.HHO)).toEqual([1, 3.5]);
+  });
+
+  it('チップのレーンを変えるのは、左バスドラムを右バスドラムへ寄せるときだけ', () => {
+    // 全部の楽器を使う4小節（ツーバス・左足HH・ライド・オープンHH・左右のシンバル・タムのフィル）
+    const chips = [];
+    let id = 1;
+    for (let m = 0; m < 4; m++) {
+      for (let k = 0; k < 16; k++) {
+        const fill = m === 3 && k >= 8;
+        if (!fill) chips.push(chip(id++, m >= 2 ? (k % 2 === 0 ? CH.RD : CH.HHC) : k % 8 === 6 ? CH.HHO : CH.HHC, m, k, 16));
+        if (k % 4 === 0) chips.push(chip(id++, CH.BD, m, k, 16));
+        if (k % 4 === 2) chips.push(chip(id++, CH.LBD, m, k, 16));
+        if (k === 4 || k === 12) chips.push(chip(id++, fill ? CH.LT : CH.SD, m, k, 16), chip(id++, CH.LP, m, k, 16));
+        if (fill) chips.push(chip(id++, k < 12 ? CH.HT : CH.FT, m, k, 16));
+      }
+      chips.push(chip(id++, m % 2 ? CH.LC : CH.CY, m, 0, 1));
+    }
+    const d: DtxDoc = { ...emptyDoc(), fields: { BPM: '150' }, chips, nextId: id };
+    const chOf = new Map(d.chips.map((c) => [c.id, c.ch]));
+    for (let rung = 0; rung <= MAX_RUNG; rung++) {
+      for (let ease = 0; ease <= 3; ease++) {
+        const r = simplify({ doc: d, rung, ease, sections: sec, keep: DEFAULT_KEEP });
+        for (const [id, f] of r.fate) if (f.kind === 'moved') expect([chOf.get(id), f.ch]).toEqual([CH.LBD, CH.BD]);
+      }
+    }
+  });
+});

@@ -297,7 +297,7 @@ export function AiGenPage() {
           <textarea
             className="field"
             rows={3}
-            placeholder={hasKey ? '例: サビのライドは低難易度でも残したい' : 'キーを設定すると使えます'}
+            placeholder={hasKey ? '例: サビは元の譜面に近く、Aメロはもっと簡単に' : 'キーを設定すると使えます'}
             disabled={!hasKey}
             value={g.instruction}
             onChange={(e) => useGen.setState({ instruction: e.target.value })}

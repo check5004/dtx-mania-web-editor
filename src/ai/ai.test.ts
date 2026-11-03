@@ -144,23 +144,26 @@ describe('レベル判定と方針', () => {
   });
   it('AIの方針は与えた区間にそろえ、範囲外の値は丸める', () => {
     const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
-    const p = cleanPlan({ summary: 's', sections: [{ name: 'サビ', from: 8, to: 15, shift: 5, fill: 'thin', keepRide: true, keepOpenHH: false, comment: 'c' }] }, spans);
+    // 前の形の答え（ライド・オープンHHを残す指定）が来ても読めて、その指定は使わない（ライドもオープンHHも置き換えないので要らない）
+    const p = cleanPlan(JSON.parse('{"summary":"s","sections":[{"name":"サビ","from":8,"to":15,"shift":5,"fill":"thin","keepRide":true,"keepOpenHH":true,"comment":"c"}]}'), spans);
     expect(p.sections).toHaveLength(2);
-    expect(p.sections[1]).toMatchObject({ shift: 2, fill: 'thin', keepRide: true });
+    expect(p.sections[1]).toMatchObject({ shift: 2, fill: 'thin', comment: 'c' });
+    expect(p.sections[1]).not.toHaveProperty('keepRide');
+    expect(p.sections[1]).not.toHaveProperty('keepOpenHH');
     expect(p.sections[0].shift).toBe(0);
     expect(cleanJudgement({ level: 12, reasons: ['a'] }).level).toBe(9.99);
   });
   it('低い難易度では細かいフィルの指定を上限までにする（BASIC に16分のフィルを残さない）', () => {
     const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
-    const raw = { summary: 's', sections: [{ name: 'A', from: 0, to: 7, shift: 0, fill: 'keep' as const, keepRide: false, keepOpenHH: false, comment: '' }, { name: 'サビ', from: 8, to: 15, shift: -1, fill: 'last' as const, keepRide: true, keepOpenHH: false, comment: '' }] };
+    const raw = { summary: 's', sections: [{ name: 'A', from: 0, to: 7, shift: 0, fill: 'keep' as const, comment: '' }, { name: 'サビ', from: 8, to: 15, shift: -1, fill: 'last' as const, comment: '' }] };
     expect(cleanPlan(raw, spans, 'BASIC').sections.map((x) => x.fill)).toEqual(['short', 'last']);
     expect(cleanPlan(raw, spans, 'ADVANCED').sections.map((x) => x.fill)).toEqual(['thin', 'last']);
     expect(cleanPlan(raw, spans, 'EXTREME').sections.map((x) => x.fill)).toEqual(['keep', 'last']);
   });
-  it('方針が強すぎて目標に届かないときは、元に近く・フィル・ライドの指定を外せる', () => {
-    const plan = { summary: 'x', sections: [{ name: 'A', from: 0, to: 7, shift: -1, fill: 'thin' as const, keepRide: true, keepOpenHH: true }, { name: 'B', from: 8, to: 15, shift: 1, fill: 'last' as const }] };
+  it('方針が強すぎて目標に届かないときは、元に近く・フィルの指定を外せる', () => {
+    const plan = { summary: 'x', sections: [{ name: 'A', from: 0, to: 7, shift: -1, fill: 'thin' as const, comment: 'サビ' }, { name: 'B', from: 8, to: 15, shift: 1, fill: 'last' as const }] };
     const r = relaxPlan(plan)!;
-    expect(r.sections[0]).toMatchObject({ shift: 0, fill: undefined, keepRide: false, keepOpenHH: true });
+    expect(r.sections[0]).toMatchObject({ shift: 0, fill: undefined, comment: 'サビ' });
     expect(r.sections[1]).toMatchObject({ shift: 1, fill: 'last' });
     expect(r.summary).toContain('指定を外して');
     expect(relaxPlan({ summary: '', sections: [{ name: 'B', from: 0, to: 7, shift: 1, fill: 'short' }] })).toBeNull();

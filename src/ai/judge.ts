@@ -181,11 +181,9 @@ export const PLAN_SCHEMA = {
             to: { type: 'integer' },
             shift: { type: 'integer', description: '全体の簡略化の段からの増減（-2〜2。+ でより簡単に、- で元の譜面に近く）' },
             fill: { type: 'string', enum: ['keep', 'thin', 'short', 'last'], description: 'フィルの扱い' },
-            keepRide: { type: 'boolean', description: 'ライドを残す' },
-            keepOpenHH: { type: 'boolean', description: 'オープンハイハットのアクセントを残す' },
             comment: { type: 'string', description: 'このセクションで何を残し何を削るか（日本語で1〜2文）' },
           },
-          required: ['name', 'from', 'to', 'shift', 'fill', 'keepRide', 'keepOpenHH', 'comment'],
+          required: ['name', 'from', 'to', 'shift', 'fill', 'comment'],
           additionalProperties: false,
         },
       },
@@ -228,6 +226,7 @@ export function planPrompt(o: {
   const system = [
     'あなたは DTXMania（ドラム）の譜面作者です。完成した MASTER 譜面から低い難易度を作るときの「どこをどう簡略化するか」だけを決めます。',
     'ノーツの配置はルールエンジンが行います。あなたはセクションごとに、全体の簡略化の段からの増減（shift）とフィルの扱いなどを選んでください。',
+    'ルールエンジンは音を間引くだけで、楽器や奏法を別のものに置き換えません（ライドはライド、オープンHHはオープン、左右のシンバルもそのまま）。',
     '音楽性を壊さないこと: 曲の山場（サビ）らしさ、キメ、ノリは残し、静かな所はより簡単にしてよい。同じ形のセクションには同じ方針を。',
     '目標のレベルに入ることが最優先です。shift の -（元の譜面に近く）は山場の一部だけにし、そのぶん静かな所を + にして釣り合わせてください。',
     `フィルの扱い: ${Object.entries(FILL_STYLES)
@@ -268,8 +267,6 @@ export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpa
       to: s.to,
       shift: Math.max(-2, Math.min(2, Math.round(Number(r?.shift) || 0))),
       fill,
-      keepRide: !!r?.keepRide,
-      keepOpenHH: !!r?.keepOpenHH,
       comment: r?.comment ? String(r.comment) : undefined,
     };
   });

@@ -1,4 +1,7 @@
-// 低難易度の生成（ルールエンジン）。MASTER の譜面から音を間引き、必要ならレーンを寄せる。
+// 低難易度の生成（ルールエンジン）。MASTER の譜面から音を間引いて易しくする。
+// 楽器や奏法を別のものに書き換えない（ライドはライド、オープンHHはオープン、左シンバルは左のまま）。
+// 書き換えると曲として間違った譜面になり、叩きやすくもならない（楯さんの方針: 音楽理論を正義に）。
+// 例外は左バスドラム→右バスドラムだけ（同じバスドラムを片足で踏むだけで、鳴る音は変わらない）。
 // AI は「どの区間をどれだけ簡略化するか」だけを決め、ノーツの配置はここで決定的に行う。
 // 同じ中身の小節には同じ結果が出る（位置と中身だけで決める）ので、曲としての一貫性が保たれる。
 import { CH, type DtxDoc } from '../dtx/model';
@@ -22,27 +25,25 @@ export interface Policy {
    * 'keep' はそのほかもハイハットと同じ細かさまで残し、'heads' は頭と食いだけ
    */
   cymbals: 'keep' | 'heads';
-  openHH: boolean;
   /** 左足：merge は左バスドラムを右へ寄せる、drop は左ペダルも消す */
   leftFoot: 'keep' | 'merge' | 'drop';
-  ride: 'keep' | 'toHH';
   maxChord: number;
 }
 
 /** 簡略化の段（0 がほぼそのまま、9 がいちばん簡単） */
 export const LADDER: readonly Policy[] = [
-  { hh: 0, kick: 0, snare: 0, toms: 0, fillEarly: 0, fillLast: 0, cymbals: 'keep', openHH: true, leftFoot: 'keep', ride: 'keep', maxChord: 4 },
-  { hh: 0.25, kick: 0.25, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'keep', ride: 'keep', maxChord: 3 },
-  { hh: 0.25, kick: 0.5, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', maxChord: 3 },
-  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.25, fillEarly: 0.5, fillLast: 0.25, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', maxChord: 3 },
-  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.5, fillEarly: 0.5, fillLast: 0.5, cymbals: 'keep', openHH: true, leftFoot: 'merge', ride: 'keep', maxChord: 2 },
-  { hh: 0.5, kick: 1, snare: 0.5, toms: 0.5, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', openHH: true, leftFoot: 'drop', ride: 'keep', maxChord: 2 },
+  { hh: 0, kick: 0, snare: 0, toms: 0, fillEarly: 0, fillLast: 0, cymbals: 'keep', leftFoot: 'keep', maxChord: 4 },
+  { hh: 0.25, kick: 0.25, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', leftFoot: 'keep', maxChord: 3 },
+  { hh: 0.25, kick: 0.5, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', leftFoot: 'merge', maxChord: 3 },
+  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.25, fillEarly: 0.5, fillLast: 0.25, cymbals: 'keep', leftFoot: 'merge', maxChord: 3 },
+  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.5, fillEarly: 0.5, fillLast: 0.5, cymbals: 'keep', leftFoot: 'merge', maxChord: 2 },
+  { hh: 0.5, kick: 1, snare: 0.5, toms: 0.5, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', leftFoot: 'drop', maxChord: 2 },
   // 6・7 は ADVANCED になることが多い：シンバルの刻み・拍のアクセントは4分で残す（作者の ADVANCED は8割前後残している）
-  { hh: 1, kick: 1, snare: 'backbeat', toms: 1, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
-  { hh: 1, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 0.5, cymbals: 'keep', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
-  { hh: 2, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
+  { hh: 1, kick: 1, snare: 'backbeat', toms: 1, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', leftFoot: 'drop', maxChord: 2 },
+  { hh: 1, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 0.5, cymbals: 'keep', leftFoot: 'drop', maxChord: 2 },
+  { hh: 2, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', leftFoot: 'drop', maxChord: 2 },
   // 速い曲の BASIC 用：キックは小節の頭だけ（人の作った BASIC は 180BPM 前後でこの形が多い）
-  { hh: 2, kick: 4, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', maxChord: 2 },
+  { hh: 2, kick: 4, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', leftFoot: 'drop', maxChord: 2 },
 ];
 
 export const MAX_RUNG = LADDER.length - 1;
@@ -68,7 +69,7 @@ export interface MustKeep {
   sectionCrash: boolean;
   /** フィルの着地（次の小節頭のクラッシュとキック） */
   fillLanding: boolean;
-  /** オープンハイハットのアクセント */
+  /** オープンハイハットのアクセント（8分の位置）を、ハイハットを間引く段でも残す */
   openHH: boolean;
 }
 
@@ -82,8 +83,6 @@ export interface SectionPlan {
   /** 全体の段からの増減（+ でより簡単に） */
   shift: number;
   fill?: 'keep' | 'thin' | 'short' | 'last';
-  keepRide?: boolean;
-  keepOpenHH?: boolean;
   comment?: string;
 }
 
@@ -127,8 +126,6 @@ export function policyFor(rung: number, plan?: SectionPlan): Policy {
     p.fillEarly = f.early;
     p.fillLast = f.last;
   }
-  if (plan?.keepRide) p.ride = 'keep';
-  if (plan?.keepOpenHH) p.openHH = true;
   return p;
 }
 
@@ -289,13 +286,11 @@ export function simplify(input: SimplifyInput): SimplifyResult {
       if (n.lane === 1 || n.lane === 9) ok = step !== null && onGrid(n.inBeat, Math.max(step, p.hh));
     } else {
       switch (n.lane) {
-        case 1: // ハイハット
+        case 1: // ハイハット（オープンはオープンのまま。クローズに書き換えない）
           ok = onGrid(n.inBeat, p.hh);
-          if (n.alt && !p.openHH && !keep.openHH) ch = CH.HHC;
           break;
-        case 9: // ライド
+        case 9: // ライド（ライドのまま、ハイハットと同じ細かさまで残す）
           ok = onGrid(n.inBeat, p.hh);
-          if (p.ride === 'toHH') ch = CH.HHC;
           break;
         case 0:
         case 8: // クラッシュ（左右のシンバルは同じに扱う）
@@ -319,7 +314,7 @@ export function simplify(input: SimplifyInput): SimplifyResult {
           ok = onGrid(n.inBeat, p.toms);
       }
     }
-    if (keep.openHH && n.lane === 1 && n.alt && onGrid(n.inBeat, 0.5)) (ok = true), (ch = n.ch);
+    if (keep.openHH && n.lane === 1 && n.alt && onGrid(n.inBeat, 0.5)) ok = true;
     const ov = input.overrides?.get(n.id);
     if (ov === 'keep') (ok = true), (protect = true);
     if (ov === 'drop') (ok = false), (protect = false);
@@ -470,10 +465,8 @@ export function describePolicy(p: Policy): string {
   const g = (s: Step | null | 'backbeat') => (s === null ? 'なし' : s === 'backbeat' ? '2・4拍' : s === 0 ? 'そのまま' : s === 0.25 ? '16分' : s === 0.5 ? '8分' : s === 1 ? '4分' : s === 2 ? '2分' : '小節の頭だけ');
   const parts = [`ハイハット ${g(p.hh)}`, `キック ${g(p.kick)}`, `スネア ${g(p.snare)}`, `フィル ${p.fillEarly === null ? '最後の拍だけ' : g(p.fillEarly)}`];
   if (p.cymbals === 'heads') parts.push('クラッシュは小節の頭と食いだけ');
-  if (!p.openHH) parts.push('オープンHHは閉じる');
   if (p.leftFoot === 'merge') parts.push('左バスは右へ');
   if (p.leftFoot === 'drop') parts.push('左足なし');
-  if (p.ride === 'toHH') parts.push('ライドはHHへ');
   parts.push(`同時 ${p.maxChord} まで`);
   return parts.join('・');
 }

@@ -160,13 +160,13 @@ function defaultPlan(spans: SectionSpan[]): DifficultyPlan {
   return { summary: '標準の方針です。機械的な推定が目標のレベルに入るまで簡略化の段を上げ下げし、段のあいだは4小節のうち何小節かだけ次の段にして合わせます。', sections: spans.map((s) => ({ name: s.name, from: s.from, to: s.to, shift: 0 })) };
 }
 
-/** 目標より難しくなる指定（元に近く・フィルを残す・ライドを残す）を外した方針。外すものが無ければ null */
+/** 目標より難しくなる指定（元に近く・フィルを残す）を外した方針。外すものが無ければ null */
 export function relaxPlan(plan: DifficultyPlan): DifficultyPlan | null {
-  const strong = (s: DifficultyPlan['sections'][number]) => s.shift < 0 || s.fill === 'keep' || s.fill === 'thin' || !!s.keepRide;
+  const strong = (s: DifficultyPlan['sections'][number]) => s.shift < 0 || s.fill === 'keep' || s.fill === 'thin';
   if (!plan.sections.some(strong)) return null;
   return {
-    summary: `${plan.summary}${plan.summary ? ' ' : ''}（この方針では目標のレベルまで簡単にできなかったので、「元の譜面に近く」「フィルを残す」「ライドを残す」の指定を外して作りました）`,
-    sections: plan.sections.map((s) => ({ ...s, shift: Math.max(0, s.shift), fill: s.fill === 'keep' || s.fill === 'thin' ? undefined : s.fill, keepRide: false })),
+    summary: `${plan.summary}${plan.summary ? ' ' : ''}（この方針では目標のレベルまで簡単にできなかったので、「元の譜面に近く」「フィルを残す」の指定を外して作りました）`,
+    sections: plan.sections.map((s) => ({ ...s, shift: Math.max(0, s.shift), fill: s.fill === 'keep' || s.fill === 'thin' ? undefined : s.fill })),
   };
 }
 
@@ -234,7 +234,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
     const calib = g.calib;
     const rawTarget = { min: ds.target.min / calib, max: ds.target.max / calib };
     let result = generateToTarget(base, DEFAULT_RUNG[diff], rawTarget);
-    // AI の方針（元に近く・フィルを残す・ライドを残す）が強すぎて、いちばん簡単な段でも目標に届かないときは、それを外して作り直す
+    // AI の方針（元に近く・フィルを残す）が強すぎて、いちばん簡単な段でも目標に届かないときは、それを外して作り直す
     if (result.level > rawTarget.max + 1e-9) {
       const relaxed = relaxPlan(plan);
       if (relaxed) {
