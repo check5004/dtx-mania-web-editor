@@ -1,4 +1,5 @@
 // ファイルを開く・保存する流れ。
+import { tr, pl, isJa } from '../i18n';
 import { zipSync } from 'fflate';
 import { readAudioTags } from '../fs/tags';
 import { virtualSound } from '../audio/sounds';
@@ -42,9 +43,12 @@ async function confirmDiscard(): Promise<boolean> {
   const s = get();
   if (s.screen !== 'editor' || !isDirty(s)) return true;
   return confirmDialog({
-    title: '保存していない変更があります',
-    body: '開き直すと、いまの変更は「最近の曲」の自動保存にだけ残ります。続けますか？',
-    ok: '続ける',
+    title: tr('保存していない変更があります', 'You have unsaved changes'),
+    body: tr(
+      '開き直すと、いまの変更は「最近の曲」の自動保存にだけ残ります。続けますか？',
+      'If you open something else, your current changes are kept only in the "Recent songs" autosave. Continue?',
+    ),
+    ok: tr('続ける', 'Continue'),
   });
 }
 
@@ -98,7 +102,7 @@ async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<st
   };
   openDocument(parsed.doc, meta, folder, { dirty: useRecent || decoded.encoding === 'utf-8' });
   await loadSidecarFor(folder, file.name, recentSidecar);
-  if (useRecent) toast('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', 'warn', 6000);
+  if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }
 
 function recentIdFor(folder: SongFolder | null, fileName: string) {
@@ -111,7 +115,7 @@ export async function openFolder(folder: SongFolder) {
   const labels = await readSetDefLabels(folder);
   if (list.length === 0) {
     const info = await newSongDialog({
-      title: `「${folder.name}」に新しい譜面を作る`,
+      title: tr(`「${folder.name}」に新しい譜面を作る`, `Create a new chart in "${folder.name}"`),
       audioFiles: audioFiles(folder).map((f) => f.path),
       defaults: { title: folder.name },
     });
@@ -124,8 +128,8 @@ export async function openFolder(folder: SongFolder) {
   let file = list[0];
   if (list.length > 1) {
     const picked = await chooseDialog({
-      title: 'どの難易度を開きますか？',
-      body: `${folder.name} には譜面が ${list.length} 個あります。`,
+      title: tr('どの難易度を開きますか？', 'Which difficulty do you want to open?'),
+      body: tr(`${folder.name} には譜面が ${list.length} 個あります。`, `${folder.name} has ${list.length} charts.`),
       options: list.map((f) => ({
         label: labels.get(f.name.toLowerCase()) ?? f.name,
         sub: `${f.name} · ${(f.size / 1024).toFixed(1)} KB`,
@@ -157,7 +161,7 @@ export async function openFolderPicker(fallbackInput?: HTMLInputElement | null) 
       const folder = await pickFolder();
       if (folder) await openFolder(folder);
     } catch (e) {
-      toast(`フォルダを開けませんでした: ${(e as Error).message}`, 'error');
+      toast(tr(`フォルダを開けませんでした: ${(e as Error).message}`, `Couldn't open the folder: ${(e as Error).message}`), 'error');
     }
     return;
   }
@@ -187,30 +191,37 @@ export async function openDroppedFiles(files: File[]) {
   const folder = folderFromFiles(files, dtx ? dtx.name.replace(/\.dtx$/i, '') : files[0].name.replace(/\.[^.]+$/, ''));
   if (dtx) {
     await openDtxFile(folder, folder.files.get(dtx.name.toLowerCase())!);
-    if (files.length === 1) toast('DTXだけを開きました。音を鳴らすには曲フォルダごと開いてください', 'info', 6000);
+    if (files.length === 1) toast(tr('DTXだけを開きました。音を鳴らすには曲フォルダごと開いてください', 'Opened only the DTX file. Open the whole song folder to hear the sounds'), 'info', 6000);
     return;
   }
   const audio = files.filter((f) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(f.name));
   if (audio.length === 0) {
-    toast('DTXか音声ファイル（WAV・OGG・MP3）を選んでください', 'warn');
+    toast(tr('DTXか音声ファイル（WAV・OGG・MP3）を選んでください', 'Choose a DTX or an audio file (WAV, OGG, MP3)'), 'warn');
     return;
   }
   // ステム分離ソフトで分けたファイル（drums・bass…）をまとめて落としたら、ステムとして読み込む
   const kinds = new Set(audio.map((f) => detectStemKind(f.name)));
   if (audio.length >= 2 && kinds.size >= 2) {
     const asStems = await chooseDialog({
-      title: `音声ファイルが ${audio.length} 個あります`,
-      body: 'ステム（楽器ごとに分けた音）として読み込むと、楽器ごとに鳴らし分け、ドラム抜きのBGMを書き出せます。',
+      title: tr(`音声ファイルが ${audio.length} 個あります`, `${audio.length} audio files`),
+      body: tr(
+        'ステム（楽器ごとに分けた音）として読み込むと、楽器ごとに鳴らし分け、ドラム抜きのBGMを書き出せます。',
+        'Loading them as stems (one file per instrument) lets you play instruments separately and export a no-drums BGM.',
+      ),
       options: [
-        { label: 'ステムとして読み込む（おすすめ）', sub: audio.map((f) => f.name).join('、'), value: true },
-        { label: '1つを原曲にする', sub: 'ほかのファイルは曲フォルダに置くだけにします', value: false },
+        { label: tr('ステムとして読み込む（おすすめ）', 'Load as stems (recommended)'), sub: audio.map((f) => f.name).join(tr('、', ', ')), value: true },
+        { label: tr('1つを原曲にする', 'Use one as the original'), sub: tr('ほかのファイルは曲フォルダに置くだけにします', 'The other files are just put in the song folder'), value: false },
       ],
     });
     if (asStems === null || asStems === undefined) return;
     if (asStems) {
-      const info = await newSongDialog({ title: '新しい譜面をつくる（ステムから）', audioFiles: [], defaults: { title: audio[0].name.replace(/\s*[([].*$/, '').replace(/\.[^.]+$/, '') } });
+      const info = await newSongDialog({
+        title: tr('新しい譜面をつくる（ステムから）', 'Create a new chart (from stems)'),
+        audioFiles: [],
+        defaults: { title: audio[0].name.replace(/\s*[([].*$/, '').replace(/\.[^.]+$/, '') },
+      });
       if (!info) return;
-      openDocument(createDoc(info), newMeta('mstr.dtx', null), folderFromFiles([], info.title || '新しい曲'), { dirty: true });
+      openDocument(createDoc(info), newMeta('mstr.dtx', null), folderFromFiles([], info.title || tr('新しい曲', 'New song')), { dirty: true });
       await importStems(audio);
       return;
     }
@@ -218,7 +229,7 @@ export async function openDroppedFiles(files: File[]) {
   // 音声ファイルのタグ（曲名・アーティスト・BPM）があれば最初から入れておく
   const tags = await readAudioTags(audio[0]);
   const info = await newSongDialog({
-    title: '新しい譜面をつくる',
+    title: tr('新しい譜面をつくる', 'Create a new chart'),
     audioFiles: audio.map((f) => f.name),
     defaults: {
       title: tags?.title || audio[0].name.replace(/\.[^.]+$/, ''),
@@ -262,13 +273,13 @@ function freePath(folder: SongFolder, name: string): string {
  */
 export async function importBgmFile(file: File) {
   if (!/\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(file.name)) {
-    toast('原曲は音声ファイル（WAV・OGG・MP3）を選んでください', 'warn');
+    toast(tr('原曲は音声ファイル（WAV・OGG・MP3）を選んでください', 'For the original, choose an audio file (WAV, OGG, MP3)'), 'warn');
     return;
   }
   const s = get();
   let folder = s.folder;
   if (!folder) {
-    folder = folderFromFiles([], s.doc.fields['TITLE'] || '新しい曲');
+    folder = folderFromFiles([], s.doc.fields['TITLE'] || tr('新しい曲', 'New song'));
     useEditor.setState({ folder });
   }
   const same = findFile(folder, file.name);
@@ -281,7 +292,7 @@ export async function importBgmFile(file: File) {
     path = same.path;
   }
   const bgm = bgmSource(get().doc);
-  edit(bgm ? '原曲を差し替える' : '原曲を読み込む', (d) => {
+  edit(bgm ? tr('原曲を差し替える', 'Replace the original') : tr('原曲を読み込む', 'Load the original'), (d) => {
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), path);
       return;
@@ -293,7 +304,9 @@ export async function importBgmFile(file: File) {
   });
   await prepareSounds();
   toast(
-    `原曲「${path}」を${bgm ? '差し替えました' : '読み込みました（001小節の頭から鳴らします。ずれていたら「テンポ合わせ」で合わせられます）'}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`,
+    isJa()
+      ? `原曲「${path}」を${bgm ? '差し替えました' : '読み込みました（001小節の頭から鳴らします。ずれていたら「テンポ合わせ」で合わせられます）'}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`
+      : `${bgm ? 'Replaced' : 'Loaded'} the original "${path}"${bgm ? '' : ' (it plays from the start of measure 001; if it is off, line it up in "Tempo")'}${memory ? '. It is written to the song folder when you save' : ''}`,
     'ok',
     7000,
   );
@@ -304,14 +317,27 @@ export async function dropAudioInEditor(files: File[]) {
   const audio = files.filter((f) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(f.name));
   if (!audio.length) return openDroppedFiles(files);
   const choice = await chooseDialog({
-    title: audio.length === 1 ? `「${audio[0].name}」をどうしますか？` : `音声ファイルが ${audio.length} 個あります`,
-    body: 'いま編集中の譜面に使うか、新しい譜面を作るかを選んでください。',
+    title: audio.length === 1 ? tr(`「${audio[0].name}」をどうしますか？`, `What do you want to do with "${audio[0].name}"?`) : tr(`音声ファイルが ${audio.length} 個あります`, `${audio.length} audio files`),
+    body: tr('いま編集中の譜面に使うか、新しい譜面を作るかを選んでください。', 'Use it in the chart you are editing, or create a new chart.'),
     options: [
       ...(audio.length === 1
-        ? [{ label: bgmSource(get().doc) ? '原曲を差し替える' : '原曲にする（おすすめ）', sub: '曲フォルダにコピーしてBGM（#WAV・ch01）に登録します。波形と原曲の打点はこの音から作ります', value: 'bgm' as const }]
+        ? [
+            {
+              label: bgmSource(get().doc) ? tr('原曲を差し替える', 'Replace the original') : tr('原曲にする（おすすめ）', 'Use as the original (recommended)'),
+              sub: tr(
+                '曲フォルダにコピーしてBGM（#WAV・ch01）に登録します。波形と原曲の打点はこの音から作ります',
+                'Copies it into the song folder and sets it as the BGM (#WAV, ch01). The waveform and detected hits come from it',
+              ),
+              value: 'bgm' as const,
+            },
+          ]
         : []),
-      { label: 'ステムとして読み込む', sub: '楽器ごとに分けた音（ドラム・ベースなど）。DAWのように鳴らし分けられます', value: 'stems' as const },
-      { label: '新しい譜面を作る', sub: 'いまの譜面を閉じて、この音から新しい譜面を作ります', value: 'new' as const },
+      {
+        label: tr('ステムとして読み込む', 'Load as stems'),
+        sub: tr('楽器ごとに分けた音（ドラム・ベースなど）。DAWのように鳴らし分けられます', 'One file per instrument (drums, bass…). Play them separately, like in a DAW'),
+        value: 'stems' as const,
+      },
+      { label: tr('新しい譜面を作る', 'Create a new chart'), sub: tr('いまの譜面を閉じて、この音から新しい譜面を作ります', 'Closes the current chart and starts a new one from this audio'), value: 'new' as const },
     ],
   });
   if (choice === 'bgm') await importBgmFile(audio[0]);
@@ -321,7 +347,7 @@ export async function dropAudioInEditor(files: File[]) {
 
 export async function newEmptySong() {
   if (!(await confirmDiscard())) return;
-  const info = await newSongDialog({ title: '新しい譜面をつくる', audioFiles: [], defaults: {} });
+  const info = await newSongDialog({ title: tr('新しい譜面をつくる', 'Create a new chart'), audioFiles: [], defaults: {} });
   if (!info) return;
   openDocument(createDoc(info), newMeta('mstr.dtx', null), null, { dirty: true });
 }
@@ -354,7 +380,9 @@ function creditNote(kit: { path: string; origin: string; library: boolean }[]): 
   const lib = kit.filter((k) => k.library);
   if (!lib.length) return '';
   const songs = [...new Set(lib.map((k) => k.origin))];
-  return `。他の曲から取り込んだ音を使っています（出典: ${songs.slice(0, 3).join('、')}${songs.length > 3 ? ' ほか' : ''}）。個人の曲づくりの範囲で使ってください`;
+  return isJa()
+    ? `。他の曲から取り込んだ音を使っています（出典: ${songs.slice(0, 3).join('、')}${songs.length > 3 ? ' ほか' : ''}）。個人の曲づくりの範囲で使ってください`
+    : `. It uses sounds taken from other songs (from: ${songs.slice(0, 3).join(', ')}${songs.length > 3 ? ' and more' : ''}). Keep it to personal charting`;
 }
 
 /** 保存する DTX。曲の終わりを決めていなければ、いま見えている終わり（原曲の鳴り終わり）を書き込む */
@@ -381,15 +409,18 @@ export async function save(opts: { as?: boolean } = {}) {
   const { bytes, lost } = encodeForSave(doc);
   if (lost.length > 0) {
     const ok = await confirmDialog({
-      title: 'Shift_JISで表せない文字があります',
-      body: `${lost.join(' ')}\n\nNXは譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるのがおすすめです。このまま保存しますか？`,
-      ok: 'このまま保存',
+      title: tr('Shift_JISで表せない文字があります', "Some characters can't be written in Shift_JIS"),
+      body: tr(
+        `${lost.join(' ')}\n\nNXは譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるのがおすすめです。このまま保存しますか？`,
+        `${lost.join(' ')}\n\nNX reads charts as Shift_JIS, so these characters become "?". It is best to replace them in Song info. Save anyway?`,
+      ),
+      ok: tr('このまま保存', 'Save anyway'),
     });
     if (!ok) return;
   }
   let fileName = s.meta.fileName;
   if (opts.as) {
-    const name = await promptDialog({ title: '名前を付けて保存', body: '同じ曲フォルダに保存します。', value: fileName, ok: '保存' });
+    const name = await promptDialog({ title: tr('名前を付けて保存', 'Save as'), body: tr('同じ曲フォルダに保存します。', 'Saves into the same song folder.'), value: fileName, ok: tr('保存', 'Save') });
     if (!name) return;
     fileName = /\.dtx$/i.test(name) ? name : `${name}.dtx`;
   }
@@ -398,11 +429,16 @@ export async function save(opts: { as?: boolean } = {}) {
   try {
     if (folder?.dir) {
       if (!(await ensureWritable(folder))) {
-        toast('フォルダへの書き込みが許可されませんでした', 'error');
+        toast(tr('フォルダへの書き込みが許可されませんでした', 'Writing to the folder was not allowed'), 'error');
         return;
       }
       if (findFile(folder, fileName) && fileName !== s.meta.fileName) {
-        const ok = await confirmDialog({ title: `${fileName} を上書きしますか？`, body: '同じ名前の譜面がフォルダにあります。', ok: '上書き', danger: true });
+        const ok = await confirmDialog({
+          title: tr(`${fileName} を上書きしますか？`, `Overwrite ${fileName}?`),
+          body: tr('同じ名前の譜面がフォルダにあります。', 'A chart with the same name is already in the folder.'),
+          ok: tr('上書き', 'Overwrite'),
+          danger: true,
+        });
         if (!ok) return;
       }
       for (const k of kit) await writeFile(folder, k.path, k.bytes);
@@ -413,21 +449,30 @@ export async function save(opts: { as?: boolean } = {}) {
       if (side) await writeFile(folder, sidecarName(fileName), side);
       markSidecarSaved();
       markSaved(doc, { meta: { ...get().meta, fileName, recentId: recentIdFor(folder, fileName) } });
-      toast(`保存しました: ${folder.name}/${fileName}${kit.length ? `（キットの音 ${kit.length} 個も保存）` : ''}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
+      const kitNote = kit.length ? tr(`（キットの音 ${kit.length} 個も保存）`, ` (also saved ${kit.length} kit ${pl(kit.length, 'sound')})`) : '';
+      toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${kitNote}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
       return;
     }
     if (supportsDirectWrite()) {
       // まだ保存先のフォルダが無い（新しい曲）。フォルダを選んでもらい、原曲もそこにコピーする
       const ok = await confirmDialog({
-        title: '曲フォルダを選んで保存します',
-        body: 'NXの曲フォルダ（DTXFiles の中など）に、この曲用の空のフォルダを作って選んでください。譜面・原曲・内蔵キットの音をまとめて保存します。',
-        ok: 'フォルダを選ぶ',
+        title: tr('曲フォルダを選んで保存します', 'Choose a song folder to save to'),
+        body: tr(
+          'NXの曲フォルダ（DTXFiles の中など）に、この曲用の空のフォルダを作って選んでください。譜面・原曲・内蔵キットの音をまとめて保存します。',
+          "Create an empty folder for this song in NX's song folder (inside DTXFiles, for example) and choose it. The chart, the original, and the built-in kit sounds are saved together.",
+        ),
+        ok: tr('フォルダを選ぶ', 'Choose folder'),
       });
       if (!ok) return;
       const dir = await window.showDirectoryPicker!({ id: 'dtx-song', mode: 'readwrite' });
       const target = await folderFromHandle(dir);
       if (findFile(target, fileName)) {
-        const over = await confirmDialog({ title: `${fileName} を上書きしますか？`, body: `「${target.name}」に同じ名前の譜面があります。`, ok: '上書き', danger: true });
+        const over = await confirmDialog({
+          title: tr(`${fileName} を上書きしますか？`, `Overwrite ${fileName}?`),
+          body: tr(`「${target.name}」に同じ名前の譜面があります。`, `"${target.name}" already has a chart with the same name.`),
+          ok: tr('上書き', 'Overwrite'),
+          danger: true,
+        });
         if (!over) return;
       }
       if (folder) {
@@ -444,7 +489,7 @@ export async function save(opts: { as?: boolean } = {}) {
       folder = target;
       const labels = await readSetDefLabels(folder);
       markSaved(doc, { folder, meta: { ...get().meta, fileName, siblings: siblingsOf(folder, labels), recentId: recentIdFor(folder, fileName) } });
-      toast(`保存しました: ${folder.name}/${fileName}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
+      toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
       return;
     }
     // フォルダに直接書けないブラウザ：ダウンロード
@@ -455,7 +500,7 @@ export async function save(opts: { as?: boolean } = {}) {
     markSaved(doc, { meta: { ...get().meta, fileName } });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return;
-    toast(`保存できませんでした: ${(e as Error).message}`, 'error', 8000);
+    toast(tr(`保存できませんでした: ${(e as Error).message}`, `Couldn't save: ${(e as Error).message}`), 'error', 8000);
   }
 }
 
@@ -465,7 +510,7 @@ function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; 
   for (const f of pendingFiles(folder)) if (!memoryOnly.includes(f)) memoryOnly.push(f);
   if (kit.length === 0 && memoryOnly.length === 0) {
     downloadBytes(fileName, bytes);
-    toast(`${fileName} をダウンロードしました。曲フォルダの同じ名前のファイルと置き換えてください`, 'ok', 7000);
+    toast(tr(`${fileName} をダウンロードしました。曲フォルダの同じ名前のファイルと置き換えてください`, `Downloaded ${fileName}. Replace the file with the same name in the song folder`), 'ok', 7000);
     return;
   }
   void (async () => {
@@ -477,7 +522,7 @@ function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; 
     const zip = zipSync(files, { level: 0 });
     const name = `${(get().doc.fields['TITLE'] || 'song').replace(/[\\/:*?"<>|]/g, '_')}.zip`;
     downloadBytes(name, zip, 'application/zip');
-    toast(`${name} をダウンロードしました。展開したファイルを曲フォルダに入れてください${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 10000 : 7000);
+    toast(tr(`${name} をダウンロードしました。展開したファイルを曲フォルダに入れてください`, `Downloaded ${name}. Unzip it and put the files in the song folder`) + creditNote(kit), 'ok', kit.some((k) => k.library) ? 10000 : 7000);
   })();
 }
 
@@ -501,7 +546,7 @@ export async function autosaveNow(saved = false) {
   const f = s.doc.fields;
   const entry: RecentEntry = {
     id: s.meta.recentId ?? recentIdFor(s.folder, s.meta.fileName),
-    title: f['TITLE'] ?? '無題',
+    title: f['TITLE'] ?? tr('無題', 'Untitled'),
     artist: f['ARTIST'] ?? '',
     bpm: f['BPM'] ?? '',
     level: f['DLEVEL'] ?? '',
@@ -563,5 +608,5 @@ export async function openRecent(e: RecentEntry) {
   const parsed = parseDtx(e.text);
   openDocument(parsed.doc, { ...newMeta(e.fileName, null), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, null, { dirty: !e.saved });
   await loadSidecarFor(null, e.fileName, e.sidecar);
-  toast('自動保存した譜面だけを開きました。音を鳴らすには曲フォルダを開いてください', 'info', 6000);
+  toast(tr('自動保存した譜面だけを開きました。音を鳴らすには曲フォルダを開いてください', 'Opened only the autosaved chart. Open the song folder to hear the sounds'), 'info', 6000);
 }

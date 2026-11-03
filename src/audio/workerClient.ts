@@ -1,4 +1,5 @@
 // 解析ワーカーへの窓口。要求ごとに Promise を返す。
+import { tr, getLang, subscribeLang } from '../i18n';
 import type { AlignSearch, LocalSim } from './align';
 import type { AnalysisData } from './analysis';
 import type { FrameFeatures } from './features';
@@ -17,12 +18,15 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; prog
 
 let worker: Worker | null = null;
 let nextId = 1;
+// 言語を切り替えたら、ワーカーのエラーの文もその言語にする
+subscribeLang(() => worker?.postMessage({ id: 0, type: 'lang', lang: getLang() }));
 const pending = new Map<number, Pending>();
 const loaded = new Set<string>();
 
 function getWorker(): Worker {
   if (worker) return worker;
   worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+  worker.postMessage({ id: 0, type: 'lang', lang: getLang() });
   worker.onmessage = (e: MessageEvent<{ id: number; ok?: boolean; result?: unknown; error?: string; progress?: number }>) => {
     const m = e.data;
     const p = pending.get(m.id);
@@ -33,10 +37,10 @@ function getWorker(): Worker {
     }
     pending.delete(m.id);
     if (m.ok) p.resolve(m.result);
-    else p.reject(new Error(m.error || '解析に失敗しました'));
+    else p.reject(new Error(m.error || tr('解析に失敗しました', 'The analysis failed')));
   };
   worker.onerror = (e) => {
-    for (const p of pending.values()) p.reject(new Error(e.message || '解析の処理が止まりました'));
+    for (const p of pending.values()) p.reject(new Error(e.message || tr('解析の処理が止まりました', 'The analysis stopped')));
     pending.clear();
     loaded.clear();
     worker?.terminate();

@@ -569,7 +569,7 @@ function DrumModelRow() {
         className="row lbl"
         title={tr(
           `原曲からドラムの5種（BD・SD・タム・HH・シンバル）の打点を聞き取ります。初回だけモデル（2.2MB）を Hugging Face から、動かす部分（約4MB）をこのサイトから読み込みます。音はこのブラウザの外に出しません。モデル: ${ADTOF.credit}・${ADTOF.license}`,
-          `Detects hits of 5 drum classes (BD, SD, toms, HH, cymbals) in the original. The first time, it downloads the model (2.2 MB) from Hugging Face and the runtime (about 4 MB) from this site. The audio never leaves this browser. Model: ${ADTOF.credit}, ${ADTOF.license}`,
+          `Detects hits of 5 drum classes (BD, SD, toms, HH, cymbals) in the original. The first time, it downloads the model (2.2 MB) from Hugging Face and the runtime (about 4 MB) from this site. The audio never leaves this browser. Model: ${ADTOF.creditEn}, ${ADTOF.license}`,
         )}
       >
         <input type="checkbox" checked={d.enabled} onChange={(e) => setDrumsEnabled(e.target.checked)} />

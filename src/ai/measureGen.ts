@@ -2,6 +2,7 @@
 // 格子（レーン × 拍ごとの格子。16分・3連・32分を拍ごとに選ぶ）での受け渡しと答えの読み方はフレーズ候補（ai/phrase）と同じ。
 // フレーズ候補との違い：原曲の打点に合わせて「耳コピ」すること、前後の小節で作者が原曲の打点をどう書いているか
 // （シンバルの打点をライドで書く、など）を読み取ってそろえること、作者がもう置いたチップを手がかりにすること。
+import { aiLangRule, aiTextLimit } from '../i18n';
 import { beatsLabel } from './beatGrid';
 import { decodeCandidates, GRID_HELP, isDrumRows, measureGrid, measureLayout, onsetGrid, onsetHelp, ROUNDED_NOTE, STEPS_HELP, GRID_LANES, type OnsetRows, type PhraseCandidate } from './phrase';
 import type { DtxDoc } from '../dtx/model';
@@ -108,24 +109,29 @@ export function buildMeasureContext(
   };
 }
 
-export const MEASURE_SCHEMA = {
+/** 小節の生成の答えの形（名前・理由の言語と字数は画面の言語に合わせるので、使うたびに作る） */
+export const measureSchema = () => ({
   name: 'measure_candidates',
   schema: {
     type: 'object',
     properties: {
       candidates: {
         type: 'array',
+        // i18n-ignore
         description: '案3つ（1つめが一番ありそうなもの）',
         items: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: '短い名前（日本語で12字以内）' },
-            reason: { type: 'string', description: 'この形にした理由（日本語で40字以内）' },
+            // i18n-ignore-start
+            name: { type: 'string', description: `短い名前（${aiTextLimit(12)}）` },
+            reason: { type: 'string', description: `この形にした理由（${aiTextLimit(40)}）` },
+            // i18n-ignore-end
             measures: {
               type: 'array',
               items: {
                 type: 'object',
                 properties: {
+                  // i18n-ignore
                   index: { type: 'integer', description: '生成する範囲の何小節目か（0から）' },
                   lanes: {
                     type: 'array',
@@ -153,11 +159,13 @@ export const MEASURE_SCHEMA = {
     required: ['candidates'],
     additionalProperties: false,
   },
-};
+});
 
+// AI へのプロンプト（指示は日本語のまま。答えのユーザーが読む文は aiLangRule で画面の言語にする）
 export function measurePrompt(ctx: MeasureGenContext): { system: string; user: string } {
   const n = ctx.to - ctx.from + 1;
   const hasOnsets = !!ctx.onsetKind;
+  // i18n-ignore-start
   const system = [
     'あなたはドラム譜面（DTXMania、電子ドラム）の耳コピを手伝います。',
     `【生成】の${n === 1 ? '小節' : `${n}小節`}のドラムを、原曲に合わせて書いてください。性格の違う案を3つ作ります。`,
@@ -179,6 +187,7 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
     ctx.onsetKind === 'drums' ? '【生成】の小節の拍の細かさは、原曲の打点の時刻に合わせて選んであります（3や6の拍は3連、8の拍は32分に聞こえる所）。3連・32分に聞こえる所は、その細かさで書いてください。' : '',
     '守ること: 手は同時に2つまで、足は左右1つずつ。【生成】の小節だけを書く。',
     '答えは指定の JSON だけで返してください。',
+    aiLangRule(),
   ]
     .filter(Boolean)
     .join('\n');
@@ -220,6 +229,7 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
     if (ms.onsets) lines.push(`原曲の打点:\n${ms.onsets.join('\n')}`);
     lines.push('');
   }
+  // i18n-ignore-end
   return { system, user: lines.join('\n') };
 }
 

@@ -1,9 +1,10 @@
 // 操作バーの「フラム」：オンにするとクリックでフラム（同じレーンの2打をほんの少しずらす）を置く。▾ で置き方・間隔・ベロシティ。
+import { tr } from '../i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FLAM_DIVS, FLAM_TARGET_MS, type FlamSide } from '../edit/flam';
 import { useEditor } from '../store/editor';
-import { FLAM_MOD_LABEL, flamChips, flamStateOf, gapAt, gapText, setFlam, toggleFlamMode, unflamChips, useFlam } from '../store/flam';
+import { FLAM_MOD_LABEL, flamChips, flamStateOf, gapAt, gapText, setFlam, sideLabel, toggleFlamMode, unflamChips, useFlam } from '../store/flam';
 import { Icon } from './icons';
 
 export function FlamButton() {
@@ -11,15 +12,27 @@ export function FlamButton() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const tip = mode
-    ? `フラムで置く：オン。クリックで同じレーンに2打をほんの少しずらして置きます（${FLAM_MOD_LABEL}+クリックなら1打）。選んだチップは Alt+F でフラムにする／1打に戻す`
-    : `フラムで置く：オフ。オンにするとクリックでフラム（両手でほんの少しずらして叩く2打）を置きます。オフのままでも ${FLAM_MOD_LABEL}+クリックで1回だけフラム。選んだチップは Alt+F`;
+    ? tr(
+        `フラムで置く：オン。クリックで同じレーンに2打をほんの少しずらして置きます（${FLAM_MOD_LABEL}+クリックなら1打）。選んだチップは Alt+F でフラムにする／1打に戻す`,
+        `Place flams: on. A click places two notes on the same lane, slightly apart (${FLAM_MOD_LABEL}+click for one note). Alt+F turns selected chips into flams and back`,
+      )
+    : tr(
+        `フラムで置く：オフ。オンにするとクリックでフラム（両手でほんの少しずらして叩く2打）を置きます。オフのままでも ${FLAM_MOD_LABEL}+クリックで1回だけフラム。選んだチップは Alt+F`,
+        `Place flams: off. Turn on to place flams (two notes played by both hands slightly apart) with a click. While off, ${FLAM_MOD_LABEL}+click places one flam. Alt+F for selected chips`,
+      );
   return (
-    <div ref={ref} className={`flam-ctl ${mode ? 'on' : ''}`} role="group" aria-label="フラム">
+    <div ref={ref} className={`flam-ctl ${mode ? 'on' : ''}`} role="group" aria-label={tr('フラム', 'Flam')}>
       <button className="flam-toggle" aria-pressed={mode} onClick={() => toggleFlamMode()} title={tip}>
         {Icon.flam(14)}
-        フラム
+        {tr('フラム', 'Flam')}
       </button>
-      <button className="flam-more" aria-expanded={open} aria-label="フラムの置き方・間隔" title="フラムの置き方・間隔・1打目のベロシティ" onClick={() => setOpen((v) => !v)}>
+      <button
+        className="flam-more"
+        aria-expanded={open}
+        aria-label={tr('フラムの置き方・間隔', 'Flam placement and spacing')}
+        title={tr('フラムの置き方・間隔・1打目のベロシティ', 'Flam placement, spacing and grace note velocity')}
+        onClick={() => setOpen((v) => !v)}
+      >
         {Icon.chevronDown(12)}
       </button>
       {open && <FlamPanel anchor={ref} onClose={() => setOpen(false)} />}
@@ -41,9 +54,9 @@ function SideFigure({ side }: { side: FlamSide }) {
   );
 }
 
-const SIDES: { side: FlamSide; title: string; sub: string }[] = [
-  { side: 'after', title: '1打目を拍の上に', sub: '2打目をすぐ後ろへ。よく見る書き方' },
-  { side: 'before', title: '2打目を拍の上に', sub: '1打目をすぐ前へ。叩くタイミングどおり' },
+const sides = (): { side: FlamSide; title: string; sub: string }[] => [
+  { side: 'after', title: sideLabel('after'), sub: tr('2打目をすぐ後ろへ。よく見る書き方', 'Main note just after. The common way to write it') },
+  { side: 'before', title: sideLabel('before'), sub: tr('1打目をすぐ前へ。叩くタイミングどおり', 'Grace note just before. Matches how it is played') },
 ];
 
 function FlamPanel({ anchor, onClose }: { anchor: React.RefObject<HTMLDivElement | null>; onClose: () => void }) {
@@ -92,17 +105,17 @@ function FlamPanel({ anchor, onClose }: { anchor: React.RefObject<HTMLDivElement
   return createPortal(
     <div ref={panel} className="popover flam-panel" style={{ position: 'fixed', left: pos.left, top: pos.top, width: 364 }}>
       <div className="row" style={{ gap: 8 }}>
-        <b>フラム</b>
-        <span className="lbl">同じレーンに2打をほんの少しずらして置く</span>
+        <b>{tr('フラム', 'Flam')}</b>
+        <span className="lbl">{tr('同じレーンに2打をほんの少しずらして置く', 'Two notes on the same lane, slightly apart')}</span>
         <span className="grow" />
-        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label="閉じる" title="閉じる（Esc）">
+        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label={tr('閉じる', 'Close')} title={tr('閉じる（Esc）', 'Close (Esc)')}>
           ✕
         </button>
       </div>
 
-      <div className="flam-label">置き方</div>
-      <div className="flam-sides" role="radiogroup" aria-label="置き方">
-        {SIDES.map((s) => (
+      <div className="flam-label">{tr('置き方', 'Placement')}</div>
+      <div className="flam-sides" role="radiogroup" aria-label={tr('置き方', 'Placement')}>
+        {sides().map((s) => (
           <button key={s.side} role="radio" aria-checked={f.side === s.side} className={`flam-side ${f.side === s.side ? 'on' : ''}`} onClick={() => setFlam({ side: s.side })}>
             <SideFigure side={s.side} />
             <span>
@@ -114,14 +127,17 @@ function FlamPanel({ anchor, onClose }: { anchor: React.RefObject<HTMLDivElement
       </div>
 
       <div className="flam-row">
-        <span className="flam-label">間隔</span>
+        <span className="flam-label">{tr('間隔', 'Spacing')}</span>
         <select
           className="field mono"
           value={String(f.gap)}
           onChange={(e) => setFlam({ gap: e.target.value === 'auto' ? 'auto' : Number(e.target.value) })}
-          title="自動は、その所の BPM で約40ミリ秒にいちばん近い細かさ（184BPM なら 1/32、138BPM なら 1/48）"
+          title={tr(
+            '自動は、その所の BPM で約40ミリ秒にいちばん近い細かさ（184BPM なら 1/32、138BPM なら 1/48）',
+            'Auto picks the note value closest to about 40 ms at the BPM there (1/32 at 184 BPM, 1/48 at 138 BPM)',
+          )}
         >
-          <option value="auto">自動（約{FLAM_TARGET_MS}ms）</option>
+          <option value="auto">{tr(`自動（約${FLAM_TARGET_MS}ms）`, `Auto (about ${FLAM_TARGET_MS} ms)`)}</option>
           {FLAM_DIVS.map((d) => (
             <option key={d} value={d}>
               1/{d}
@@ -130,11 +146,12 @@ function FlamPanel({ anchor, onClose }: { anchor: React.RefObject<HTMLDivElement
         </select>
       </div>
       <div className="flam-note lbl">
-        ▶ の所（BPM {Math.round(here.bpm * 100) / 100}）では <b className="mono">{gapText(here.div, here.bpm)}</b>
+        {tr(`▶ の所（BPM ${Math.round(here.bpm * 100) / 100}）では `, `At ▶ (BPM ${Math.round(here.bpm * 100) / 100}): `)}
+        <b className="mono">{gapText(here.div, here.bpm)}</b>
       </div>
 
       <div className="flam-row">
-        <span className="flam-label">1打目のベロシティ</span>
+        <span className="flam-label">{tr('1打目のベロシティ', 'Grace velocity')}</span>
         <div className="row" style={{ gap: 8 }}>
           <input
             type="range"
@@ -144,38 +161,53 @@ function FlamPanel({ anchor, onClose }: { anchor: React.RefObject<HTMLDivElement
             value={f.grace}
             onChange={(e) => setFlam({ grace: Number(e.target.value) })}
             style={{ flex: 1 }}
-            aria-label="1打目のベロシティ（2打目に対する割合）"
+            aria-label={tr('1打目のベロシティ（2打目に対する割合）', 'Grace note velocity (percent of the main note)')}
           />
           <span className="mono" style={{ width: 40, textAlign: 'right' }}>
             {f.grace}%
           </span>
         </div>
       </div>
-      <div className="flam-note lbl">先に鳴る1打目を、2打目のベロシティのこの割合で置きます（100% なら同じ）</div>
+      <div className="flam-note lbl">
+        {tr('先に鳴る1打目を、2打目のベロシティのこの割合で置きます（100% なら同じ）', "The grace note (heard first) gets this percent of the main note's velocity (100% = the same)")}
+      </div>
 
-      <label className="row flam-check" title="グリッドより細かい間で同じレーンを2回叩いたとき、後の1打で前の1打を消さずにフラムにします">
+      <label
+        className="row flam-check"
+        title={tr(
+          'グリッドより細かい間で同じレーンを2回叩いたとき、後の1打で前の1打を消さずにフラムにします',
+          'When you hit the same lane twice faster than the grid, the second hit makes a flam instead of replacing the first',
+        )}
+      >
         <input type="checkbox" checked={f.rec} onChange={(e) => setFlam({ rec: e.target.checked })} />
-        <span>録音で、グリッドでは分けられないすばやい2打をフラムにする</span>
+        <span>{tr('録音で、グリッドでは分けられないすばやい2打をフラムにする', 'While recording, turn two hits too quick for the grid into a flam')}</span>
       </label>
 
       <div className="row" style={{ gap: 6, marginTop: 12 }}>
-        <button className="btn small primary" disabled={st.single.length === 0} onClick={() => flamChips(selection)} title="選んだチップをフラムにします（Alt+F）">
-          選んだチップをフラムにする{st.single.length > 1 ? `（${st.single.length}）` : ''}
+        <button className="btn small primary" disabled={st.single.length === 0} onClick={() => flamChips(selection)} title={tr('選んだチップをフラムにします（Alt+F）', 'Turn the selected chips into flams (Alt+F)')}>
+          {tr('選んだチップをフラムにする', 'Make selection flams')}
+          {st.single.length > 1 ? tr(`（${st.single.length}）`, ` (${st.single.length})`) : ''}
         </button>
-        <button className="btn small" disabled={st.pairs.length === 0} onClick={() => unflamChips(selection)} title="選んだフラムを1打に戻します（Alt+F）">
-          1打に戻す{st.pairs.length > 1 ? `（${st.pairs.length}）` : ''}
+        <button className="btn small" disabled={st.pairs.length === 0} onClick={() => unflamChips(selection)} title={tr('選んだフラムを1打に戻します（Alt+F）', 'Turn the selected flams back into single notes (Alt+F)')}>
+          {tr('1打に戻す', 'Back to one note')}
+          {st.pairs.length > 1 ? tr(`（${st.pairs.length}）`, ` (${st.pairs.length})`) : ''}
         </button>
       </div>
 
       <ul className="flam-help lbl">
         <li>
-          <b>「フラム」をオン</b>：クリックでフラムを置く（キー入力も）
+          <b>{tr('「フラム」をオン', '"Flam" on')}</b>
+          {tr('：クリックでフラムを置く（キー入力も）', ': a click places a flam (key input too)')}
         </li>
         <li>
-          <b>{FLAM_MOD_LABEL}+クリック</b>：1回だけ逆（オフならフラム、オンなら1打）
+          <b>
+            {FLAM_MOD_LABEL}+{tr('クリック', 'click')}
+          </b>
+          {tr('：1回だけ逆（オフならフラム、オンなら1打）', ': the opposite, once (a flam when off, one note when on)')}
         </li>
         <li>
-          <b>Alt+F</b>・右クリック：選んだチップをフラムにする／1打に戻す
+          <b>Alt+F</b>
+          {tr('・右クリック：選んだチップをフラムにする／1打に戻す', ' or right-click: turn the selected chips into flams and back')}
         </li>
       </ul>
     </div>,

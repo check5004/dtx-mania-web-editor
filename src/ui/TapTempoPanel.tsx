@@ -1,4 +1,5 @@
 // 曲に合わせてクリック（T キー）してBPMと小節の頭を合わせる小窓。
+import { tr, pl, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { bgmSource } from '../store/derived';
@@ -37,9 +38,11 @@ export function TapTempoButton() {
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <button ref={ref} className={`btn small tap-btn ${open ? 'on' : ''}`} title="曲に合わせてクリック（T キー）してBPMを測り、小節の頭を合わせる" onClick={() => openTap(!open)}>
+      <button ref={ref} className={`btn small tap-btn ${open ? 'on' : ''}`} title={tr('曲に合わせてクリック（T キー）してBPMを測り、小節の頭を合わせる', 'Click along with the song (or press T) to measure the BPM and line up the downbeats')}
+        onClick={() => openTap(!open)}
+      >
         {Icon.tap(14)}
-        <span style={{ fontSize: 11 }}>BPMタップ</span>
+        <span style={{ fontSize: 11 }}>{tr('BPMタップ', 'Tap BPM')}</span>
       </button>
       {open && <TapTempoPanel anchor={ref} />}
     </>
@@ -98,14 +101,14 @@ function TapTempoPanel({ anchor }: { anchor: React.RefObject<HTMLButtonElement |
 
   const bpm = currentTapBpm(s);
   const align = canAlign(s);
-  const source = hasBgm ? '原曲' : hasYt ? 'YouTube' : null;
+  const source = hasBgm ? tr('原曲', 'the original') : hasYt ? 'YouTube' : null;
 
   return createPortal(
     <div className="popover tap-panel" style={{ position: 'fixed', left: pos.left, top: pos.top, width: 380 }} onPointerDown={(e) => e.stopPropagation()}>
       <div className="row" style={{ marginBottom: 8 }}>
-        <b>曲に合わせてBPMを測る</b>
+        <b>{tr('曲に合わせてBPMを測る', 'Measure the BPM along with the song')}</b>
         <span className="grow" />
-        <button className="ib" style={{ width: 24, height: 24 }} onClick={() => openTap(false)} aria-label="閉じる" title="閉じる（Esc）">
+        <button className="ib" style={{ width: 24, height: 24 }} onClick={() => openTap(false)} aria-label={tr('閉じる', 'Close')} title={tr('閉じる（Esc）', 'Close (Esc)')}>
           ✕
         </button>
       </div>
@@ -118,8 +121,10 @@ function TapTempoPanel({ anchor }: { anchor: React.RefObject<HTMLButtonElement |
         }}
       >
         {flash > 0 && <span key={flash} className="tap-ring" />}
-        <span className="tap-pad-main">{s.taps.length === 0 ? '拍に合わせてここをクリック' : `${s.taps.length} 回`}</span>
-        <span className="lbl">T キーでも叩けます</span>
+        <span className="tap-pad-main">
+          {s.taps.length === 0 ? tr('拍に合わせてここをクリック', 'Click here on the beat') : tr(`${s.taps.length} 回`, `${s.taps.length} ${pl(s.taps.length, 'tap')}`)}
+        </span>
+        <span className="lbl">{tr('T キーでも叩けます', 'You can also press T')}</span>
       </button>
       <div className="tap-result">
         {bpm !== null && s.fit ? (
@@ -127,29 +132,33 @@ function TapTempoPanel({ anchor }: { anchor: React.RefObject<HTMLButtonElement |
             <span className="tap-bpm mono">{bpm}</span>
             <span className="lbl">BPM</span>
             <span className="grow" />
-            <span className="lbl mono" title="測った値・誤差の目安・叩いた位置のばらつき">
-              {s.fit.bpm.toFixed(2)} ±{Math.max(0.01, s.fit.errBpm).toFixed(2)} · ばらつき {Math.round(s.fit.jitterMs)}ms
+            <span className="lbl mono" title={tr('測った値・誤差の目安・叩いた位置のばらつき', 'Measured value, rough error, and how much your taps varied')}>
+              {s.fit.bpm.toFixed(2)} ±{Math.max(0.01, s.fit.errBpm).toFixed(2)} · {tr('ばらつき', 'spread')} {Math.round(s.fit.jitterMs)}ms
             </span>
           </>
         ) : (
-          <span className="lbl">{s.taps.length === 0 ? '4回以上叩くとBPMが出ます。叩くほど正確になります。' : `あと ${4 - s.taps.length} 回`}</span>
+          <span className="lbl">
+            {s.taps.length === 0
+              ? tr('4回以上叩くとBPMが出ます。叩くほど正確になります。', 'Tap 4 or more times to get the BPM. More taps make it more accurate.')
+              : tr(`あと ${4 - s.taps.length} 回`, `${4 - s.taps.length} more`)}
+          </span>
         )}
       </div>
       <div className="row" style={{ gap: 10, marginBottom: 8 }}>
-        <label className="row" style={{ gap: 6 }} title="測った値が整数に近ければ整数にします">
+        <label className="row" style={{ gap: 6 }} title={tr('測った値が整数に近ければ整数にします', 'Rounds to a whole number when the result is close to one')}>
           <input type="checkbox" checked={s.round} onChange={(e) => useTap.setState({ round: e.target.checked })} />
-          <span className="lbl">整数にそろえる</span>
+          <span className="lbl">{tr('整数にそろえる', 'Round to whole BPM')}</span>
         </label>
         <span className="grow" />
-        <button className={`btn small ghost ${metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !metronome })} title="譜面のグリッドに合わせてクリック音を鳴らす">
-          {Icon.metronome(14)} クリック音
+        <button className={`btn small ghost ${metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !metronome })} title={tr('譜面のグリッドに合わせてクリック音を鳴らす', 'Play a click on the chart grid')}>
+          {Icon.metronome(14)} {tr('クリック音', 'Click')}
         </button>
       </div>
       {playing ? (
         s.synced &&
         source && (
           <div className="row tap-first">
-            <span className="lbl">最初に叩いたのは</span>
+            <span className="lbl">{tr('最初に叩いたのは', 'My first tap was beat')}</span>
             <div className="seg small">
               {[1, 2, 3, 4].map((b) => (
                 <button key={b} className={s.firstBeat === b ? 'on' : ''} onClick={() => useTap.setState({ firstBeat: b })}>
@@ -157,21 +166,34 @@ function TapTempoPanel({ anchor }: { anchor: React.RefObject<HTMLButtonElement |
                 </button>
               ))}
             </div>
-            <span className="lbl">拍目</span>
+            {isJa() && <span className="lbl">拍目</span>}
           </div>
         )
       ) : (
         <div className="notice info tap-hint">
           {source ? (
             <>
-              {source}を再生しながら叩くと、BPMと一緒に<b>小節の頭</b>
-              も合わせられます。
+              {isJa() ? (
+                <>
+                  {source}を再生しながら叩くと、BPMと一緒に<b>小節の頭</b>
+                  も合わせられます。
+                </>
+              ) : (
+                <>
+                  Tap while {source} plays to line up the <b>downbeats</b> along with the BPM.
+                </>
+              )}
               <button className="btn small" style={{ marginLeft: 6 }} onClick={() => void playFrom(currentBeat())}>
-                {Icon.play(12)} 再生
+                {Icon.play(12)} {tr('再生', 'Play')}
               </button>
             </>
           ) : (
-            <>原曲もYouTubeも無いので、BPMだけ測れます（曲は別のプレーヤーで流してください）。</>
+            <>
+              {tr(
+                '原曲もYouTubeも無いので、BPMだけ測れます（曲は別のプレーヤーで流してください）。',
+                "There's no original or YouTube video, so only the BPM can be measured (play the song in another player).",
+              )}
+            </>
           )}
         </div>
       )}
@@ -180,24 +202,31 @@ function TapTempoPanel({ anchor }: { anchor: React.RefObject<HTMLButtonElement |
           className="btn small primary"
           disabled={!align}
           onClick={applyTapAlign}
-          title={align ? '測ったBPMにして、最初の1拍目を小節の頭に合わせます' : '再生しながら4回以上叩くと使えます'}
+          title={
+            align
+              ? tr('測ったBPMにして、最初の1拍目を小節の頭に合わせます', 'Sets the measured BPM and puts the first downbeat at the start of a measure')
+              : tr('再生しながら4回以上叩くと使えます', 'Available after 4 or more taps during playback')
+          }
         >
-          BPMと小節の頭を合わせる
+          {tr('BPMと小節の頭を合わせる', 'Set BPM and downbeat')}
         </button>
-        <button className="btn small" disabled={bpm === null} onClick={applyTapBpm} title="小節の位置は変えずにBPMだけ変えます">
-          BPMだけ反映
+        <button className="btn small" disabled={bpm === null} onClick={applyTapBpm} title={tr('小節の位置は変えずにBPMだけ変えます', 'Changes only the BPM, not where the measures start')}>
+          {tr('BPMだけ反映', 'BPM only')}
         </button>
         <span className="grow" />
         <button className="btn small ghost" disabled={s.taps.length === 0} onClick={clearTaps}>
-          やり直す
+          {tr('やり直す', 'Reset')}
         </button>
       </div>
       <p className="lbl" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
-        2.5秒あけると測り直しになります。反映すると再生は同じ所から続くので、クリック音で合っているか確かめられます。
+        {tr(
+          '2.5秒あけると測り直しになります。反映すると再生は同じ所から続くので、クリック音で合っているか確かめられます。',
+          'A 2.5-second pause starts over. After applying, playback continues from the same place, so you can check it with the click.',
+        )}
         {hasBgm && (
           <>
             {' '}
-            BPMが途中で変わる曲や細かい調整は
+            {tr('BPMが途中で変わる曲や細かい調整は', 'For songs whose BPM changes, or for fine-tuning, use the ')}
             <button
               className="linkish"
               onClick={() => {
@@ -206,9 +235,9 @@ function TapTempoPanel({ anchor }: { anchor: React.RefObject<HTMLButtonElement |
                 openTempo();
               }}
             >
-              テンポ合わせ画面
+              {tr('テンポ合わせ画面', 'Tempo screen')}
             </button>
-            で。
+            {tr('で。', '.')}
           </>
         )}
       </p>

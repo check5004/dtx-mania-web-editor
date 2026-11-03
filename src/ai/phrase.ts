@@ -2,6 +2,7 @@
 // AI には小節ごとの「レーン × 拍ごとの格子」の文字で渡し、同じ形で返してもらう（拍がずれない）。
 // 格子は拍ごとに細かさを変えられる（16分・3連・32分。ai/beatGrid）。小節の生成（ai/measureGen）も同じ形を使う。
 // キーが無いときは、原曲の打点が似た小節・直前の小節から候補を作る。
+import { tr, aiLangRule, aiTextLimit } from '../i18n';
 import { beatsLabel, beatsOfMeasure, baseCells, combineCells, exactCells, fitMeasureCells, locateInBeats, parseSteps, type BeatSlot } from './beatGrid';
 import { cmp, div, frac, mul, sub, toNum, type Frac } from '../dtx/fraction';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
@@ -50,6 +51,7 @@ export function stepsOf(tempo: TempoMap, m: number): number {
  */
 export type OnsetRows = Readonly<Record<string, readonly { t: number; s: number }[]>>;
 
+// AI に渡す格子の行の名前（プロンプトの一部なので日本語のまま） i18n-ignore
 const ONSET_LABEL: Record<string, string> = { low: '低', mid: '中', high: '高' };
 
 /** 採譜モデルの5種か（でなければ3帯域） */
@@ -191,6 +193,8 @@ export function onsetGrid(onsets: OnsetRows, tempo: TempoMap, m: number, offsetS
   return out;
 }
 
+// ---- AI へのプロンプト（指示は日本語のまま。答えのユーザーが読む文は aiLangRule で画面の言語にする） i18n-ignore-start
+
 /** AI に格子の読み書きを説明する文（フレーズ候補・小節の生成で共通） */
 export const GRID_HELP = [
   '譜面は小節ごとに「レーン: 格子」で表します。格子は | で拍（4分音符）を区切り、1拍の文字数でその拍の細かさを表します（4=16分、2=8分、3=8分3連、6=16分3連、8=32分、12=16分と8分3連が混ざる拍）。x は打つ、- は休み。',
@@ -209,6 +213,8 @@ export const ROUNDED_NOTE = '（5連など、格子に乗らないチップは�
 
 /** 格子の行の説明（JSON の steps） */
 export const STEPS_HELP = 'x=打つ, -=休み。拍（4分音符）ごとに | で区切り、1拍の文字数で細かさを決める（4=16分、3=8分3連、6=16分3連、8=32分）。例: x-x-|x-x-|xxx|xxxxxx';
+
+// i18n-ignore-end
 
 export interface PhraseContext {
   kind: 'fill' | 'rhythm';
@@ -247,24 +253,29 @@ export function buildContext(doc: DtxDoc, tempo: TempoMap, o: { kind: 'fill' | '
   };
 }
 
-export const PHRASE_SCHEMA = {
+/** フレーズ候補の答えの形（名前・理由の言語と字数は画面の言語に合わせるので、使うたびに作る） */
+export const phraseSchema = () => ({
   name: 'phrase_candidates',
   schema: {
     type: 'object',
     properties: {
       candidates: {
         type: 'array',
+        // i18n-ignore
         description: '候補3つ',
         items: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: '短い名前（日本語で12字以内）' },
-            reason: { type: 'string', description: 'この形にした理由（日本語で40字以内）' },
+            // i18n-ignore-start
+            name: { type: 'string', description: `短い名前（${aiTextLimit(12)}）` },
+            reason: { type: 'string', description: `この形にした理由（${aiTextLimit(40)}）` },
+            // i18n-ignore-end
             measures: {
               type: 'array',
               items: {
                 type: 'object',
                 properties: {
+                  // i18n-ignore
                   index: { type: 'integer', description: '範囲の何小節目か（0から）' },
                   lanes: {
                     type: 'array',
@@ -292,9 +303,10 @@ export const PHRASE_SCHEMA = {
     required: ['candidates'],
     additionalProperties: false,
   },
-};
+});
 
 export function phrasePrompt(ctx: PhraseContext): { system: string; user: string } {
+  // i18n-ignore-start
   const system = [
     'あなたはドラム譜面（DTXMania、電子ドラム）の作者を手伝います。',
     '指定の範囲に入れる' + (ctx.kind === 'fill' ? 'フィルイン' : 'リズムパターン') + 'の候補を、性格の違う3つ作ってください。',
@@ -303,6 +315,7 @@ export function phrasePrompt(ctx: PhraseContext): { system: string; user: string
     ctx.onsetKind ? onsetHelp(ctx.onsetKind) : '',
     '守ること: 手は同時に2つまで、足は左右1つずつ。前後の小節とのつながりを自然に。範囲の外は書かない。',
     '答えは指定の JSON だけで返してください。',
+    aiLangRule(),
   ]
     .filter(Boolean)
     .join('\n');
@@ -320,6 +333,7 @@ export function phrasePrompt(ctx: PhraseContext): { system: string; user: string
     if (ms.onsets) lines.push(`原曲の打点:\n${ms.onsets.join('\n')}`);
     lines.push('');
   }
+  // i18n-ignore-end
   return { system, user: lines.join('\n') };
 }
 
@@ -347,7 +361,8 @@ export function decodeCandidates(raw: { candidates?: RawCandidate[] }, ctx: { fr
     }
     const clean = enforcePlayable(notes);
     if (clean.length === 0) continue;
-    out.push({ name: String(c.name ?? '候補').slice(0, 24), reason: String(c.reason ?? '').slice(0, 80), source: 'ai', notes: clean });
+    // 英語の名前・理由は長くなるので、切る長さは広めに
+    out.push({ name: String(c.name ?? tr('候補', 'Idea')).slice(0, 48), reason: String(c.reason ?? '').slice(0, 160), source: 'ai', notes: clean });
   }
   return out.slice(0, 3);
 }
@@ -449,7 +464,12 @@ export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; 
       seen.add(key);
       const notes: PhraseNote[] = [];
       for (let i = 0; i < len; i++) for (const n of drumNotesIn(doc, p + i)) notes.push({ ch: n.ch, m: o.from + i, f: n.f });
-      prevCand = { name: len === 1 ? '直前の小節を複製' : `直前の${len}小節を複製`, reason: '前と同じ形を続けます', source: 'prev', notes };
+      prevCand = {
+        name: len === 1 ? tr('直前の小節を複製', 'Repeat the previous measure') : tr(`直前の${len}小節を複製`, `Repeat the previous ${len} measures`),
+        reason: tr('前と同じ形を続けます', 'Keeps the same pattern going'),
+        source: 'prev',
+        notes,
+      };
     }
   }
   // 似た小節
@@ -464,7 +484,7 @@ export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; 
     if (o.onsets) {
       for (let i = 0; i < len; i++) score += cosine(onsetVector(o.onsets, tempo, o.from + i, o.offsetSec), onsetVector(o.onsets, tempo, m + i, o.offsetSec));
       score /= len;
-      why = `原曲の打点が ${Math.round(score * 100)}% 似ています`;
+      why = tr(`原曲の打点が ${Math.round(score * 100)}% 似ています`, `The original's hits are ${Math.round(score * 100)}% similar`);
     } else {
       // 原曲の解析が無いときは、直前の小節が似ている所の続き
       const prevA = new Set(drumNotesIn(doc, o.from - 1).map(noteKey));
@@ -472,7 +492,7 @@ export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; 
       if (prevA.size === 0 || prevB.length === 0) continue;
       const inter = prevB.filter((k) => prevA.has(k)).length;
       score = inter / (prevA.size + prevB.length - inter);
-      why = `直前の小節が ${Math.round(score * 100)}% 同じ所の続き`;
+      why = tr(`直前の小節が ${Math.round(score * 100)}% 同じ所の続き`, `What follows a place whose previous measure is ${Math.round(score * 100)}% the same`);
     }
     if (score > 0.3) scored.push({ m, score, why });
   }
@@ -483,7 +503,7 @@ export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; 
     seen.add(key);
     const notes: PhraseNote[] = [];
     for (let i = 0; i < len; i++) for (const n of drumNotesIn(doc, s.m + i)) notes.push({ ch: n.ch, m: o.from + i, f: n.f });
-    out.push({ name: `小節 ${s.m} からコピー`, reason: s.why, source: 'similar', notes });
+    out.push({ name: tr(`小節 ${s.m} からコピー`, `Copy from measure ${s.m}`), reason: s.why, source: 'similar', notes });
     if (out.length >= 2) break;
   }
   if (prevCand) out.push(prevCand);

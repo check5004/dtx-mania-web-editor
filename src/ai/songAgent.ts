@@ -2,9 +2,10 @@
 // 手がかり（原曲のファイル名・タグ・曲の長さ・譜面の値）から曲を特定し、道具（Web検索・iTunes・YouTube の確認・画像の確認）を
 // 自分で選んで使い、正式表記・ジャンル・年・コメント・公式の YouTube 動画・ジャケットを答える。
 // URL はでっち上げやすいので、答えに入れてよいのは道具で確かめたものだけにする。
+import { tr, pl, isJa, aiLangRule, aiLangName, aiTextLimit } from '../i18n';
 import type { AudioTags } from '../fs/tags';
 import { AiError, parseJsonLoose, type ChatMessage, type ChatResult, type Citation, type FunctionTool, type ToolCall, type WebSearchOptions } from './openrouter';
-import { cleanSongInfo, SONG_INFO_SCHEMA, youtubeId, type SongInfoAnswer, type StoreHit } from './songInfo';
+import { cleanSongInfo, songInfoSchema, youtubeId, type SongInfoAnswer, type StoreHit } from './songInfo';
 
 // ---- 手がかり ----------------------------------------------------------------------
 
@@ -85,6 +86,8 @@ export function searchTerms(c: SongClues): string[] {
   return out.slice(0, 3);
 }
 
+// ---- AI へのプロンプト（指示は日本語のまま。ユーザーが読む答えと途中経過の言語は aiLangRule・aiLangName で画面の言語にする） i18n-ignore-start
+
 const mmss = (sec: number) => `${Math.floor(sec / 60)}分${String(Math.round(sec % 60)).padStart(2, '0')}秒`;
 
 /** AI に渡す手がかりの文 */
@@ -121,6 +124,8 @@ export function cluesText(c: SongClues): string {
   if (c.youtube) lines.push(`- 設定済みの参照動画: ${c.youtube.url}${c.youtube.title ? `（「${c.youtube.title}」チャンネル: ${c.youtube.channel ?? '不明'}）` : ''}`);
   return lines.join('\n');
 }
+
+// i18n-ignore-end
 
 /** iTunes の結果が手がかりの曲とどれだけ合うか（0〜。3 以上なら同じ曲とみなしてよい） */
 export function matchScore(h: StoreHit, c: SongClues): number {
@@ -171,7 +176,9 @@ export interface AgentTools {
 
 const SUBMIT = 'submit_song_info';
 
-export const AGENT_TOOLS: FunctionTool[] = [
+// i18n-ignore-start
+/** エージェントの道具（答えの形は画面の言語に合わせるので、使うたびに作る） */
+export const agentTools = (): FunctionTool[] => [
   {
     type: 'function',
     function: {
@@ -212,7 +219,7 @@ export const AGENT_TOOLS: FunctionTool[] = [
       parameters: {
         type: 'object',
         properties: {
-          ...SONG_INFO_SCHEMA.schema.properties,
+          ...songInfoSchema().schema.properties,
           title_alt: { type: 'string', description: '別の表記（英語・ローマ字・原題など。無ければ空）' },
           jacket: { type: 'string', description: 'ジャケットに使う画像の id（search_itunes の it1 など、check_image の img1 など）。無ければ空' },
           youtube: {
@@ -235,7 +242,7 @@ export const AGENT_TOOLS: FunctionTool[] = [
             items: { type: 'object', properties: { title: { type: 'string' }, url: { type: 'string' } }, required: ['title', 'url'] },
           },
         },
-        required: [...SONG_INFO_SCHEMA.schema.required, 'title_alt', 'jacket', 'youtube', 'sources'],
+        required: [...songInfoSchema().schema.required, 'title_alt', 'jacket', 'youtube', 'sources'],
       },
     },
   },
@@ -257,8 +264,9 @@ export function agentSystemPrompt(): string {
     '- 推測で埋めない。確かめられない項目は空にして notes に書く。手がかりと違う曲（同名の別の曲など）を選ばない。',
     '- URL を作らない。ジャケットは search_itunes の id（it1 など）か check_image の id（img1 など）で選ぶ。',
     '- 曲名・アーティストは公式の表記（大文字小文字・記号・全角半角まで）。日本の曲で公式が日本語ならそれを title に、英語やローマ字の表記があれば title_alt に入れる。',
-    '- comment は選曲画面に出す日本語の紹介文（60字以内。曲の特徴・タイアップ・聴きどころ）。panel は演奏中に流れる日本語の文（40字以内。例:「曲名 / アーティスト」やタイアップ名）。どちらにも URL は入れない。',
-    '- 道具を呼ぶときは、その前に「分かったこと → 次にすること」を日本語で1行だけ書く。',
+    `- comment は選曲画面に出す紹介文（${aiTextLimit(60)}。曲の特徴・タイアップ・聴きどころ）。panel は演奏中に流れる文（${aiTextLimit(40)}。例:「曲名 / アーティスト」やタイアップ名）。どちらにも URL は入れない。`,
+    `- 道具を呼ぶときは、その前に「分かったこと → 次にすること」を${aiLangName()}で1行だけ書く。`,
+    aiLangRule(),
   ].join('\n');
 }
 
@@ -270,6 +278,7 @@ export function agentUserPrompt(c: SongClues, seed?: { term: string; hits: [stri
   }
   return lines.join('\n');
 }
+// i18n-ignore-end
 
 // ---- 進み具合 ----------------------------------------------------------------------
 
@@ -389,27 +398,29 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
     { role: 'user', content: agentUserPrompt(o.clues, o.seed ? { term: o.seed.term, hits: seeded } : undefined) },
   ];
   let answer: AgentAnswer | null = null;
+  const tools = agentTools();
   let nudged = false;
   let turns = 0;
   const abortIf = () => {
-    if (o.signal?.aborted) throw new DOMException('止めました', 'AbortError');
+    if (o.signal?.aborted) throw new DOMException(tr('止めました', 'Stopped'), 'AbortError');
   };
 
   for (let turn = 0; turn < maxTurns && !answer; turn++) {
     abortIf();
     const last = turn === maxTurns - 1 || cost > budget * 0.7;
+    // i18n-ignore
     if (last && turn > 0) messages.push({ role: 'user', content: `道具はここまでです。分かったことで ${SUBMIT} を呼んで答えてください。` });
-    const think = step({ kind: 'think', state: 'run', text: turn === 0 ? '手がかりから曲を探しています…' : '次の手を考えています…' });
+    const think = step({ kind: 'think', state: 'run', text: turn === 0 ? tr('手がかりから曲を探しています…', 'Looking for the song from the clues…') : tr('次の手を考えています…', 'Deciding what to do next…') });
     const web = last ? (false as const) : { maxResults: 5, maxUses: 3 };
     let r: AgentCallResult;
     try {
-      r = await o.call(messages, AGENT_TOOLS, web);
+      r = await o.call(messages, tools, web);
     } catch (e) {
       // 推論の署名つきの発言を返すと、提供元に「書き換えた」と断られることがある。外して1回だけやり直す
       const signed = messages.some((m) => m.role === 'assistant' && m.reasoning_details);
       if (!(e instanceof AiError && e.status === 400 && signed)) throw e;
       for (const m of messages) if (m.role === 'assistant') delete m.reasoning_details;
-      r = await o.call(messages, AGENT_TOOLS, web);
+      r = await o.call(messages, tools, web);
     }
     turns++;
     cost += r.costUsed;
@@ -417,10 +428,22 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
     webSearches += r.webSearches;
     for (const c of r.citations) if (!citations.some((x) => x.url === c.url)) citations.push(c);
     const memo = (r.text ?? '').trim();
-    step({ kind: 'think', state: 'ok', text: memo && r.toolCalls.length ? short(memo.split('\n').filter(Boolean).pop() ?? memo, 90) : r.toolCalls.length ? '調べることを決めました' : 'まとめています' }, think);
+    step(
+      {
+        kind: 'think',
+        state: 'ok',
+        text:
+          memo && r.toolCalls.length
+            ? short(memo.split('\n').filter(Boolean).pop() ?? memo, isJa() ? 90 : 160)
+            : r.toolCalls.length
+              ? tr('調べることを決めました', 'Decided what to look up')
+              : tr('まとめています', 'Putting it together'),
+      },
+      think,
+    );
     if (r.webSearches > 0) {
       const titles = r.citations.slice(0, 3).map((c) => c.title);
-      step({ kind: 'web', state: 'ok', text: `Web検索 ${r.webSearches}回`, detail: titles.length ? titles.join(' / ') : undefined });
+      step({ kind: 'web', state: 'ok', text: tr(`Web検索 ${r.webSearches}回`, `Web search × ${r.webSearches}`), detail: titles.length ? titles.join(' / ') : undefined });
     }
     if (!r.toolCalls.length) {
       // 文で答えてきたとき：JSON なら答えとして使う
@@ -435,8 +458,10 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
       }
       if (nudged) break;
       nudged = true;
+      // AI へのことば i18n-ignore-start
       messages.push(r.message.content ? r.message : { role: 'assistant', content: r.text || '（空）' });
       messages.push({ role: 'user', content: `答えは ${SUBMIT} を呼んで出してください。` });
+      // i18n-ignore-end
       continue;
     }
     // Web 検索をした回の推論は、検索結果と組みで署名されていて、そのまま返すと断られる。外して返す
@@ -455,6 +480,7 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
     try {
       args = JSON.parse(tc.function.arguments || '{}') as Record<string, unknown>;
     } catch {
+      // 道具の結果は AI が読む i18n-ignore
       return { content: JSON.stringify({ ok: false, error: '引数が JSON として読めませんでした' }) };
     }
     const name = tc.function.name;
@@ -466,7 +492,7 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
       if (name === 'search_itunes') {
         const term = s(args.term);
         const country = s(args.country) === 'US' ? 'US' : 'JP';
-        const id = step({ kind: 'itunes', state: 'run', text: `iTunes で「${short(term, 40)}」を検索` });
+        const id = step({ kind: 'itunes', state: 'run', text: tr(`iTunes で「${short(term, 40)}」を検索`, `Searching iTunes for "${short(term, 40)}"`) });
         const hits = term ? await o.tools.searchItunes(term, country, o.signal) : [];
         const results = hits.slice(0, 6).map((h) => {
           let key = [...itunes.entries()].find(([, v]) => v.art.big === h.art.big && v.title === h.title)?.[0];
@@ -477,32 +503,43 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
           return { id: key, title: h.title, artist: h.artist, album: h.album, release_date: h.date, genre: h.genre, length_sec: h.durationSec || undefined };
         });
         const top = results[0];
-        step({ kind: 'itunes', state: results.length ? 'ok' : 'fail', text: `iTunes で「${short(term, 40)}」を検索 — ${results.length}件`, detail: top ? `${top.title} / ${top.artist}（${top.release_date.slice(0, 4)}）` : undefined }, id);
+        step(
+          {
+            kind: 'itunes',
+            state: results.length ? 'ok' : 'fail',
+            text: tr(`iTunes で「${short(term, 40)}」を検索 — ${results.length}件`, `Searched iTunes for "${short(term, 40)}" — ${results.length} ${pl(results.length, 'result')}`),
+            detail: top ? `${top.title} / ${top.artist}${tr(`（${top.release_date.slice(0, 4)}）`, ` (${top.release_date.slice(0, 4)})`)}` : undefined,
+          },
+          id,
+        );
         return { content: JSON.stringify({ ok: true, country, results }) };
       }
       if (name === 'check_youtube') {
         const url = s(args.url);
         const vid = youtubeId(url);
-        const id = step({ kind: 'youtube', state: 'run', text: 'YouTube の動画を確認' });
+        const id = step({ kind: 'youtube', state: 'run', text: tr('YouTube の動画を確認', 'Checking a YouTube video') });
         if (!vid) {
-          step({ kind: 'youtube', state: 'fail', text: 'YouTube の URL ではありませんでした', detail: short(url) }, id);
+          step({ kind: 'youtube', state: 'fail', text: tr('YouTube の URL ではありませんでした', "That wasn't a YouTube URL"), detail: short(url) }, id);
+          // i18n-ignore
           return { content: JSON.stringify({ ok: false, error: 'YouTube の動画の URL ではありません' }) };
         }
         const info = await o.tools.checkYoutube(`https://www.youtube.com/watch?v=${vid}`, o.signal);
         if (!info) {
-          step({ kind: 'youtube', state: 'fail', text: 'YouTube の動画が見つかりませんでした', detail: vid }, id);
+          step({ kind: 'youtube', state: 'fail', text: tr('YouTube の動画が見つかりませんでした', "Couldn't find the YouTube video"), detail: vid }, id);
+          // i18n-ignore
           return { content: JSON.stringify({ ok: false, error: '動画が見つかりません（削除・非公開・URL の誤り）' }) };
         }
         youtube.set(vid, { id: vid, url: `https://www.youtube.com/watch?v=${vid}`, ...info });
-        step({ kind: 'youtube', state: 'ok', text: `YouTube「${short(info.title, 44)}」`, detail: `チャンネル: ${info.channel}` }, id);
+        step({ kind: 'youtube', state: 'ok', text: tr(`YouTube「${short(info.title, 44)}」`, `YouTube "${short(info.title, 44)}"`), detail: tr(`チャンネル: ${info.channel}`, `Channel: ${info.channel}`) }, id);
         return { content: JSON.stringify({ ok: true, url: `https://www.youtube.com/watch?v=${vid}`, title: info.title, channel: info.channel, channel_url: info.channelUrl }) };
       }
       if (name === 'check_image') {
         const url = s(args.url);
-        const id = step({ kind: 'image', state: 'run', text: '画像を確認' });
+        const id = step({ kind: 'image', state: 'run', text: tr('画像を確認', 'Checking an image') });
         const size = /^https?:\/\//.test(url) ? await o.tools.checkImage(url, o.signal) : null;
         if (!size) {
-          step({ kind: 'image', state: 'fail', text: '画像を読み込めませんでした', detail: short(url) }, id);
+          step({ kind: 'image', state: 'fail', text: tr('画像を読み込めませんでした', "Couldn't load the image"), detail: short(url) }, id);
+          // i18n-ignore
           return { content: JSON.stringify({ ok: false, error: '画像として読み込めませんでした' }) };
         }
         let key = [...images.entries()].find(([, v]) => v.url === url)?.[0];
@@ -510,20 +547,24 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
           key = `img${images.size + 1}`;
           images.set(key, { url, ...size });
         }
-        step({ kind: 'image', state: 'ok', text: `画像 ${size.w}×${size.h}`, detail: short(url) }, id);
+        step({ kind: 'image', state: 'ok', text: tr(`画像 ${size.w}×${size.h}`, `Image ${size.w}×${size.h}`), detail: short(url) }, id);
         return { content: JSON.stringify({ ok: true, id: key, width: size.w, height: size.h }) };
       }
+      // i18n-ignore-start
       return { content: JSON.stringify({ ok: false, error: `${name} という道具はありません` }) };
     } catch (e) {
       if (o.signal?.aborted) throw e;
       return { content: JSON.stringify({ ok: false, error: (e as Error).message || '失敗しました' }) };
+      // i18n-ignore-end
     }
   }
 
   abortIf();
-  if (!answer && turns === 0) throw new AiError('AIに頼めませんでした');
+  if (!answer && turns === 0) throw new AiError(tr('AIに頼めませんでした', "Couldn't ask the AI"));
   const incomplete = !answer;
-  const a = answer ?? cleanAgentAnswer({ confidence: 'low', notes: '調べきれずに終わりました。見つかった候補だけ出しています。' });
+  const a =
+    answer ??
+    cleanAgentAnswer({ confidence: 'low', notes: tr('調べきれずに終わりました。見つかった候補だけ出しています。', "The search ended before it was finished. Showing only what it found.") });
   // 答えに入っていても、確かめていない YouTube は入れない（でっち上げを防ぐ）。確かめられたら入れる
   const yt: AgentAnswer['youtube'] = [];
   for (const y of a.youtube) {
@@ -541,7 +582,11 @@ export async function runSongAgent(o: AgentRunOptions): Promise<AgentOutcome> {
     const byUrl = [...itunes.entries()].find(([, h]) => h.art.big === a.jacket || h.art.url === a.jacket)?.[0] ?? [...images.entries()].find(([, v]) => v.url === a.jacket)?.[0];
     a.jacket = byUrl ?? '';
   }
-  step({ kind: 'answer', state: incomplete ? 'info' : 'ok', text: incomplete ? '調べきれませんでした（見つかった候補を出します）' : 'まとめました' });
+  step({
+    kind: 'answer',
+    state: incomplete ? 'info' : 'ok',
+    text: incomplete ? tr('調べきれませんでした（見つかった候補を出します）', "Couldn't finish the search (showing what was found)") : tr('まとめました', 'Done'),
+  });
   return { answer: a, itunes, youtube, images, citations, cost, webSearches, turns, model, incomplete };
 }
 

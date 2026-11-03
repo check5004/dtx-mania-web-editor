@@ -1,4 +1,5 @@
 // TAB補完の札：点線のすぐ上に出す（Tab で入れる・1小節だけ・前後の候補・AIに聞く・消す）。
+import { tr } from '../i18n';
 import type { CSSProperties, PointerEvent } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
@@ -24,10 +25,17 @@ export interface GhostAnchor {
   h: number;
 }
 
-const SOURCE_TIP: Record<string, string> = {
-  context: '直前の数小節と同じ並びの所を前から探して、そのときの続きを写しています。',
-  structure: '原曲でこの先と同じに聞こえる、もう打ってある小節を写しています（2番のサビ＝1番のサビ など）。',
-};
+const sourceTip = (k: string): string | undefined =>
+  ({
+    context: tr(
+      '直前の数小節と同じ並びの所を前から探して、そのときの続きを写しています。',
+      'Finds an earlier place with the same pattern as the last few measures and copies what came next there.',
+    ),
+    structure: tr(
+      '原曲でこの先と同じに聞こえる、もう打ってある小節を写しています（2番のサビ＝1番のサビ など）。',
+      'Copies already-charted measures that sound the same as what comes next in the original (e.g. 2nd chorus = 1st chorus).',
+    ),
+  })[k];
 
 export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: number) => GhostAnchor; sized: number }) {
   const c = useComplete();
@@ -66,16 +74,26 @@ export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: n
   } else {
     style.bottom = a.h - (a.top - 6);
   }
-  const range = len === 1 ? toMeasure(b.at) : `${toMeasure(b.at)}〜${toMeasure(b.at + len - 1)}`;
-  const aiTitle = hasKey ? `この先の続きをAIに3つ作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「フレーズ候補」のモデルを使います` : noKeyTitle();
+  const range = len === 1 ? toMeasure(b.at) : `${toMeasure(b.at)}${tr('〜', '–')}${toMeasure(b.at + len - 1)}`;
+  const aiTitle = hasKey
+    ? tr(
+        `この先の続きをAIに3つ作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「フレーズ候補」のモデルを使います`,
+        `Ask the AI for 3 ways to continue from here (${model}, about ${formatUsd(cost)} per run). Uses the "Phrase ideas" model in Settings › AI`,
+      )
+    : noKeyTitle();
   const stop = (e: PointerEvent) => e.stopPropagation();
   const aiButton = (
     <button className="tg-ai" onClick={() => void askAi()} disabled={!hasKey || c.aiLoading} title={aiTitle}>
-      {Icon.sparkle(12)} {c.aiLoading ? '考え中…' : 'AIに聞く'}
+      {Icon.sparkle(12)} {c.aiLoading ? tr('考え中…', 'Thinking…') : tr('AIに聞く', 'Ask AI')}
     </button>
   );
   const close = (
-    <button className="tg-x" onClick={() => dismissGhost()} title="消す（Esc）。次にチップを置くまで出しません" aria-label="TAB補完を消す">
+    <button
+      className="tg-x"
+      onClick={() => dismissGhost()}
+      title={tr('消す（Esc）。次にチップを置くまで出しません', "Dismiss (Esc). It won't come back until you place another chip")}
+      aria-label={tr('TAB補完を消す', 'Dismiss Tab completion')}
+    >
       {Icon.close(12)}
     </button>
   );
@@ -85,8 +103,15 @@ export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: n
       <div className="tab-ghost empty" style={style} onPointerDown={stop}>
         <div className="tg-row">
           <span className="tg-msg">
-            {arrow}小節 <span className="mono">{toMeasure(b.at)}</span> から先：
-            {c.aiLoading ? 'AIが続きを考えています…' : c.aiError ? <span className="tg-err">AI: {c.aiError}</span> : '続きの候補が見つかりません'}
+            {arrow}
+            {tr('小節', 'From measure')} <span className="mono">{toMeasure(b.at)}</span> {tr('から先：', 'on: ')}
+            {c.aiLoading ? (
+              tr('AIが続きを考えています…', 'The AI is working on a continuation…')
+            ) : c.aiError ? (
+              <span className="tg-err">AI: {c.aiError}</span>
+            ) : (
+              tr('続きの候補が見つかりません', 'No continuation found')
+            )}
           </span>
           {!c.aiLoading && aiButton}
           {close}
@@ -97,29 +122,34 @@ export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: n
 
   const cand = g.cand;
   const pct = Number.isFinite(cand.score) ? Math.round(cand.score * 100) : null;
-  const srcTip = cand.kind === 'ai' ? (cand.reason ?? '') : SOURCE_TIP[cand.kind];
-  const scoreTip = pct !== null ? `\n見込み：次の小節がこのまま正解になる確からしさ（精度テストの結果から）。` : '';
+  const srcTip = cand.kind === 'ai' ? (cand.reason ?? '') : (sourceTip(cand.kind) ?? '');
+  const scoreTip =
+    pct !== null
+      ? tr('\n見込み：次の小節がこのまま正解になる確からしさ（精度テストの結果から）。', '\nLikelihood: how likely the next measure is right as is (from the accuracy tests).')
+      : '';
   return (
     <div className="tab-ghost" style={style} onPointerDown={stop}>
       <div className="tg-row">
-        <button className="tg-accept" onClick={() => acceptGhost()} title="点線の小節をまとめて入れます（Tab）。Ctrl+Z で戻せます">
+        <button className="tg-accept" onClick={() => acceptGhost()} title={tr('点線の小節をまとめて入れます（Tab）。Ctrl+Z で戻せます', 'Insert the dashed measures (Tab). Undo with Ctrl+Z')}>
           <kbd>Tab</kbd>
-          {arrow}小節 <span className="mono">{range}</span> を入れる
+          {arrow}
+          {tr('小節', 'Insert measure')} <span className="mono">{range}</span>
+          {tr(' を入れる', '')}
         </button>
         {len > 1 && (
-          <button onClick={() => acceptGhost(1)} title="最初の1小節だけ入れます（Shift+Tab）">
-            1小節だけ
+          <button onClick={() => acceptGhost(1)} title={tr('最初の1小節だけ入れます（Shift+Tab）', 'Insert only the first measure (Shift+Tab)')}>
+            {tr('1小節だけ', 'Just one')}
           </button>
         )}
         {g.count > 1 && (
           <span className="tg-step">
-            <button onClick={() => stepGhost(-1)} title="前の候補（Alt+[）" aria-label="前の候補">
+            <button onClick={() => stepGhost(-1)} title={tr('前の候補（Alt+[）', 'Previous idea (Alt+[)')} aria-label={tr('前の候補', 'Previous idea')}>
               ‹
             </button>
             <span className="mono">
               {g.index + 1}/{g.count}
             </span>
-            <button onClick={() => stepGhost(1)} title="次の候補（Alt+]）" aria-label="次の候補">
+            <button onClick={() => stepGhost(1)} title={tr('次の候補（Alt+]）', 'Next idea (Alt+])')} aria-label={tr('次の候補', 'Next idea')}>
               ›
             </button>
           </span>
@@ -132,19 +162,27 @@ export function CompleteBadge({ anchor, sized }: { anchor: (from: number, len: n
           {sourceLabel(cand)}
           {pct !== null && (
             <>
-              {' · 見込み '}
+              {tr(' · 見込み ', ' · Likelihood ')}
               <b className="mono">{pct}%</b>
             </>
           )}
         </span>
         {g.doubt.size > 0 && (
-          <span className="tg-doubt" title="オレンジの枠のチップは、原曲でその音（バスドラム・スネア・タム）が聞こえません。外れのことが多い所なので、入れたあと聴いて確かめてください">
-            {' · '}要確認 {g.doubt.size}
+          <span
+            className="tg-doubt"
+            title={tr(
+              'オレンジの枠のチップは、原曲でその音（バスドラム・スネア・タム）が聞こえません。外れのことが多い所なので、入れたあと聴いて確かめてください',
+              "Chips with an orange frame aren't heard in the original (kick, snare, toms). These are often wrong, so listen after inserting",
+            )}
+          >
+            {' · '}
+            {tr('要確認', 'Check')} {g.doubt.size}
           </span>
         )}
         {c.aiError && (
           <span className="tg-err" title={c.aiError}>
-            {' · '}AIは失敗しました
+            {' · '}
+            {tr('AIは失敗しました', 'The AI failed')}
           </span>
         )}
       </div>

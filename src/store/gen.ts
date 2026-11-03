@@ -2,7 +2,7 @@
 // AI は区間ごとの方針だけを決め、配置は gen/simplify のルールで行う。キーが無ければ標準の方針で作る。
 // 再生はエディタと共通（▶・ループ・速さ）で、この画面にいる間は「聴く」譜面（元の譜面か作った難易度）の音を鳴らす。
 import { create } from 'zustand';
-import { cleanPlan, PLAN_SCHEMA, planPrompt, sectionSpans, type DifficultyPlan, type SectionSpan } from '../ai/judge';
+import { cleanPlan, planSchema, planPrompt, sectionSpans, type DifficultyPlan, type SectionSpan } from '../ai/judge';
 import { AiError } from '../ai/openrouter';
 import { findIssues } from '../check/playability';
 import { levelToField } from '../check/level';
@@ -217,7 +217,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
       const guide = guidelineText(gl.guide, [bandOf(ds.target.center)]);
       const r = await runAi<Partial<DifficultyPlan>>('difficulty', {
         ...planPrompt({ doc: master, title, genre: master.fields['GENRE'] ?? '', diff, target: ds.target, masterLevel: g.masterLevel, rung: DEFAULT_RUNG[diff], sections: g.spans, guide, keep: g.keep, instruction: g.instruction }),
-        schema: PLAN_SCHEMA,
+        schema: planSchema(),
         maxTokens: 6000,
       });
       if (!r) {

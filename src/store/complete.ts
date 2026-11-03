@@ -5,7 +5,7 @@
 import { tr, withTr } from '../i18n';
 import { create } from 'zustand';
 import { AiError } from '../ai/openrouter';
-import { buildContext, decodeCandidates, PHRASE_SCHEMA, phrasePrompt, type PhraseCandidate } from '../ai/phrase';
+import { buildContext, decodeCandidates, phraseSchema, phrasePrompt, type PhraseCandidate } from '../ai/phrase';
 import { measureContents, noteKey, predictChain, type Candidate, type ChartSource, type CNote } from '../assist/complete';
 import { modelEvidence, onsetEvidence, unheard, type Evidence } from '../assist/evidence';
 import { heardDrums, type HeardDrums } from '../assist/heard';
@@ -628,7 +628,7 @@ export async function askAi() {
       onsets: onsets && bgm ? onsets : null,
       offsetSec: bgm?.sec ?? 0,
     });
-    const r = await runAi<Parameters<typeof decodeCandidates>[0]>('phrase', { ...phrasePrompt(ctx), schema: PHRASE_SCHEMA, maxTokens: 3000, signal: ac.signal });
+    const r = await runAi<Parameters<typeof decodeCandidates>[0]>('phrase', { ...phrasePrompt(ctx), schema: phraseSchema(), maxTokens: 3000, signal: ac.signal });
     if (aiAbort !== ac) return;
     aiAbort = null;
     if (!r) {

@@ -18,5 +18,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // 言語は日本語で始める（src/test-setup.ts）
+    setupFiles: ['src/test-setup.ts'],
   },
 });

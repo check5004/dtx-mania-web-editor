@@ -5,9 +5,10 @@
 //  - 写す: この曲でもう打った小節を写す（TAB補完と同じ点数の付け方）。キー不要・すぐ出る。
 // 案は点線で見せ、いまの譜面との違い（足す・消す）も見せてから、マージのしかたを選んで入れる（edit/merge）。
 // 入れるまで譜面は変わらない。再生すると、案を入れた譜面で鳴らす（聴き比べられる）。
+import { tr } from '../i18n';
 import { produce } from 'immer';
 import { create } from 'zustand';
-import { buildMeasureContext, decodeMeasureCandidates, MEASURE_SCHEMA, measurePrompt } from '../ai/measureGen';
+import { buildMeasureContext, decodeMeasureCandidates, measureSchema, measurePrompt } from '../ai/measureGen';
 import { AiError } from '../ai/openrouter';
 import { draftFromHits, learnStyle, styleLines } from '../assist/draft';
 import { toBase36x2, toMeasure } from '../dtx/base36';
@@ -115,8 +116,10 @@ function draftCandidate(doc: DtxDoc, from: number, to: number): GenCandidate | n
   return {
     id: 'draft',
     source: 'draft',
-    name: '採譜から',
-    reason: style.measures ? '原曲から聞き取った打点。レーンは前後の小節の書き方に合わせました' : '原曲から聞き取った打点',
+    name: tr('採譜から', 'From detection'),
+    reason: style.measures
+      ? tr('原曲から聞き取った打点。レーンは前後の小節の書き方に合わせました', 'Hits heard in the original. Lanes follow how the nearby measures are written')
+      : tr('原曲から聞き取った打点', 'Hits heard in the original'),
     notes,
     fit: null,
   };
@@ -132,11 +135,11 @@ const COPY_OVER_AI = 0.4;
 
 /** 写す案の理由（名前に小節番号が入っているので、ここでは繰り返さない） */
 function copyReason(c: Candidate, at: number): string {
-  if (c.kind === 'structure') return '原曲で同じに聞こえる小節';
-  if (c.src !== null && c.src > at) return '後ろにある、流れが同じ小節';
-  if (c.period === 1) return '直前の小節を続ける';
-  if (c.period !== null && c.period <= 8) return `${c.period}小節前と同じ流れ`;
-  return '流れが同じ小節';
+  if (c.kind === 'structure') return tr('原曲で同じに聞こえる小節', 'A measure that sounds the same in the original');
+  if (c.src !== null && c.src > at) return tr('後ろにある、流れが同じ小節', 'A later measure with the same flow');
+  if (c.period === 1) return tr('直前の小節を続ける', 'Continues the previous measure');
+  if (c.period !== null && c.period <= 8) return tr(`${c.period}小節前と同じ流れ`, `Same flow as ${c.period} measures back`);
+  return tr('流れが同じ小節', 'A measure with the same flow');
 }
 
 const copyScore = (c: GenCandidate | undefined) => (c?.source === 'copy' ? (c.score ?? 0) : 0);
@@ -151,11 +154,11 @@ export function localCandidates(doc: DtxDoc, from: number, to: number): GenCandi
       for (const n of ns) if (isNormal(n.ch)) notes.push({ ch: n.ch, m: from + i, f: n.f, v: n.v });
     });
     if (notes.length === 0 || c.src === null) continue;
-    const pct = Number.isFinite(c.score) ? `（同じ形の見込み ${Math.round(c.score * 100)}%）` : '';
+    const pct = Number.isFinite(c.score) ? tr(`（同じ形の見込み ${Math.round(c.score * 100)}%）`, ` (${Math.round(c.score * 100)}% likely the same)`) : '';
     copies.push({
       id: `copy:${c.src}`,
       source: 'copy',
-      name: `小節 ${toMeasure(c.src)} を写す`,
+      name: tr(`小節 ${toMeasure(c.src)} を写す`, `Copy measure ${toMeasure(c.src)}`),
       reason: `${copyReason(c, from)}${pct}`,
       notes,
       fit: heardFit(doc, notes, from, to),
@@ -245,7 +248,7 @@ async function runGenAi(instruction = '', focus = false) {
   const range = { from: g.from, to: g.to };
   set({ ai: 'loading', aiError: null });
   try {
-    const r = await runAi<unknown>('measure', { ...measurePrompt(ctx), schema: MEASURE_SCHEMA, maxTokens: 3000, signal: ac.signal });
+    const r = await runAi<unknown>('measure', { ...measurePrompt(ctx), schema: measureSchema(), maxTokens: 3000, signal: ac.signal });
     if (aiAbort !== ac) return;
     aiAbort = null;
     const cur = get();
@@ -256,7 +259,7 @@ async function runGenAi(instruction = '', focus = false) {
     }
     const pcs = decodeMeasureCandidates(r.data, range, tempo);
     if (pcs.length === 0) {
-      set({ ai: 'error', aiError: 'AIの案が使える形になりませんでした。もう一度試してください', cost: r.costUsed });
+      set({ ai: 'error', aiError: tr('AIの案が使える形になりませんでした。もう一度試してください', "The AI's ideas weren't usable. Please try again"), cost: r.costUsed });
       return;
     }
     const nowDoc = useEditor.getState().doc;
@@ -299,7 +302,7 @@ export function openMeasureGen(m: number, o: { extend?: boolean } = {}) {
     from = Math.min(g.from, m);
     to = Math.max(g.to, m);
     if (to - from + 1 > MAX_GEN_MEASURES) {
-      toast(`小節の生成は ${MAX_GEN_MEASURES} 小節までです`, 'warn');
+      toast(tr(`小節の生成は ${MAX_GEN_MEASURES} 小節までです`, `Measure generation works on up to ${MAX_GEN_MEASURES} measures`), 'warn');
       if (m < g.from) to = from + MAX_GEN_MEASURES - 1;
       else from = to - MAX_GEN_MEASURES + 1;
     }
@@ -430,7 +433,7 @@ export function rangeHasChips(doc: DtxDoc = useEditor.getState().doc): boolean {
 
 /** 案の出どころの短い言い方 */
 export function genSourceLabel(c: GenCandidate): string {
-  return c.source === 'ai' ? 'AI' : c.source === 'draft' ? '採譜' : '写す';
+  return c.source === 'ai' ? 'AI' : c.source === 'draft' ? tr('採譜', 'detected') : tr('写す', 'copied');
 }
 
 /** 今の案を入れる。next なら、入れたあと次の小節の生成を始める */
@@ -438,20 +441,21 @@ export function applyMeasureGen(o: { next?: boolean } = {}): boolean {
   const g = get();
   const v = genView();
   if (!v) return false;
-  const range = g.from === g.to ? `小節 ${toMeasure(g.from)}` : `小節 ${toMeasure(g.from)}〜${toMeasure(g.to)}`;
+  const range = g.from === g.to ? tr(`小節 ${toMeasure(g.from)}`, `measure ${toMeasure(g.from)}`) : tr(`小節 ${toMeasure(g.from)}〜${toMeasure(g.to)}`, `measures ${toMeasure(g.from)}–${toMeasure(g.to)}`);
   const nextAt = g.to + 1;
   if (v.plan.add.length === 0 && v.plan.remove.length === 0) {
-    toast('いまの譜面と違う所がありません', 'info');
+    toast(tr('いまの譜面と違う所がありません', 'Nothing differs from the current chart'), 'info');
     closeMeasureGen();
     if (o.next) openMeasureGen(nextAt);
     return false;
   }
   const fieldsBefore = Object.keys(useEditor.getState().doc.fields).length;
-  const label = `${range} に${genSourceLabel(v.cand)}の案「${v.cand.name}」を入れる（+${v.plan.add.length}${v.plan.remove.length ? ` −${v.plan.remove.length}` : ''}）`;
+  const counts = `+${v.plan.add.length}${v.plan.remove.length ? ` −${v.plan.remove.length}` : ''}`;
+  const label = tr(`${range} に${genSourceLabel(v.cand)}の案「${v.cand.name}」を入れる（${counts}）`, `Insert ${genSourceLabel(v.cand)} idea "${v.cand.name}" into ${range} (${counts})`);
   const ok = edit(label, (d) => applyMerge(d, v.plan, wavForChannel));
   closeMeasureGen();
   if (Object.keys(useEditor.getState().doc.fields).length !== fieldsBefore) void prepareSounds();
-  if (ok) toast(`${range} に「${v.cand.name}」を入れました（Ctrl+Z で戻せます）`, 'ok');
+  if (ok) toast(tr(`${range} に「${v.cand.name}」を入れました（Ctrl+Z で戻せます）`, `Inserted "${v.cand.name}" into ${range} (undo with Ctrl+Z)`), 'ok');
   if (o.next) openMeasureGen(nextAt);
   return ok;
 }

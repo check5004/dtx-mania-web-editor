@@ -1,4 +1,5 @@
 // 原曲（音声ファイル）：読み込む場所。BGM（#WAV と ch01）に登録し、波形と原曲の打点はこの音から作る。
+import { tr, pl } from '../i18n';
 import { useState } from 'react';
 import { importBgmFile, pickBgmFile } from '../app/fileActions';
 import { engine } from '../audio/engine';
@@ -53,16 +54,22 @@ export function SourceCard() {
   };
 
   const analysis =
-    status === 'loading' ? `解析中… ${Math.round(progress * 100)}%` : status === 'ready' ? `波形・打点: ${srcName ?? name}` : status === 'error' ? '解析できませんでした' : null;
+    status === 'loading'
+      ? tr(`解析中… ${Math.round(progress * 100)}%`, `Analyzing… ${Math.round(progress * 100)}%`)
+      : status === 'ready'
+        ? tr(`波形・打点: ${srcName ?? name}`, `Waveform and hits: ${srcName ?? name}`)
+        : status === 'error'
+          ? tr('解析できませんでした', "Couldn't analyze")
+          : null;
 
   return (
     <div className={`card source-card ${over ? 'over' : ''}`} {...drop}>
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="section-title">原曲（音声ファイル）</span>
+        <span className="section-title">{tr('原曲（音声ファイル）', 'Original (audio file)')}</span>
         <span className="grow" />
         {bgm && (
-          <button className="btn small ghost" style={{ height: 24 }} onClick={openTempo} title="原曲に合わせてBPMと曲の始まりを決める">
-            テンポ合わせ
+          <button className="btn small ghost" style={{ height: 24 }} onClick={openTempo} title={tr('原曲に合わせてBPMと曲の始まりを決める', 'Set the BPM and song start to match the original')}>
+            {tr('テンポ合わせ', 'Tempo')}
           </button>
         )}
       </div>
@@ -72,14 +79,14 @@ export function SourceCard() {
             <span className="source-ic">{Icon.wave(15)}</span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="ellipsis" title={path} style={{ fontWeight: 600 }}>
-                {has ? name : `ステム ${stems.length} 本`}
+                {has ? name : tr(`ステム ${stems.length} 本`, `${stems.length} ${pl(stems.length, 'stem')}`)}
               </div>
               <div className="lbl mono">
-                {len > 0 ? formatTime(len, false) : '—'} · {toMeasure(bgmMeasure(doc))}小節から
+                {len > 0 ? formatTime(len, false) : '—'} · {tr(`${toMeasure(bgmMeasure(doc))}小節から`, `from measure ${toMeasure(bgmMeasure(doc))}`)}
               </div>
             </div>
-            <button className="btn small" onClick={pickBgmFile} title="別の音声ファイルに差し替える（Ctrl+Z で戻せます）">
-              差し替え
+            <button className="btn small" onClick={pickBgmFile} title={tr('別の音声ファイルに差し替える（Ctrl+Z で戻せます）', 'Replace with another audio file (undo with Ctrl+Z)')}>
+              {tr('差し替え', 'Replace')}
             </button>
           </div>
           {analysis && <div className="lbl" style={{ marginTop: 6 }}>{analysis}</div>}
@@ -87,16 +94,16 @@ export function SourceCard() {
             <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
               {sepBusy ? (
                 <>
-                  ステムに分解しています…{' '}
+                  {tr('ステムに分解しています…', 'Splitting into stems…')}{' '}
                   <button className="link-btn" onClick={openSeparation}>
-                    ようす
+                    {tr('ようす', 'Progress')}
                   </button>
                 </>
               ) : (
                 <>
-                  ドラム抜きの BGM を作るには{' '}
-                  <button className="link-btn" onClick={openSeparation} title="原曲をブラウザの中でドラムとドラム抜きに分ける">
-                    ステムに分解
+                  {tr('ドラム抜きの BGM を作るには', 'To make a no-drums BGM:')}{' '}
+                  <button className="link-btn" onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜きに分ける', 'Split the original into drums and no-drums in your browser')}>
+                    {tr('ステムに分解', 'Split into stems')}
                   </button>
                 </>
               )}
@@ -104,9 +111,12 @@ export function SourceCard() {
           )}
           {stems.length > 0 && (
             <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
-              ステム {stems.length} 本を鳴らしています（原曲と鳴らし分けるのは下のトラックで）。
+              {tr(
+                `ステム ${stems.length} 本を鳴らしています（原曲と鳴らし分けるのは下のトラックで）。`,
+                `Playing ${stems.length} ${pl(stems.length, 'stem')} (switch between them and the original in the tracks below). `,
+              )}
               <button className="link-btn" onClick={() => openPage('stems')}>
-                ステムとミックス
+                {tr('ステムとミックス', 'Stems & mix')}
               </button>
             </div>
           )}
@@ -115,19 +125,24 @@ export function SourceCard() {
         <>
           {lost && (
             <div className="notice" style={{ marginBottom: 8 }}>
-              原曲のファイル「{name}」が曲フォルダに見つかりません。音声ファイルを選び直してください。
+              {tr(`原曲のファイル「${name}」が曲フォルダに見つかりません。音声ファイルを選び直してください。`, `The original file "${name}" isn't in the song folder. Pick the audio file again.`)}
             </div>
           )}
           <button className={`source-drop ${over ? 'over' : ''}`} onClick={pickBgmFile}>
-            <b>{Icon.folder(15)} 原曲の音声ファイルを読み込む</b>
-            <span>ここにドロップするか、クリックして選ぶ（WAV・OGG・MP3）</span>
+            <b>
+              {Icon.folder(15)} {tr('原曲の音声ファイルを読み込む', 'Load the original audio file')}
+            </b>
+            <span>{tr('ここにドロップするか、クリックして選ぶ（WAV・OGG・MP3）', 'Drop it here or click to choose (WAV, OGG, MP3)')}</span>
           </button>
           <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-            曲フォルダにコピーしてBGM（#WAV と ch01）に登録します。譜面の右の波形と原曲の打点はこの音から作ります。楽器ごとに分けた音は
+            {tr(
+              '曲フォルダにコピーしてBGM（#WAV と ch01）に登録します。譜面の右の波形と原曲の打点はこの音から作ります。楽器ごとに分けた音は',
+              'It is copied into the song folder and set as the BGM (#WAV and ch01). The waveform and detected hits next to the chart come from it. Separate instrument tracks can be loaded from ',
+            )}
             <button className="link-btn" onClick={() => openPage('stems')}>
-              ステム
+              {tr('ステム', 'Stems')}
             </button>
-            から読み込めます。
+            {tr('から読み込めます。', '.')}
           </p>
         </>
       )}

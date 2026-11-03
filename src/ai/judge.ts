@@ -1,7 +1,8 @@
 // AI のレベル判定・ガイドラインの下書き・難易度生成の方針。どれも譜面の特徴量と基準文だけを渡す。
+import { tr, aiLangRule, aiLangName } from '../i18n';
 import type { DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
-import { chartFeatures, FEATURE_DEFS, featureSummary, sectionSummaries, type ChartFeatures } from '../gen/features';
+import { chartFeatures, FEATURE_DEFS, featureSummary, sectionSummaries, spanName, type ChartFeatures } from '../gen/features';
 import { describePolicy, FILL_STYLES, LADDER, type Difficulty, type MustKeep, type SectionPlan } from '../gen/simplify';
 import type { BandStats, ChartEntry } from '../store/guideline';
 
@@ -16,21 +17,26 @@ export interface LevelJudgement {
   gap: string;
 }
 
-export const LEVEL_SCHEMA = {
+// AI への説明とプロンプトは日本語のまま。ユーザーが読む答え（根拠・難所・方針・基準文）は aiLangName・aiLangRule で画面の言語にする。
+// 答えの形は書く言語を含むので、使うたびに作る。
+
+// i18n-ignore-start
+export const levelSchema = () => ({
   name: 'level_judgement',
   schema: {
     type: 'object',
     properties: {
       level: { type: 'number', description: 'DTXMania のドラムのレベル（1.00〜9.99、小数2桁）' },
-      reasons: { type: 'array', items: { type: 'string' }, description: '根拠を3つ前後（どの基準に当たったか、どこが難所か。日本語で短く）' },
+      reasons: { type: 'array', items: { type: 'string' }, description: `根拠を3つ前後（どの基準に当たったか、どこが難所か。${aiLangName()}で短く）` },
       confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-      hardest: { type: 'string', description: 'いちばんの難所（小節の範囲と内容）' },
-      gap: { type: 'string', description: '機械的な推定と0.5以上違うときはその理由。近ければ空' },
+      hardest: { type: 'string', description: `いちばんの難所（小節の範囲と内容。${aiLangName()}で）` },
+      gap: { type: 'string', description: `機械的な推定と0.5以上違うときはその理由（${aiLangName()}で）。近ければ空` },
     },
     required: ['level', 'reasons', 'confidence', 'hardest', 'gap'],
     additionalProperties: false,
   },
-};
+});
+// i18n-ignore-end
 
 export interface SectionSpan {
   name: string;
@@ -41,11 +47,13 @@ export interface SectionSpan {
 export function levelPrompt(o: { doc: DtxDoc; title: string; label?: string; sections: SectionSpan[]; guide: string; near: { c: ChartEntry; d: number }[]; mech: number; feat?: ChartFeatures }): { system: string; user: string } {
   const tempo = buildTempoMap(o.doc);
   const feat = o.feat ?? chartFeatures(o.doc, tempo);
+  // i18n-ignore-start
   const system = [
     'あなたは DTXMania（ドラム）の譜面のレベルを判定する専門家です。',
     'レベルは 1.00〜9.99。作者の手元の曲から作った「難易度ガイドライン」と、特徴の近い既知レベルの譜面を物差しにしてください。',
     '機械的な推定は打数の密度と同時打数からの目安です。シンコペーションの読みにくさ、手順の組みにくさ、譜面の見た目の分かりにくさなど、機械的な推定が拾えない点を考えてください。',
-    '答えは指定の JSON だけで返してください。根拠は日本語で短く。',
+    `答えは指定の JSON だけで返してください。根拠は${aiLangName()}で短く。`,
+    aiLangRule(),
   ].join('\n');
   const lines: string[] = [];
   lines.push(`曲: ${o.title}${o.label ? `（${o.label}）` : ''}`);
@@ -61,6 +69,7 @@ export function levelPrompt(o: { doc: DtxDoc; title: string; label?: string; sec
   lines.push('特徴の近い既知レベルの譜面:');
   if (o.near.length === 0) lines.push('（ライブラリに譜面がありません）');
   for (const { c } of o.near) lines.push(`- ${c.song} ${c.label}: 登録 Lv${c.level?.toFixed(2)} / ${featureSummary(c.feat)}`);
+  // i18n-ignore-end
   return { system, user: lines.join('\n') };
 }
 
@@ -80,24 +89,25 @@ export function sectionSpans(sections: { m: number; name: string }[], last: numb
   const sorted = [...sections].sort((a, b) => a.m - b.m).filter((s) => s.m <= last);
   if (sorted.length === 0) {
     const out: SectionSpan[] = [];
-    for (let m = 0; m <= last; m += 8) out.push({ name: `${m}〜${Math.min(last, m + 7)}小節`, from: m, to: Math.min(last, m + 7) });
+    for (let m = 0; m <= last; m += 8) out.push({ name: spanName(m, Math.min(last, m + 7)), from: m, to: Math.min(last, m + 7) });
     // 最後の4小節未満の端は前に含める（終わりの1小節だけの区間を作らない）
     if (out.length >= 2 && out[out.length - 1].to - out[out.length - 1].from < 3) {
       out.pop();
       const p = out[out.length - 1];
-      out[out.length - 1] = { name: `${p.from}〜${last}小節`, from: p.from, to: last };
+      out[out.length - 1] = { name: spanName(p.from, last), from: p.from, to: last };
     }
     return out;
   }
   const out: SectionSpan[] = [];
-  if (sorted[0].m > 0) out.push({ name: '前奏', from: 0, to: sorted[0].m - 1 });
+  if (sorted[0].m > 0) out.push({ name: tr('前奏', 'Intro'), from: 0, to: sorted[0].m - 1 });
   sorted.forEach((s, i) => out.push({ name: s.name, from: s.m, to: i + 1 < sorted.length ? sorted[i + 1].m - 1 : last }));
   return out;
 }
 
 // ---- ガイドラインの下書き ---------------------------------------------------------------
 
-export const GUIDE_SCHEMA = {
+// i18n-ignore-start
+export const guideSchema = () => ({
   name: 'difficulty_guideline',
   schema: {
     type: 'object',
@@ -113,7 +123,7 @@ export const GUIDE_SCHEMA = {
               items: {
                 type: 'object',
                 properties: {
-                  text: { type: 'string', description: '基準文（日本語で1文。譜面の作者がそのまま使える言い方）' },
+                  text: { type: 'string', description: `基準文（${aiLangName()}で1文。譜面の作者がそのまま使える言い方）` },
                   basis: { type: 'string', description: '根拠になった出現率など（例: 16分のハイハット 45%）' },
                 },
                 required: ['text', 'basis'],
@@ -129,7 +139,7 @@ export const GUIDE_SCHEMA = {
     required: ['bands'],
     additionalProperties: false,
   },
-};
+});
 
 export function guidelinePrompt(o: { stats: BandStats[]; reps: Record<number, ChartEntry[]>; bands: number[]; confirmed: string }): { system: string; user: string } {
   const system = [
@@ -137,6 +147,7 @@ export function guidelinePrompt(o: { stats: BandStats[]; reps: Record<number, Ch
     '作者の手元の曲を集計した出現率と代表譜面だけを根拠にしてください。一般論で埋めないでください。',
     '1つのレベル帯に3〜5行。各行は「何が出てくるか・どこまでか」を具体的に（例: 「8分のハイハットが土台で、サビの一部で16分の刻みが入る」）。',
     '下の帯と上の帯との違いが分かるように書いてください。答えは指定の JSON だけで。',
+    aiLangRule(),
   ].join('\n');
   const lines: string[] = [];
   lines.push('レベル帯ごとの要素の出現率（その要素が出てくる譜面の割合）:');
@@ -157,6 +168,7 @@ export function guidelinePrompt(o: { stats: BandStats[]; reps: Record<number, Ch
   lines.push(`下書きするレベル帯: ${o.bands.map((b) => `Lv${b}台`).join('、')}`);
   return { system, user: lines.join('\n') };
 }
+// i18n-ignore-end
 
 // ---- 難易度生成の方針 ---------------------------------------------------------------------
 
@@ -165,12 +177,13 @@ export interface DifficultyPlan {
   sections: SectionPlan[];
 }
 
-export const PLAN_SCHEMA = {
+// i18n-ignore-start
+export const planSchema = () => ({
   name: 'difficulty_plan',
   schema: {
     type: 'object',
     properties: {
-      summary: { type: 'string', description: '全体の方針（日本語で2文まで）' },
+      summary: { type: 'string', description: `全体の方針（${aiLangName()}で2文まで）` },
       sections: {
         type: 'array',
         items: {
@@ -181,7 +194,7 @@ export const PLAN_SCHEMA = {
             to: { type: 'integer' },
             shift: { type: 'integer', description: '全体の簡略化の段からの増減（-2〜2。+ でより簡単に、- で元の譜面に近く）' },
             fill: { type: 'string', enum: ['keep', 'thin', 'short', 'last'], description: 'フィルの扱い' },
-            comment: { type: 'string', description: 'このセクションで何を残し何を削るか（日本語で1〜2文）' },
+            comment: { type: 'string', description: `このセクションで何を残し何を削るか（${aiLangName()}で1〜2文）` },
           },
           required: ['name', 'from', 'to', 'shift', 'fill', 'comment'],
           additionalProperties: false,
@@ -191,8 +204,9 @@ export const PLAN_SCHEMA = {
     required: ['summary', 'sections'],
     additionalProperties: false,
   },
-};
+});
 
+// AI に伝える「必ず残すもの」の名前
 const KEEP_LABELS: Record<keyof MustKeep, string> = {
   backbeat: '2・4拍のスネア（バックビート）',
   kick1: '1拍目のキック',
@@ -200,6 +214,7 @@ const KEEP_LABELS: Record<keyof MustKeep, string> = {
   fillLanding: 'フィルの着地',
   openHH: 'オープンHHのアクセント',
 };
+// i18n-ignore-end
 
 export function keepList(k: MustKeep): string {
   return (Object.keys(KEEP_LABELS) as (keyof MustKeep)[])
@@ -223,6 +238,7 @@ export function planPrompt(o: {
 }): { system: string; user: string } {
   const tempo = buildTempoMap(o.doc);
   const feat = chartFeatures(o.doc, tempo);
+  // i18n-ignore-start
   const system = [
     'あなたは DTXMania（ドラム）の譜面作者です。完成した MASTER 譜面から低い難易度を作るときの「どこをどう簡略化するか」だけを決めます。',
     'ノーツの配置はルールエンジンが行います。あなたはセクションごとに、全体の簡略化の段からの増減（shift）とフィルの扱いなどを選んでください。',
@@ -234,6 +250,7 @@ export function planPrompt(o: {
       .join('、')}`,
     `フィルの細かさの上限: ADVANCED は ${FILL_LIMIT.ADVANCED} まで、BASIC は ${FILL_LIMIT.BASIC} まで（それより細かい指定は ${FILL_LIMIT.BASIC}・${FILL_LIMIT.ADVANCED} に直します）。`,
     '答えは指定の JSON だけで返してください。sections は与えたセクションと同じ範囲で、すべて返してください。',
+    aiLangRule(),
   ].join('\n');
   const lines: string[] = [];
   lines.push(`曲: ${o.title}${o.genre ? `（${o.genre}）` : ''}`);
@@ -248,6 +265,7 @@ export function planPrompt(o: {
   lines.push('');
   lines.push('難易度ガイドライン（目標のレベル帯）:');
   lines.push(o.guide.trim() || '（まだありません）');
+  // i18n-ignore-end
   return { system, user: lines.join('\n') };
 }
 

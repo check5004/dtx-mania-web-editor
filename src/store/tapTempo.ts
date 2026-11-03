@@ -1,6 +1,7 @@
 // 曲に合わせてクリック（または T キー）でBPMと小節の頭を合わせる。
 //   ・再生中に叩けば、曲の中の時刻で記録するので「小節の頭」まで合わせられる
 //   ・止まっているときは間隔からBPMだけを測る
+import { tr, isJa } from '../i18n';
 import { create } from 'zustand';
 import { engine } from '../audio/engine';
 import { evaluatePlan, applyPlan, writeSegments, type TempoPlan } from '../assist/tempoPlan';
@@ -132,12 +133,12 @@ export function applyTapBpm() {
   const changes = tempoOf(doc).events.length > 1;
   keepPlaying(() => {
     // 途中でBPMが変わる譜面は、最初のBPMだけ変える
-    if (changes) setInitialBpm(bpm, `最初のBPMを ${bpm} にする（タップ）`);
-    else edit(`BPMを ${bpm} にする（タップ）`, (d) => writeSegments(d, [{ m: 0, bpm, src: 'base' }]));
+    if (changes) setInitialBpm(bpm, tr(`最初のBPMを ${bpm} にする（タップ）`, `Set the first BPM to ${bpm} (tap)`));
+    else edit(tr(`BPMを ${bpm} にする（タップ）`, `Set BPM to ${bpm} (tap)`), (d) => writeSegments(d, [{ m: 0, bpm, src: 'base' }]));
     setAnchors([]);
     resetTempoPage();
   });
-  toast(changes ? `最初のBPMを ${bpm} にしました（途中のBPM変化はそのまま）` : `BPMを ${bpm} にしました`, 'ok');
+  toast(changes ? tr(`最初のBPMを ${bpm} にしました（途中のBPM変化はそのまま）`, `Set the first BPM to ${bpm} (later BPM changes are kept)`) : tr(`BPMを ${bpm} にしました`, `Set BPM to ${bpm}`), 'ok');
 }
 
 /** BPMと小節の頭を合わせる（最初に叩いた拍が firstBeat 拍目） */
@@ -155,7 +156,7 @@ export function applyTapAlign() {
   let m = 1;
   if (bgm) {
     if (ref < 0) {
-      toast('原曲が始まる前を叩いています。曲が鳴っている所で叩いてください', 'warn');
+      toast(tr('原曲が始まる前を叩いています。曲が鳴っている所で叩いてください', 'Those taps are before the original starts. Tap while the song is playing'), 'warn');
       return;
     }
     let plan: TempoPlan = { bpm, anchors: [{ m: 1, t: ref }] };
@@ -165,12 +166,12 @@ export function applyTapAlign() {
       r = evaluatePlan(doc, plan);
     }
     if (!r.bgm) {
-      toast('原曲（BGM）を置ける位置が見つかりませんでした', 'warn');
+      toast(tr('原曲（BGM）を置ける位置が見つかりませんでした', "Couldn't find a place to put the original (BGM)"), 'warn');
       return;
     }
     m = plan.anchors[0].m;
     keepPlaying(() => {
-      edit(`BPM ${bpm}・小節の頭を合わせる（タップ）`, (d) => applyPlan(d, r, null));
+      edit(tr(`BPM ${bpm}・小節の頭を合わせる（タップ）`, `BPM ${bpm}, line up downbeat (tap)`), (d) => applyPlan(d, r, null));
       setAnchors(plan.anchors);
       resetTempoPage();
     });
@@ -187,7 +188,7 @@ export function applyTapAlign() {
     while (m < 999 && tempo.beatToSec(tempo.measureStart(m)) < ref - 1e-6) m++;
     const offset = Math.round((ref - tempo.beatToSec(tempo.measureStart(m))) * 1000) / 1000;
     keepPlaying(() => {
-      edit(`BPM ${bpm}・小節の頭を合わせる（タップ）`, (d) => writeSegments(d, segs));
+      edit(tr(`BPM ${bpm}・小節の頭を合わせる（タップ）`, `BPM ${bpm}, line up downbeat (tap)`), (d) => writeSegments(d, segs));
       setYoutube({ ...yt, offset });
       resetTempoPage();
     });
@@ -198,5 +199,11 @@ export function applyTapAlign() {
     setView({ scrollBeat: Math.max(-1, tempo.measureStart(m) - 2) });
   }
   clearTaps();
-  toast(`BPM ${bpm}、${s.firstBeat === 1 ? '最初に叩いた拍' : `${s.firstBeat}拍目から数えた次の1拍目`}を小節 ${toMeasure(m)} の頭にしました`, 'ok', 6000);
+  toast(
+    isJa()
+      ? `BPM ${bpm}、${s.firstBeat === 1 ? '最初に叩いた拍' : `${s.firstBeat}拍目から数えた次の1拍目`}を小節 ${toMeasure(m)} の頭にしました`
+      : `BPM ${bpm}. ${s.firstBeat === 1 ? 'Your first tap' : `The next beat 1 after your first tap (beat ${s.firstBeat})`} is now the start of measure ${toMeasure(m)}`,
+    'ok',
+    6000,
+  );
 }

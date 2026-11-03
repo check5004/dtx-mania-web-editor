@@ -3,15 +3,20 @@
 //   drums.wav・Song (Drums).wav・1_Song_(No Drums).wav・曲_ドラム_mixed.mp3・ﾄﾞﾗﾑ.wav・01_Dr.wav・BassDrum.wav
 // まとめて読み込んだときは、どのファイルにも付いている部分（曲名・_mixed など）を除いた残りを名前にする
 // （back number - 水平線_弦楽器_mixed.mp3 → 弦楽器）。
+import { tr, withTr } from '../i18n';
 import type { StemKind, StemTrack } from '../store/sidecar';
 
-export const STEM_KINDS: { kind: StemKind; label: string; color: string }[] = [
-  { kind: 'drums', label: 'ドラム', color: '#F0965A' },
-  { kind: 'bass', label: 'ベース', color: '#A08CF0' },
-  { kind: 'vocals', label: 'ボーカル', color: '#5BD69A' },
-  { kind: 'guitar', label: 'ギター', color: '#4FA3E0' },
-  { kind: 'piano', label: 'ピアノ', color: '#E57BC4' },
-  { kind: 'other', label: 'その他', color: '#D6C85A' },
+type KindInfo = { kind: StemKind; label: string; labels: readonly [string, string]; color: string };
+const kindInfo = (kind: StemKind, labels: readonly [string, string], color: string) => withTr({ kind, labels, color } as KindInfo, { label: labels });
+
+/** 種類と、その名前（label は画面の言語。labels は日本語と英語） */
+export const STEM_KINDS: KindInfo[] = [
+  kindInfo('drums', ['ドラム', 'Drums'], '#F0965A'),
+  kindInfo('bass', ['ベース', 'Bass'], '#A08CF0'),
+  kindInfo('vocals', ['ボーカル', 'Vocals'], '#5BD69A'),
+  kindInfo('guitar', ['ギター', 'Guitar'], '#4FA3E0'),
+  kindInfo('piano', ['ピアノ', 'Piano'], '#E57BC4'),
+  kindInfo('other', ['その他', 'Other'], '#D6C85A'),
 ];
 
 export function stemKindInfo(kind: StemKind) {
@@ -21,6 +26,7 @@ export function stemKindInfo(kind: StemKind) {
 // ---- 文字をそろえる ---------------------------------------------------------------
 
 /** 見せる形：分かれた濁点（Mac・Google ドライブの zip）・半角カナ・全角英数をそろえる */
+// i18n-ignore-start
 export function tidyName(s: string): string {
   return s.replace(/゛/g, '゙').replace(/゜/g, '゚').normalize('NFKC');
 }
@@ -60,14 +66,15 @@ const TOKEN = new RegExp(`[^${SEP}]+`, 'g');
 const ONLY_SEP_DIGITS = new RegExp(`^[${SEP}\\d]*$`);
 const AFTER_WORD = new RegExp(`^[${SEP}]*(\\d{1,2})?[${SEP}]*$`);
 const TRAILING_NUM = /^[ _-]?(\d{1,2})(?!\d)/;
+// i18n-ignore-end
 
 // ---- 楽器の名前の表 -----------------------------------------------------------------
 
 interface Word {
   re: RegExp;
   kind: StemKind;
-  /** 名前（null ならファイル名に書いてあるまま） */
-  label: string | null;
+  /** 名前の日本語と英語（null ならファイル名に書いてあるまま） */
+  label: readonly [string, string] | null;
   /** 短くて別の意味もある略語（Dr・Ba・Vo など）。ほかに当たる語が無いときだけ使う */
   weak: boolean;
 }
@@ -75,83 +82,85 @@ interface Word {
 const B = '(?<![a-z])';
 const E = '(?![a-z])';
 /** 英語の語（前後が英字でない） */
-const en = (src: string, kind: StemKind, label: string, weak = false): Word => ({ re: new RegExp(`${B}(?:${src})${E}`, 'g'), kind, label, weak });
+const en = (src: string, kind: StemKind, label: readonly [string, string], weak = false): Word => ({ re: new RegExp(`${B}(?:${src})${E}`, 'g'), kind, label, weak });
 /** 英語の語の頭（drums・drumkit・vocals のように後ろに英字が続いてよい） */
-const head = (src: string, kind: StemKind, label: string): Word => ({ re: new RegExp(`${B}(?:${src})[a-z]*`, 'g'), kind, label, weak: false });
-/** 日本語の語（後ろに続くカタカナも含める：ドラムス・ドラムセット）。ひらがなで書いてもよい */
-const ja = (src: string, kind: StemKind, label: string | null = null, weak = false): Word => ({ re: new RegExp(`(?:${kata(src)})[ァ-ヺー]*`, 'g'), kind, label, weak });
+const head = (src: string, kind: StemKind, label: readonly [string, string]): Word => ({ re: new RegExp(`${B}(?:${src})[a-z]*`, 'g'), kind, label, weak: false });
+/** 日本語の語（後ろに続くカタカナも含める：ドラムス・ドラムセット）。ひらがなで書いてもよい。照合に使う i18n-ignore */
+const ja = (src: string, kind: StemKind, label: readonly [string, string] | null = null, weak = false): Word => ({ re: new RegExp(`(?:${kata(src)})[ァ-ヺー]*`, 'g'), kind, label, weak });
 
+// 日本語のファイル名の語（照合に使うので訳さない） i18n-ignore-start
 const WORDS: Word[] = [
   // 「〜抜き」はその楽器ではない（ドラム抜きの BGM など）
-  en('(?:no|without|minus)[ _-]?drums?|drum[ _-]?less|nodrums?', 'other', 'ドラム抜き'),
+  en('(?:no|without|minus)[ _-]?drums?|drum[ _-]?less|nodrums?', 'other', ['ドラム抜き', 'No drums']),
   ja('ドラム(?:抜き?|ぬき|なし|無し?|レス|オフ)|ノードラム', 'other'),
-  en('(?:no|without|minus|off)[ _-]?(?:vocals?|vox)|vocal[ _-]?less|novocals?', 'other', 'ボーカル抜き'),
+  en('(?:no|without|minus|off)[ _-]?(?:vocals?|vox)|vocal[ _-]?less|novocals?', 'other', ['ボーカル抜き', 'No vocals']),
   ja('(?:ボーカル|ヴォーカル)(?:抜き?|ぬき|なし|無し?|レス|オフ)|オフ[ _-]?(?:ボーカル|ヴォーカル)', 'other'),
-  en('(?:no|without|minus)[ _-]?bass|bass[ _-]?less|nobass', 'other', 'ベース抜き'),
+  en('(?:no|without|minus)[ _-]?bass|bass[ _-]?less|nobass', 'other', ['ベース抜き', 'No bass']),
   ja('ベース(?:抜き?|ぬき|なし|無し?|レス)', 'other'),
   // ドラム（キック・スネアなど、パーツごとのステムもドラム）
-  en('bass[ _-]?drums?', 'drums', 'キック'),
-  head('kick', 'drums', 'キック'),
-  en('bd|kd', 'drums', 'キック', true),
-  head('snare', 'drums', 'スネア'),
-  en('sd|snr', 'drums', 'スネア', true),
-  en('hi[ _-]?hats?', 'drums', 'ハイハット'),
-  en('hh|hats?', 'drums', 'ハイハット', true),
-  head('cymbal', 'drums', 'シンバル'),
-  en('toms|(?:floor|rack|hi|mid|low)[ _-]?toms?', 'drums', 'タム'),
-  en('tom', 'drums', 'タム', true),
-  en('overheads?|ohs', 'drums', 'オーバーヘッド'),
-  head('perc', 'drums', 'パーカッション'),
-  head('drum', 'drums', 'ドラム'),
-  en('drs?|kits?', 'drums', 'ドラム', true),
+  en('bass[ _-]?drums?', 'drums', ['キック', 'Kick']),
+  head('kick', 'drums', ['キック', 'Kick']),
+  en('bd|kd', 'drums', ['キック', 'Kick'], true),
+  head('snare', 'drums', ['スネア', 'Snare']),
+  en('sd|snr', 'drums', ['スネア', 'Snare'], true),
+  en('hi[ _-]?hats?', 'drums', ['ハイハット', 'Hi-hat']),
+  en('hh|hats?', 'drums', ['ハイハット', 'Hi-hat'], true),
+  head('cymbal', 'drums', ['シンバル', 'Cymbals']),
+  en('toms|(?:floor|rack|hi|mid|low)[ _-]?toms?', 'drums', ['タム', 'Toms']),
+  en('tom', 'drums', ['タム', 'Toms'], true),
+  en('overheads?|ohs', 'drums', ['オーバーヘッド', 'Overheads']),
+  head('perc', 'drums', ['パーカッション', 'Percussion']),
+  head('drum', 'drums', ['ドラム', 'Drums']),
+  en('drs?|kits?', 'drums', ['ドラム', 'Drums'], true),
   ja('バスドラム|バスドラ|ベースドラム|キック|スネア|ハイハット|シンバル|パーカッション|打楽器|太鼓|ドラム', 'drums'),
   { re: /(?<![ァ-ヺー])タム(?![ァ-ヺー])/g, kind: 'drums', label: null, weak: true },
   // ベース
-  en('bass[ _-]?guitars?|contra[ _-]?bass|double[ _-]?bass', 'bass', 'ベース'),
-  { re: /(?<![a-z])bass(?!oon)[a-z]*/g, kind: 'bass', label: 'ベース', weak: false },
-  en('ba|bs', 'bass', 'ベース', true),
+  en('bass[ _-]?guitars?|contra[ _-]?bass|double[ _-]?bass', 'bass', ['ベース', 'Bass']),
+  { re: /(?<![a-z])bass(?!oon)[a-z]*/g, kind: 'bass', label: ['ベース', 'Bass'], weak: false },
+  en('ba|bs', 'bass', ['ベース', 'Bass'], true),
   ja('ベースギター|エレキベース|ウッドベース|シンセベース|ベース', 'bass'),
   // ボーカル
-  en('(?:lead|main|ld)[ _-]?(?:vocals?|vox|voc)', 'vocals', 'リードボーカル'),
-  en('(?:backing|back|backup|bg)[ _-]?(?:vocals?|vox|voc)|bgvs?|bvox|harmon(?:y|ies)|choirs?|chorus', 'vocals', 'コーラス'),
-  en('a[ _-]?cap+el+a', 'vocals', 'アカペラ'),
-  head('vocal', 'vocals', 'ボーカル'),
-  en('vox|voc|voices?|singing|singer', 'vocals', 'ボーカル'),
-  en('vo|vc', 'vocals', 'ボーカル', true),
-  en('rap', 'vocals', 'ラップ', true),
+  en('(?:lead|main|ld)[ _-]?(?:vocals?|vox|voc)', 'vocals', ['リードボーカル', 'Lead vocals']),
+  en('(?:backing|back|backup|bg)[ _-]?(?:vocals?|vox|voc)|bgvs?|bvox|harmon(?:y|ies)|choirs?|chorus', 'vocals', ['コーラス', 'Backing vocals']),
+  en('a[ _-]?cap+el+a', 'vocals', ['アカペラ', 'A cappella']),
+  head('vocal', 'vocals', ['ボーカル', 'Vocals']),
+  en('vox|voc|voices?|singing|singer', 'vocals', ['ボーカル', 'Vocals']),
+  en('vo|vc', 'vocals', ['ボーカル', 'Vocals'], true),
+  en('rap', 'vocals', ['ラップ', 'Rap'], true),
   ja('リードボーカル|メインボーカル|コーラス|ハモリ|アカペラ|ボーカル|ヴォーカル|ボイス|ヴォイス|歌', 'vocals'),
   ja('うた|声|ラップ', 'vocals', null, true),
   // ギター
-  head('guitar', 'guitar', 'ギター'),
-  en('gtrs?', 'guitar', 'ギター'),
-  en('gts?', 'guitar', 'ギター', true),
+  head('guitar', 'guitar', ['ギター', 'Guitar']),
+  en('gtrs?', 'guitar', ['ギター', 'Guitar']),
+  en('gts?', 'guitar', ['ギター', 'Guitar'], true),
   ja('エレキギター|アコースティックギター|アコギ|エレアコ|エレキ|ギター', 'guitar'),
   // ピアノ・キーボード
-  en('e[ _.-]?pianos?|electric[ _-]?pianos?|rhodes|wurli(?:tzer)?', 'piano', 'エレピ'),
-  head('piano', 'piano', 'ピアノ'),
-  en('keys|keyboards?|kbd', 'piano', 'キーボード'),
-  en('organs?', 'piano', 'オルガン'),
-  en('pno|pf|key', 'piano', 'ピアノ', true),
+  en('e[ _.-]?pianos?|electric[ _-]?pianos?|rhodes|wurli(?:tzer)?', 'piano', ['エレピ', 'E. piano']),
+  head('piano', 'piano', ['ピアノ', 'Piano']),
+  en('keys|keyboards?|kbd', 'piano', ['キーボード', 'Keys']),
+  en('organs?', 'piano', ['オルガン', 'Organ']),
+  en('pno|pf|key', 'piano', ['ピアノ', 'Piano'], true),
   ja('ピアノ|キーボード|鍵盤|エレピ|オルガン', 'piano'),
   // その他（ストリングス・ブラス・シンセなどもここ）
-  en('others?', 'other', 'その他'),
-  en('rest|misc', 'other', 'その他', true),
-  en('accompaniments?|accomp', 'other', '伴奏'),
-  en('inst(?:rumentals?|s)?|instr', 'other', 'インスト'),
-  en('karaoke', 'other', 'カラオケ'),
-  en('strings?', 'other', 'ストリングス'),
-  en('violins?|violas?', 'other', 'バイオリン'),
-  en('cellos?', 'other', 'チェロ'),
-  en('orchestral?|orch', 'other', 'オーケストラ'),
-  en('brass|horns?|trumpets?|trombones?', 'other', 'ブラス'),
-  en('sax(?:ophones?)?', 'other', 'サックス'),
-  en('winds?|woodwinds?|flutes?|clarinets?', 'other', '管楽器'),
-  head('synth', 'other', 'シンセ'),
-  en('s?fx|effects?|sound[ _-]?effects?', 'other', '効果音'),
-  en('se', 'other', '効果音', true),
+  en('others?', 'other', ['その他', 'Other']),
+  en('rest|misc', 'other', ['その他', 'Other'], true),
+  en('accompaniments?|accomp', 'other', ['伴奏', 'Accompaniment']),
+  en('inst(?:rumentals?|s)?|instr', 'other', ['インスト', 'Instrumental']),
+  en('karaoke', 'other', ['カラオケ', 'Karaoke']),
+  en('strings?', 'other', ['ストリングス', 'Strings']),
+  en('violins?|violas?', 'other', ['バイオリン', 'Violin']),
+  en('cellos?', 'other', ['チェロ', 'Cello']),
+  en('orchestral?|orch', 'other', ['オーケストラ', 'Orchestra']),
+  en('brass|horns?|trumpets?|trombones?', 'other', ['ブラス', 'Brass']),
+  en('sax(?:ophones?)?', 'other', ['サックス', 'Sax']),
+  en('winds?|woodwinds?|flutes?|clarinets?', 'other', ['管楽器', 'Winds']),
+  head('synth', 'other', ['シンセ', 'Synth']),
+  en('s?fx|effects?|sound[ _-]?effects?', 'other', ['効果音', 'SFX']),
+  en('se', 'other', ['効果音', 'SFX'], true),
   ja('その他|伴奏|インスト|カラオケ|オケ|弦楽器|ストリングス|バイオリン|ヴァイオリン|チェロ|オーケストラ|管楽器|金管|木管|ブラス|ホーン|サックス|トランペット|フルート|シンセ|効果音|エフェクト', 'other'),
   ja('弦', 'other', null, true),
 ];
+// i18n-ignore-end
 
 interface Hit {
   a: number;
@@ -242,7 +251,7 @@ function related(p: Prep, q: Prep): boolean {
 
 /** 語の名前（表の名前か、書いてあるまま）とすぐ後ろの番号（ボーカル1・Vocals 2） */
 function wordName(p: Prep, off: number, h: Hit, num: boolean): string {
-  const label = h.w.label ?? p.tidy.slice(p.f.at[off + h.a], p.f.at[off + h.b]);
+  const label = h.w.label ? tr(h.w.label[0], h.w.label[1]) : p.tidy.slice(p.f.at[off + h.a], p.f.at[off + h.b]);
   const n = num ? TRAILING_NUM.exec(p.f.s.slice(off + h.b)) : null;
   return label + (n ? String(Number(n[1])) : '');
 }
@@ -258,7 +267,7 @@ function plainName(p: Prep, hints: string[]): string {
   }
   const toks = s.split(new RegExp(`[${SEP}]+`)).filter(Boolean);
   const kept = toks.filter((t) => !NOISE.test(t.toLowerCase()));
-  return (kept.length ? kept : toks).join(' ').trim() || p.tidy.trim() || 'ステム';
+  return (kept.length ? kept : toks).join(' ').trim() || p.tidy.trim() || tr('ステム', 'Stem');
 }
 
 function guessOne(p: Prep, others: Prep[], hints: string[]): StemGuess {
@@ -334,9 +343,9 @@ export function stemDisplayName(kind: StemKind, existing: string[]): string {
   return uniqueStemName(stemKindInfo(kind).label, existing);
 }
 
-/** 種類のラベルをそのまま使った名前か（その他・ドラム2 など。種類を変えたら名前も変えてよい） */
+/** 種類のラベルをそのまま使った名前か（その他・ドラム2・Drums2 など。どちらの言語でも。種類を変えたら名前も変えてよい） */
 export function isKindLabel(name: string): boolean {
-  return STEM_KINDS.some((k) => new RegExp(`^${k.label}\\d*(?:-\\d+)?$`).test(name));
+  return STEM_KINDS.some((k) => k.labels.some((l) => new RegExp(`^${l}\\d*(?:-\\d+)?$`).test(name)));
 }
 
 /**

@@ -3,6 +3,7 @@
 // 動画の秒 = 原曲の秒 + offset（自動で合わせて所ごとの差 anchors があれば、その所の差を足す）。
 // 再生中は「いま耳に届いている曲の位置」と動画の位置（getCurrentTime）を比べ、ずれが大きくなったら動画を飛ばす。
 // 飛ばしてから動き出すまでの遅れは、飛ばしたあとの着地のずれから少しずつ覚える（先回りの量）。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { anchorDelta } from '../audio/align';
 import { engine } from '../audio/engine';
@@ -75,7 +76,7 @@ function loadApi(): Promise<YTNamespace> {
       tag.async = true;
       tag.onerror = () => {
         apiPromise = null;
-        reject(new Error('YouTube を読み込めませんでした'));
+        reject(new Error(tr('YouTube を読み込めませんでした', "Couldn't load YouTube")));
       };
       document.head.appendChild(tag);
     });
@@ -121,7 +122,9 @@ export async function mountPlayer(el: HTMLElement, videoId: string): Promise<voi
           cueToCursor();
         },
         onError: (e) => {
-          useYt.setState({ error: e.data === 101 || e.data === 150 ? 'この動画は埋め込みが許可されていません' : '動画を再生できません' });
+          useYt.setState({
+            error: e.data === 101 || e.data === 150 ? tr('この動画は埋め込みが許可されていません', "This video can't be embedded") : tr('動画を再生できません', "Can't play this video"),
+          });
         },
       },
     });

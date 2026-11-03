@@ -1,5 +1,6 @@
 // フラム（両手でほんの少しずらして叩く2打）の設定と操作。グリッドを変えずに置く・選んだチップをフラムにする・1打に戻す。
 // 設定（置き方・間隔・1打目のベロシティ）はブラウザに保存する。中身の計算は edit/flam.ts。
+import { tr, isJa } from '../i18n';
 import { create } from 'zustand';
 import { engine } from '../audio/engine';
 import { DRUM_LANES, type DtxDoc } from '../dtx/model';
@@ -91,11 +92,11 @@ export function wantFlam(mod: boolean): boolean {
   return useFlam.getState().mode !== mod;
 }
 
-export const SIDE_LABEL: Record<FlamSide, string> = { after: '1打目を拍の上に', before: '2打目を拍の上に' };
+export const sideLabel = (k: FlamSide): string => (k === 'after' ? tr('1打目を拍の上に', 'Grace note on the beat') : tr('2打目を拍の上に', 'Main note on the beat'));
 
 /** 間隔の説明（例：「1/48・約36ms」） */
 export function gapText(div: number, bpm: number): string {
-  return `1/${div}・約${Math.round(flamMs(div, bpm))}ms`;
+  return tr(`1/${div}・約${Math.round(flamMs(div, bpm))}ms`, `1/${div}, about ${Math.round(flamMs(div, bpm))} ms`);
 }
 
 /** 拍 beat の所で使う間隔（全音符の分割数）と、その所の BPM */
@@ -143,7 +144,7 @@ export function placeFlam(
       { lane, alt, pos: spot.grace, vel: grace },
       { lane, alt, pos: spot.main, vel: main },
     ],
-    { label: o.label ?? `${name}をフラムで置く`, group: o.group, select: o.select ?? true, preview: false },
+    { label: o.label ?? tr(`${name}をフラムで置く`, `Place a flam on ${name}`), group: o.group, select: o.select ?? true, preview: false },
   );
   if (ids.length === 2 && (o.preview ?? useEditor.getState().previewOnPlace)) {
     const chips = useEditor.getState().doc.chips;
@@ -185,12 +186,17 @@ export function flamChips(ids: readonly number[], opts: { quiet?: boolean } = {}
   const step = useInputSettings.getState().velStep;
   const st = flamState(s.doc, tempo, ids, o.gap);
   if (st.single.length === 0) {
-    if (!opts.quiet) toast(st.pairs.length ? 'もうフラムになっています（Alt+F で1打に戻せます）' : 'フラムにするドラムのチップを選んでください');
+    if (!opts.quiet)
+      toast(
+        st.pairs.length
+          ? tr('もうフラムになっています（Alt+F で1打に戻せます）', "It's already a flam (Alt+F turns it back into one note)")
+          : tr('フラムにするドラムのチップを選んでください', 'Select the drum chips to turn into flams'),
+      );
     return 0;
   }
   const fields = Object.keys(s.doc.fields).length;
   let res = { ids: [] as number[], made: 0, crowded: 0, div: 0 };
-  edit(st.single.length === 1 ? 'フラムにする' : `${st.single.length}個のチップをフラムにする`, (d) => {
+  edit(st.single.length === 1 ? tr('フラムにする', 'Make flam') : tr(`${st.single.length}個のチップをフラムにする`, `Make ${st.single.length} chips into flams`), (d) => {
     res = opFlam(d, new Set(st.single), tempo, o, step);
   });
   if (res.made > 0) {
@@ -203,9 +209,18 @@ export function flamChips(ids: readonly number[], opts: { quiet?: boolean } = {}
   if (!opts.quiet) {
     const first = s.doc.chips.find((c) => c.id === st.single[0]);
     const bpm = first ? tempo.bpmAt(tempo.beatOf(first.m, first.f)) : tempo.initialBpm;
-    const how = o.side === 'after' ? `2打目は 1/${res.div} 後ろ` : `1打目は 1/${res.div} 前`;
-    const head = res.made > 0 ? `フラムにしました（${res.made > 1 ? `${res.made}か所。` : ''}${how}・約${Math.round(flamMs(res.div, bpm))}ms）` : 'フラムにできませんでした';
-    const tail = res.crowded > 0 ? `。${res.crowded}か所はすぐ近くに同じレーンのチップがあるので変えていません` : '';
+    const ms = Math.round(flamMs(res.div, bpm));
+    const how = o.side === 'after' ? tr(`2打目は 1/${res.div} 後ろ`, `main note 1/${res.div} later`) : tr(`1打目は 1/${res.div} 前`, `grace note 1/${res.div} earlier`);
+    const head =
+      res.made > 0
+        ? isJa()
+          ? `フラムにしました（${res.made > 1 ? `${res.made}か所。` : ''}${how}・約${ms}ms）`
+          : `Made ${res.made > 1 ? `${res.made} flams` : 'a flam'} (${how}, about ${ms} ms)`
+        : tr('フラムにできませんでした', "Couldn't make a flam");
+    const tail =
+      res.crowded > 0
+        ? tr(`。${res.crowded}か所はすぐ近くに同じレーンのチップがあるので変えていません`, `. Left ${res.crowded} unchanged because another chip on the same lane is too close`)
+        : '';
     toast(head + tail, res.made > 0 ? 'ok' : 'warn');
   }
   return res.made;
@@ -217,17 +232,21 @@ export function unflamChips(ids: readonly number[], opts: { quiet?: boolean } = 
   const tempo = tempoOf(s.doc);
   const o = flamOptions();
   let res = { ids: [] as number[], count: 0 };
-  edit('フラムを1打に戻す', (d) => {
+  edit(tr('フラムを1打に戻す', 'Turn flam back into one note'), (d) => {
     res = opUnflam(d, new Set(ids), tempo, o);
   });
   if (res.count === 0) {
-    if (!opts.quiet) toast('選んだチップにフラム（同じレーンのすばやい2打）がありません');
+    if (!opts.quiet) toast(tr('選んだチップにフラム（同じレーンのすばやい2打）がありません', 'The selection has no flams (two quick notes on the same lane)'));
     return 0;
   }
   const alive = new Set(useEditor.getState().doc.chips.map((c) => c.id));
   const keep = s.selection.filter((id) => alive.has(id));
   useEditor.setState({ selection: [...new Set([...keep, ...res.ids])] });
-  if (!opts.quiet) toast(res.count > 1 ? `${res.count}か所のフラムを1打に戻しました` : 'フラムを1打に戻しました', 'ok');
+  if (!opts.quiet)
+    toast(
+      res.count > 1 ? tr(`${res.count}か所のフラムを1打に戻しました`, `Turned ${res.count} flams back into single notes`) : tr('フラムを1打に戻しました', 'Turned the flam back into one note'),
+      'ok',
+    );
   return res.count;
 }
 
@@ -235,13 +254,13 @@ export function unflamChips(ids: readonly number[], opts: { quiet?: boolean } = 
 export function toggleFlamSelection() {
   const ids = useEditor.getState().selection;
   if (ids.length === 0) {
-    toast('フラムにするチップを選んでから Alt+F を押してください（クリックで置くときは操作バーの「フラム」）');
+    toast(tr('フラムにするチップを選んでから Alt+F を押してください（クリックで置くときは操作バーの「フラム」）', 'Select chips, then press Alt+F (to place flams by clicking, use "Flam" in the toolbar)'));
     return;
   }
   const st = flamStateOf(ids);
   if (st.single.length > 0) flamChips(ids);
   else if (st.pairs.length > 0) unflamChips(ids);
-  else toast('フラムにできるのはドラムの（見える）チップです');
+  else toast(tr('フラムにできるのはドラムの（見える）チップです', 'Only visible drum chips can be flams'));
 }
 
 // ---- キー入力・録音 ----------------------------------------------------------------
@@ -288,7 +307,7 @@ export function recFlam(lane: number, alt: boolean, sec: number, pos: Pos, vel: 
   recLast.delete(lane);
   const anchor = f.side === 'after' ? prev.pos : pos;
   edit(
-    '録音でフラムを聞き取る',
+    tr('録音でフラムを聞き取る', 'Detect a flam while recording'),
     (d) => {
       opDelete(d, new Set([prev.id]));
     },
@@ -310,10 +329,14 @@ addChipMenuItems((ids) => {
   const st = flamStateOf(ids);
   const items: CtxItem[] = [];
   if (st.single.length > 0) {
-    items.push({ label: st.single.length > 1 ? `フラムにする（${st.single.length} 個）` : 'フラムにする', hint: 'Alt+F', run: () => flamChips(ids) });
+    items.push({ label: st.single.length > 1 ? tr(`フラムにする（${st.single.length} 個）`, `Make flams (${st.single.length})`) : tr('フラムにする', 'Make flam'), hint: 'Alt+F', run: () => flamChips(ids) });
   }
   if (st.pairs.length > 0) {
-    items.push({ label: st.pairs.length > 1 ? `フラムを1打に戻す（${st.pairs.length} か所）` : 'フラムを1打に戻す', hint: 'Alt+F', run: () => unflamChips(ids) });
+    items.push({
+      label: st.pairs.length > 1 ? tr(`フラムを1打に戻す（${st.pairs.length} か所）`, `Back to single notes (${st.pairs.length})`) : tr('フラムを1打に戻す', 'Back to one note'),
+      hint: 'Alt+F',
+      run: () => unflamChips(ids),
+    });
   }
   return items;
 });
@@ -321,8 +344,8 @@ addChipMenuItems((ids) => {
 // レーンの何もない所：ここにフラムを置く
 addLaneMenuItems((at) => [
   {
-    label: 'ここにフラムを置く',
-    hint: useFlam.getState().mode ? 'クリック' : `${FLAM_MOD_LABEL}+クリック`,
+    label: tr('ここにフラムを置く', 'Place a flam here'),
+    hint: useFlam.getState().mode ? tr('クリック', 'Click') : `${FLAM_MOD_LABEL}+${tr('クリック', 'Click')}`,
     run: () => {
       placeFlam(at.lane, at.alt, at.pos);
     },

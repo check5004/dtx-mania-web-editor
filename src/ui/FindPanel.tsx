@@ -1,4 +1,5 @@
 // 検索と置換のパネル（譜面の右上に重ねて出す）。
+import { tr, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { parseBase36x2 } from '../dtx/base36';
 import { DRUM_LANES, type ChipKind } from '../dtx/model';
@@ -20,10 +21,10 @@ import {
 import { useEditor } from '../store/editor';
 import { Icon } from './icons';
 
-const KINDS: [ChipKind, string][] = [
-  ['normal', '通常'],
-  ['hidden', '不可視'],
-  ['nochip', '音だけ'],
+const kinds = (): [ChipKind, string][] => [
+  ['normal', tr('通常', 'Normal')],
+  ['hidden', tr('不可視', 'Invisible')],
+  ['nochip', tr('音だけ', 'Sound only')],
 ];
 
 export function FindPanel() {
@@ -65,24 +66,24 @@ export function FindPanel() {
       }}
     >
       <div className="row find-head">
-        <b>検索と置換</b>
-        <span className={`find-count mono ${n ? '' : 'none'}`}>{st.error ? '—' : n ? `${st.index >= 0 ? st.index + 1 : '–'} / ${n}` : '0 件'}</span>
+        <b>{tr('検索と置換', 'Find and replace')}</b>
+        <span className={`find-count mono ${n ? '' : 'none'}`}>{st.error ? '—' : n ? `${st.index >= 0 ? st.index + 1 : '–'} / ${n}` : tr('0 件', 'None')}</span>
         <span className="grow" />
-        <button className="ib tiny" onClick={() => gotoResult(st.index - 1)} disabled={!n} title="前の結果（Shift+Enter）">
+        <button className="ib tiny" onClick={() => gotoResult(st.index - 1)} disabled={!n} title={tr('前の結果（Shift+Enter）', 'Previous result (Shift+Enter)')}>
           {Icon.chevronUp(13)}
         </button>
-        <button className="ib tiny" onClick={() => gotoResult(st.index + 1)} disabled={!n} title="次の結果（Enter・F3）">
+        <button className="ib tiny" onClick={() => gotoResult(st.index + 1)} disabled={!n} title={tr('次の結果（Enter・F3）', 'Next result (Enter, F3)')}>
           {Icon.chevronDown(13)}
         </button>
-        <button className="ib tiny" onClick={closeFind} aria-label="閉じる">
+        <button className="ib tiny" onClick={closeFind} aria-label={tr('閉じる', 'Close')}>
           ✕
         </button>
       </div>
       <div className="find-sec">
         <div className="find-lbl">
-          レーン
+          {tr('レーン', 'Lanes')}
           <button className="link-btn" onClick={() => setQuery({ lanes: [] })}>
-            {q.lanes.length ? 'すべてに戻す' : 'すべて'}
+            {q.lanes.length ? tr('すべてに戻す', 'Back to all') : tr('すべて', 'All')}
           </button>
         </div>
         <div className="find-lanes">
@@ -97,13 +98,13 @@ export function FindPanel() {
           })}
         </div>
         <div className="find-grid">
-          <span className="find-lbl">HHO・LBD</span>
+          <span className="find-lbl">{tr('HHO・LBD', 'HHO / LBD')}</span>
           <div className="seg small">
             {(
               [
-                ['any', '問わない'],
-                ['main', '除く'],
-                ['alt', 'だけ'],
+                ['any', tr('問わない', 'Any')],
+                ['main', tr('除く', 'Exclude')],
+                ['alt', tr('だけ', 'Only')],
               ] as const
             ).map(([k, label]) => (
               <button key={k} className={q.alt === k ? 'on' : ''} onClick={() => setQuery({ alt: k })}>
@@ -111,48 +112,54 @@ export function FindPanel() {
               </button>
             ))}
           </div>
-          <span className="find-lbl">種類</span>
+          <span className="find-lbl">{tr('種類', 'Type')}</span>
           <div className="seg small">
-            {KINDS.map(([k, label]) => (
+            {kinds().map(([k, label]) => (
               <button key={k} className={q.kinds.includes(k) ? 'on' : ''} onClick={() => toggleKind(k)}>
                 {label}
               </button>
             ))}
           </div>
-          <span className="find-lbl">WAV番号</span>
-          <input className="field mono" value={q.wavs} onChange={(e) => setQuery({ wavs: e.target.value })} placeholder="例: 0A 0B（空なら問わない）" />
-          <span className="find-lbl">小節</span>
+          <span className="find-lbl">{tr('WAV番号', 'WAV no.')}</span>
+          <input
+            className="field mono"
+            value={q.wavs}
+            onChange={(e) => setQuery({ wavs: e.target.value })}
+            placeholder={tr('例: 0A 0B（空なら問わない）', 'e.g. 0A 0B (empty = any)')}
+          />
+          <span className="find-lbl">{tr('小節', 'Measures')}</span>
           <div className="row" style={{ gap: 4 }}>
-            <input className="field mono" style={{ width: 58 }} value={q.from} onChange={(e) => setQuery({ from: e.target.value })} placeholder="000" aria-label="小節の始め" />
-            <span className="lbl">〜</span>
-            <input className="field mono" style={{ width: 58 }} value={q.to} onChange={(e) => setQuery({ to: e.target.value })} placeholder="最後" aria-label="小節の終わり" />
-            <button className="btn small ghost" onClick={rangeFromSelection} disabled={!hasSel} title="選んでいるチップの小節を範囲にします">
-              選択から
+            <input className="field mono" style={{ width: 58 }} value={q.from} onChange={(e) => setQuery({ from: e.target.value })} placeholder="000" aria-label={tr('小節の始め', 'First measure')} />
+            <span className="lbl">{tr('〜', '–')}</span>
+            <input className="field mono" style={{ width: 58 }} value={q.to} onChange={(e) => setQuery({ to: e.target.value })} placeholder={tr('最後', 'End')} aria-label={tr('小節の終わり', 'Last measure')} />
+            <button className="btn small ghost" onClick={rangeFromSelection} disabled={!hasSel} title={tr('選んでいるチップの小節を範囲にします', 'Use the measures of the selected chips')}>
+              {tr('選択から', 'From selection')}
             </button>
           </div>
         </div>
         {st.error && <div className="find-err">{st.error}</div>}
         <div className="row" style={{ gap: 6, marginTop: 8 }}>
           <button className="btn small" onClick={selectResults} disabled={!n}>
-            見つかった {n} 個を選択
+            {tr(`見つかった ${n} 個を選択`, `Select ${n} found`)}
           </button>
-          <button className="btn small ghost" onClick={mirrorSelection} disabled={!n && !hasSel} title="選んでいるチップ（無ければ見つかったチップ）を、画面の並びで左右反転します">
-            左右反転
+          <button className="btn small ghost" onClick={mirrorSelection} disabled={!n && !hasSel} title={tr('選んでいるチップ（無ければ見つかったチップ）を、画面の並びで左右反転します', 'Mirrors the selected chips (or the found chips) left to right in the on-screen lane order')}
+          >
+            {tr('左右反転', 'Mirror')}
           </button>
         </div>
       </div>
       <div className="seg full small" style={{ margin: '2px 0 8px' }}>
         <button className={tab === 'replace' ? 'on' : ''} onClick={() => setTab('replace')}>
-          見つかったチップを置換
+          {tr('見つかったチップを置換', 'Replace found chips')}
         </button>
         <button className={tab === 'swap' ? 'on' : ''} onClick={() => setTab('swap')}>
-          レーンの入れ替え
+          {tr('レーンの入れ替え', 'Swap lanes')}
         </button>
       </div>
       {tab === 'replace' ? (
         <div className="find-sec">
           <div className="find-row">
-            <span className="find-lbl">レーンへ移す</span>
+            <span className="find-lbl">{tr('レーンへ移す', 'Move to lane')}</span>
             <select className="field" value={toLane} onChange={(e) => setToLane(Number(e.target.value))}>
               {order.map((l) => (
                 <option key={l} value={l}>
@@ -161,26 +168,26 @@ export function FindPanel() {
               ))}
             </select>
             <button className="btn small" disabled={!n} onClick={() => relaneResults(toLane, 'keep', resound)}>
-              移す
+              {tr('移す', 'Move')}
             </button>
           </div>
           <label className="row" style={{ gap: 6, margin: '2px 0 8px 92px' }}>
             <input type="checkbox" checked={resound} onChange={(e) => setResound(e.target.checked)} />
-            <span className="lbl">音も移した先のレーンの音にする（ベロシティは保つ）</span>
+            <span className="lbl">{tr('音も移した先のレーンの音にする（ベロシティは保つ）', "Also use the new lane's sound (velocity is kept)")}</span>
           </label>
           <div className="find-row">
-            <span className="find-lbl">WAV番号</span>
-            <input className="field mono" value={wav} onChange={(e) => setWav(e.target.value)} placeholder="例: 0C" />
+            <span className="find-lbl">{tr('WAV番号', 'WAV no.')}</span>
+            <input className="field mono" value={wav} onChange={(e) => setWav(e.target.value)} placeholder={tr('例: 0C', 'e.g. 0C')} />
             <button className="btn small" disabled={!n || wavNo <= 0} onClick={() => replaceWavResults(wavNo)}>
-              替える
+              {tr('替える', 'Change')}
             </button>
           </div>
           <div className="find-row">
-            <span className="find-lbl">種類</span>
+            <span className="find-lbl">{tr('種類', 'Set type')}</span>
             <div className="row" style={{ gap: 4 }}>
-              {KINDS.map(([k, label]) => (
+              {kinds().map(([k, label]) => (
                 <button key={k} className="btn small ghost" disabled={!n} onClick={() => setKindResults(k)}>
-                  {label}に
+                  {isJa() ? `${label}に` : label}
                 </button>
               ))}
             </div>
@@ -188,17 +195,20 @@ export function FindPanel() {
           <div className="find-row">
             <span className="find-lbl" />
             <button className="btn small ghost danger" disabled={!n} onClick={deleteResults}>
-              {Icon.trash(12)} 見つかった {n} 個を消す
+              {Icon.trash(12)} {tr(`見つかった ${n} 個を消す`, `Delete ${n} found`)}
             </button>
           </div>
         </div>
       ) : (
         <div className="find-sec">
           <p className="lbl" style={{ margin: '0 0 8px', lineHeight: 1.6 }}>
-            上の「小節」の範囲（空なら曲全体）で、2つのレーンのチップを丸ごと入れ替えます。HHオープン・左バスドラムは、入れ替え先に2種目が無ければ通常のチップになります。
+            {tr(
+              '上の「小節」の範囲（空なら曲全体）で、2つのレーンのチップを丸ごと入れ替えます。HHオープン・左バスドラムは、入れ替え先に2種目が無ければ通常のチップになります。',
+              'Swaps all chips between two lanes within the "Measures" range above (empty = the whole song). HH open and left bass drum chips become normal chips if the other lane has no second type.',
+            )}
           </p>
           <div className="row" style={{ gap: 6 }}>
-            <select className="field" value={swapA} onChange={(e) => setSwapA(Number(e.target.value))} aria-label="入れ替えるレーン1">
+            <select className="field" value={swapA} onChange={(e) => setSwapA(Number(e.target.value))} aria-label={tr('入れ替えるレーン1', 'Lane to swap 1')}>
               {order.map((l) => (
                 <option key={l} value={l}>
                   {DRUM_LANES[l].key} {DRUM_LANES[l].name}
@@ -206,7 +216,7 @@ export function FindPanel() {
               ))}
             </select>
             <span>⇄</span>
-            <select className="field" value={swapB} onChange={(e) => setSwapB(Number(e.target.value))} aria-label="入れ替えるレーン2">
+            <select className="field" value={swapB} onChange={(e) => setSwapB(Number(e.target.value))} aria-label={tr('入れ替えるレーン2', 'Lane to swap 2')}>
               {order.map((l) => (
                 <option key={l} value={l}>
                   {DRUM_LANES[l].key} {DRUM_LANES[l].name}
@@ -214,12 +224,12 @@ export function FindPanel() {
               ))}
             </select>
             <button className="btn small primary" disabled={swapA === swapB} onClick={() => swapLanesInRange(swapA, swapB)}>
-              入れ替え
+              {tr('入れ替え', 'Swap')}
             </button>
           </div>
         </div>
       )}
-      <p className="lbl" style={{ margin: '8px 0 0' }}>どの操作も Ctrl+Z で戻せます。</p>
+      <p className="lbl" style={{ margin: '8px 0 0' }}>{tr('どの操作も Ctrl+Z で戻せます。', 'Every action can be undone with Ctrl+Z.')}</p>
     </div>
   );
 }

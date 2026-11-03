@@ -4,6 +4,7 @@
 // 例外は左バスドラム→右バスドラムだけ（同じバスドラムを片足で踏むだけで、鳴る音は変わらない）。
 // AI は「どの区間をどれだけ簡略化するか」だけを決め、ノーツの配置はここで決定的に行う。
 // 同じ中身の小節には同じ結果が出る（位置と中身だけで決める）ので、曲としての一貫性が保たれる。
+import { tr, withTr } from '../i18n';
 import { CH, type DtxDoc } from '../dtx/model';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { estimateLevel } from '../check/level';
@@ -129,11 +130,14 @@ export function policyFor(rung: number, plan?: SectionPlan): Policy {
   return p;
 }
 
-export const FILL_STYLES: Record<NonNullable<SectionPlan['fill']>, { early: Step | null; last: Step; label: string }> = {
-  keep: { early: 0.25, last: 0.25, label: 'フィルはほぼそのまま' },
-  thin: { early: 0.5, last: 0.5, label: 'フィルは8分に間引く' },
-  short: { early: 1, last: 0.5, label: 'フィルは最後の拍を残して短く' },
-  last: { early: null, last: 1, label: 'フィルは最後の拍だけ' },
+type FillStyle = { early: Step | null; last: Step; label: string };
+const fillStyle = (early: Step | null, last: Step, label: readonly [string, string]) => withTr({ early, last } as FillStyle, { label });
+
+export const FILL_STYLES: Record<NonNullable<SectionPlan['fill']>, FillStyle> = {
+  keep: fillStyle(0.25, 0.25, ['フィルはほぼそのまま', 'Fills mostly as is']),
+  thin: fillStyle(0.5, 0.5, ['フィルは8分に間引く', 'Fills thinned to 8ths']),
+  short: fillStyle(1, 0.5, ['フィルは最後の拍を残して短く', 'Fills shortened to the last beat or so']),
+  last: fillStyle(null, 1, ['フィルは最後の拍だけ', 'Fills on the last beat only']),
 };
 
 /**
@@ -462,11 +466,31 @@ export function levelOfDoc(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): n
 
 /** 方針を人が読める文にする */
 export function describePolicy(p: Policy): string {
-  const g = (s: Step | null | 'backbeat') => (s === null ? 'なし' : s === 'backbeat' ? '2・4拍' : s === 0 ? 'そのまま' : s === 0.25 ? '16分' : s === 0.5 ? '8分' : s === 1 ? '4分' : s === 2 ? '2分' : '小節の頭だけ');
-  const parts = [`ハイハット ${g(p.hh)}`, `キック ${g(p.kick)}`, `スネア ${g(p.snare)}`, `フィル ${p.fillEarly === null ? '最後の拍だけ' : g(p.fillEarly)}`];
-  if (p.cymbals === 'heads') parts.push('クラッシュは小節の頭と食いだけ');
-  if (p.leftFoot === 'merge') parts.push('左バスは右へ');
-  if (p.leftFoot === 'drop') parts.push('左足なし');
-  parts.push(`同時 ${p.maxChord} まで`);
-  return parts.join('・');
+  const g = (s: Step | null | 'backbeat') =>
+    s === null
+      ? tr('なし', 'none')
+      : s === 'backbeat'
+        ? tr('2・4拍', 'beats 2 & 4')
+        : s === 0
+          ? tr('そのまま', 'as is')
+          : s === 0.25
+            ? tr('16分', '16ths')
+            : s === 0.5
+              ? tr('8分', '8ths')
+              : s === 1
+                ? tr('4分', 'quarters')
+                : s === 2
+                  ? tr('2分', 'halves')
+                  : tr('小節の頭だけ', 'downbeats only');
+  const parts = [
+    tr(`ハイハット ${g(p.hh)}`, `Hi-hat ${g(p.hh)}`),
+    tr(`キック ${g(p.kick)}`, `Kick ${g(p.kick)}`),
+    tr(`スネア ${g(p.snare)}`, `Snare ${g(p.snare)}`),
+    tr(`フィル ${p.fillEarly === null ? '最後の拍だけ' : g(p.fillEarly)}`, `Fills ${p.fillEarly === null ? 'last beat only' : g(p.fillEarly)}`),
+  ];
+  if (p.cymbals === 'heads') parts.push(tr('クラッシュは小節の頭と食いだけ', 'Crashes only on downbeats and pushes'));
+  if (p.leftFoot === 'merge') parts.push(tr('左バスは右へ', 'Left bass moved to the right'));
+  if (p.leftFoot === 'drop') parts.push(tr('左足なし', 'No left foot'));
+  parts.push(tr(`同時 ${p.maxChord} まで`, `Up to ${p.maxChord} at once`));
+  return parts.join(tr('・', ' · '));
 }

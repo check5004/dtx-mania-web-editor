@@ -1,4 +1,5 @@
 // 検索と置換。条件に合うチップを譜面でハイライトし、まとめて移す・番号を替える・消す。
+import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { parseBase36x2, parseMeasure, toBase36x2 } from '../dtx/base36';
 import { DRUM_LANES, drumChannel, type ChipKind, type DtxDoc } from '../dtx/model';
@@ -61,10 +62,10 @@ export function parseWavList(s: string): number[] | null {
 /** 条件に合うチップ（拍の順） */
 export function findChips(doc: DtxDoc, q: FindQuery): { ids: number[]; error: string | null } {
   const wavs = parseWavList(q.wavs);
-  if (wavs === null) return { ids: [], error: 'WAV番号は 01〜ZZ を空白かカンマで区切って書いてください' };
+  if (wavs === null) return { ids: [], error: tr('WAV番号は 01〜ZZ を空白かカンマで区切って書いてください', 'Write WAV numbers 01–ZZ separated by spaces or commas') };
   const from = parseMeasureInput(q.from);
   const to = parseMeasureInput(q.to);
-  if (Number.isNaN(from) || Number.isNaN(to)) return { ids: [], error: '小節は 000〜Z99 か数で書いてください' };
+  if (Number.isNaN(from) || Number.isNaN(to)) return { ids: [], error: tr('小節は 000〜Z99 か数で書いてください', 'Write measures as 000–Z99 or a plain number') };
   const lanes = new Set(q.lanes);
   const wavSet = new Set(wavs);
   const kinds = new Set(q.kinds);
@@ -153,7 +154,7 @@ export function relaneResults(lane: number, alt: AltMode, resound: boolean) {
   const ids = targets();
   if (!ids.size) return;
   let n = 0;
-  edit(`${ids.size}個のチップを${laneName(lane)}へ移す`, (d) => {
+  edit(tr(`${ids.size}個のチップを${laneName(lane)}へ移す`, `Move ${ids.size} ${pl(ids.size, 'chip')} to ${laneName(lane)}`), (d) => {
     n = opRelane(d, ids, lane, alt);
     if (resound) {
       for (const c of d.chips) {
@@ -166,30 +167,36 @@ export function relaneResults(lane: number, alt: AltMode, resound: boolean) {
     }
   });
   if (resound) void prepareSounds();
-  toast(`${n}個のチップを${laneName(lane)}へ移しました`, 'ok');
+  toast(tr(`${n}個のチップを${laneName(lane)}へ移しました`, `Moved ${n} ${pl(n, 'chip')} to ${laneName(lane)}`), 'ok');
 }
 
 export function replaceWavResults(no: number) {
   const ids = targets();
   if (!ids.size) return;
   let n = 0;
-  edit(`${ids.size}個のチップの音を WAV${toBase36x2(no)} にする`, (d) => {
+  edit(tr(`${ids.size}個のチップの音を WAV${toBase36x2(no)} にする`, `Set ${ids.size} ${pl(ids.size, 'chip')} to WAV${toBase36x2(no)}`), (d) => {
     n = opReplaceWav(d, ids, no);
   });
   void prepareSounds();
-  toast(`${n}個のチップの音を WAV${toBase36x2(no)} にしました`, 'ok');
+  toast(tr(`${n}個のチップの音を WAV${toBase36x2(no)} にしました`, `Set ${n} ${pl(n, 'chip')} to WAV${toBase36x2(no)}`), 'ok');
 }
 
 export function setKindResults(kind: ChipKind) {
   const ids = targets();
   if (!ids.size) return;
-  edit(kind === 'normal' ? '見つかったチップを通常チップにする' : kind === 'hidden' ? '見つかったチップを不可視にする' : '見つかったチップを音だけにする', (d) => opSetKind(d, ids, kind));
+  const label =
+    kind === 'normal'
+      ? tr('見つかったチップを通常チップにする', 'Make found chips normal')
+      : kind === 'hidden'
+        ? tr('見つかったチップを不可視にする', 'Make found chips invisible')
+        : tr('見つかったチップを音だけにする', 'Make found chips sound only');
+  edit(label, (d) => opSetKind(d, ids, kind));
 }
 
 export function deleteResults() {
   const ids = targets();
   if (!ids.size) return;
-  edit(`見つかった${ids.size}個のチップを消す`, (d) => {
+  edit(tr(`見つかった${ids.size}個のチップを消す`, `Delete ${ids.size} found ${pl(ids.size, 'chip')}`), (d) => {
     for (let i = d.chips.length - 1; i >= 0; i--) if (ids.has(d.chips[i].id)) d.chips.splice(i, 1);
   });
 }
@@ -201,10 +208,10 @@ export function swapLanesInRange(a: number, b: number) {
   const to = parseMeasureInput(q.to) ?? 3599;
   if (Number.isNaN(from) || Number.isNaN(to)) return;
   let n = 0;
-  edit(`${laneName(a)}と${laneName(b)}を入れ替え`, (d) => {
+  edit(tr(`${laneName(a)}と${laneName(b)}を入れ替え`, `Swap ${laneName(a)} and ${laneName(b)}`), (d) => {
     n = opSwapLanes(d, a, b, from, to);
   });
-  toast(`${laneName(a)}と${laneName(b)}を入れ替えました（${n}個）`, 'ok');
+  toast(tr(`${laneName(a)}と${laneName(b)}を入れ替えました（${n}個）`, `Swapped ${laneName(a)} and ${laneName(b)} (${n} ${pl(n, 'chip')})`), 'ok');
 }
 
 /** 選んだチップを左右反転（画面の並びで左右を逆にする） */
@@ -212,12 +219,19 @@ export function mirrorSelection() {
   const s = useEditor.getState();
   const ids = new Set(s.selection.length ? s.selection : useFind.getState().results);
   if (!ids.size) {
-    toast('左右反転するチップを選んでください', 'info');
+    toast(tr('左右反転するチップを選んでください', 'Select the chips to mirror'), 'info');
     return;
   }
   let n = 0;
-  edit('左右反転', (d) => {
+  edit(tr('左右反転', 'Mirror'), (d) => {
     n = opMapLanes(d, ids, (l) => laneAt(9 - slotOf(l)) ?? null);
   });
-  toast(`${n}個のチップを左右反転しました（HHオープン・左バスドラムは、反転先に2種目が無ければ通常のチップになります）`, 'ok', 6000);
+  toast(
+    tr(
+      `${n}個のチップを左右反転しました（HHオープン・左バスドラムは、反転先に2種目が無ければ通常のチップになります）`,
+      `Mirrored ${n} ${pl(n, 'chip')} (HH open and left bass drum chips become normal chips if the other lane has no second type)`,
+    ),
+    'ok',
+    6000,
+  );
 }

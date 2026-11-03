@@ -6,6 +6,7 @@
 //
 // 遅れの補正: タブの音が手元に届くまでには遅れがある。エンジンから小さなクリックを鳴らして、
 // 鳴らした時刻と届いた時刻の差（Δ）を測る。届いた音は「Δ だけ前に聞こえていた音」として扱う。
+import { tr } from '../i18n';
 
 /** このブラウザでタブの音を聞き取れそうか（Chrome・Edge などの Chromium） */
 export function canCaptureTab(): boolean {
@@ -29,7 +30,7 @@ export class CaptureError extends Error {
  * 映像はすぐ止め、音だけ残す。
  */
 export async function requestTabAudio(): Promise<MediaStream> {
-  if (!canCaptureTab()) throw new CaptureError('このブラウザではタブの音を聞き取れません（Chrome・Edge で使えます）', 'unsupported');
+  if (!canCaptureTab()) throw new CaptureError(tr('このブラウザではタブの音を聞き取れません（Chrome・Edge で使えます）', "This browser can't listen to tab audio (use Chrome or Edge)"), 'unsupported');
   let stream: MediaStream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
@@ -44,13 +45,16 @@ export async function requestTabAudio(): Promise<MediaStream> {
     } as DisplayMediaStreamOptions);
   } catch (e) {
     const name = (e as DOMException)?.name;
-    if (name === 'NotAllowedError' || name === 'AbortError') throw new CaptureError('タブの共有が許可されませんでした', 'denied');
-    throw new CaptureError(`タブの音を受け取れませんでした（${(e as Error).message}）`, 'failed');
+    if (name === 'NotAllowedError' || name === 'AbortError') throw new CaptureError(tr('タブの共有が許可されませんでした', 'Tab sharing was not allowed'), 'denied');
+    throw new CaptureError(tr(`タブの音を受け取れませんでした（${(e as Error).message}）`, `Couldn't get the tab audio (${(e as Error).message})`), 'failed');
   }
   for (const t of stream.getVideoTracks()) t.stop();
   if (stream.getAudioTracks().length === 0) {
     stopStream(stream);
-    throw new CaptureError('タブの音が届きませんでした。共有の画面で「タブの音声も共有する」をオンにしてください', 'noaudio');
+    throw new CaptureError(
+      tr('タブの音が届きませんでした。共有の画面で「タブの音声も共有する」をオンにしてください', 'No tab audio came through. Turn on "Also share tab audio" in the sharing prompt'),
+      'noaudio',
+    );
   }
   return stream;
 }

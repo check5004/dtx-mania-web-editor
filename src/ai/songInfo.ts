@@ -1,5 +1,6 @@
 // 曲情報：YouTube の公開情報（oEmbed）、配信サービスの公開アートワーク（iTunes Search）、AI による正式表記・ジャンル・年・コメントの下書き。
 // 画像は AI に作らせず、実在する URL だけを候補にする（AI は画像 URL をでっち上げやすい）。
+import { tr, isJa, aiTextLimit, aiLangName } from '../i18n';
 
 /** URL や ID から YouTube の動画 ID を取り出す */
 export function youtubeId(input: string): string | null {
@@ -58,8 +59,8 @@ export interface ArtCandidate {
 
 export function youtubeThumbs(id: string): ArtCandidate[] {
   return [
-    { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`, label: 'YouTube（最大）', source: 'youtube' },
-    { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, label: 'YouTube（標準）', source: 'youtube' },
+    { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`, label: tr('YouTube（最大）', 'YouTube (largest)'), source: 'youtube' },
+    { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, label: tr('YouTube（標準）', 'YouTube (standard)'), source: 'youtube' },
   ];
 }
 
@@ -86,7 +87,7 @@ function jsonp<T>(url: string, timeoutMs = 8000): Promise<T> {
     };
     const timer = window.setTimeout(() => {
       done();
-      reject(new Error('時間切れ'));
+      reject(new Error(tr('時間切れ', 'Timed out')));
     }, timeoutMs);
     w[cb] = (data: T) => {
       done();
@@ -95,7 +96,7 @@ function jsonp<T>(url: string, timeoutMs = 8000): Promise<T> {
     s.src = `${url}${url.includes('?') ? '&' : '?'}callback=${cb}`;
     s.onerror = () => {
       done();
-      reject(new Error('読み込めませんでした'));
+      reject(new Error(tr('読み込めませんでした', "Couldn't load")));
     };
     document.head.appendChild(s);
   });
@@ -144,7 +145,7 @@ export async function itunesSearch(term: string, opts: { country?: string; limit
       date: (x.releaseDate ?? '').slice(0, 10),
       genre: x.primaryGenreName ?? '',
       durationSec: x.trackTimeMillis ? Math.round(x.trackTimeMillis / 1000) : 0,
-      art: { url: itunesArt(x.artworkUrl100, 300), big, label: `${x.collectionName ?? x.trackName ?? ''}（iTunes）`, source: 'itunes', w: 1200, h: 1200 },
+      art: { url: itunesArt(x.artworkUrl100, 300), big, label: `${x.collectionName ?? x.trackName ?? ''}${tr('（iTunes）', ' (iTunes)')}`, source: 'itunes', w: 1200, h: 1200 },
     });
   }
   return out;
@@ -161,24 +162,32 @@ export interface SongInfoAnswer {
   notes: string;
 }
 
-export const SONG_INFO_SCHEMA = {
+/** 曲情報の答えの形（コメントなどの言語と字数は画面の言語に合わせるので、使うたびに作る） */
+export const songInfoSchema = () => ({
   name: 'song_info',
   schema: {
     type: 'object',
+    // AI への説明（日本語のまま。書く言語と字数は aiTextLimit・aiLangName で画面の言語に合わせる） i18n-ignore-start
     properties: {
       title: { type: 'string', description: '曲の正式な表記（公式の表記。分からなければ入力のまま）' },
       artist: { type: 'string', description: 'アーティストの正式な表記' },
-      genre: { type: 'string', description: 'ジャンル（短く。例: J-ROCK, アニメ, ボカロ, メタル, ポップス, フュージョン）' },
+      genre: {
+        type: 'string',
+        description: isJa()
+          ? 'ジャンル（短く。例: J-ROCK, アニメ, ボカロ, メタル, ポップス, フュージョン）'
+          : 'ジャンル（短く、US English で。例: J-Rock, Anime, Vocaloid, Metal, Pop, Fusion）',
+      },
       year: { type: 'string', description: 'リリース年（4桁。分からなければ空）' },
-      comment: { type: 'string', description: '選曲画面のコメント（日本語で60字以内。曲の特徴や聴きどころ）' },
-      panel: { type: 'string', description: '演奏中に流れるパネル文（日本語で40字以内。曲名・アーティスト・出典など）' },
+      comment: { type: 'string', description: `選曲画面のコメント（${aiTextLimit(60)}。曲の特徴や聴きどころ）` },
+      panel: { type: 'string', description: `演奏中に流れるパネル文（${aiTextLimit(40)}。曲名・アーティスト・出典など）` },
       confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-      notes: { type: 'string', description: '確かめたこと・分からなかったこと（日本語で短く）' },
+      notes: { type: 'string', description: `確かめたこと・分からなかったこと（${aiLangName()}で短く）` },
     },
+    // i18n-ignore-end
     required: ['title', 'artist', 'genre', 'year', 'comment', 'panel', 'confidence', 'notes'],
     additionalProperties: false,
   },
-};
+});
 
 const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').trim();
 /** [文字](URL) は文字だけにし、むき出しの URL は消す */

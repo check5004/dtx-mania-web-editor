@@ -1,6 +1,6 @@
 // AI のレベル判定（「確かめる」に機械的な推定と並べて出す）。
 import { create } from 'zustand';
-import { cleanJudgement, LEVEL_SCHEMA, levelPrompt, sectionSpans, type LevelJudgement } from '../ai/judge';
+import { cleanJudgement, levelSchema, levelPrompt, sectionSpans, type LevelJudgement } from '../ai/judge';
 import { AiError } from '../ai/openrouter';
 import type { DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
@@ -28,7 +28,7 @@ export async function judgeDoc(doc: DtxDoc, o: { title: string; label?: string; 
   const b = bandOf(o.mech);
   const guide = guidelineText(g.guide, [b - 1, b, b + 1].filter((x) => x >= 1 && x <= 9));
   const p = levelPrompt({ doc, title: o.title, label: o.label, sections: sectionSpans(o.sections, lastMeasure(doc)), guide, near, mech: o.mech, feat });
-  const r = await runAi<Partial<LevelJudgement>>('level', { ...p, schema: LEVEL_SCHEMA, maxTokens: 2500, quiet: o.quiet });
+  const r = await runAi<Partial<LevelJudgement>>('level', { ...p, schema: levelSchema(), maxTokens: 2500, quiet: o.quiet });
   if (!r) return null;
   return { ...cleanJudgement(r.data), cost: r.costUsed, model: r.model, nearCount: near.length };
 }

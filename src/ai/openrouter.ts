@@ -1,4 +1,5 @@
 // OpenRouter の呼び出し。キーはブラウザの中だけに置き、ブラウザから直接送る（サーバーは通さない）。
+import { tr } from '../i18n';
 const BASE = 'https://openrouter.ai/api/v1';
 
 export interface OrModel {
@@ -75,7 +76,7 @@ export function isChatModel(id: string): boolean {
 
 export async function fetchModels(signal?: AbortSignal): Promise<OrModel[]> {
   const r = await fetch(`${BASE}/models`, { signal });
-  if (!r.ok) throw new AiError(`モデル一覧を取れませんでした（${r.status}）`, r.status);
+  if (!r.ok) throw new AiError(tr(`モデル一覧を取れませんでした（${r.status}）`, `Couldn't get the model list (${r.status})`), r.status);
   return parseModels(await r.json());
 }
 
@@ -128,25 +129,25 @@ async function errorOf(r: Response): Promise<AiError> {
       } catch {
         // そのまま
       }
-      if (inner && !detail.includes(inner)) detail = `${detail}（${inner.slice(0, 200)}）`;
+      if (inner && !detail.includes(inner)) detail = `${detail}${tr('（', ' (')}${inner.slice(0, 200)}${tr('）', ')')}`;
     }
   } catch {
     // 本文が JSON でなくてもよい
   }
   const msg =
     r.status === 401
-      ? 'キーが正しくないか、無効になっています'
+      ? tr('キーが正しくないか、無効になっています', 'The key is wrong or has been disabled')
       : r.status === 402
-        ? 'OpenRouter の残高が足りません'
+        ? tr('OpenRouter の残高が足りません', 'Not enough OpenRouter credits')
         : r.status === 403
-          ? 'このキーでは使えません（上限やモデルの制限）'
+          ? tr('このキーでは使えません（上限やモデルの制限）', "This key can't be used for this (a limit or model restriction)")
           : r.status === 408
-            ? '時間がかかりすぎて止まりました'
+            ? tr('時間がかかりすぎて止まりました', 'It took too long and was stopped')
             : r.status === 429
-              ? '混み合っています。少し待ってからやり直してください'
+              ? tr('混み合っています。少し待ってからやり直してください', 'Too many requests right now. Wait a moment and try again')
               : r.status >= 500
-                ? 'OpenRouter かモデルの提供元でエラーが起きました'
-                : `呼び出しに失敗しました（${r.status}）`;
+                ? tr('OpenRouter かモデルの提供元でエラーが起きました', 'An error happened at OpenRouter or the model provider')
+                : tr(`呼び出しに失敗しました（${r.status}）`, `The request failed (${r.status})`);
   return new AiError(detail ? `${msg}: ${detail}` : msg, r.status);
 }
 
@@ -259,7 +260,7 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
     });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e;
-    throw new AiError('OpenRouter につながりませんでした（ネットワークを確かめてください）');
+    throw new AiError(tr('OpenRouter につながりませんでした（ネットワークを確かめてください）', "Couldn't reach OpenRouter (check your network)"));
   }
   if (!r.ok) throw await errorOf(r);
   const j = (await r.json()) as {
@@ -277,7 +278,7 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
       server_tool_use_details?: { web_search_requests?: number };
     };
   };
-  if (j.error) throw new AiError(j.error.message ?? 'モデルがエラーを返しました');
+  if (j.error) throw new AiError(j.error.message ?? tr('モデルがエラーを返しました', 'The model returned an error'));
   const msg = j.choices?.[0]?.message;
   const c = msg?.content;
   const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (typeof p === 'string' ? p : ((p as { text?: string }).text ?? ''))).join('') : '';
@@ -323,7 +324,7 @@ export function parseJsonLoose<T = unknown>(text: string): T {
       }
     }
   }
-  throw new AiError('AIの答えをJSONとして読めませんでした。もう一度試すか、別のモデルを選んでください');
+  throw new AiError(tr('AIの答えをJSONとして読めませんでした。もう一度試すか、別のモデルを選んでください', "Couldn't read the AI's answer as JSON. Try again or pick another model"));
 }
 
 /**
@@ -349,6 +350,7 @@ export function missingKeys(schema: object, data: unknown): string[] {
 /** 形の崩れた答えを、指定の JSON の形に直してもらうための頼み方 */
 export function repairPrompt(schema: { name: string; schema: object }, text: string): { system: string; user: string } {
   const keys = Object.keys((schema.schema as { properties?: object }).properties ?? {});
+  // 中身はそのまま（言語も変えない）で形だけ直してもらうので、言語の指示は足さない i18n-ignore-start
   return {
     system: [
       'あなたは JSON の形をそろえる係です。',
@@ -358,6 +360,7 @@ export function repairPrompt(schema: { name: string; schema: object }, text: str
     ].join('\n'),
     user: `JSON Schema:\n${JSON.stringify(schema.schema)}\n\nAIの答え:\n${text.slice(0, 12000)}`,
   };
+  // i18n-ignore-end
 }
 
 /** 文字数からトークン数をおおまかに見積もる（日本語は1文字≒1トークン、英数字は4文字≒1トークン） */

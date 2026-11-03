@@ -1,4 +1,5 @@
 // 小節の生成の札：生成している小節のすぐ上に出す（案の切り替え・入れ方・レーンごと・入れる・やめる）。
+import { tr } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
@@ -33,15 +34,19 @@ function bracketDir(e: KeyboardEvent): 1 | -1 | 0 {
 
 function tabLabel(c: GenCandidate, cands: readonly GenCandidate[]): string {
   if (c.source === 'ai') return `AI ${cands.filter((x) => x.source === 'ai').indexOf(c) + 1}`;
-  if (c.source === 'draft') return '採譜';
-  return `写す ${c.src !== undefined ? toMeasure(c.src) : ''}`;
+  if (c.source === 'draft') return tr('採譜', 'Detected');
+  return `${tr('写す', 'Copy')} ${c.src !== undefined ? toMeasure(c.src) : ''}`;
 }
 
-const SOURCE_TIP: Record<GenCandidate['source'], string> = {
-  ai: 'AI が、原曲の打点と前後の小節（作者の書き方）から作った案',
-  draft: 'ドラムの採譜モデルが原曲から聞き取った打点を、そのままチップにした案。レーン（ライドかシンバルか、HHの開け閉め、タムの高さ）は前後の小節の書き方に合わせて選んでいます',
-  copy: 'この曲でもう打った小節を写した案（TAB補完と同じ選び方）',
-};
+const sourceTip = (k: GenCandidate['source']): string =>
+  ({
+    ai: tr('AI が、原曲の打点と前後の小節（作者の書き方）から作った案', "Made by the AI from the original's hits and the measures around it (the charter's style)"),
+    draft: tr(
+      'ドラムの採譜モデルが原曲から聞き取った打点を、そのままチップにした案。レーン（ライドかシンバルか、HHの開け閉め、タムの高さ）は前後の小節の書き方に合わせて選んでいます',
+      'The hits the drum detection model heard in the original, turned straight into chips. Lanes (ride or cymbal, open or closed HH, tom pitch) follow how the nearby measures are written',
+    ),
+    copy: tr('この曲でもう打った小節を写した案（TAB補完と同じ選び方）', 'A copy of a measure already charted in this song (picked the same way as Tab completion)'),
+  })[k];
 
 export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number) => GhostAnchor; sized: number }) {
   const gs = useMeasureGen();
@@ -120,7 +125,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
   } else {
     style.top = topY;
   }
-  const range = len === 1 ? toMeasure(gs.from) : `${toMeasure(gs.from)}〜${toMeasure(gs.to)}`;
+  const range = len === 1 ? toMeasure(gs.from) : `${toMeasure(gs.from)}${tr('〜', '–')}${toMeasure(gs.to)}`;
   const stop = (e: PointerEvent) => e.stopPropagation();
   const hasChips = rangeHasChips(doc);
   const cand = v?.cand ?? null;
@@ -130,15 +135,21 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
   const rejected = v ? v.plan.skipped.filter((x) => x.why === 'rejected').length : 0;
   const offLanes = new Set(gs.offLanes);
   const fitPct = cand && cand.fit !== null && cand.source !== 'draft' ? Math.round(cand.fit * 100) : null;
-  const aiTitle = hasKey ? `AI にもう一度作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「小節の生成」のモデルを使います` : noKeyTitle();
+  const aiTitle = hasKey
+    ? tr(
+        `AI にもう一度作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「小節の生成」のモデルを使います`,
+        `Ask the AI for another one (${model}, about ${formatUsd(cost)} per run). Uses the "Measure generation" model in Settings › AI`,
+      )
+    : noKeyTitle();
 
   return (
     <div ref={boxRef} className="tab-ghost gen-badge" style={style} onPointerDown={stop}>
       <div className="tg-row">
-        <span className="gen-title" title="小節の生成。入れるまで譜面は変わりません">
-          {Icon.sparkle(12)} {arrow}小節 <span className="mono">{range}</span>
+        <span className="gen-title" title={tr('小節の生成。入れるまで譜面は変わりません', "Measure generation. The chart doesn't change until you insert")}>
+          {Icon.sparkle(12)} {arrow}
+          {tr('小節', 'Measure')} <span className="mono">{range}</span>
         </span>
-        <span className="gen-tabs" role="tablist" aria-label="案">
+        <span className="gen-tabs" role="tablist" aria-label={tr('案', 'Ideas')}>
           {gs.cands.map((c, i) => (
             <button
               key={c.id}
@@ -146,33 +157,42 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
               aria-selected={i === gs.index}
               className={`gen-tab ${c.source} ${i === gs.index ? 'on' : ''}`}
               onClick={() => selectMeasureGen(i)}
-              title={`${c.name}\n${c.reason}\n\n${SOURCE_TIP[c.source]}${c.fit !== null && c.source !== 'draft' ? `\n原曲で聞こえるドラム（BD・SD・タム）との合い方 ${Math.round(c.fit * 100)}%` : ''}`}
+              title={`${c.name}\n${c.reason}\n\n${sourceTip(c.source)}${c.fit !== null && c.source !== 'draft' ? tr(`\n原曲で聞こえるドラム（BD・SD・タム）との合い方 ${Math.round(c.fit * 100)}%`, `\nMatch with the drums heard in the original (BD, SD, toms): ${Math.round(c.fit * 100)}%`) : ''}`}
             >
               {tabLabel(c, gs.cands)}
               {c.fit !== null && c.source !== 'draft' && <span className="gen-fit mono">{Math.round(c.fit * 100)}</span>}
             </button>
           ))}
           {gs.ai === 'loading' && (
-            <span className="gen-tab loading" title={`${model} が考えています`}>
-              AI 考え中…
+            <span className="gen-tab loading" title={tr(`${model} が考えています`, `${model} is thinking`)}>
+              {tr('AI 考え中…', 'AI thinking…')}
             </span>
           )}
         </span>
         {hasKey ? (
           <button className="tg-ai" onClick={() => regenMeasureAi(note ?? '')} disabled={gs.ai === 'loading'} title={aiTitle}>
-            {Icon.sparkle(12)} {gs.ai === 'done' || gs.ai === 'error' ? 'AIでもう一度' : 'AIで作る'}
+            {Icon.sparkle(12)} {gs.ai === 'done' || gs.ai === 'error' ? tr('AIでもう一度', 'AI again') : tr('AIで作る', 'Make with AI')}
           </button>
         ) : (
           <button className="tg-ai" onClick={() => openSettings('ai')} title={noKeyTitle()}>
-            {Icon.sparkle(12)} キーを設定するとAIの案も
+            {Icon.sparkle(12)} {tr('キーを設定するとAIの案も', 'Set a key for AI ideas too')}
           </button>
         )}
         {hasKey && note === null && (
-          <button className="gen-note-btn" onClick={() => setNote('')} title="AI にひとこと添えて作り直します（例: ここはフィル、ライドで刻む）">
-            ひとこと
+          <button
+            className="gen-note-btn"
+            onClick={() => setNote('')}
+            title={tr('AI にひとこと添えて作り直します（例: ここはフィル、ライドで刻む）', 'Remake it with a short note to the AI (e.g. "fill here", "keep time on the ride")')}
+          >
+            {tr('ひとこと', 'Note')}
           </button>
         )}
-        <button className="tg-x" onClick={() => closeMeasureGen()} title="やめる（Esc）。譜面は変わりません" aria-label="小節の生成をやめる">
+        <button
+          className="tg-x"
+          onClick={() => closeMeasureGen()}
+          title={tr('やめる（Esc）。譜面は変わりません', "Cancel (Esc). The chart doesn't change")}
+          aria-label={tr('小節の生成をやめる', 'Cancel measure generation')}
+        >
           {Icon.close(12)}
         </button>
       </div>
@@ -181,7 +201,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
           <input
             className="field"
             autoFocus
-            placeholder="AI へのひとこと（例: ここはフィル。最後はクラッシュ）"
+            placeholder={tr('AI へのひとこと（例: ここはフィル。最後はクラッシュ）', 'A note for the AI (e.g. "a fill here, end on a crash")')}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => {
@@ -195,37 +215,52 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
             }}
           />
           <button onClick={() => regenMeasureAi(note)} disabled={gs.ai === 'loading'}>
-            作り直す
+            {tr('作り直す', 'Remake')}
           </button>
         </div>
       )}
       <div className="tg-info">
         {cand ? (
-          <span title={`${cand.reason}\n\n${SOURCE_TIP[cand.source]}`}>
+          <span title={`${cand.reason}\n\n${sourceTip(cand.source)}`}>
             <b>{cand.name}</b>
             {cand.reason && <span className="gen-reason"> · {cand.reason}</span>}
           </span>
         ) : gs.ai === 'loading' ? (
-          <span>AIが案を考えています…（採譜も写せる小節も見つかりませんでした）</span>
+          <span>{tr('AIが案を考えています…（採譜も写せる小節も見つかりませんでした）', 'The AI is working on an idea… (no detected hits or measures to copy were found)')}</span>
         ) : (
-          <span>案が見つかりませんでした。{!hasKey ? 'キーを設定すると AI に作ってもらえます。' : ''}</span>
+          <span>
+            {tr('案が見つかりませんでした。', 'No ideas found. ')}
+            {!hasKey ? tr('キーを設定すると AI に作ってもらえます。', 'Set a key to have the AI make one.') : ''}
+          </span>
         )}
         {fitPct !== null && (
-          <span title="原曲で聞こえるドラム（採譜したバスドラム・スネア・タム）とどれだけ合うか">
-            {' · '}原曲と <b className="mono">{fitPct}%</b>
+          <span title={tr('原曲で聞こえるドラム（採譜したバスドラム・スネア・タム）とどれだけ合うか', 'How well it matches the drums heard in the original (detected kick, snare and toms)')}>
+            {' · '}
+            {tr('原曲と', 'Original match')} <b className="mono">{fitPct}%</b>
           </span>
         )}
         {drumless && (
           <span
             className="gen-reason"
-            title="BGM がドラム抜きの音源のようです（採譜でバスドラム・スネアがほとんど聞こえません）。採譜の案と、原曲との照合（要確認の枠・原曲と N%）は出しません。写す案と AI の案は前後の小節の流れから作ります"
+            title={tr(
+              'BGM がドラム抜きの音源のようです（採譜でバスドラム・スネアがほとんど聞こえません）。採譜の案と、原曲との照合（要確認の枠・原曲と N%）は出しません。写す案と AI の案は前後の小節の流れから作ります',
+              'The BGM seems to have no drums (detection hears almost no kick or snare). Detected ideas and the comparison with the original (check frames, "Original match N%") are not shown. Copy and AI ideas are based on the surrounding measures',
+            )}
           >
-            {' · '}原曲にドラムが聞こえないので照合なし
+            {' · '}
+            {tr('原曲にドラムが聞こえないので照合なし', 'No drums heard in the original, so no comparison')}
           </span>
         )}
         {v && v.doubt.size > 0 && (
-          <span className="tg-doubt" title="オレンジの枠のチップは、原曲でその音（バスドラム・スネア・タム）が聞こえません。外れのことが多い所です">
-            {' · '}要確認 {v.doubt.size}
+          <span
+            className="tg-doubt"
+            title={tr(
+              'オレンジの枠のチップは、原曲でその音（バスドラム・スネア・タム）が聞こえません。外れのことが多い所です',
+              "Chips with an orange frame aren't heard in the original (kick, snare, toms). These are often wrong",
+            )}
+          >
+            {' · '}
+            {tr('要確認', 'Check')} {v.doubt.size}
           </span>
         )}
         {gs.ai === 'error' && gs.aiError && (
@@ -237,28 +272,41 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
       </div>
       {cand && v && (
         <div className="tg-row gen-merge">
-          <button className="tg-accept" onClick={() => applyMeasureGen()} disabled={add + remove === 0} title="この案を入れます（Enter）。Ctrl+Z で戻せます">
-            <kbd>Enter</kbd> 入れる
+          <button
+            className="tg-accept"
+            onClick={() => applyMeasureGen()}
+            disabled={add + remove === 0}
+            title={tr('この案を入れます（Enter）。Ctrl+Z で戻せます', 'Insert this idea (Enter). Undo with Ctrl+Z')}
+          >
+            <kbd>Enter</kbd> {tr('入れる', 'Insert')}
             <span className="gen-count mono">
               <span className="plus">+{add}</span>
               {remove > 0 && <span className="minus"> −{remove}</span>}
             </span>
           </button>
-          <button onClick={() => applyMeasureGen({ next: true })} title="入れて、次の小節の生成を始めます（Shift+Enter）">
-            入れて次へ
+          <button onClick={() => applyMeasureGen({ next: true })} title={tr('入れて、次の小節の生成を始めます（Shift+Enter）', 'Insert and start on the next measure (Shift+Enter)')}>
+            {tr('入れて次へ', 'Insert & next')}
           </button>
           {hasChips && (
-            <span className="seg small gen-mode" title="いまの譜面にチップがあるときの入れ方">
-              <button className={gs.mode === 'add' ? 'on' : ''} onClick={() => setGenMode('add')} title="いまのチップはすべて残し、案にあって譜面に無いチップだけを足します">
-                足す
+            <span className="seg small gen-mode" title={tr('いまの譜面にチップがあるときの入れ方', 'How to insert when the chart already has chips here')}>
+              <button
+                className={gs.mode === 'add' ? 'on' : ''}
+                onClick={() => setGenMode('add')}
+                title={tr('いまのチップはすべて残し、案にあって譜面に無いチップだけを足します', "Keeps every current chip and only adds the idea's chips that aren't there yet")}
+              >
+                {tr('足す', 'Add')}
               </button>
-              <button className={gs.mode === 'replace' ? 'on' : ''} onClick={() => setGenMode('replace')} title="案に無いチップは消して、案のとおりにします（消えるチップに赤い × が付きます）">
-                置き換え
+              <button
+                className={gs.mode === 'replace' ? 'on' : ''}
+                onClick={() => setGenMode('replace')}
+                title={tr('案に無いチップは消して、案のとおりにします（消えるチップに赤い × が付きます）', "Removes chips that aren't in the idea so it matches exactly (chips to be removed get a red ×)")}
+              >
+                {tr('置き換え', 'Replace')}
               </button>
             </span>
           )}
           {v.lanes.length > 0 && (
-            <span className="gen-lanes" title="レーンごとに、案を使うか（消すとそのレーンはいまのまま）">
+            <span className="gen-lanes" title={tr('レーンごとに、案を使うか（消すとそのレーンはいまのまま）', 'Use the idea per lane (turn a lane off to keep it as it is)')}>
               {v.lanes.map((ln) => {
                 const def = DRUM_LANES[ln];
                 const off = offLanes.has(ln);
@@ -268,7 +316,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
                     className={`gen-lane ${off ? 'off' : ''}`}
                     style={{ '--lane': def.color } as CSSProperties}
                     onClick={() => toggleGenLane(ln)}
-                    title={`${def.name}：${off ? 'いまのまま（クリックで案を使う）' : '案を使う（クリックでいまのまま）'}`}
+                    title={`${def.name}${tr('：', ': ')}${off ? tr('いまのまま（クリックで案を使う）', 'kept as is (click to use the idea)') : tr('案を使う（クリックでいまのまま）', 'uses the idea (click to keep as is)')}`}
                   >
                     {def.key}
                   </button>
@@ -280,21 +328,31 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
       )}
       {cand && v && (
         <div className="tg-info gen-hint">
-          点線をクリックで外す
-          {remove > 0 || v.kept.size > 0 ? '・赤い × をクリックで残す' : ''}
+          {tr('点線をクリックで外す', 'Click a dashed chip to drop it')}
+          {remove > 0 || v.kept.size > 0 ? tr('・赤い × をクリックで残す', ', click a red × to keep it') : ''}
           {rejected + v.kept.size > 0 && (
             <>
               {' · '}
               <button className="link-btn" onClick={resetGenMarks}>
-                外した印を戻す
+                {tr('外した印を戻す', 'Reset the marks')}
               </button>
             </>
           )}
-          {dropped > 0 && <span title="いまのチップと同時に叩けない（手が3本・同じ場所に別の音）ので入れないチップ">{` · 叩けないので入れない ${dropped}`}</span>}
+          {dropped > 0 && (
+            <span title={tr('いまのチップと同時に叩けない（手が3本・同じ場所に別の音）ので入れないチップ', "Chips left out because they can't be played with the current chips (three hands, or another sound in the same spot)")}>
+              {tr(` · 叩けないので入れない ${dropped}`, ` · Unplayable, left out: ${dropped}`)}
+            </span>
+          )}
           {' · '}
-          {playing ? <span className="gen-live">♪ 案の音で鳴らしています</span> : <span title="再生すると、案を入れた譜面で鳴ります（ループと合わせて聴き比べ）">再生すると案の音で鳴ります</span>}
+          {playing ? (
+            <span className="gen-live">{tr('♪ 案の音で鳴らしています', '♪ Playing with the idea')}</span>
+          ) : (
+            <span title={tr('再生すると、案を入れた譜面で鳴ります（ループと合わせて聴き比べ）', 'Playback uses the chart with the idea inserted (compare using a loop)')}>
+              {tr('再生すると案の音で鳴ります', 'Playback uses the idea')}
+            </span>
+          )}
           {' · '}
-          <kbd>Tab</kbd> 次の案 <kbd>Shift</kbd>+<kbd>Enter</kbd> 入れて次へ
+          <kbd>Tab</kbd> {tr('次の案', 'next idea')} <kbd>Shift</kbd>+<kbd>Enter</kbd> {tr('入れて次へ', 'insert & next')}
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 // ドラムの採譜の窓口。音をモデルの入力（44.1kHz・モノラル）にそろえ、ワーカーで動かし、結果を覚えておく。
 // 同じ音（key）は二度解析しない：この画面の間はメモリに、次に開いたときのためにブラウザ（IndexedDB）に置く。
+import { tr, getLang } from '../i18n';
 import { ADTOF, type DrumActivations } from './model';
 import type { TranscribeMessage, TranscribeRequest } from './worker';
 
@@ -64,7 +65,7 @@ function getWorker(): Worker {
     scheduleIdle();
   };
   worker.onerror = (e) => {
-    for (const p of pending.values()) p.reject(new Error(e.message || '採譜の処理が止まりました'));
+    for (const p of pending.values()) p.reject(new Error(e.message || tr('採譜の処理が止まりました', 'Drum detection stopped')));
     pending.clear();
     worker?.terminate();
     worker = null;
@@ -88,7 +89,7 @@ function runWorker(audio: Float32Array, progress?: (stage: TranscribeStage, p: n
   const id = nextId++;
   return new Promise<{ act: Float32Array; frames: number; backend: string }>((resolve, reject) => {
     pending.set(id, { resolve, reject, progress });
-    const msg: TranscribeRequest = { id, type: 'run', audio };
+    const msg: TranscribeRequest = { id, type: 'run', audio, lang: getLang() };
     w.postMessage(msg, [audio.buffer]);
   });
 }

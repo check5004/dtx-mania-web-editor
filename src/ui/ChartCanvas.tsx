@@ -1040,7 +1040,7 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
           </p>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6, fontSize: 10.5 }}>
             {tr('モデル: ', 'Model: ')}
-            {ADTOF.credit} · {ADTOF.license}
+            {isJa() ? ADTOF.credit : ADTOF.creditEn} · {ADTOF.license}
             {tr('（非商用）。音はこのブラウザの中だけで解析します。', ' (non-commercial). Audio is analyzed only inside this browser.')}
           </p>
         </>

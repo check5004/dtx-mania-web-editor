@@ -27,7 +27,9 @@ export const ADTOF = {
    */
   reliable: ['BD', 'SD', 'TT'] as readonly DrumClass[],
   license: 'CC BY-NC-SA 4.0',
+  // 英語は creditEn i18n-ignore
   credit: 'ADTOF（M. Zehren, M. Alunno, P. Bientinesi）',
+  creditEn: 'ADTOF (M. Zehren, M. Alunno, P. Bientinesi)',
   page: 'https://github.com/MZehren/ADTOF',
 } as const;
 

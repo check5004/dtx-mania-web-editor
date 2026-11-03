@@ -1,4 +1,5 @@
 // 原曲の解析とスロー再生用の伸長を、画面を止めないように別スレッドで行う。
+import { tr, setLang, type Lang } from '../i18n';
 import { alignFeatures, buildRefIndex, PROBE_SEC, ALIGN_FPS, probeFine, probeLocal, searchProbe, type AlignFeat, type RefIndex } from './align';
 import { analyzeAudio } from './analysis';
 import { computeFrameFeatures } from './features';
@@ -6,6 +7,8 @@ import { renderSpectro, spectroDb, type SpecMode } from './spectro';
 import { wsola } from './stretch';
 
 export type WorkerRequest =
+  /** エラーの文の言語（ワーカーは画面の言語を知らないので、作ったときと切り替えたときに知らせる） */
+  | { id: number; type: 'lang'; lang: Lang }
   | { id: number; type: 'load'; key: string; channels: Float32Array[]; sr: number }
   | { id: number; type: 'analyze'; key: string }
   | { id: number; type: 'spectro'; key: string; mode: SpecMode }
@@ -38,6 +41,10 @@ const post = (msg: unknown, transfer: Transferable[] = []) => (self as unknown a
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const req = e.data;
+  if (req.type === 'lang') {
+    setLang(req.lang, false);
+    return;
+  }
   try {
     if (req.type === 'load') {
       // 古い曲は捨てる（2曲まで持つ）
@@ -49,7 +56,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       return;
     }
     const src = store.get(req.key);
-    if (!src) throw new Error('音声がまだ読み込まれていません');
+    if (!src) throw new Error(tr('音声がまだ読み込まれていません', "The audio isn't loaded yet"));
     if (req.type === 'analyze') {
       const r = analyzeAudio(src.channels, src.sr, (p) => post({ id: req.id, progress: p }));
       const transfer = [r.peaks.buffer, ...Object.values(r.odf).map((a) => a.buffer), ...Object.values(r.env).map((a) => a.buffer)];
@@ -91,7 +98,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     if (req.type === 'alignLocal') {
       const idx = alignIndex(req.key, src);
       const feat = alignProbes.get(req.probe);
-      if (!feat) throw new Error('聞き取った音がもうありません');
+      if (!feat) throw new Error(tr('聞き取った音がもうありません', 'The captured audio is no longer available'));
       const r = req.fine ? { local: probeFine(idx.feat, feat, req.v, req.os), floor: 0 } : probeLocal(idx.feat, feat, req.v, req.os);
       post({ id: req.id, ok: true, result: r }, r.local.map((x) => x.sim.buffer as ArrayBuffer));
       return;

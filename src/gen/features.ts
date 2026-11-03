@@ -1,5 +1,6 @@
 // 譜面の特徴：難易度ガイドラインの集計、AIのレベル判定、低難易度の生成で使う。
 // どれも「その要素が譜面に出てくるか」と、密度などの数値。拍の位置で見るので BPM が変わっても同じ物差しになる。
+import { tr, withTr } from '../i18n';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { estimateLevel, LEVEL_VERSION } from '../check/level';
@@ -46,19 +47,21 @@ export function drumNotes(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): No
   return out;
 }
 
+const feature = <K extends string>(key: K, label: readonly [string, string]) => withTr({ key } as { readonly key: K; readonly label: string }, { label });
+
 /** 集計する要素（ガイドラインの表の行） */
 export const FEATURE_DEFS = [
-  { key: 'hh8', label: '8分のハイハット' },
-  { key: 'hh16', label: '16分のハイハット' },
-  { key: 'hho', label: 'オープンハイハット' },
-  { key: 'kick16', label: '16分のキック' },
-  { key: 'twinBass', label: 'ツーバス連打' },
-  { key: 'leftPedal', label: '左ペダル' },
-  { key: 'tom16', label: '16分のタム回し' },
-  { key: 'chord3', label: '同時3打以上' },
-  { key: 'synco', label: 'シンコペーション' },
-  { key: 'leftCymRide', label: '左シンバル・ライド' },
-  { key: 'bpmChange', label: 'BPM変化・変拍子' },
+  feature('hh8', ['8分のハイハット', '8th-note hi-hat']),
+  feature('hh16', ['16分のハイハット', '16th-note hi-hat']),
+  feature('hho', ['オープンハイハット', 'Open hi-hat']),
+  feature('kick16', ['16分のキック', '16th-note kick']),
+  feature('twinBass', ['ツーバス連打', 'Double-bass runs']),
+  feature('leftPedal', ['左ペダル', 'Left pedal']),
+  feature('tom16', ['16分のタム回し', '16th-note tom runs']),
+  feature('chord3', ['同時3打以上', '3+ notes at once']),
+  feature('synco', ['シンコペーション', 'Syncopation']),
+  feature('leftCymRide', ['左シンバル・ライド', 'Left cymbal / ride']),
+  feature('bpmChange', ['BPM変化・変拍子', 'BPM / meter changes']),
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_DEFS)[number]['key'];
@@ -210,6 +213,8 @@ export function featureDistance(a: ChartFeatures, b: ChartFeatures): number {
   return Math.sqrt(s);
 }
 
+// ---- AI に渡す要約（AI へのことばなので日本語のまま。要素の名前だけは画面の言語） i18n-ignore-start
+
 /** 人に（AIに）渡す1行の要約 */
 export function featureSummary(f: ChartFeatures): string {
   const list = FEATURE_DEFS.filter((d) => f.has[d.key]).map((d) => d.label);
@@ -224,7 +229,7 @@ export function sectionSummaries(doc: DtxDoc, sections: { name: string; from: nu
     const ns = notes.filter((n) => n.m >= s.from && n.m <= s.to);
     // 名前が「0〜7小節」のような範囲そのものなら、範囲を重ねて書かない
     const span = `${s.from}〜${s.to}小節`;
-    const head = s.name === span ? span : `${s.name}（${span}）`;
+    const head = s.name === span || s.name === spanName(s.from, s.to) ? span : `${s.name}（${span}）`;
     if (ns.length === 0) return `${head}: ノーツなし`;
     const secs = Math.max(0.5, tempo.beatToSec(tempo.measureStart(s.to + 1)) - tempo.beatToSec(tempo.measureStart(s.from)));
     const per = LANE_KEYS.map((k, i) => [k, ns.filter((n) => n.lane === i).length] as const).filter(([, c]) => c > 0);
@@ -232,6 +237,10 @@ export function sectionSummaries(doc: DtxDoc, sections: { name: string; from: nu
     return `${head}: ${ns.length}ノーツ, ${(ns.length / secs).toFixed(1)}打/秒, 8分より細かい音 ${Math.round((fine / ns.length) * 100)}%, レーン別 ${per.map(([k, c]) => `${k}${c}`).join(' ')}`;
   });
 }
+// i18n-ignore-end
+
+/** 小節の範囲の区間の名前（セクションのメモが無いとき） */
+export const spanName = (a: number, b: number): string => tr(`${a}〜${b}小節`, `Measures ${a}–${b}`);
 
 /** BGM やフィルインの位置など、ドラム以外も含めて「曲の長さ」に使う最後の小節 */
 export function lastMeasure(doc: DtxDoc): number {

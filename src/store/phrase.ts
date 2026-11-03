@@ -1,7 +1,8 @@
 // フレーズ候補の状態：範囲、候補（点線で譜面に出す）、選んでいる候補、適用。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { AiError } from '../ai/openrouter';
-import { buildContext, decodeCandidates, PHRASE_SCHEMA, phrasePrompt, ruleCandidates, type PhraseCandidate } from '../ai/phrase';
+import { buildContext, decodeCandidates, phraseSchema, phrasePrompt, ruleCandidates, type PhraseCandidate } from '../ai/phrase';
 import { drumChannel } from '../dtx/model';
 import { lastMeasure } from '../gen/features';
 import { levelOfField } from './guideline';
@@ -73,7 +74,7 @@ export async function makeCandidates(kind: 'fill' | 'rhythm') {
   const rule = () => ruleCandidates(s.doc, tempo, { from: p.from, to: p.to, onsets: onsets && bgm ? onsets : null, offsetSec, lastMeasure: lastMeasure(s.doc) });
   if (!hasAiKey()) {
     const cands = rule();
-    set({ loading: false, cands, madeFor: s.doc, error: cands.length ? null : '似た小節も直前の小節も見つかりませんでした' });
+    set({ loading: false, cands, madeFor: s.doc, error: cands.length ? null : tr('似た小節も直前の小節も見つかりませんでした', 'No similar measure or previous measure was found') });
     return;
   }
   ac?.abort();
@@ -88,21 +89,28 @@ export async function makeCandidates(kind: 'fill' | 'rhythm') {
       onsets: onsets && bgm ? onsets : null,
       offsetSec,
     });
-    const r = await runAi<{ candidates?: unknown[] }>('phrase', { ...phrasePrompt(ctx), schema: PHRASE_SCHEMA, maxTokens: 3000, signal: ac.signal });
+    const r = await runAi<{ candidates?: unknown[] }>('phrase', { ...phrasePrompt(ctx), schema: phraseSchema(), maxTokens: 3000, signal: ac.signal });
     if (!r) {
       set({ loading: false });
       return;
     }
     const cands = decodeCandidates(r.data as Parameters<typeof decodeCandidates>[0], p, tempo);
     if (cands.length === 0) {
-      set({ loading: false, cands: rule(), madeFor: s.doc, cost: r.costUsed, error: 'AIの候補が使える形になりませんでした。似た小節からの候補を出しています' });
+      set({
+        loading: false,
+        cands: rule(),
+        madeFor: s.doc,
+        cost: r.costUsed,
+        error: tr('AIの候補が使える形になりませんでした。似た小節からの候補を出しています', "The AI's ideas weren't usable. Showing ideas from similar measures instead"),
+      });
       return;
     }
     set({ loading: false, cands, madeFor: s.doc, cost: r.costUsed });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return;
     const cands = rule();
-    set({ loading: false, cands, madeFor: s.doc, error: `${e instanceof AiError ? e.message : (e as Error).message}${cands.length ? '（似た小節からの候補を出しています）' : ''}` });
+    const msg = e instanceof AiError ? e.message : (e as Error).message;
+    set({ loading: false, cands, madeFor: s.doc, error: `${msg}${cands.length ? tr('（似た小節からの候補を出しています）', ' (showing ideas from similar measures)') : ''}` });
   }
 }
 
@@ -117,7 +125,7 @@ export function applyCandidate() {
   const c = current();
   if (!c) return;
   const { from, to } = get();
-  const ok = edit(`フレーズ候補「${c.name}」を適用`, (d) => {
+  const ok = edit(tr(`フレーズ候補「${c.name}」を適用`, `Apply phrase idea "${c.name}"`), (d) => {
     for (let i = d.chips.length - 1; i >= 0; i--) {
       const x = d.chips[i];
       if (x.m >= from && x.m <= to && drumChannel(x.ch)?.kind === 'normal') d.chips.splice(i, 1);
@@ -125,7 +133,7 @@ export function applyCandidate() {
     for (const n of c.notes) d.chips.push({ id: d.nextId++, ch: n.ch, m: n.m, f: { n: n.f.n, d: n.f.d }, v: wavForChannel(d, n.ch) });
   });
   if (ok) {
-    toast(`「${c.name}」を置きました（Ctrl+Z で戻せます）`, 'ok');
+    toast(tr(`「${c.name}」を置きました（Ctrl+Z で戻せます）`, `Placed "${c.name}" (undo with Ctrl+Z)`), 'ok');
     set({ cands: [], index: 0 });
   }
 }

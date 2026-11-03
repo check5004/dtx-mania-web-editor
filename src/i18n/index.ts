@@ -101,3 +101,11 @@ export function aiLangRule(): string {
 export function aiLangName(): string {
   return current === 'ja' ? '日本語' : '英語（US English）';
 }
+
+/**
+ * AI への字数の指示（JSON Schema の説明などに入れる）。英語は同じ内容で日本語の約2.5倍の文字数になるので、上限もそのぶん広げる。
+ * 例: `短い名前（${aiTextLimit(12)}）` → 「日本語で12字以内」/「US English で30文字以内」
+ */
+export function aiTextLimit(jaChars: number): string {
+  return current === 'ja' ? `日本語で${jaChars}字以内` : `US English で${Math.round(jaChars * 2.5)}文字以内`; // i18n-ignore
+}

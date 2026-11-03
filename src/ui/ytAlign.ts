@@ -8,6 +8,7 @@
 //    聞き取った音の頭が動画の何秒かは、聞いているあいだの getCurrentTime と、出力の時刻（getOutputTimestamp）から決める
 // 4. ワーカーで原曲の全体と比べ（打点・音色・和音）、decideOffset で結果をまとめてずれ（と所ごとの差）を入れる
 // 合わせているあいだは再生との同期を止め、終わったら動画の音・音量・聴く音を元に戻す。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { decideOffset, fineNeeds, planProbe, PROBE_SEC, type AlignDecision, type ProbeResult } from '../audio/align';
 import { engine } from '../audio/engine';
@@ -63,11 +64,13 @@ export function setAutoOnLoad(v: boolean) {
   }
 }
 
+const videoChanged = () => tr('動画が替わったのでやめました', 'Stopped because the video changed');
+
 /** 自動で合わせられるか（できなければ理由） */
 export function alignBlocker(): string | null {
-  if (!canCaptureTab()) return '自動で合わせるのは Chrome・Edge で使えます（このタブの音を聞き取るため）';
+  if (!canCaptureTab()) return tr('自動で合わせるのは Chrome・Edge で使えます（このタブの音を聞き取るため）', 'Automatic sync works in Chrome and Edge (it needs to listen to this tab)');
   const bgm = bgmSource(useEditor.getState().doc);
-  if (!bgm || !engine.buffer(bgm.wav)) return '原曲の音声ファイルが読み込めていません';
+  if (!bgm || !engine.buffer(bgm.wav)) return tr('原曲の音声ファイルが読み込めていません', "The original audio file isn't loaded");
   return null;
 }
 
@@ -79,11 +82,15 @@ export function aligning(): boolean {
 class Abort extends Error {}
 
 let abortReason: string | null = null;
+/** ユーザーが「やめる」を押した（失敗として出さない） */
+let abortByUser = false;
 let running = false;
 
-/** 合わせるのをやめる */
-export function cancelAutoAlign(reason = 'やめました') {
-  if (running) abortReason = reason;
+/** 合わせるのをやめる（reason が無ければユーザーが止めた） */
+export function cancelAutoAlign(reason?: string) {
+  if (!running) return;
+  abortByUser = reason === undefined;
+  abortReason = reason ?? tr('やめました', 'Stopped');
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -114,7 +121,7 @@ async function waitPlayer(ms: number): Promise<YTPlayer> {
     const p = ytPlayer();
     if (p) return p;
     if (useYt.getState().error) throw new Error(useYt.getState().error!);
-    if (performance.now() - t0 > ms) throw new Error('YouTube の動画が読み込めませんでした');
+    if (performance.now() - t0 > ms) throw new Error(tr('YouTube の動画が読み込めませんでした', "Couldn't load the YouTube video"));
     await sleep(100);
   }
 }
@@ -205,7 +212,8 @@ export async function startAutoAlign(): Promise<void> {
   const ctx = engine.ensure();
   running = true;
   abortReason = null;
-  set({ phase: 'asking', probe: 0, note: '共有の確認で、このタブを選んで「共有」を押してください', error: null });
+  abortByUser = false;
+  set({ phase: 'asking', probe: 0, note: tr('共有の確認で、このタブを選んで「共有」を押してください', 'In the sharing prompt, pick this tab and click "Share"'), error: null });
   // ここまで await なし（共有の確認はボタンを押した直後に出す）
   const streamP = requestTabAudio();
   let stream: MediaStream | null = null;
@@ -214,12 +222,12 @@ export async function startAutoAlign(): Promise<void> {
   let saved: { muted: boolean; volume: number } | null = null;
   try {
     stream = await streamP;
-    stream.getAudioTracks()[0]?.addEventListener('ended', () => cancelAutoAlign('共有が止められました'));
+    stream.getAudioTracks()[0]?.addEventListener('ended', () => cancelAutoAlign(tr('共有が止められました', 'Sharing was stopped')));
     check();
     stopPlayback();
     holdSync(true);
     useYt.setState({ hidden: false });
-    set({ phase: 'prep', note: '準備しています…' });
+    set({ phase: 'prep', note: tr('準備しています…', 'Getting ready…') });
     await wk.loadAudio(ref.key, ref.buf);
     const refP = wk.alignRef(ref.key);
     player = await waitPlayer(20000);
@@ -229,7 +237,7 @@ export async function startAutoAlign(): Promise<void> {
     await rec.start();
 
     // 遅れを測る（クリック 4 回）
-    set({ phase: 'calib', note: '音が届くまでの遅れを測っています…' });
+    set({ phase: 'calib', note: tr('音が届くまでの遅れを測っています…', 'Measuring the audio output delay…') });
     await sleep(400);
     const c0 = ctx.currentTime + 0.15;
     const times = [c0, c0 + 0.3, c0 + 0.6, c0 + 0.9];
@@ -264,14 +272,20 @@ export async function startAutoAlign(): Promise<void> {
       if (plan === null) break;
       const cut = plan.cut || undefined;
       const n = done.length + 1;
-      set({ phase: 'listen', probe: n, note: cut ? `編集で飛んでいる所を細かく聞き取っています（${n} か所目）…` : `YouTube の音を聞き取っています（${n} か所目）…` });
+      set({
+        phase: 'listen',
+        probe: n,
+        note: cut
+          ? tr(`編集で飛んでいる所を細かく聞き取っています（${n} か所目）…`, `Listening closely around the edit jump (place ${n})…`)
+          : tr(`YouTube の音を聞き取っています（${n} か所目）…`, `Listening to the YouTube audio (place ${n})…`),
+      });
       const got = await listenAt(player, rec, ctx, plan.v, delta);
       if (!got) {
         done.push({ v: plan.v, len: PROBE_SEC, cands: [], active: 0, cut });
         ids.push(null);
         continue;
       }
-      set({ phase: 'think', note: '原曲と照らし合わせています…' });
+      set({ phase: 'think', note: tr('原曲と照らし合わせています…', 'Comparing with the original…') });
       const r = await wk.alignProbe(ref.key, got.pcm, ctx.sampleRate);
       done.push({ v: got.v, len: PROBE_SEC, cands: r.cands, active: r.active, zc: r.zc, pad: r.pad, cut });
       ids.push(r.probe);
@@ -296,9 +310,12 @@ export async function startAutoAlign(): Promise<void> {
         },
       }),
     );
-    if (!dec || dec.conf < 0.3) throw new Error('動画の中に原曲と同じ曲の所が見つかりませんでした。別の動画か、手で合わせてください');
+    if (!dec || dec.conf < 0.3)
+      throw new Error(
+        tr('動画の中に原曲と同じ曲の所が見つかりませんでした。別の動画か、手で合わせてください', "Couldn't find the original song in the video. Try another video or sync by hand"),
+      );
     const cur = useSidecar.getState().youtube;
-    if (!cur || cur.url !== yt0.url) throw new Abort('動画が替わったのでやめました');
+    if (!cur || cur.url !== yt0.url) throw new Abort(videoChanged());
     const r3 = (x: number) => Math.round(x * 1000) / 1000;
     setYoutube({
       url: cur.url,
@@ -309,7 +326,7 @@ export async function startAutoAlign(): Promise<void> {
     set({ phase: 'done', note: '', last: { dec, prev: cur, url: cur.url, precise, probes: done.length } });
   } catch (e) {
     const msg = e instanceof CaptureError || e instanceof Abort || e instanceof Error ? e.message : String(e);
-    set({ phase: e instanceof Abort && msg === 'やめました' ? 'idle' : 'failed', error: msg, note: '' });
+    set({ phase: e instanceof Abort && abortByUser ? 'idle' : 'failed', error: msg, note: '' });
   } finally {
     rec?.stop();
     stopStream(stream);
@@ -325,6 +342,7 @@ export async function startAutoAlign(): Promise<void> {
     holdSync(false);
     running = false;
     abortReason = null;
+    abortByUser = false;
   }
 }
 
@@ -349,7 +367,7 @@ export function undoAutoAlign() {
 // 動画を替えたら、前の動画の結果の表示は消す
 useSidecar.subscribe((s, prev) => {
   if (s.youtube?.url === prev.youtube?.url) return;
-  if (aligning()) cancelAutoAlign('動画が替わったのでやめました');
+  if (aligning()) cancelAutoAlign(videoChanged());
   const st = useYtAlign.getState();
   if (st.phase === 'done' || st.phase === 'failed') set({ phase: 'idle', error: null, last: null });
 });

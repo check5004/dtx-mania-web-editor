@@ -1,10 +1,12 @@
 // ドラムの採譜（ADTOF）を別スレッドで動かす。ONNX Runtime Web（WASM）でモデルを動かし、1/100 秒ごとの出力を返す。
 // GitHub Pages では SharedArrayBuffer が使えないので 1 スレッドで動く（4分の曲で十数秒）。
+import { tr, setLang, type Lang } from '../i18n';
 import * as ort from 'onnxruntime-web/wasm';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { ADTOF } from './model';
 
-export type TranscribeRequest = { id: number; type: 'run'; audio: Float32Array };
+/** lang: エラーの文の言語（ワーカーは画面の言語を知らないので渡す） */
+export type TranscribeRequest = { id: number; type: 'run'; audio: Float32Array; lang: Lang };
 
 export type TranscribeMessage =
   | { id: number; stage: 'model' | 'prepare' | 'run'; progress: number }
@@ -40,9 +42,9 @@ async function modelBytes(progress: (p: number) => void): Promise<ArrayBuffer> {
   try {
     res = await fetch(ADTOF.url, { mode: 'cors' });
   } catch {
-    throw new Error('採譜のモデルを読み込めませんでした（インターネットにつながっているか確かめてください）');
+    throw new Error(tr('採譜のモデルを読み込めませんでした（インターネットにつながっているか確かめてください）', "Couldn't download the drum detection model (check your internet connection)"));
   }
-  if (!res.ok || !res.body) throw new Error(`採譜のモデルを読み込めませんでした（${res.status}）`);
+  if (!res.ok || !res.body) throw new Error(tr(`採譜のモデルを読み込めませんでした（${res.status}）`, `Couldn't download the drum detection model (${res.status})`));
   const reader = res.body.getReader();
   const parts: Uint8Array[] = [];
   let got = 0;
@@ -61,7 +63,7 @@ async function modelBytes(progress: (p: number) => void): Promise<ArrayBuffer> {
   }
   if (crypto?.subtle) {
     const h = hex(await crypto.subtle.digest('SHA-256', buf));
-    if (h !== ADTOF.sha256) throw new Error('採譜のモデルの中身が想定と違います（読み込み直してください）');
+    if (h !== ADTOF.sha256) throw new Error(tr('採譜のモデルの中身が想定と違います（読み込み直してください）', "The drum detection model's contents don't match (try downloading it again)"));
   }
   try {
     await cache?.put(ADTOF.url, new Response(buf.slice().buffer, { headers: { 'content-type': 'application/octet-stream' } }));
@@ -116,6 +118,7 @@ async function run(id: number, audio: Float32Array) {
 self.onmessage = (e: MessageEvent<TranscribeRequest>) => {
   const req = e.data;
   if (req.type !== 'run') return;
+  setLang(req.lang, false);
   run(req.id, req.audio).then(
     (r) => post({ id: req.id, ok: true, result: { ...r, backend: `wasm×${ort.env.wasm.numThreads}` } }, [r.act.buffer]),
     (err: unknown) => post({ id: req.id, ok: false, error: (err as Error)?.message || String(err) }),

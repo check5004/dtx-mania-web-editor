@@ -9,7 +9,7 @@ import { defaultLabel, folderFromFileList, folderFromHandle, parseSetDef, type S
 import { chartFeatures, FEATURE_DEFS, featureDistance, featureSummary, type ChartFeatures, type FeatureKey } from '../gen/features';
 import { toast } from './editor';
 import { runAi } from './ai';
-import { GUIDE_SCHEMA, guidelinePrompt } from '../ai/judge';
+import { guideSchema, guidelinePrompt } from '../ai/judge';
 
 export interface ChartEntry {
   /** 曲フォルダ＋ファイル名 */
@@ -378,6 +378,7 @@ export async function importGuideline(text: string): Promise<boolean> {
   }
 }
 
+// AI へ渡す文なので日本語のまま i18n-ignore-start
 /** AI やレベル判定に渡す、確定・下書き済みの基準文 */
 export function guidelineText(g: Guideline = get().guide, bands: readonly number[] = BANDS): string {
   const lines: string[] = [];
@@ -393,6 +394,7 @@ export function guidelineText(g: Guideline = get().guide, bands: readonly number
 export function chartLine(c: ChartEntry): string {
   return `${c.song} ${c.label}（登録 Lv${c.level?.toFixed(2) ?? '?'}）: ${featureSummary(c.feat)}`;
 }
+// i18n-ignore-end
 
 // ---- AI の下書き ---------------------------------------------------------------------------
 
@@ -412,7 +414,7 @@ export async function draftWithAi(bands: number[]): Promise<boolean> {
   );
   const r = await runAi<{ bands?: { band?: number; rows?: { text?: string; basis?: string }[] }[] }>('guideline', {
     ...guidelinePrompt({ stats, reps, bands: target, confirmed }),
-    schema: GUIDE_SCHEMA,
+    schema: guideSchema(),
     maxTokens: 8000,
   });
   if (!r) return false;

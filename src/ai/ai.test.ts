@@ -6,7 +6,7 @@ import { bandStats, levelOfField, predictLevel, type ChartEntry } from '../store
 import { buildSetDef, outFileName, relaxPlan, replacedInSetDef } from '../store/gen';
 import { cleanJudgement, cleanPlan, sectionSpans } from './judge';
 import { buildChatBody, isChatModel, missingKeys, parseJsonLoose, parseModels, repairPrompt } from './openrouter';
-import { cleanSongInfo, SONG_INFO_SCHEMA } from './songInfo';
+import { cleanSongInfo, songInfoSchema } from './songInfo';
 import { decodeCandidates, enforcePlayable, measureGrid, ruleCandidates } from './phrase';
 import { estimateCost, meetsNeeds, modelInfo, taskDef } from './tasks';
 import { frac } from '../dtx/fraction';
@@ -227,13 +227,13 @@ describe('AIの答えの形', () => {
   it('Web検索のときに勝手なキー名で返ってきたら、足りないキーを見つける', () => {
     // 実際に Claude Haiku 5.5 + openrouter:web_search で返ってきた形
     const got = parseJsonLoose('```json\n{"title":"ブレス・ユア・ブレス","artist":"和田たけあき feat. 初音ミク","genre":"ロック","release_year":"2019","song_comment_select_screen":"…","notes":"…"}\n```');
-    expect(missingKeys(SONG_INFO_SCHEMA.schema, got)).toEqual(['year', 'comment', 'panel', 'confidence']);
-    expect(missingKeys(SONG_INFO_SCHEMA.schema, { title: '', artist: '', genre: '', year: '', comment: '', panel: '', confidence: 'low', notes: '' })).toEqual([]);
+    expect(missingKeys(songInfoSchema().schema, got)).toEqual(['year', 'comment', 'panel', 'confidence']);
+    expect(missingKeys(songInfoSchema().schema, { title: '', artist: '', genre: '', year: '', comment: '', panel: '', confidence: 'low', notes: '' })).toEqual([]);
     expect(missingKeys({ required: ['candidates'], properties: { candidates: { type: 'array' } } }, { candidates: 'x' })).toEqual(['candidates']);
     expect(missingKeys({ required: ['a'] }, null)).toEqual(['a']);
   });
   it('直す頼み方にはスキーマと元の答えが入る', () => {
-    const p = repairPrompt(SONG_INFO_SCHEMA, '{"release_year":"2019"}');
+    const p = repairPrompt(songInfoSchema(), '{"release_year":"2019"}');
     expect(p.system).toContain('title, artist, genre, year');
     expect(p.user).toContain('release_year');
   });
