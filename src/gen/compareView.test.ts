@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipHeight, COL_GAP, columnAt, compareGeom, firstAtOrAfter, GUTTER_W, labelEvery, layoutColumns, MAX_COL_W, MIN_COL_W, pxToFit, stepIn } from './compareView';
+import { chipHeight, COL_GAP, columnAt, compareGeom, firstAtOrAfter, GUTTER_W, labelEvery, layoutColumns, MAX_COL_W, MIN_COL_W, PAD_BOTTOM, PAD_TOP, pxToFit, stepIn } from './compareView';
 
 describe('並べた譜面の列', () => {
   it('小節番号の列のあとに同じ幅で並べ、広すぎるときは上限で止める', () => {
@@ -59,7 +59,7 @@ describe('並べた譜面の列', () => {
   });
 
   it('n 小節が収まる大きさ・チップの高さ', () => {
-    expect(pxToFit(500, 32)).toBeCloseTo((500 - 18) / 32, 9);
+    expect(pxToFit(500, 32)).toBeCloseTo((500 - PAD_BOTTOM - PAD_TOP) / 32, 9);
     expect(pxToFit(10, 1000)).toBe(0.5);
     expect(chipHeight(100)).toBe(7);
     expect(chipHeight(2)).toBe(2);

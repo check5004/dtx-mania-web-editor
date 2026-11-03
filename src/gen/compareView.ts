@@ -94,9 +94,12 @@ export function firstAtOrAfter(list: readonly { beat: number }[], from: number):
   return lo;
 }
 
+/** 収めるときの上の余白（いちばん上の小節番号が切れないように） */
+export const PAD_TOP = 16;
+
 /** n 小節ぶんが高さ h に収まる 1拍の高さ（拍子が混ざっても、拍の数で合わせる） */
 export function pxToFit(h: number, beats: number): number {
-  return Math.max(0.5, (h - PAD_BOTTOM - 8) / Math.max(1, beats));
+  return Math.max(0.5, (h - PAD_BOTTOM - PAD_TOP) / Math.max(1, beats));
 }
 
 /** チップの高さ（詰まった所でも重ならないように、拍の高さに合わせて縮める） */
