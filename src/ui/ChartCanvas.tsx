@@ -1,6 +1,6 @@
 // 譜面の縦スクロール表示と、マウスでの編集。下から上へ時間が進む（NXと同じ向き）。
 // 右に「原曲の打点」（ドラムの採譜モデルの5種。使えないときは低・中・高の3帯域）と「原曲の波形」の列を出す。
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Onset } from '../audio/analysis';
 import { engine } from '../audio/engine';
 import { SPEC_F_HI, SPEC_F_LO, specFreq, specPos, type SpectroData } from '../audio/spectro';
@@ -31,6 +31,7 @@ import {
   dragSongEnd,
   minSongEnd,
   moveSelection,
+  openPage,
   placeBpmChange,
   placeChip,
   playFrom,
@@ -41,6 +42,8 @@ import {
   useEditor,
   zoom,
 } from '../store/editor';
+import { fixBpm, fixStart, fixStemLag, fmtMs, offsetBadge, offsetReport, stemLag, stemLagWarn, useOffset, STEM_LAG_LIMIT } from '../store/offset';
+import { chooseAnalysisStem } from '../store/stems';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
@@ -57,6 +60,7 @@ import { thumb, useThumbs } from './thumbs';
 import { drumHitsByClass, drumStatusText, readyDrums, useDrums } from '../store/drums';
 import { DRUM_CLASSES, CLASS_LABEL, type DrumClass } from '../bench/classes';
 import { ADTOF } from '../transcribe/model';
+import type { OffsetReport } from '../assist/offsetCheck';
 import { promptDialog } from './dialogs';
 import { songEndM, songSpan } from './hooks';
 import { chipBpmLabel, formatTime, meterLabel } from './format';
@@ -370,6 +374,9 @@ export function ChartCanvas() {
         l.dirty = true;
       }),
       useDrums.subscribe(() => {
+        l.dirty = true;
+      }),
+      useOffset.subscribe(() => {
         l.dirty = true;
       }),
     ];
@@ -862,6 +869,7 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
       </div>
       {model ? (
         <>
+          <OffsetSection onClose={onClose} />
           <p className="lbl" style={{ margin: '0 0 6px', lineHeight: 1.7, color: 'var(--text2)' }}>
             ドラムの採譜モデルが原曲から聞き取った打点です。横棒が打点（幅は確からしさ）、薄い帯は「その音が鳴っていそうな度合い」です。
           </p>
@@ -911,6 +919,141 @@ function OnsetHelp({ x, y, onClose }: { x: number; y: number; onClose: () => voi
         </>
       )}
     </div>
+  );
+}
+
+/** ずれの見立ての1行（見出しのヒント・説明の段） */
+function offsetSummary(r: OffsetReport): string {
+  const n = r.pairs.length;
+  if (r.verdict === 'start') {
+    return `原曲の打点が、譜面のチップより ${Math.abs(Math.round(r.offset * 1000))}ms ${r.offset > 0 ? '後ろ' : '前'}にあります（${n} 打で測定。頭 ${fmtMs(r.head)}・終わり ${fmtMs(r.tail)}）。曲のどこでも同じだけずれているので、開始位置のずれです。`;
+  }
+  if (r.verdict === 'bpm' && r.bpmFit) {
+    return `原曲の打点が、曲の後ろほど${r.tail > r.head ? '遅れて' : '早まって'}いきます（頭 ${fmtMs(r.head)} → 終わり ${fmtMs(r.tail)}、${n} 打で測定）。BPM が少し違います（${r.bpmFit.from} → ${r.bpmFit.bpm}）。`;
+  }
+  if (r.verdict === 'uneven') {
+    return `場所によってずれ方が違います（${fmtMs(r.lo)}〜${fmtMs(r.hi)}、${n} 打で測定）。テンポが揺れている曲かもしれません。テンポ合わせで、ずれている所の小節の頭を合わせてください。`;
+  }
+  if (r.verdict === 'ok') return `譜面のチップと原曲の打点は合っています（${fmtMs(r.offset)}、${n} 打で測定）。`;
+  if (r.chips < 16) return 'チップがまだ少ないため、ずれは測れません。チップを置いていくと測ります。';
+  return `譜面のチップ ${r.chips} 個のうち、原曲の打点と組にできたのが ${n} 個だけなので、ずれは測れません（ドラムの入っていない原曲のときなど）。`;
+}
+
+/** ステムのずれの説明 */
+function stemLagText(lag: number, name: string): string {
+  return `解析元のステム（${name}）が、原曲より ${Math.abs(Math.round(lag * 1000))}ms ${lag > 0 ? '遅れて' : '早まって'}います。分離ソフトが MP3 の頭の無音を足したまま書き出したときなどに起こります。`;
+}
+
+/** 「原曲の打点」の ⓘ の上の段：譜面のチップとのずれと、直すボタン（打点がステムからなら、ステムと原曲のずれも） */
+function OffsetSection({ onClose }: { onClose: () => void }) {
+  useEditor((s) => s.doc);
+  useAssist((s) => s.sensitivity);
+  useOffset((s) => s.rev);
+  useOffset((s) => s.stemLag);
+  const dr = useDrums();
+  const r = offsetReport();
+  if (!r) return null;
+  const fromStem = dr.key?.startsWith('stem:') ?? false;
+  const sl = fromStem ? stemLag() : null;
+  const slWarn = sl && sl.status === 'done' && sl.lag !== null && Math.abs(sl.lag) >= STEM_LAG_LIMIT ? sl.lag : null;
+  const warn = r.verdict === 'start' || r.verdict === 'bpm' || r.verdict === 'uneven';
+  const bgm = bgmSource(useEditor.getState().doc);
+  const canOrig = fromStem && !sl && !!bgm && !!engine.buffer(bgm.wav);
+  const box = (on: boolean): CSSProperties => ({
+    margin: '0 0 8px',
+    padding: '8px 10px',
+    borderRadius: 8,
+    background: on ? 'var(--amber-bg)' : 'var(--raise)',
+    border: on ? '1px solid var(--amber-line)' : '1px solid transparent',
+  });
+  return (
+    <>
+      {sl && (
+        <div style={box(slWarn !== null)}>
+          <div className="row" style={{ marginBottom: 4 }}>
+            <b style={{ fontSize: 12 }}>ステムと原曲のずれ</b>
+            <span className="grow" />
+            {sl.status === 'done' && sl.lag !== null && slWarn === null && <span className="pill ok">合っています</span>}
+            {slWarn !== null && <span className="pill warn">{fmtMs(slWarn)}</span>}
+          </div>
+          <p className="lbl" style={{ margin: 0, lineHeight: 1.7, color: 'var(--text2)' }}>
+            {sl.status === 'running'
+              ? `解析元のステム（${sl.name}）と原曲の音を重ねて、ずれを測っています…`
+              : sl.lag === null
+                ? `解析元のステム（${sl.name}）と原曲は、重なる音が少なく、ずれを測れませんでした（原曲にその楽器が入っていないときなど）。`
+                : slWarn !== null
+                  ? stemLagText(slWarn, sl.name)
+                  : `解析元のステム（${sl.name}）は原曲と合っています（${fmtMs(sl.lag)}）。`}
+          </p>
+          {slWarn !== null && (
+            <div className="row" style={{ marginTop: 6 }}>
+              <button className="btn small primary" onClick={() => fixStemLag()} title="ステムの「頭のずれ」を変えて原曲に合わせます（ステムとミックスの画面でも変えられます）">
+                ステムの頭のずれを {fmtMs(-slWarn)} 直す
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={box(warn && slWarn === null)}>
+        <div className="row" style={{ marginBottom: 4 }}>
+          <b style={{ fontSize: 12 }}>譜面とのずれ</b>
+          <span className="grow" />
+          {slWarn === null && r.verdict === 'ok' && <span className="pill ok">合っています</span>}
+          {slWarn === null && warn && <span className="pill warn">{r.verdict === 'bpm' ? 'BPM' : fmtMs(r.offset)}</span>}
+        </div>
+        <p className="lbl" style={{ margin: 0, lineHeight: 1.7, color: 'var(--text2)' }}>
+          {slWarn !== null && r.verdict !== 'few'
+            ? `ステムの打点はチップより ${fmtMs(r.offset)} ずれていますが、そのうち ${fmtMs(slWarn)} はステムのずれです。原曲と比べた譜面のずれは ${fmtMs(r.offset - slWarn)} です。ステムを直すと採譜し直して、もう一度測ります。`
+            : offsetSummary(r)}
+        </p>
+        {slWarn === null && warn && (
+          <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+            {r.verdict === 'start' && (
+              <button className="btn small primary" onClick={() => fixStart()} title="原曲（BGM のチップ）を動かして、譜面のグリッドを原曲に合わせます。テンポ合わせの「開始位置」を動かすのと同じです">
+                開始位置を {fmtMs(r.offset)} 直す
+              </button>
+            )}
+            {r.verdict === 'bpm' && r.bpmFit && (
+              <button className="btn small primary" onClick={() => fixBpm()} title="BPM を直し、原曲（BGM のチップ）の位置も合わせます。チップは同じ拍の位置のままです">
+                BPM を {r.bpmFit.bpm} にして合わせる
+              </button>
+            )}
+            {r.verdict === 'uneven' && (
+              <button
+                className="btn small"
+                onClick={() => {
+                  onClose();
+                  openPage('tempo');
+                }}
+              >
+                テンポ合わせを開く
+              </button>
+            )}
+            {r.verdict === 'uneven' && Math.abs(r.offset) >= 0.012 && (
+              <button className="link-btn" onClick={() => fixStart()} title="曲全体のずれの中央値の分だけ、開始位置を動かします">
+                平均の {fmtMs(r.offset)} だけ直す
+              </button>
+            )}
+          </div>
+        )}
+        {canOrig && (
+          <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6, fontSize: 10.5 }}>
+            ステム（{dr.name}）の打点で測っています。
+            <button
+              className="link-btn"
+              style={{ fontSize: 10.5 }}
+              onClick={() => {
+                onClose();
+                chooseAnalysisStem(null);
+              }}
+              title="解析元（◉）を原曲にして、原曲から採譜し直します"
+            >
+              原曲で測る
+            </button>
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1453,6 +1596,14 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
   }
   const a = useAssist.getState();
   const rx = x - g.ox;
+  if (h.kind === 'header' && a.audioCols && rx >= GEO.hitsX && rx < GEO.hitsX + GEO.hitsW) {
+    const sl = stemLagWarn();
+    if (sl) return at(`stemlag:${sl.key}`, 'warn', 'ステムと原曲のずれ', [stemLagText(sl.lag!, sl.name), 'クリック: 直し方']);
+    const r = offsetReport();
+    if (r && r.verdict !== 'ok' && r.verdict !== 'few') {
+      return at(`offset:${r.verdict}`, 'warn', '譜面と原曲の打点のずれ', [offsetSummary(r), 'クリック: 直し方']);
+    }
+  }
   const inWave = a.audioCols && rx >= GEO.waveX && rx < GEO.waveX + waveColW();
   if (h.kind === 'header' && inWave) {
     const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
@@ -2127,7 +2278,21 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   if (a.audioCols) {
     ctx.font = '9px system-ui, sans-serif';
     ctx.fillStyle = '#A3ADBB';
-    ctx.fillText('原曲の打点 ⓘ', ox + GEO.hitsX + GEO.hitsW / 2, 8);
+    // 譜面のチップと原曲の打点がずれていれば、見出しの代わりにずれを出す（クリックで直し方）
+    const bgmH = bgmSource(doc);
+    const badge = bgmH ? offsetBadge(tempo.beatToSec(g.yToBeat(H)) - bgmH.sec, tempo.beatToSec(g.yToBeat(GEO.head)) - bgmH.sec) : null;
+    if (badge) {
+      const bx = ox + GEO.hitsX + GEO.hitsW / 2;
+      ctx.font = '600 9px system-ui, sans-serif';
+      const tw = ctx.measureText(badge).width;
+      ctx.fillStyle = 'rgba(255,199,104,.16)';
+      roundRect(ctx, bx - tw / 2 - 5, 1.5, tw + 10, 13, 6.5);
+      ctx.fill();
+      ctx.fillStyle = C.amber;
+      ctx.fillText(badge, bx, 8);
+    } else {
+      ctx.fillText('原曲の打点 ⓘ', ox + GEO.hitsX + GEO.hitsW / 2, 8);
+    }
     const dr = useDrums.getState();
     if (readyDrums()) {
       // ドラムの採譜モデルの5種
