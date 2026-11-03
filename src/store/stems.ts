@@ -187,7 +187,7 @@ function applyStrips() {
 }
 
 /**
- * 解析（波形・原曲の打点・候補チップ・BPM推定）に使うステム。選んだものが無く、原曲のファイルも
+ * 解析（波形・原曲の打点・BPM推定）に使うステム。選んだものが無く、原曲のファイルも
  * 鳴らせないときは、ドラム、無ければ最初のステムを使う（ステムだけ読み込んでも波形が出るように）。
  */
 export function effectiveAnalysisStem(): { file: string; auto: boolean } | null {

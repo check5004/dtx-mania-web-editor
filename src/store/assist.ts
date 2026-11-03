@@ -1,14 +1,13 @@
-// 耳コピアシストの状態：原曲の解析、候補チップ、ループ・速度・帯域フィルタ・ミュート、入力方法。
+// 耳コピアシストの状態：原曲の解析、ループ・速度・帯域フィルタ・ミュート、入力方法。
 import { create } from 'zustand';
 import { pickOnsets, type AnalysisData, type Band, type Onset } from '../audio/analysis';
 import { engine, type BgmFilter, type StretchProvider } from '../audio/engine';
 import * as wk from '../audio/workerClient';
-import { classifyEvents, detectEvents, placeGhosts, GHOST_LANES, type Ghost, type GhostLane, type Hit } from '../assist/ghosts';
 import { copyMeasureInto, measureSignatures, sameMeasures } from '../assist/similar';
 import type { DtxDoc } from '../dtx/model';
 import { bgmSource, tempoOf, wavPath } from './derived';
 import { snapToGrid } from '../edit/ops';
-import { edit, placeChips, useEditor } from './editor';
+import { edit, useEditor } from './editor';
 
 export type InputMode = 'mouse' | 'key' | 'rec';
 
@@ -33,10 +32,8 @@ export interface AssistState {
   waveMode: 'wave' | 'spec';
   /** 譜面の右の「原曲の打点」「原曲の波形」の列を出すか */
   audioCols: boolean;
-  ghostsOn: boolean;
+  /** 「原曲の打点」の列に出す打点の感度（0〜1） */
   sensitivity: number;
-  ghostLanes: Record<GhostLane, boolean>;
-  dismissed: ReadonlySet<string>;
   loop: LoopBeats | null;
   speed: number;
   bandFilter: BgmFilter;
@@ -59,10 +56,7 @@ export const useAssist = create<AssistState>(() => ({
   specSource: null,
   waveMode: 'wave',
   audioCols: true,
-  ghostsOn: true,
   sensitivity: 0.5,
-  ghostLanes: { BD: true, SD: true, HH: true, CY: true },
-  dismissed: new Set(),
   loop: null,
   speed: 1,
   bandFilter: 'all',
@@ -115,7 +109,7 @@ export function syncAnalysis() {
   if (running === got.key) return;
   running = got.key;
   const name = stem ? stem.name : ((wavPath(s.doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '');
-  aset({ src: { wav: bgm.wav, key: got.key, name }, status: 'loading', progress: 0, error: null, data: null, ...specReset(), dismissed: new Set() });
+  aset({ src: { wav: bgm.wav, key: got.key, name }, status: 'loading', progress: 0, error: null, data: null, ...specReset() });
   void (async () => {
     try {
       await wk.loadAudio(got.key, got.buf);
@@ -175,19 +169,7 @@ export function setWaveMode(m: 'wave' | 'spec') {
   if (m === 'spec') void loadSpectrogram();
 }
 
-// ---- 候補チップ -------------------------------------------------------------------
-
-let hitsMemo: { data: AnalysisData; sens: number; hits: Hit[] } | null = null;
-
-/** 打点をレーンに振り分けたもの（感度ごとに覚えておく） */
-export function analysisHits(): Hit[] {
-  const a = aget();
-  if (!a.data) return [];
-  if (hitsMemo && hitsMemo.data === a.data && hitsMemo.sens === a.sensitivity) return hitsMemo.hits;
-  const hits = classifyEvents(detectEvents(a.data, a.sensitivity));
-  hitsMemo = { data: a.data, sens: a.sensitivity, hits };
-  return hits;
-}
+// ---- 原曲の打点 -------------------------------------------------------------------
 
 let bandMemo: { data: AnalysisData; sens: number; out: Record<Band, Onset[]> } | null = null;
 
@@ -204,70 +186,6 @@ export function bandOnsets(): Record<Band, Onset[]> | null {
   bandMemo = { data: a.data, sens: a.sensitivity, out };
   return out;
 }
-
-let ghostMemo: { doc: DtxDoc; div: number; hits: Hit[]; lanes: object; dismissed: object; on: boolean; out: Ghost[] } | null = null;
-
-/** 今の譜面に出す候補チップ */
-export function currentGhosts(): Ghost[] {
-  const a = aget();
-  const s = useEditor.getState();
-  if (!a.data || !a.ghostsOn) return [];
-  const hits = analysisHits();
-  const div = s.view.div;
-  if (ghostMemo && ghostMemo.doc === s.doc && ghostMemo.div === div && ghostMemo.hits === hits && ghostMemo.lanes === a.ghostLanes && ghostMemo.dismissed === a.dismissed && ghostMemo.on === a.ghostsOn) {
-    return ghostMemo.out;
-  }
-  const bgm = bgmSource(s.doc);
-  const out = bgm ? placeGhosts(hits, s.doc, tempoOf(s.doc), { offsetSec: bgm.sec, div, lanes: a.ghostLanes, dismissed: a.dismissed }) : [];
-  ghostMemo = { doc: s.doc, div, hits, lanes: a.ghostLanes, dismissed: a.dismissed, on: a.ghostsOn, out };
-  return out;
-}
-
-export function ghostsInRange(from: number, to: number): Ghost[] {
-  const g = currentGhosts();
-  let lo = 0;
-  let hi = g.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (g[mid].beat < from) lo = mid + 1;
-    else hi = mid;
-  }
-  const out: Ghost[] = [];
-  for (let i = lo; i < g.length && g[i].beat <= to; i++) out.push(g[i]);
-  return out;
-}
-
-export function dismissGhosts(keys: string[]) {
-  if (keys.length === 0) return;
-  const next = new Set(aget().dismissed);
-  for (const k of keys) next.add(k);
-  aset({ dismissed: next });
-}
-
-/** 候補チップを採用して本物のチップにする */
-export function adoptGhosts(list: readonly Ghost[]): number {
-  if (list.length === 0) return 0;
-  placeChips(
-    list.map((g) => ({ lane: g.lane, alt: false, pos: g.pos })),
-    { label: list.length === 1 ? '候補を採用' : `候補を ${list.length} 個採用` },
-  );
-  return list.length;
-}
-
-/** 拍の範囲 [from, to) の候補を採用 */
-export function adoptGhostsInRange(from: number, to: number): number {
-  return adoptGhosts(ghostsInRange(from, to - 1e-9));
-}
-
-export function restoreGhosts() {
-  aset({ dismissed: new Set() });
-}
-
-export function setGhostLane(l: GhostLane, on: boolean) {
-  aset({ ghostLanes: { ...aget().ghostLanes, [l]: on } });
-}
-
-export { GHOST_LANES };
 
 // ---- ループ・速度・ミックス ----------------------------------------------------------
 
@@ -516,7 +434,7 @@ export function resetAssistForDoc() {
     specSrc = null;
     aset({ specSource: null, spectro: null, spectroStatus: 'none' });
   }
-  aset({ loop: null, dismissed: new Set(), similarPin: null });
+  aset({ loop: null, similarPin: null });
 }
 
 // ---- スロー再生の BGM（伸ばした音をワーカーで作る） --------------------------------------

@@ -235,8 +235,8 @@ function TrackHead({ t }: { t: StemTrack }) {
           onClick={() => chooseAnalysisStem(analysis === t.file && !eff?.auto ? null : t.file)}
           title={
             analysis === t.file && eff?.auto
-              ? '原曲のファイルが無いので、このトラックから波形・原曲の打点・候補チップを作っています（クリックで固定）'
-              : '波形・原曲の打点・候補チップ・BPM推定をこのトラックから作る'
+              ? '原曲のファイルが無いので、このトラックから波形・原曲の打点を作っています（クリックで固定）'
+              : '波形・原曲の打点・BPM推定をこのトラックから作る'
           }
           aria-label={`${t.name}を解析に使う`}
           aria-pressed={analysis === t.file}
@@ -469,7 +469,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
             }
             c.globalAlpha = 1;
           }
-          const note = analysis === t.file ? '解析元: 波形・原曲の打点・候補チップ・BPM推定に使います' : (() => {
+          const note = analysis === t.file ? '解析元: 波形・原曲の打点・BPM推定に使います' : (() => {
             const inf = stemInfo(t.file);
             return inf && inf.shortBy > 0.01 ? `他より ${inf.shortBy.toFixed(2)} 秒短い → 末尾を無音で埋めてそろえます` : '';
           })();

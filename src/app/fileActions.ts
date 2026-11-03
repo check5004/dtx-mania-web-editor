@@ -300,7 +300,7 @@ export async function dropAudioInEditor(files: File[]) {
     body: 'いま編集中の譜面に使うか、新しい譜面を作るかを選んでください。',
     options: [
       ...(audio.length === 1
-        ? [{ label: bgmSource(get().doc) ? '原曲を差し替える' : '原曲にする（おすすめ）', sub: '曲フォルダにコピーしてBGM（#WAV・ch01）に登録します。波形と候補チップはこの音から作ります', value: 'bgm' as const }]
+        ? [{ label: bgmSource(get().doc) ? '原曲を差し替える' : '原曲にする（おすすめ）', sub: '曲フォルダにコピーしてBGM（#WAV・ch01）に登録します。波形と原曲の打点はこの音から作ります', value: 'bgm' as const }]
         : []),
       { label: 'ステムとして読み込む', sub: '楽器ごとに分けた音（ドラム・ベースなど）。DAWのように鳴らし分けられます', value: 'stems' as const },
       { label: '新しい譜面を作る', sub: 'いまの譜面を閉じて、この音から新しい譜面を作ります', value: 'new' as const },

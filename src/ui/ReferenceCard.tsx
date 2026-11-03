@@ -121,7 +121,7 @@ export function ReferenceCard() {
           </button>
         </div>
         <div className="lbl" style={{ lineHeight: 1.6, padding: '7px 9px', borderRadius: 7, background: '#151A21' }}>
-          {srcName ? `波形と候補チップは音声ファイル（${srcName}）から作っています。` : '波形と候補チップは音声ファイルから作ります。'}
+          {srcName ? `波形と原曲の打点は音声ファイル（${srcName}）から作っています。` : '波形と原曲の打点は音声ファイルから作ります。'}
           YouTubeは映像と音の確認用です。ずれは作業ファイル（.dtxe.json）に保存します。
         </div>
       </div>

@@ -1,9 +1,8 @@
 // 譜面の縦スクロール表示と、マウスでの編集。下から上へ時間が進む（NXと同じ向き）。
-// 右に「原曲の打点（低・中・高）」と「原曲の波形」の列、レーンには候補チップ（点線）を出す。
+// 右に「原曲の打点（低・中・高）」と「原曲の波形」の列を出す。
 import { useEffect, useRef, useState } from 'react';
 import type { Onset } from '../audio/analysis';
 import { engine } from '../audio/engine';
-import type { Ghost } from '../assist/ghosts';
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
@@ -13,11 +12,8 @@ import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import {
   bandOnsets,
   beginLoopDrag,
-  currentGhosts,
-  dismissGhosts,
   dragLoop,
   endLoopDrag,
-  ghostsInRange,
   setLoop,
   setWaveMode,
   useAssist,
@@ -107,7 +103,7 @@ type Drag =
   | { type: 'velPencil'; idx: number; group: string; lastY: number }
   | { type: 'velLine'; idx: number; y0: number; v0: number; y1: number; v1: number }
   | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean }
-  | { type: 'erase'; ids: Set<number>; ghosts: Set<string> }
+  | { type: 'erase'; ids: Set<number> }
   | { type: 'cursor' }
   | { type: 'loop'; ld: LoopDrag; y0: number; where: 'chart' | 'mini' }
   | { type: 'mini' };
@@ -118,7 +114,6 @@ interface Hover {
   lane: number;
   pos: Pos | null;
   alt: boolean;
-  ghost: Ghost | null;
   /** 小節番号の列・波形の上：クリックで再生を始める位置（拍） */
   start?: number;
 }
@@ -141,7 +136,7 @@ interface Local {
   drag: Drag | null;
   hover: Hover | null;
   followScroll: number | null;
-  mini: { canvas: HTMLCanvasElement; doc: unknown; h: number; endBeat: number; ghosts: unknown; sections: unknown } | null;
+  mini: { canvas: HTMLCanvasElement; doc: unknown; h: number; endBeat: number; sections: unknown } | null;
   spec: { canvas: HTMLCanvasElement; data: unknown } | null;
   pointer: { x: number; y: number } | null;
 }
@@ -395,10 +390,7 @@ export function ChartCanvas() {
         return;
       }
       if (h.kind === 'chip') {
-        l.drag = { type: 'erase', ids: new Set([h.view.c.id]), ghosts: new Set() };
-        l.dirty = true;
-      } else if (h.kind === 'ghost') {
-        l.drag = { type: 'erase', ids: new Set(), ghosts: new Set([h.ghost.key]) };
+        l.drag = { type: 'erase', ids: new Set([h.view.c.id]) };
         l.dirty = true;
       }
       return;
@@ -416,11 +408,6 @@ export function ChartCanvas() {
     if (h.kind === 'miniLoop') {
       const mg = miniGeom(l);
       l.drag = { type: 'loop', ld: beginLoopDrag(mg.beatAt(y), (6 * mg.end) / (mg.bottom - mg.top)), y0: y, where: 'mini' };
-      return;
-    }
-    if (h.kind === 'ghost') {
-      // 候補を採用（その位置にチップを置く）
-      placeChip(h.ghost.lane, false, h.ghost.pos);
       return;
     }
     if (h.kind === 'audio' && !useAssist.getState().data && (useAssist.getState().status === 'nosource' || useAssist.getState().status === 'none')) {
@@ -486,15 +473,13 @@ export function ChartCanvas() {
       const h = hitTest(l, g, x, y);
       if (h && h.kind === 'lane') {
         const pos = snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div);
-        l.hover = { x, y, lane: h.lane, pos, alt: e.shiftKey, ghost: null };
-      } else if (h && h.kind === 'ghost') {
-        l.hover = { x, y, lane: h.ghost.lane, pos: null, alt: false, ghost: h.ghost };
+        l.hover = { x, y, lane: h.lane, pos, alt: e.shiftKey };
       } else if (h && (h.kind === 'gutter' || h.kind === 'audio')) {
         const tempo = tempoOf(s.doc);
         const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
-        l.hover = { x, y, lane: -1, pos: null, alt: false, ghost: null, start: tempo.beatOf(p.m, p.f) };
+        l.hover = { x, y, lane: -1, pos: null, alt: false, start: tempo.beatOf(p.m, p.f) };
       } else {
-        l.hover = h && h.kind !== 'mini' && h.kind !== 'miniLoop' && h.kind !== 'vel' && h.kind !== 'velChip' ? { x, y, lane: -1, pos: null, alt: false, ghost: null } : null;
+        l.hover = h && h.kind !== 'mini' && h.kind !== 'miniLoop' && h.kind !== 'vel' && h.kind !== 'velChip' ? { x, y, lane: -1, pos: null, alt: false } : null;
       }
       showTip(tipFor(l, g, h, x, y));
       const tool = useVel.getState().tool;
@@ -507,7 +492,7 @@ export function ChartCanvas() {
               : 'default'
           : h?.kind === 'chip'
           ? 'grab'
-          : h?.kind === 'ghost' || h?.kind === 'section'
+          : h?.kind === 'section'
             ? 'pointer'
             : h?.kind === 'loop' || h?.kind === 'miniLoop'
               ? loopCursor(l, g, h.kind, y)
@@ -546,7 +531,6 @@ export function ChartCanvas() {
     if (d.type === 'erase') {
       const h = hitTest(l, g, x, y);
       if (h?.kind === 'chip') d.ids.add(h.view.c.id);
-      if (h?.kind === 'ghost') d.ghosts.add(h.ghost.key);
       return;
     }
     if (d.type === 'cursor') {
@@ -618,7 +602,6 @@ export function ChartCanvas() {
     }
     if (d.type === 'erase') {
       deleteChips([...d.ids]);
-      dismissGhosts([...d.ghosts]);
       return;
     }
     if (d.type === 'cursor') {
@@ -727,7 +710,7 @@ export function ChartCanvas() {
             </div>
           </div>
           <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.7 }}>
-            波形だけでは埋もれて見えない音を探す目印で、点線の候補チップもここから作っています。「原曲の波形」の見出しをクリックするとスペクトログラムに切り替わります。
+            波形だけでは埋もれて見えない音を探す目印です。「原曲の波形」の見出しをクリックするとスペクトログラムに切り替わります。
           </p>
         </div>
       )}
@@ -767,7 +750,6 @@ function geom(l: Local, scroll: number, px: number): Geom {
 
 type Hit =
   | { kind: 'chip'; view: ChipView }
-  | { kind: 'ghost'; ghost: Ghost }
   | { kind: 'lane'; lane: number }
   | { kind: 'gutter' }
   | { kind: 'section'; m: number }
@@ -854,19 +836,6 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
     }
   }
   if (best) return { kind: 'chip', view: best };
-  if (col >= 0) {
-    let bg: Ghost | null = null;
-    let bd = Infinity;
-    for (const gh of ghostsInRange(beat - tol, beat + tol)) {
-      if (gh.lane !== col) continue;
-      const dd = Math.abs(gh.beat - beat);
-      if (dd < bd) {
-        bg = gh;
-        bd = dd;
-      }
-    }
-    if (bg) return { kind: 'ghost', ghost: bg };
-  }
   if (col === COL_BPM) return { kind: 'bpm' };
   if (col === COL_BGM) return { kind: 'bgm' };
   if (col === COL_BGA) return { kind: 'bga' };
@@ -1260,30 +1229,8 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   const sel = new Set(s.selection);
   const d = l.drag;
   const erasing = d?.type === 'erase' ? d.ids : null;
-  const erasingGhosts = d?.type === 'erase' ? d.ghosts : null;
   const moving = d?.type === 'move' && d.moved && d.dBeat ? d : null;
   const visible = viewsInRange(views, g.minBeat - 0.5, g.maxBeat + 0.5);
-
-  // 候補チップ（点線）
-  if (a.ghostsOn && a.data) {
-    const hv = l.hover?.ghost?.key;
-    for (const gh of ghostsInRange(g.minBeat - 0.5, g.maxBeat + 0.5)) {
-      if (erasingGhosts?.has(gh.key)) continue;
-      const lane = DRUM_LANES[gh.lane];
-      const y = g.beatToY(gh.beat);
-      const cx = ox + laneCX(gh.lane);
-      ctx.globalAlpha = hv === gh.key ? 1 : 0.45 + 0.45 * gh.s;
-      roundRect(ctx, cx - 16, y - 5, 32, 10, 3);
-      ctx.fillStyle = hv === gh.key ? lane.color + '55' : 'rgba(255,255,255,.04)';
-      ctx.fill();
-      ctx.setLineDash([3, 2]);
-      ctx.strokeStyle = lane.color;
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
-    }
-  }
 
   const velMode = useVel.getState().mode;
   const issueOn = useCheck.getState().showIssues;
@@ -1310,7 +1257,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
         ctx.fillStyle = shade(color, vel);
         ctx.fill();
         if (vel <= 50) {
-          // 弱いチップは縁取り（点線の候補チップとは見分けられるよう実線）
+          // 弱いチップは縁取り（点線のフレーズ候補とは見分けられるよう実線）
           ctx.strokeStyle = color;
           ctx.lineWidth = 1;
           ctx.stroke();
@@ -2042,8 +1989,7 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
   const x = l.w - GEO.miniW;
   const ML = GEO.miniLoopW;
   const { top, bottom, end } = miniGeom(l);
-  const ghosts = a.ghostsOn && a.data ? currentGhosts() : null;
-  if (!l.mini || l.mini.doc !== doc || l.mini.h !== l.h || l.mini.endBeat !== end || l.mini.ghosts !== ghosts || l.mini.sections !== side.sections) {
+  if (!l.mini || l.mini.doc !== doc || l.mini.h !== l.h || l.mini.endBeat !== end || l.mini.sections !== side.sections) {
     const c = l.mini?.canvas ?? document.createElement('canvas');
     c.width = Math.floor(GEO.miniW * l.dpr);
     c.height = Math.floor(l.h * l.dpr);
@@ -2073,14 +2019,6 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
       const y = yOf(tempo.measureStart(mm));
       m.fillRect(ML + 6, Math.round(y), GEO.miniW - ML - 12, 1);
     }
-    if (ghosts) {
-      m.globalAlpha = 0.35;
-      for (const gh of ghosts) {
-        m.fillStyle = DRUM_LANES[gh.lane].color;
-        m.fillRect(ML + 6 + slotOf(gh.lane) * 6, Math.round(yOf(gh.beat)), 5, 1);
-      }
-      m.globalAlpha = 1;
-    }
     for (const v of chipViews(doc)) {
       if (v.col < 0) continue;
       m.fillStyle = DRUM_LANES[v.col].color;
@@ -2089,7 +2027,7 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
     // BPM の変化
     m.fillStyle = C.amber;
     for (const ev of tempo.events.slice(1)) m.fillRect(GEO.miniW - 6, Math.round(yOf(ev.beat)) - 1, 4, 2);
-    l.mini = { canvas: c, doc, h: l.h, endBeat: end, ghosts, sections: side.sections };
+    l.mini = { canvas: c, doc, h: l.h, endBeat: end, sections: side.sections };
   }
   ctx.drawImage(l.mini.canvas, x, 0, GEO.miniW, l.h);
   // ループの範囲（左の帯に範囲と A・B の印）

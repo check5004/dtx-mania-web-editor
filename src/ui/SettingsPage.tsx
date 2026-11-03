@@ -294,7 +294,7 @@ function KeySettings() {
       </div>
       <p className="lbl" style={{ lineHeight: 1.8 }}>
         <kbd>Shift</kbd>＋キーで HHオープン・左バスドラム。<kbd>↑</kbd>
-        <kbd>↓</kbd> でカーソル移動、<kbd>[</kbd> <kbd>]</kbd> でグリッド変更、<kbd>Enter</kbd> でカーソルの小節の候補をまとめて採用、<kbd>Ctrl</kbd>＋<kbd>D</kbd> で前の小節を複製。
+        <kbd>↓</kbd> でカーソル移動、<kbd>[</kbd> <kbd>]</kbd> でグリッド変更、<kbd>Ctrl</kbd>＋<kbd>D</kbd> で前の小節を複製。
       </p>
     </div>
   );
