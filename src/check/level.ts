@@ -21,6 +21,28 @@ export interface LevelEstimate {
 
 const HAND = new Set([0, 1, 3, 4, 6, 7, 8, 9]);
 
+/**
+ * 打数の項の係数。2026-11-03 に、楯さんの手元の6曲23譜面（作者5人、Lv2.40〜8.30）の #DLEVEL で合わせ直した。
+ * 前の 3.1・-1.9 は登録より低く（BASIC で半分前後、MASTER で7割）出ていた。誤差は二乗平均で 1.73 → 0.43
+ * （曲ごとに抜いて確かめても 0.52）。残りの誤差は主に作者ごとのつけ方の違いで、ガイドラインと似た譜面で埋める。
+ */
+const SLOPE = 3.51;
+const BASE = -0.93;
+const OLD_SLOPE = 3.1;
+const OLD_BASE = -1.9;
+/** 推定の式の版。ガイドラインに保存した古い推定を直すのに使う */
+export const LEVEL_VERSION = 2;
+
+const effOf = (avgNps: number, peakNps: number) => Math.max(1, 0.7 * avgNps + 0.3 * peakNps);
+const clampLevel = (lv: number) => Math.round(Math.max(1, Math.min(9.99, lv)) * 100) / 100;
+
+/** 前の版の式で出した推定を今の式に直す。密度は保存してあるので、ほかの項は前の推定から逆算する */
+export function migrateLevel(old: number, avgNps: number, peakNps: number): number {
+  const eff = effOf(avgNps, peakNps);
+  const aux = Math.max(0, old - (OLD_SLOPE * Math.log(eff) + OLD_BASE));
+  return clampLevel(SLOPE * Math.log(eff) + BASE + aux);
+}
+
 export function estimateLevel(doc: DtxDoc, tempo: TempoMap): LevelEstimate | null {
   const ev: { sec: number; lane: number }[] = [];
   for (const c of doc.chips) {
@@ -70,11 +92,9 @@ export function estimateLevel(doc: DtxDoc, tempo: TempoMap): LevelEstimate | nul
     prevHand = e.lane;
   }
   const movesPs = moves / duration;
-  // 打数は対数で効かせる（8ビート120BPM ≒ 3.8、16ビート140BPM ≒ 6、BDの多い16分180BPM ≒ 7.5）
-  const eff = 0.7 * avgNps + 0.3 * peakNps;
-  let lv = 3.1 * Math.log(Math.max(1, eff)) - 1.9 + 0.4 * fastRatio + 0.15 * Math.min(2, Math.max(0, maxChord - 2)) + 0.03 * movesPs;
-  lv = Math.max(1, Math.min(9.99, lv));
-  return { level: Math.round(lv * 100) / 100, notes: ev.length, duration, avgNps, peakNps, maxChord, fastRatio, moves: movesPs };
+  // 打数は対数で効かせる（平均2.5打/秒 ≒ Lv2.5、5打/秒 ≒ Lv5、10打/秒 ≒ Lv8 前後）
+  const lv = SLOPE * Math.log(effOf(avgNps, peakNps)) + BASE + 0.4 * fastRatio + 0.15 * Math.min(2, Math.max(0, maxChord - 2)) + 0.03 * movesPs;
+  return { level: clampLevel(lv), notes: ev.length, duration, avgNps, peakNps, maxChord, fastRatio, moves: movesPs };
 }
 
 /** #DLEVEL に書く値（6.65 → 665） */

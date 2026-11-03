@@ -405,7 +405,12 @@ function Verdict({ ds }: { ds: DiffState }) {
     <div className={`card gen-verdict ${pass ? 'ok' : 'warn'}`}>
       <b>{pass ? '✓ 検証を通過' : '! 確認してください'}</b>
       <div>{msgs.join('。')}。</div>
-      {!ok && <div className="lbl">目標から外れています。「易しく／難しく」で段を動かすか、目標を変えて作り直してください。</div>}
+      {!ok &&
+        (r.rung >= MAX_RUNG && shownLevel(ds, calib) > ds.target.max ? (
+          <div className="lbl">いちばん簡単な段でも目標より高く出ました。人が作る BASIC でもこのくらいの曲はあります。このままでよければ書き出し、もっと下げたいときは中央の譜面のチップを押して削ってください。</div>
+        ) : (
+          <div className="lbl">目標から外れています。「易しく／難しく」で段を動かすか、目標を変えて作り直してください。</div>
+        ))}
     </div>
   );
 }

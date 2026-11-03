@@ -129,8 +129,8 @@ describe('簡略化', () => {
   });
   it('目標のレベル帯まで段を動かす', () => {
     const d = song(16, 170);
-    const g = generateToTarget({ doc: d, sections, keep: DEFAULT_KEEP }, 0, { min: 2, max: 3.2 });
-    expect(g.level).toBeLessThanOrEqual(3.2);
+    const g = generateToTarget({ doc: d, sections, keep: DEFAULT_KEEP }, 0, { min: 3.5, max: 4.6 });
+    expect(g.level).toBeLessThanOrEqual(4.6);
     expect(g.tries.length).toBeGreaterThan(1);
     expect(g.rung).toBeGreaterThan(0);
   });

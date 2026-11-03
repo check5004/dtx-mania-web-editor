@@ -7,7 +7,7 @@ import { estimateLevel } from '../check/level';
 import { drumNotes, HAND_LANES, TOM_LANES, type Note } from './features';
 
 /** 残す一番細かい間隔（拍）。0 は全部残す、null は残さない */
-export type Step = 0 | 0.25 | 0.5 | 1 | 2;
+export type Step = 0 | 0.25 | 0.5 | 1 | 2 | 4;
 
 export interface Policy {
   hh: Step;
@@ -38,6 +38,8 @@ export const LADDER: readonly Policy[] = [
   { hh: 1, kick: 1, snare: 'backbeat', toms: 1, fillEarly: 1, fillLast: 0.5, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'keep', maxChord: 2 },
   { hh: 1, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 0.5, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'toRight', maxChord: 2 },
   { hh: 2, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'toRight', maxChord: 2 },
+  // 速い曲の BASIC 用：キックは小節の頭だけ（人の作った BASIC は 180BPM 前後でこの形が多い）
+  { hh: 2, kick: 4, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', openHH: false, leftFoot: 'drop', ride: 'toHH', leftCymbal: 'toRight', maxChord: 2 },
 ];
 
 export const MAX_RUNG = LADDER.length - 1;
@@ -46,8 +48,8 @@ export type Difficulty = 'BASIC' | 'ADVANCED' | 'EXTREME';
 export const DIFFICULTIES: readonly Difficulty[] = ['EXTREME', 'ADVANCED', 'BASIC'];
 /** 難易度ごとの最初の段 */
 export const DEFAULT_RUNG: Record<Difficulty, number> = { EXTREME: 1, ADVANCED: 4, BASIC: 6 };
-/** MASTER のレベルに対する目標の割合 */
-export const TARGET_RATIO: Record<Difficulty, number> = { EXTREME: 0.82, ADVANCED: 0.62, BASIC: 0.4 };
+/** MASTER のレベルに対する目標の割合（楯さんの手元の5曲の人が作った譜面の平均: 0.85・0.60・0.37） */
+export const TARGET_RATIO: Record<Difficulty, number> = { EXTREME: 0.85, ADVANCED: 0.6, BASIC: 0.37 };
 
 export function targetRange(diff: Difficulty, masterLevel: number): { min: number; max: number; center: number } {
   const c = Math.max(1, Math.min(9.5, masterLevel * TARGET_RATIO[diff]));
@@ -450,7 +452,7 @@ export function levelOfDoc(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): n
 
 /** 方針を人が読める文にする */
 export function describePolicy(p: Policy): string {
-  const g = (s: Step | null | 'backbeat') => (s === null ? 'なし' : s === 'backbeat' ? '2・4拍' : s === 0 ? 'そのまま' : s === 0.25 ? '16分' : s === 0.5 ? '8分' : s === 1 ? '4分' : '2分');
+  const g = (s: Step | null | 'backbeat') => (s === null ? 'なし' : s === 'backbeat' ? '2・4拍' : s === 0 ? 'そのまま' : s === 0.25 ? '16分' : s === 0.5 ? '8分' : s === 1 ? '4分' : s === 2 ? '2分' : '小節の頭だけ');
   const parts = [`ハイハット ${g(p.hh)}`, `キック ${g(p.kick)}`, `スネア ${g(p.snare)}`, `フィル ${p.fillEarly === null ? '最後の拍だけ' : g(p.fillEarly)}`];
   if (p.cymbals === 'heads') parts.push('クラッシュは頭だけ');
   if (!p.openHH) parts.push('オープンHHは閉じる');

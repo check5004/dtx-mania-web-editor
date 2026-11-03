@@ -240,7 +240,7 @@ export function planPrompt(o: {
   lines.push(`曲: ${o.title}${o.genre ? `（${o.genre}）` : ''}`);
   lines.push(`MASTER: Lv${o.masterLevel.toFixed(2)} / ${featureSummary(feat)}`);
   lines.push(`作る難易度: ${o.diff}（目標 Lv${o.target.min.toFixed(2)}〜${o.target.max.toFixed(2)}）`);
-  lines.push(`全体の簡略化の段: ${o.rung}（0〜8。${describePolicy(LADDER[o.rung])}）`);
+  lines.push(`全体の簡略化の段: ${o.rung}（0〜${LADDER.length - 1}。${describePolicy(LADDER[o.rung])}）`);
   lines.push(`必ず残すもの: ${keepList(o.keep) || '指定なし'}`);
   if (o.instruction.trim()) lines.push(`作者の指示: ${o.instruction.trim()}`);
   lines.push('');

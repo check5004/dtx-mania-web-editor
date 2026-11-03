@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { decodeDtx } from '../dtx/encoding';
 import { parseDtx } from '../dtx/parse';
 import { buildTempoMap } from '../dtx/timing';
+import { LEVEL_VERSION, migrateLevel } from '../check/level';
 import { defaultLabel, folderFromFileList, folderFromHandle, parseSetDef, type SongFolder } from '../fs/folder';
 import { chartFeatures, FEATURE_DEFS, featureDistance, featureSummary, type ChartFeatures, type FeatureKey } from '../gen/features';
 import { toast } from './editor';
@@ -93,10 +94,16 @@ const set = useGuideline.setState;
 
 let loading: Promise<void> | null = null;
 
+/** 前の版の推定レベルで保存した譜面は、今の式の値に直して使う */
+function upgradeEntry(c: ChartEntry): ChartEntry {
+  if (!c.feat || (c.feat.mechVer ?? 1) >= LEVEL_VERSION) return c;
+  return { ...c, feat: { ...c.feat, mech: migrateLevel(c.feat.mech, c.feat.density, c.feat.peakNps), mechVer: LEVEL_VERSION } };
+}
+
 export function loadGuideline(): Promise<void> {
   loading ??= (async () => {
     try {
-      const charts = (await wrap((await os('charts')).getAll() as IDBRequest<ChartEntry[]>)) ?? [];
+      const charts = ((await wrap((await os('charts')).getAll() as IDBRequest<ChartEntry[]>)) ?? []).map(upgradeEntry);
       const guide = ((await wrap((await os('kv')).get('guideline') as IDBRequest<Guideline | undefined>)) as Guideline | undefined) ?? emptyGuideline();
       set({ loaded: true, charts, guide: { ...emptyGuideline(), ...guide, bands: { ...emptyGuideline().bands, ...guide.bands } } });
     } catch {

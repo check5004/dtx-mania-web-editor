@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
-import { estimateLevel, levelToField } from './level';
+import { estimateLevel, levelToField, migrateLevel } from './level';
 import { findIssues } from './playability';
 
 const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
@@ -59,6 +59,21 @@ describe('推定レベル', () => {
     expect(easy.level).toBeLessThan(hard.level);
     expect(easy.level).toBeGreaterThanOrEqual(1);
     expect(hard.level).toBeLessThanOrEqual(9.99);
+  });
+  it('人の作った譜面の目盛りに合わせてある（平均5打/秒前後で Lv5 前後）', () => {
+    // 16分のハイハットを抜いた8ビート（HH 8分・BD・SD）148BPM ≒ 平均6打/秒。手元の曲では ADVANCED（Lv5前後）がこの形
+    const d = beat8(16, 148);
+    const e = estimateLevel(d, buildTempoMap(d))!;
+    expect(e.level).toBeGreaterThan(4.5);
+    expect(e.level).toBeLessThan(6.5);
+  });
+  it('前の版の推定（ガイドラインに保存したもの）を今の式に直せる', () => {
+    const d = beat8(16, 160, true);
+    const e = estimateLevel(d, buildTempoMap(d))!;
+    const eff = Math.max(1, 0.7 * e.avgNps + 0.3 * e.peakNps);
+    const aux = e.level - (3.51 * Math.log(eff) - 0.93);
+    const old = 3.1 * Math.log(eff) - 1.9 + aux;
+    expect(migrateLevel(old, e.avgNps, e.peakNps)).toBeCloseTo(e.level, 1);
   });
   it('#DLEVEL の書き方', () => {
     expect(levelToField(6.65)).toBe('665');

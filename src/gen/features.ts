@@ -2,7 +2,7 @@
 // どれも「その要素が譜面に出てくるか」と、密度などの数値。拍の位置で見るので BPM が変わっても同じ物差しになる。
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
-import { estimateLevel } from '../check/level';
+import { estimateLevel, LEVEL_VERSION } from '../check/level';
 
 export interface Note {
   id: number;
@@ -75,6 +75,8 @@ export interface ChartFeatures {
   bpm: number;
   /** 機械的な推定レベル */
   mech: number;
+  /** mech を出した式の版（無ければ 1。check/level の LEVEL_VERSION） */
+  mechVer?: number;
   /** 8分中心か16分中心か（ハイハット・ライドの刻み） */
   feel: '4' | '8' | '16' | 'mixed';
 }
@@ -174,6 +176,7 @@ export function chartFeatures(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc))
     maxChord: lv?.maxChord ?? (notes.length ? 1 : 0),
     bpm: tempo.initialBpm,
     mech: lv?.level ?? 1,
+    mechVer: LEVEL_VERSION,
     feel,
   };
 }
