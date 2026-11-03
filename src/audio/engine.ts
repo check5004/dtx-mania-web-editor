@@ -488,6 +488,25 @@ class AudioEngine {
     const run = this.run;
     const ctx = this.ctx;
     if (!run || !ctx) return null;
+    return this.songAt(run, this.heardCtxAt(ctx, perfMs));
+  }
+
+  /**
+   * いま耳に届いている曲の位置（秒）。鳴り始める前は、始めの位置から前へ延ばした位置を返す
+   * （参照映像を、音が鳴り始める時刻にそろえて動かし始めるため）
+   */
+  heardSecLinear(): number | null {
+    const run = this.run;
+    const ctx = this.ctx;
+    if (!run || !ctx) return null;
+    const t = this.heardCtxAt(ctx, performance.now());
+    const first = run.segs[0];
+    if (t < first.ctx) return first.song + (t - first.ctx) * run.rate;
+    return this.songAt(run, t);
+  }
+
+  /** performance.now() の時刻に耳に届いていた音の AudioContext の時刻 */
+  private heardCtxAt(ctx: AudioContext, perfMs: number): number {
     let ctxTime: number;
     const ts = typeof ctx.getOutputTimestamp === 'function' ? ctx.getOutputTimestamp() : null;
     if (ts && ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.performanceTime > 0 && ts.contextTime > 0) {
@@ -496,8 +515,7 @@ class AudioEngine {
       ctxTime = ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0) + (perfMs - performance.now()) / 1000;
     }
     // 出力の時刻が古いまま（タブが裏にあった直後など）でも、作っている音より先には進めない
-    ctxTime = Math.min(ctxTime, ctx.currentTime + (perfMs - performance.now()) / 1000);
-    return this.songAt(run, ctxTime);
+    return Math.min(ctxTime, ctx.currentTime + (perfMs - performance.now()) / 1000);
   }
 
   /** スピーカーに届くまでの遅れ（秒）。分からなければ 0 */

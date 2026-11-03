@@ -1,4 +1,5 @@
 // 解析ワーカーへの窓口。要求ごとに Promise を返す。
+import type { AlignSearch } from './align';
 import type { AnalysisData } from './analysis';
 import type { FrameFeatures } from './features';
 import type { SpecMode, SpectroData } from './spectro';
@@ -80,6 +81,16 @@ export function features(key: string, progress?: (p: number) => void): Promise<{
 
 export function stretch(key: string, rate: number, from: number, to: number): Promise<StretchChunk> {
   return call<StretchChunk>({ type: 'stretch', key, rate, from, to });
+}
+
+/** YouTube との自動合わせ: 原曲の特徴を作っておく（同じ曲は一度だけ） */
+export function alignRef(key: string, progress?: (p: number) => void): Promise<void> {
+  return call<void>({ type: 'alignRef', key }, [], progress);
+}
+
+/** YouTube から聞き取った音（モノラル）を原曲と比べる */
+export function alignProbe(key: string, pcm: Float32Array, sr: number): Promise<AlignSearch> {
+  return call<AlignSearch>({ type: 'alignProbe', key, pcm, sr }, [pcm.buffer as ArrayBuffer]);
 }
 
 export function isLoaded(key: string) {

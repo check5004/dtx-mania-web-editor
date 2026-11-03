@@ -1,4 +1,5 @@
 // 原曲の解析とスロー再生用の伸長を、画面を止めないように別スレッドで行う。
+import { alignFeatures, buildRefIndex, PROBE_SEC, ALIGN_FPS, searchProbe, type RefIndex } from './align';
 import { analyzeAudio } from './analysis';
 import { computeFrameFeatures } from './features';
 import { renderSpectro, spectroDb, type SpecMode } from './spectro';
@@ -9,11 +10,24 @@ export type WorkerRequest =
   | { id: number; type: 'analyze'; key: string }
   | { id: number; type: 'spectro'; key: string; mode: SpecMode }
   | { id: number; type: 'features'; key: string }
-  | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number };
+  | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number }
+  | { id: number; type: 'alignRef'; key: string }
+  | { id: number; type: 'alignProbe'; key: string; pcm: Float32Array; sr: number };
 
 const store = new Map<string, { channels: Float32Array[]; sr: number }>();
 /** スペクトルの dB（見せ方を変えるときに測り直さない）。2曲ぶん */
 const specCache = new Map<string, ReturnType<typeof spectroDb>>();
+
+/** YouTube との自動合わせに使う原曲の特徴（1曲ぶん） */
+let alignRef: { key: string; idx: RefIndex } | null = null;
+
+function alignIndex(key: string, src: { channels: Float32Array[]; sr: number }, progress?: (p: number) => void): RefIndex {
+  if (alignRef?.key === key) return alignRef.idx;
+  const feat = alignFeatures(src.channels, src.sr, progress);
+  const idx = buildRefIndex(feat, PROBE_SEC * ALIGN_FPS);
+  alignRef = { key, idx };
+  return idx;
+}
 
 const post = (msg: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(msg, transfer);
 
@@ -52,6 +66,17 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       const r = computeFrameFeatures(src.channels, src.sr, (p) => post({ id: req.id, progress: p }));
       const duration = (src.channels[0]?.length ?? 0) / src.sr;
       post({ id: req.id, ok: true, result: { frames: r, duration } }, [r.chroma.buffer, r.bands.buffer, r.flux.buffer] as Transferable[]);
+      return;
+    }
+    if (req.type === 'alignRef') {
+      alignIndex(req.key, src, (p) => post({ id: req.id, progress: p }));
+      post({ id: req.id, ok: true, result: null });
+      return;
+    }
+    if (req.type === 'alignProbe') {
+      const idx = alignIndex(req.key, src);
+      const r = searchProbe(idx, alignFeatures([req.pcm], req.sr));
+      post({ id: req.id, ok: true, result: r });
       return;
     }
     if (req.type === 'stretch') {

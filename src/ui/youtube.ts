@@ -1,16 +1,24 @@
 // YouTube の参照映像。譜面の再生に合わせて動かす（音は原曲ファイルを鳴らし、YouTube は消音が基本）。
+//
+// 動画の秒 = 原曲の秒 + offset（自動で合わせて所ごとの差 anchors があれば、その所の差を足す）。
+// 再生中は「いま耳に届いている曲の位置」と動画の位置（getCurrentTime）を比べ、ずれが大きくなったら動画を飛ばす。
+// 飛ばしてから動き出すまでの遅れは、飛ばしたあとの着地のずれから少しずつ覚える（先回りの量）。
 import { create } from 'zustand';
+import { anchorDelta } from '../audio/align';
 import { engine } from '../audio/engine';
 import { bgmSource, tempoOf } from '../store/derived';
 import { onPlayback, useEditor } from '../store/editor';
-import { useSidecar } from '../store/sidecar';
+import { useSidecar, type YoutubeRef } from '../store/sidecar';
 
-interface YTPlayer {
+export interface YTPlayer {
   seekTo(sec: number, allowSeekAhead: boolean): void;
   playVideo(): void;
   pauseVideo(): void;
   mute(): void;
   unMute(): void;
+  isMuted(): boolean;
+  getVolume(): number;
+  setVolume(v: number): void;
   setPlaybackRate(r: number): void;
   getCurrentTime(): number;
   getPlayerState(): number;
@@ -77,13 +85,19 @@ function loadApi(): Promise<YTNamespace> {
 
 let player: YTPlayer | null = null;
 let syncTimer = 0;
+/** 自動で合わせているあいだは、再生との同期を止める（合わせる側が動画を動かす） */
+let held = false;
+
+/** 原曲（音声ファイル）の秒 → 動画の秒 */
+export function videoTimeOfAudio(a: number, yt: YoutubeRef | null = useSidecar.getState().youtube): number {
+  if (!yt) return a;
+  return a + yt.offset + anchorDelta(yt.anchors ?? [], a);
+}
 
 /** 譜面の秒 → 動画の秒 */
 function videoTimeAt(songSec: number): number {
-  const doc = useEditor.getState().doc;
-  const bgm = bgmSource(doc);
-  const offset = useSidecar.getState().youtube?.offset ?? 0;
-  return songSec - (bgm?.sec ?? 0) + offset;
+  const bgm = bgmSource(useEditor.getState().doc);
+  return videoTimeOfAudio(songSec - (bgm?.sec ?? 0));
 }
 
 export async function mountPlayer(el: HTMLElement, videoId: string): Promise<void> {
@@ -129,6 +143,32 @@ export function destroyPlayer() {
   engine.setBgmMuted(false);
 }
 
+/** 自動で合わせる処理が動画を動かすための入口（準備ができていなければ null） */
+export function ytPlayer(): YTPlayer | null {
+  return player && useYt.getState().ready ? player : null;
+}
+
+/** 動画の長さ（秒）。分からなければ 0 */
+export function ytDuration(): number {
+  try {
+    return player?.getDuration() ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** 自動で合わせるあいだ、再生との同期を止める／戻す */
+export function holdSync(on: boolean) {
+  held = on;
+  if (on) {
+    window.clearInterval(syncTimer);
+    syncTimer = 0;
+  } else {
+    applyListen();
+    cueToCursor();
+  }
+}
+
 /** 映像の長さを曲の長さに入れる（譜面が空でも映像の終わりまで再生できるように） */
 function noteDuration() {
   let dur = 0;
@@ -152,6 +192,7 @@ export function listensYoutube(): boolean {
 }
 
 function applyListen() {
+  if (held) return;
   const yt = listensYoutube() && player !== null;
   engine.setBgmMuted(yt);
   if (!player) return;
@@ -161,7 +202,7 @@ function applyListen() {
 
 /** 止まっているとき、カーソル位置の映像を出しておく */
 export function cueToCursor() {
-  if (!player || engine.playing) return;
+  if (!player || engine.playing || held) return;
   const s = useEditor.getState();
   const t = videoTimeAt(tempoOf(s.doc).beatToSec(Math.max(0, s.cursorBeat)));
   try {
@@ -172,17 +213,57 @@ export function cueToCursor() {
   }
 }
 
+/** このずれ（秒）を超えたら動画を飛ばす */
+const TOL = 0.08;
+/**
+ * 飛ばしてから動き出すまでの遅れを見込んだ先回り（秒）。着地のずれから覚える。
+ * 止まっている所から動かすとき（cold）と、動いたまま飛ばすとき（hot）では遅れが違うので別に覚える
+ */
+const lead = { cold: 0.05, hot: 0.05 };
+
+/** いま耳に届いている曲の位置（鳴り始める前は、始めの位置より前へ延ばす。無ければ音を作っている位置） */
+function heardNow(): number | null {
+  return engine.heardSecLinear() ?? engine.currentSec();
+}
+
+/**
+ * テンポが少しずつ違う動画（ライブ版など）では、同じ速さで流すと映像が一方へずれていく（細かい速さは YouTube で選べない）。
+ * 飛ばすときに逆向きへ少し寄せておき、ずれが 0 のまわりを行き来するようにする（寄せる量・秒）
+ */
+function driftBias(sec: number): number {
+  // 曲 1 秒あたりに動画が進むべき秒。1 より小さければ、動画は先へ行きすぎる
+  const slope = (videoTimeAt(sec + 1) - videoTimeAt(sec - 1)) / 2;
+  const k = 1 - slope;
+  // 編集で飛ぶ所（傾きが大きく外れる）は寄せない
+  if (Math.abs(k) < 0.003 || Math.abs(k) > 0.1) return 0;
+  return -Math.sign(k) * TOL * 0.7;
+}
+
 function startSync(rate: number) {
-  if (!player) return;
+  if (!player || held) return;
   window.clearInterval(syncTimer);
   try {
     player.setPlaybackRate(rate);
   } catch {
     // 対応していない速さ
   }
-  const check = () => {
+  /** 最後に飛ばした時刻（performance.now）。動き出して落ち着くまでは測らない */
+  let seekAt = 0;
+  let landed = true;
+  let seekKind: keyof typeof lead = 'cold';
+  /** 飛ばしたときにわざと寄せた量 */
+  let seekBias = 0;
+  const seek = (sec: number, want: number, kind: keyof typeof lead) => {
     if (!player) return;
-    const sec = engine.currentSec();
+    seekBias = driftBias(sec);
+    player.seekTo(want + seekBias + lead[kind] * rate, true);
+    seekAt = performance.now();
+    seekKind = kind;
+    landed = false;
+  };
+  const check = () => {
+    if (!player || held) return;
+    const sec = heardNow();
     if (sec === null) return;
     const want = videoTimeAt(sec);
     const state = player.getPlayerState();
@@ -193,25 +274,34 @@ function startSync(rate: number) {
     const dur = player.getDuration();
     noteDuration();
     if (dur > 0 && want > dur) return;
-    const have = player.getCurrentTime();
     if (state !== 1 && state !== 3) {
-      player.seekTo(want, true);
+      // 動かしたばかりなら、動き出すのを待つ（動画の状態が届くまで少しかかる）
+      if (seekKind === 'cold' && performance.now() - seekAt < 1000) return;
+      seek(sec, want, 'cold');
       player.playVideo();
       return;
     }
-    if (Math.abs(have - want) > 0.15) player.seekTo(want + 0.05, true);
+    if (state === 3 || performance.now() - seekAt < 350) return;
+    const err = player.getCurrentTime() - want;
+    if (!landed) {
+      // 飛ばしたあとの着地のずれ（わざと寄せた分は除く）で、先回りの量を直す（半分ずつ）
+      landed = true;
+      const miss = err - seekBias;
+      if (Math.abs(miss) < 0.5) lead[seekKind] = Math.max(0, Math.min(0.4, lead[seekKind] - miss * 0.5));
+    }
+    if (Math.abs(err) > TOL) seek(sec, want, 'hot');
   };
-  const sec = engine.currentSec() ?? 0;
+  const sec = heardNow() ?? 0;
   const want = videoTimeAt(sec);
   if (want >= 0) {
-    player.seekTo(want, true);
+    seek(sec, want, 'cold');
     player.playVideo();
   }
-  syncTimer = window.setInterval(check, 400);
+  syncTimer = window.setInterval(check, 250);
 }
 
 onPlayback((e) => {
-  if (!player || !useYt.getState().ready) return;
+  if (!player || !useYt.getState().ready || held) return;
   if (e.type === 'play') startSync(e.rate);
   else if (e.type === 'loop') {
     player.seekTo(Math.max(0, videoTimeAt(e.startSec)), true);
@@ -235,7 +325,7 @@ useEditor.subscribe((s, prev) => {
 });
 
 useSidecar.subscribe((s, prev) => {
-  if (s.youtube?.offset !== prev.youtube?.offset) cueToCursor();
+  if (s.youtube?.offset !== prev.youtube?.offset || s.youtube?.anchors !== prev.youtube?.anchors) cueToCursor();
   // 映像を外した・替えたら長さは分からなくなる（隠しただけなら覚えておく）
   if (s.youtube?.url !== prev.youtube?.url && useEditor.getState().refVideoSec !== 0) useEditor.setState({ refVideoSec: 0 });
 });

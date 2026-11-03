@@ -52,11 +52,21 @@ export interface SavedMix {
   drumSolo?: boolean;
 }
 
+/** 参照映像（YouTube）。動画の秒 = 原曲の秒 + offset（anchors があればその所の差 d を足す） */
+export interface YoutubeRef {
+  url: string;
+  offset: number;
+  /** 所ごとのずれの差（ライブのテンポ違い・編集違いのとき。自動で合わせたときだけ） */
+  anchors?: { a: number; d: number }[];
+  /** 自動で合わせた結果（const = ずれは一定、drift = 少しずつ変わる、edit = 途中で飛ぶ） */
+  auto?: { kind: 'const' | 'drift' | 'edit'; conf: number; at: number };
+}
+
 export interface SidecarData {
   sections: SectionMark[];
   /** セクション名 → 色（同じ名前は同じ色） */
   sectionColors: Record<string, string>;
-  youtube: { url: string; offset: number } | null;
+  youtube: YoutubeRef | null;
   /** テンポ合わせ画面の拍アンカー */
   anchors: TempoAnchor[];
   stems: StemTrack[];
@@ -171,7 +181,10 @@ export function removeSection(m: number) {
   setSection(m, null);
 }
 
-export function setYoutube(y: { url: string; offset: number } | null) {
+/** 参照映像を変える。動画が替わったら、前の動画で自動で合わせた結果（所ごとの差）は捨てる */
+export function setYoutube(y: YoutubeRef | null) {
+  const cur = get().youtube;
+  if (y && cur && y.url !== cur.url && y.anchors === cur.anchors) y = { url: y.url, offset: y.offset };
   touch({ youtube: y });
 }
 
@@ -198,7 +211,17 @@ export function parseSidecar(text: string): SidecarData | null {
     if (j.sectionColors && typeof j.sectionColors === 'object') {
       for (const [k, v] of Object.entries(j.sectionColors)) if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) out.sectionColors[k] = v;
     }
-    if (j.youtube && typeof j.youtube.url === 'string') out.youtube = { url: j.youtube.url, offset: Number(j.youtube.offset) || 0 };
+    if (j.youtube && typeof j.youtube.url === 'string') {
+      const y: YoutubeRef = { url: j.youtube.url, offset: Number(j.youtube.offset) || 0 };
+      const an = (j.youtube as Partial<YoutubeRef>).anchors;
+      if (Array.isArray(an)) {
+        const ok = an.filter((x) => x && Number.isFinite(x.a) && Number.isFinite(x.d)).map((x) => ({ a: x.a, d: x.d }));
+        if (ok.length) y.anchors = ok.sort((p, q) => p.a - q.a);
+      }
+      const au = (j.youtube as Partial<YoutubeRef>).auto;
+      if (au && (au.kind === 'const' || au.kind === 'drift' || au.kind === 'edit') && Number.isFinite(au.conf)) y.auto = { kind: au.kind, conf: Number(au.conf), at: Number(au.at) || 0 };
+      out.youtube = y;
+    }
     if (Array.isArray(j.anchors)) out.anchors = j.anchors.filter((a) => a && Number.isFinite(a.m) && Number.isFinite(a.t)).map((a) => ({ m: Math.trunc(a.m), t: a.t }));
     if (Array.isArray(j.stems)) {
       const kinds: StemKind[] = ['drums', 'bass', 'vocals', 'guitar', 'piano', 'other'];
