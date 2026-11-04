@@ -128,7 +128,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
         <button className={`btn small mute-tg ${mix.bgmMute ? 'muted' : ''}`} onClick={toggleBgmMute} aria-pressed={mix.bgmMute} title={tr('原曲・SE・ステムのトラックをまとめてミュート（トラックごとの設定はそのまま）', 'Mute the original, SE and stem tracks together (each track keeps its own settings)')}>
           {Icon.wave(14)} {tr('曲の音', 'Song audio')} <span className="key">Alt+1</span>
         </button>
-        <button className={`btn small mute-tg ${mix.drumMute ? 'muted' : ''}`} onClick={toggleDrumMute} aria-pressed={mix.drumMute} title={tr('譜面の音をミュート（下のトラックの「譜面の音」の M と同じ）', 'Mute the chart sounds (same as M on the "Chart sounds" track below)')}>
+        <button className={`btn small mute-tg ${mix.drumMute ? 'muted' : ''}`} onClick={toggleDrumMute} aria-pressed={mix.drumMute} title={tr('譜面の音をミュート（下のトラックの「譜面の音」の M と同じ）', 'Mute the chart sounds (same as M on the "Chart" track below)')}>
           {mix.drumMute ? Icon.chartOff(14) : Icon.drum(14)} {tr('譜面の音', 'Chart sounds')} <span className="key">Alt+2</span>
         </button>
       </div>

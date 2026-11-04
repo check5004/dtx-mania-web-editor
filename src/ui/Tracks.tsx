@@ -88,7 +88,7 @@ export function useTrackRows(): Row[] {
   useStems((s) => s.version);
   useSoundsVersion();
   // 譜面の音をいちばん上に（トラックが多くて下に隠れても、編集している音はいつも見える）
-  const rows: Row[] = [{ type: 'chart', id: 'chart', name: tr('譜面の音', 'Chart sounds'), sub: tr('置いたチップのドラム', 'Drums of the placed chips'), color: CHART_COLOR }];
+  const rows: Row[] = [{ type: 'chart', id: 'chart', name: tr('譜面の音', 'Chart'), sub: tr('置いたチップのドラム', 'Drum chips'), color: CHART_COLOR }];
   const bgm = bgmSource(doc);
   const origBuf = bgm ? engine.buffer(bgm.wav) : null;
   const origFile = bgm ? ((wavPath(doc, bgm.wav) ?? '').split(/[\\/]/).pop() ?? '') : '';
