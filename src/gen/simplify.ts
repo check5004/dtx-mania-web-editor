@@ -53,13 +53,11 @@ export type Difficulty = 'BASIC' | 'ADVANCED' | 'EXTREME';
 export const DIFFICULTIES: readonly Difficulty[] = ['EXTREME', 'ADVANCED', 'BASIC'];
 /** 難易度ごとの最初の段 */
 export const DEFAULT_RUNG: Record<Difficulty, number> = { EXTREME: 1, ADVANCED: 4, BASIC: 6 };
-/** MASTER のレベルに対する目標の割合（楯さんの手元の5曲の人が作った譜面の平均: 0.85・0.60・0.37） */
+/**
+ * MASTER のレベルに対するレベルの比（楯さんの手元の5曲の人が作った譜面の平均: 0.85・0.60・0.37）。
+ * 目標そのものではなく、難易度の並びの位置に使う（目標の幅は gen/targets）
+ */
 export const TARGET_RATIO: Record<Difficulty, number> = { EXTREME: 0.85, ADVANCED: 0.6, BASIC: 0.37 };
-
-export function targetRange(diff: Difficulty, masterLevel: number): { min: number; max: number; center: number } {
-  const c = Math.max(1, Math.min(9.5, masterLevel * TARGET_RATIO[diff]));
-  return { min: Math.max(1, c - 0.3), max: c + 0.3, center: c };
-}
 
 export interface MustKeep {
   /** 2・4拍のスネア */

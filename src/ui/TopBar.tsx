@@ -1,5 +1,5 @@
 import { tr, pl, getLang, setLang, LANG_NAMES } from '../i18n';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { downloadDtx, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
@@ -49,6 +49,8 @@ import { togglePanel, useLayout } from '../store/layout';
 import { MasterMixer } from './MixPanel';
 import { MenuBar, type MenuDef } from './MenuBar';
 import { useLang } from '../i18n/useLang';
+import { ORIGIN_KEY, originOf } from '../dtx/origin';
+import { OriginBadge, originTitle } from './OriginBadge';
 
 const cursorM = () => {
   const s = useEditor.getState();
@@ -104,7 +106,12 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   const barRef = useRef<HTMLElement>(null);
   // 言語が変わると文字の幅が変わるので、畳む段を測り直す
   const lang = useLang();
-  const fit = useTopbarFit(barRef, `${lang}|${meta.fileName}|${meta.siblings.length}|${f0(doc.fields['TITLE'])}`);
+  // 開いている譜面の出どころ（AI で作った譜面か。手で直すと「手直し」になる）。印の無い譜面は数えない
+  const mark = doc.fields[ORIGIN_KEY];
+  const chips = doc.chips;
+  const ownOrigin = useMemo(() => (mark === undefined ? 'human' : originOf({ chips, fields: { [ORIGIN_KEY]: mark } })), [mark, chips]);
+  const originsKey = meta.siblings.map((x) => x.origin ?? '').join('') + ownOrigin;
+  const fit = useTopbarFit(barRef, `${lang}|${meta.fileName}|${meta.siblings.length}|${originsKey}|${f0(doc.fields['TITLE'])}`);
 
   const f = doc.fields;
   const length = useSongLength(doc);
@@ -231,12 +238,17 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         </div>
         {meta.siblings.length > 1 && folder && (
           <div className="seg diff-tabs hide-narrow" style={{ marginLeft: 6 }}>
-            {meta.siblings.map((sb) => (
-              <button key={sb.file} className={sb.file.toLowerCase() === meta.fileName.toLowerCase() ? 'on' : ''} onClick={() => void switchDifficulty(sb.file)} title={sb.file}>
-                <span className="diff-full">{sb.label}</span>
-                <span className="diff-abbr">{abbrDiff(sb.label)}</span>
-              </button>
-            ))}
+            {meta.siblings.map((sb) => {
+              const cur = sb.file.toLowerCase() === meta.fileName.toLowerCase();
+              const origin = cur ? ownOrigin : (sb.origin ?? 'human');
+              return (
+                <button key={sb.file} className={cur ? 'on' : ''} onClick={() => void switchDifficulty(sb.file)} title={origin === 'human' ? sb.file : `${sb.file} · ${originTitle(origin)}`}>
+                  <span className="diff-full">{sb.label}</span>
+                  <span className="diff-abbr">{abbrDiff(sb.label)}</span>
+                  <OriginBadge origin={origin} tab />
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -245,8 +257,8 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         className="btn ai-gen"
         onClick={() => openPage('ai')}
         title={tr(
-          'AI難易度生成：いま開いている譜面を MASTER として BASIC・ADVANCED・EXTREME を作り、並べて聴き比べる',
-          'AI difficulty generator: use the open chart as MASTER to make BASIC, ADVANCED and EXTREME, then compare them side by side',
+          'AI難易度生成：いま開いている譜面から、それより下の難易度（EXTREME・ADVANCED・BASIC）を作り、曲に既にある難易度と並べて聴き比べる',
+          'AI difficulty generator: make the easier difficulties (EXTREME, ADVANCED, BASIC) from the open chart and compare them side by side with the ones already in the song',
         )}
         aria-label={tr('AI難易度生成', 'AI difficulty generator')}
       >

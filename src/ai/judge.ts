@@ -228,8 +228,13 @@ export function planPrompt(o: {
   title: string;
   genre: string;
   diff: Difficulty;
-  target: { min: number; max: number };
+  target: { min: number; max: number; center?: number };
+  /** 作る元の譜面の難易度（ふつうは MASTER。既存の EXTREME から ADVANCED を作るなど） */
+  sourceLabel?: string;
+  /** 作る元の譜面のレベル */
   masterLevel: number;
+  /** 曲にあるほかの難易度（「EXTREME（既存・作者の譜面）Lv6.20」など） */
+  others?: string[];
   rung: number;
   sections: SectionSpan[];
   guide: string;
@@ -240,11 +245,12 @@ export function planPrompt(o: {
   const feat = chartFeatures(o.doc, tempo);
   // i18n-ignore-start
   const system = [
-    'あなたは DTXMania（ドラム）の譜面作者です。完成した MASTER 譜面から低い難易度を作るときの「どこをどう簡略化するか」だけを決めます。',
+    'あなたは DTXMania（ドラム）の譜面作者です。完成した上の難易度の譜面（ふつうは MASTER）から低い難易度を作るときの「どこをどう簡略化するか」だけを決めます。',
     'ノーツの配置はルールエンジンが行います。あなたはセクションごとに、全体の簡略化の段からの増減（shift）とフィルの扱いなどを選んでください。',
     'ルールエンジンは音を間引くだけで、楽器や奏法を別のものに置き換えません（ライドはライド、オープンHHはオープン、左右のシンバルもそのまま）。',
     '音楽性を壊さないこと: 曲の山場（サビ）らしさ、キメ、ノリは残し、静かな所はより簡単にしてよい。同じ形のセクションには同じ方針を。',
-    '目標のレベルに入ることが最優先です。shift の -（元の譜面に近く）は山場の一部だけにし、そのぶん静かな所を + にして釣り合わせてください。',
+    '目標のレベル（幅）に入ることが最優先です。めやすの近くを狙ってください。shift の -（元の譜面に近く）は山場の一部だけにし、そのぶん静かな所を + にして釣り合わせてください。',
+    '曲にほかの難易度があるときは、そのあいだに収まり、隣の難易度と難しさがはっきり違うようにしてください。',
     `フィルの扱い: ${Object.entries(FILL_STYLES)
       .map(([k, v]) => `${k}=${v.label}`)
       .join('、')}`,
@@ -254,8 +260,11 @@ export function planPrompt(o: {
   ].join('\n');
   const lines: string[] = [];
   lines.push(`曲: ${o.title}${o.genre ? `（${o.genre}）` : ''}`);
-  lines.push(`MASTER: Lv${o.masterLevel.toFixed(2)} / ${featureSummary(feat)}`);
-  lines.push(`作る難易度: ${o.diff}（目標 Lv${o.target.min.toFixed(2)}〜${o.target.max.toFixed(2)}）`);
+  lines.push(`元の譜面（${o.sourceLabel ?? 'MASTER'}）: Lv${o.masterLevel.toFixed(2)} / ${featureSummary(feat)}`);
+  lines.push(
+    `作る難易度: ${o.diff}（目標 Lv${o.target.min.toFixed(2)}〜${o.target.max.toFixed(2)}${o.target.center !== undefined ? `、めやす Lv${o.target.center.toFixed(2)}` : ''}）`,
+  );
+  if (o.others?.length) lines.push(`曲にある難易度: ${o.others.join('、')}`);
   lines.push(`全体の簡略化の段: ${o.rung}（0〜${LADDER.length - 1}。${describePolicy(LADDER[o.rung])}）`);
   lines.push(`必ず残すもの: ${keepList(o.keep) || '指定なし'}`);
   if (o.instruction.trim()) lines.push(`作者の指示: ${o.instruction.trim()}`);

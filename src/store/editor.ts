@@ -2,13 +2,14 @@
 import { tr, pl, isJa } from '../i18n';
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer';
 import { create } from 'zustand';
-import { engine, type Mix } from '../audio/engine';
+import { engine, type Mix, type WavSource } from '../audio/engine';
 import { builtinFile, virtualSound } from '../audio/sounds';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
 import { endMeasureOf, moveEndDecorations, naturalEndMeasure, solidEndMeasure } from '../dtx/end';
 import { CH, DRUM_LANES, drumChannel, emptyDoc, type DtxDoc, type HeaderLine, type ParseWarning } from '../dtx/model';
+import type { ChartOrigin } from '../dtx/origin';
 import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
 import { audibleEnd } from '../audio/dsp';
 import {
@@ -44,8 +45,8 @@ export interface DocMeta {
   encodingNote?: string;
   warnings: ParseWarning[];
   hasRandom: boolean;
-  /** 同じフォルダの難易度（set.def のラベル付き） */
-  siblings: { label: string; file: string }[];
+  /** 同じフォルダの難易度（set.def のラベル付き）。origin は AI難易度生成で作った譜面か（dtx/origin） */
+  siblings: { label: string; file: string; origin?: ChartOrigin }[];
   /** 最近の曲（自動保存）のキー */
   recentId?: string;
 }
@@ -680,9 +681,38 @@ export function setCursorBeat(beat: number) {
 let preparedSig = '';
 let preparing: Promise<void> | null = null;
 
+/**
+ * 再生で鳴らすかもしれないほかの譜面（AI難易度生成で並べる、曲に既にある難易度）。開いている譜面と同じ WAV 番号の上に
+ * 写してあり、足りない音だけ空いている番号に足してある。その音も一緒に読み込む
+ */
+const soundDocSources: (() => DtxDoc[])[] = [];
+export function addSoundDocs(fn: () => DtxDoc[]): () => void {
+  soundDocSources.push(fn);
+  return () => {
+    const i = soundDocSources.indexOf(fn);
+    if (i >= 0) soundDocSources.splice(i, 1);
+  };
+}
+
+function allWavSources(doc: DtxDoc, folder: SongFolder | null): WavSource[] {
+  const out = wavSources(doc, folder);
+  const seen = new Set(out.map((x) => x.no));
+  for (const fn of soundDocSources) {
+    for (const d of fn()) {
+      for (const x of wavSources(d, folder)) {
+        if (seen.has(x.no)) continue;
+        seen.add(x.no);
+        out.push(x);
+      }
+    }
+  }
+  return out.sort((a, b) => a.no - b.no);
+}
+
 export async function prepareSounds(): Promise<void> {
   const s = get();
-  const sources = wavSources(s.doc, s.folder);
+  const sources = allWavSources(s.doc, s.folder);
+  const own = new Set(wavSources(s.doc, s.folder).map((x) => x.no));
   const sig = sources.map((x) => `${x.no}:${x.key}:${x.volume}:${x.pan}`).join('|');
   if (sig === preparedSig && preparing) return preparing;
   preparedSig = sig;
@@ -692,7 +722,8 @@ export async function prepareSounds(): Promise<void> {
       const failed = await engine.prepare(sources, (done, total) => {
         if (total > 8 && done % 8 === 0) set({ loading: tr(`音を読み込んでいます… ${done}/${total}`, `Loading sounds… ${done}/${total}`) });
       });
-      if (preparedSig === sig) set({ missingWavs: failed });
+      // 読めない音の知らせは、開いている譜面の音だけ
+      if (preparedSig === sig) set({ missingWavs: failed.filter((no) => own.has(no)) });
     } finally {
       set((st) => ({ loading: null, soundsVersion: st.soundsVersion + 1 }));
       syncAnalysis();

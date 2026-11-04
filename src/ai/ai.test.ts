@@ -3,7 +3,9 @@ import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures } from '../gen/features';
 import { bandStats, levelOfField, predictLevel, type ChartEntry } from '../store/guideline';
-import { buildSetDef, outFileName, relaxPlan, replacedInSetDef } from '../store/gen';
+import { buildSetDef, chooseOutFiles, outFileName, relaxPlan, replacedInSetDef } from '../store/gen';
+import { folderFromFiles } from '../fs/folder';
+import { chartHash } from '../dtx/origin';
 import { cleanJudgement, cleanPlan, sectionSpans } from './judge';
 import { buildChatBody, isChatModel, missingKeys, parseJsonLoose, parseModels, repairPrompt } from './openrouter';
 import { cleanSongInfo, songInfoSchema } from './songInfo';
@@ -193,10 +195,44 @@ describe('ガイドライン', () => {
 });
 
 describe('書き出し', () => {
-  it('難易度のファイル名', () => {
+  it('難易度のファイル名（元の譜面の名前が難易度で終わるなら、そこだけを変える）', () => {
     expect(outFileName('song.dtx', 'BASIC')).toBe('song_bsc.dtx');
     expect(outFileName('song_mstr.dtx', 'EXTREME')).toBe('song_ext.dtx');
-    expect(outFileName('master.dtx', 'ADVANCED')).toBe('master_adv.dtx');
+    expect(outFileName('master.dtx', 'ADVANCED')).toBe('adv.dtx');
+    expect(outFileName('mstr.dtx', 'BASIC')).toBe('bsc.dtx');
+    expect(outFileName('ext.dtx', 'ADVANCED')).toBe('adv.dtx');
+    // DTXCreatorAL の「曲名-mas.dtx」は「-bas」「-adv」「-ext」
+    expect(outFileName('248 - Song-mas.dtx', 'BASIC')).toBe('248 - Song-bas.dtx');
+    expect(outFileName('248 - Song-mas.dtx', 'ADVANCED')).toBe('248 - Song-adv.dtx');
+    // 難易度の名前でない語の終わり（christmas など）は変えない
+    expect(outFileName('christmas.dtx', 'BASIC')).toBe('christmas_bsc.dtx');
+  });
+  it('作者の譜面・手で直した譜面は上書きしない（別の名前にする）。手を入れていない AI の譜面だけ上書きする', async () => {
+    const dtx = (body: string) => new TextEncoder().encode(`#TITLE: x\r\n#BPM: 120\r\n${body}`);
+    const file = (name: string, body: string) => new File([dtx(body)], name);
+    // adv.dtx は作者の譜面、bsc.dtx はこのアプリで作ったまま（ハッシュはチップが無いときの値）、ext.dtx は手直しした AI の譜面
+    const empty = chartHash({ chips: [] });
+    const folder = folderFromFiles([
+      file('mstr.dtx', '#00012: 01\r\n'),
+      file('adv.dtx', '#00012: 01\r\n'),
+      file('bsc.dtx', `#DTXE_ORIGIN: AI ${empty} from mstr.dtx\r\n`),
+      file('ext.dtx', `#DTXE_ORIGIN: AI ${empty} from mstr.dtx\r\n#00012: 01\r\n`),
+    ]);
+    const out = await chooseOutFiles(folder, 'mstr.dtx', ['EXTREME', 'ADVANCED', 'BASIC'], []);
+    expect(out).toEqual([
+      { diff: 'EXTREME', file: 'ext_ai.dtx', overwrite: false },
+      { diff: 'ADVANCED', file: 'adv_ai.dtx', overwrite: false },
+      { diff: 'BASIC', file: 'bsc.dtx', overwrite: true },
+    ]);
+    // 残す既存の譜面の名前は、AI の譜面でも使わない
+    const kept = await chooseOutFiles(folder, 'mstr.dtx', ['BASIC'], ['bsc.dtx']);
+    expect(kept).toEqual([{ diff: 'BASIC', file: 'bsc_ai.dtx', overwrite: false }]);
+    // 作り直す AI の譜面は、名前が違ってもそのファイルに上書きする（手直しした譜面なら決まった名前に）
+    const own = await chooseOutFiles(folder, 'mstr.dtx', ['ADVANCED', 'EXTREME'], [], undefined, { ADVANCED: 'bsc.dtx', EXTREME: 'ext.dtx' });
+    expect(own).toEqual([
+      { diff: 'ADVANCED', file: 'bsc.dtx', overwrite: true },
+      { diff: 'EXTREME', file: 'ext_ai.dtx', overwrite: false },
+    ]);
   });
   it('set.def はほかの難易度を残して書き直す', () => {
     const before = '#TITLE Song\r\n#L1LABEL NOVICE\r\n#L1FILE nov.dtx\r\n#L2LABEL MASTER\r\n#L2FILE song.dtx\r\n';
@@ -208,6 +244,32 @@ describe('書き出し', () => {
     expect(out).toContain('#L2LABEL ADVANCED');
     expect(out).toContain('#L4LABEL MASTER\r\n#L4FILE song.dtx');
     expect(out).toContain('#L3LABEL NOVICE\r\n#L3FILE nov.dtx');
+  });
+  it('set.def：EXTREME から下を作るとき、元の譜面は EXTREME の段に、上の MASTER はそのまま残す', () => {
+    const before = '#TITLE Song\r\n#L3LABEL EXTREME\r\n#L3FILE ext.dtx\r\n#L4LABEL MASTER\r\n#L4FILE mstr.dtx\r\n';
+    const out = buildSetDef(
+      before,
+      'Song',
+      'ext.dtx',
+      'EXTREME',
+      [
+        { diff: 'ADVANCED', file: 'adv.dtx' },
+        { diff: 'BASIC', file: 'bsc.dtx' },
+      ],
+      { sourceSlot: 'EXTREME' },
+    );
+    expect(out).toBe('#TITLE Song\r\n#L1LABEL BASIC\r\n#L1FILE bsc.dtx\r\n#L2LABEL ADVANCED\r\n#L2FILE adv.dtx\r\n#L3LABEL EXTREME\r\n#L3FILE ext.dtx\r\n#L4LABEL MASTER\r\n#L4FILE mstr.dtx\r\n');
+  });
+  it('set.def が無い曲：ファイル名から見つけて残す既存の譜面も載せる', () => {
+    const out = buildSetDef(null, 'Song', 'mstr.dtx', 'MASTER', [{ diff: 'BASIC', file: 'bsc.dtx' }], {
+      kept: [
+        { slot: 'EXTREME', label: 'EXTREME', file: 'ext.dtx' },
+        { slot: 'ADVANCED', label: 'ADVANCED', file: 'adv.dtx' },
+      ],
+    });
+    expect(out).toBe(
+      '#TITLE Song\r\n#L1LABEL BASIC\r\n#L1FILE bsc.dtx\r\n#L2LABEL ADVANCED\r\n#L2FILE adv.dtx\r\n#L3LABEL EXTREME\r\n#L3FILE ext.dtx\r\n#L4LABEL MASTER\r\n#L4FILE mstr.dtx\r\n',
+    );
   });
   it('set.def で置き換わる難易度を知らせる（DTXCreatorAL の「#L1LABEL: Basic」形式）', () => {
     const setdef = '#TITLE: 曲\r\n#L1LABEL: Basic\r\n#L1FILE: s-bas.dtx\r\n#L2LABEL: Advanced\r\n#L2FILE: s-adv.dtx\r\n#L4LABEL: Master\r\n#L4FILE: s-mas.dtx\r\n';

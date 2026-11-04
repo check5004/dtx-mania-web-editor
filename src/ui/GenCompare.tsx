@@ -1,4 +1,4 @@
-// AI難易度生成：元の譜面と作った難易度を、曲全体を縦にスクロールする譜面にして横に並べる。
+// AI難易度生成：元の譜面・曲に既にある難易度・作った難易度を、曲全体を縦にスクロールする譜面にして横に並べる。
 // 再生はエディタと同じ（▶・止めると ▶ に戻る・小節番号のクリックで ▶ を移す）。列を押すとその譜面を聴く。
 import { tr, pl, locale, subscribeLang } from '../i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -6,19 +6,22 @@ import { engine } from '../audio/engine';
 import { estimateLevel } from '../check/level';
 import { toMeasure } from '../dtx/base36';
 import { DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
+import { originOf } from '../dtx/origin';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { snapToGrid } from '../edit/ops';
 import { chipHeight, columnAt, compareGeom, FOLLOW_AT, firstAtOrAfter, labelEvery, layoutColumns, LOOP_BAND_W, PAD_BOTTOM, pxToFit, type CompareGeom, type CompareLayout } from '../gen/compareView';
 import { drumNotes, lastMeasure, type Note } from '../gen/features';
-import { DIFFICULTIES, type Difficulty } from '../gen/simplify';
+import type { Difficulty } from '../gen/simplify';
+import type { Slot } from '../gen/targets';
 import { slotOf, useInputSettings } from '../input/settings';
 import { useAssist } from '../store/assist';
 import { tempoOf } from '../store/derived';
 import { useSidecar } from '../store/sidecar';
 import { playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
-import { isPassing, selectDiff, setGenView, setListen, shownLevel, toggleChip, useGen, type GenState, type Listen } from '../store/gen';
+import { columnKind, compareColumns, isPassing, selectDiff, setGenView, setListen, shownLevel, toggleChip, useGen, type DiffState, type GenState } from '../store/gen';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
+import { OriginBadge } from './OriginBadge';
 
 const C = {
   bg: '#0B0E13',
@@ -35,11 +38,6 @@ const C = {
   removed: 'rgba(200,210,225,.38)',
   moved: '#FFB547',
 };
-
-/** 並べる列（元の譜面と、作る・作った難易度） */
-export function compareColumns(s: GenState): Listen[] {
-  return ['MASTER', ...DIFFICULTIES.filter((d) => s.diffs[d].enabled || s.diffs[d].result)];
-}
 
 /** いま見えている拍の範囲（キーで ▶ を動かしたとき、見えなくなったら表示を動かすため） */
 export const genViewport = { minBeat: 0, maxBeat: 0 };
@@ -64,7 +62,7 @@ interface Local {
   w: number;
   h: number;
   dpr: number;
-  cols: Listen[];
+  cols: Slot[];
   lay: CompareLayout;
   dirty: boolean;
   /** 再生中に追いかけている表示の位置（止めたらそこに残す） */
@@ -109,8 +107,20 @@ function laneX(box: { x: number; laneW: number }, lane: number) {
   return box.x + slotOf(lane) * box.laneW + box.laneW / 2;
 }
 
-/** チップの表示：レーン・色・どうなったか（作った難易度の列は、元の譜面のチップを残した・削った・移したで描き分ける） */
-function chipLook(n: Note, ds: GenState['diffs'][Difficulty] | null): { lane: number; color: string; kind: 'kept' | 'removed' | 'moved' } {
+/** 列に描く譜面のチップ。作った難易度の列は、作った元の譜面のチップを、残した・削った・移したで描き分ける */
+function columnNotes(g: GenState, col: Slot, tempo: TempoMap): { notes: Note[]; ds: DiffState | null } | null {
+  const kind = columnKind(g, col);
+  if (kind === 'source') return g.master ? { notes: notesOf(g.master, tempo), ds: null } : null;
+  if (kind === 'existing') return { notes: notesOf(g.charts[col]!.doc, tempo), ds: null };
+  if (kind === 'made') {
+    const ds = g.diffs[col as Difficulty];
+    return ds.result && ds.src ? { notes: notesOf(ds.src.doc, tempo), ds } : null;
+  }
+  return null;
+}
+
+/** チップの表示：レーン・色・どうなったか */
+function chipLook(n: Note, ds: DiffState | null): { lane: number; color: string; kind: 'kept' | 'removed' | 'moved' } {
   let lane = n.lane;
   let alt = n.alt;
   let kind: 'kept' | 'removed' | 'moved' = 'kept';
@@ -228,14 +238,14 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     }
   }
 
-  // チップ
-  const notes = notesOf(master, tempo);
+  // チップ（どの列も、開いている譜面と同じ時間の並びに写してある）
   const ch = chipHeight(px);
-  const i0 = firstAtOrAfter(notes, geo.minBeat - 0.1);
   l.cols.forEach((col, ci) => {
     const box = lay.cols[ci];
-    const ds = col === 'MASTER' ? null : g.diffs[col];
-    if (ds && !ds.result) return;
+    const cn = columnNotes(g, col, tempo);
+    if (!cn) return;
+    const { notes, ds } = cn;
+    const i0 = firstAtOrAfter(notes, geo.minBeat - 0.1);
     const cw = Math.max(3, Math.min(26, box.laneW - 5));
     for (let i = i0; i < notes.length; i++) {
       const n = notes[i];
@@ -283,8 +293,8 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   ctx.textBaseline = 'middle';
   ctx.font = '12px system-ui, sans-serif';
   l.cols.forEach((col, ci) => {
-    if (col === 'MASTER') return;
-    const ds = g.diffs[col];
+    if (columnKind(g, col) !== 'made') return;
+    const ds = g.diffs[col as Difficulty];
     if (ds.result) return;
     const box = lay.cols[ci];
     const msg = statusText(ds.status);
@@ -392,12 +402,11 @@ function chipAt(l: Local, geo: CompareGeom, x: number, y: number): { diff: Diffi
   const ci = columnAt(l.lay, x);
   if (ci === null || ci < 0) return null;
   const col = l.cols[ci];
-  if (col === 'MASTER') return null;
   const g = useGen.getState();
-  const ds = g.diffs[col];
-  if (!ds.result || !g.master) return null;
-  const tempo = tempoOf(g.master);
-  const notes = notesOf(g.master, tempo);
+  if (!g.master || columnKind(g, col) !== 'made') return null;
+  const cn = columnNotes(g, col, tempoOf(g.master));
+  if (!cn?.ds) return null;
+  const { notes, ds } = cn;
   const box = l.lay.cols[ci];
   const reach = 14;
   const lo = geo.yToBeat(y + reach);
@@ -409,13 +418,20 @@ function chipAt(l: Local, geo: CompareGeom, x: number, y: number): { diff: Diffi
     const d = Math.hypot(laneX(box, look.lane) - x, (geo.beatToY(n.beat) - y) * 1.6);
     if (d < Math.min(16, box.laneW * 0.75 + 4) && (!best || d < best.d)) best = { id: n.id, d };
   }
-  return best ? { diff: col, id: best.id } : null;
+  return best ? { diff: ds.diff, id: best.id } : null;
 }
 
-const SHORT: Record<Listen, string> = { MASTER: 'MAS', EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
+const SHORT: Record<Slot, string> = { MASTER: 'MAS', EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
+
+/** 列を押したとき：その譜面を聴く（作る難易度・元の譜面より下の既存の譜面なら、右の判定・方針もその難易度に） */
+function pickColumn(col: Slot) {
+  const g = useGen.getState();
+  if (columnKind(g, col) === 'made') selectDiff(col as Difficulty);
+  else setListen(col);
+}
 
 /** 作っている途中・作れなかった・まだの文 */
-function statusText(st: GenState['diffs'][Difficulty]['status']): string {
+function statusText(st: DiffState['status']): string {
   if (st === 'planning') return tr('AIが方針を考えています…', 'AI is planning…');
   if (st === 'building') return tr('作っています…', 'Building…');
   if (st === 'judging') return tr('AIがレベルを判定しています…', 'AI is rating the level…');
@@ -424,65 +440,95 @@ function statusText(st: GenState['diffs'][Difficulty]['status']): string {
 }
 
 /** 列の見出し：押すとその譜面を聴く（作った難易度なら右の判定・方針もその難易度に）。w は列の幅（狭いときは短く書く） */
-function ColHead({ col, w }: { col: Listen; w: number }) {
+function ColHead({ col, w }: { col: Slot; w: number }) {
+  const kind = useGen((s) => columnKind(s, col));
   const listen = useGen((s) => s.listen);
   const selected = useGen((s) => s.selected);
   const master = useGen((s) => s.master);
   const masterLabel = useGen((s) => s.masterLabel);
   const masterLevel = useGen((s) => s.masterLevel);
-  const calib = useGen((s) => s.calib);
+  const chart = useGen((s) => s.charts[col]);
   const ds = useGen((s) => (col === 'MASTER' ? null : s.diffs[col]));
-  const doc = col === 'MASTER' ? master : (ds?.result?.doc ?? null);
+  const doc = kind === 'source' ? master : kind === 'existing' ? (chart?.doc ?? null) : (ds?.result?.doc ?? null);
   const est = useMemo(() => (doc ? estimateLevel(doc, buildTempoMap(doc)) : null), [doc]);
   const masterNotes = useMemo(() => (master ? (estimateLevel(master, buildTempoMap(master))?.notes ?? 0) : 0), [master]);
+  const masterOrigin = useMemo(() => (master ? originOf(master) : 'human'), [master]);
   const on = listen === col;
-  const sel = col !== 'MASTER' && selected === col;
-  const playable = col === 'MASTER' || !!ds?.result;
+  const sel = kind !== 'source' && col !== 'MASTER' && selected === col;
+  const playable = kind !== 'made' || !!ds?.result;
   const narrow = w < 210;
   const tiny = w < 160;
-  const full = col === 'MASTER' ? masterLabel : col;
-  const name = tiny ? (col === 'MASTER' && masterLabel !== 'MASTER' ? masterLabel : SHORT[col]) : full;
-  const busy = ds && (ds.status === 'planning' || ds.status === 'building' || ds.status === 'judging');
+  // 作った難易度の見出しはレベルの出どころ（計算・AI判定）と ✓ も入るので、名前が切れないように早めに畳む
+  const roomy = w >= 260;
+  const full = kind === 'source' ? masterLabel : kind === 'existing' ? (chart?.label ?? col) : col;
+  const name = tiny && full === col ? SHORT[col] : full;
+  const made = kind === 'made' ? ds : null;
+  const busy = made && (made.status === 'planning' || made.status === 'building' || made.status === 'judging');
   // 2行目：作っている途中ならその様子、作ってあればノーツ数（元の譜面に対する割合）・平均の密度・最大同時打数
   let sub: string;
-  if (busy && ds) sub = statusText(ds.status);
+  if (busy && made) sub = statusText(made.status);
   else if (est) {
-    const pct = col !== 'MASTER' && masterNotes ? Math.round((est.notes / masterNotes) * 100) : null;
+    const pct = kind !== 'source' && masterNotes ? Math.round((est.notes / masterNotes) * 100) : null;
     const ratio = pct === null ? '' : tr(`（${pct}%）`, ` (${pct}%)`);
     sub = tr(
       `${est.notes.toLocaleString()}${tiny ? '' : 'ノーツ'}${ratio} · ${est.avgNps.toFixed(1)}/秒 · 同時${est.maxChord}`,
       `${est.notes.toLocaleString(locale())}${tiny ? '' : ' notes'}${ratio} · ${est.avgNps.toFixed(1)}/s · max ${est.maxChord}`,
     );
-  } else sub = statusText(ds?.status === 'error' ? 'error' : 'idle');
+  } else sub = statusText(made?.status === 'error' ? 'error' : 'idle');
+  // 何の列か：元の譜面・曲に既にある譜面（作者か AI か）・この画面で作る譜面（AI）
+  let what: React.ReactNode = null;
+  if (kind === 'source' && !narrow) what = <span className="lbl">{tr('元の譜面', 'Original')}</span>;
+  else if (kind === 'existing' && chart) what = <OriginBadge origin={chart.origin} tab={tiny} />;
+  else if (kind === 'made') what = <OriginBadge origin="ai" tab={tiny} />;
+  const whatTitle =
+    kind === 'source'
+      ? tr('（元の譜面）', ' (the original chart)')
+      : kind === 'existing'
+        ? tr('（曲に既にある譜面）', ' (already in the song)')
+        : chart
+          ? tr('（この画面で作り直す譜面）', ' (being remade here)')
+          : tr('（この画面で作る譜面）', ' (being made here)');
   return (
     <button
-      className={`gen-colhead ${on ? 'on' : ''} ${sel ? 'sel' : ''} ${playable ? '' : 'empty'}`}
-      onClick={() => (col === 'MASTER' ? setListen('MASTER') : selectDiff(col))}
+      className={`gen-colhead ${on ? 'on' : ''} ${sel ? 'sel' : ''} ${playable ? '' : 'empty'} ${kind ?? ''}`}
+      onClick={() => pickColumn(col)}
       aria-pressed={on}
       title={
         playable
-          ? tr(
-              `${full}${col === 'MASTER' ? '（元の譜面）' : ''} を聴く（←→ で切り替え。再生中ならそのまま切り替わります）`,
-              `Listen to ${full}${col === 'MASTER' ? ' (the original chart)' : ''} (←→ to switch; switches right away while playing)`,
-            )
+          ? tr(`${full}${whatTitle} を聴く（←→ で切り替え。再生中ならそのまま切り替わります）`, `Listen to ${full}${whatTitle} (←→ to switch; switches right away while playing)`)
           : tr(`${full} はまだ作っていません`, `${full} isn't made yet`)
       }
     >
       <span className="gen-colhead-top">
         <span className="gen-spk">{on ? Icon.speaker(13) : null}</span>
         <b className="ellipsis">{name}</b>
-        {col === 'MASTER' && !narrow && <span className="lbl">{tr('元の譜面', 'Original')}</span>}
+        {what}
+        {kind === 'source' && masterOrigin !== 'human' && !tiny && <OriginBadge origin={masterOrigin} />}
         <span className="grow" />
-        {col === 'MASTER' ? (
+        {kind === 'source' ? (
           <span className="mono gen-colhead-lv">
             {tiny ? '' : 'Lv '}
             {masterLevel.toFixed(2)}
           </span>
-        ) : ds?.result ? (
+        ) : kind === 'existing' && chart ? (
+          <span className="mono gen-colhead-lv" title={chart.registered ? tr('登録レベル（#DLEVEL）', 'Registered level (#DLEVEL)') : tr('登録レベルが無いので計算のめやす', 'No registered level, so this is a computed estimate')}>
+            {tiny ? '' : 'Lv '}
+            {chart.registered ? '' : '≈'}
+            {chart.level.toFixed(2)}
+          </span>
+        ) : made?.result ? (
           <>
-            {!narrow && <span className="lbl">{ds.judge && !ds.judgeStale ? 'AI' : tr('計算', 'Calc')}</span>}
-            <span className="mono gen-colhead-lv">{shownLevel(ds, calib).toFixed(2)}</span>
-            {isPassing(ds, calib) ? <span className="gen-ok" title={tr('検証OK', 'Checks passed')}>✓</span> : <span className="gen-warn" title={ds.issues ? tr(`叩けない所 ${ds.issues}`, `${ds.issues} unplayable ${pl(ds.issues, 'spot')}`) : tr('目標から外れ', 'Off target')}>!</span>}
+            {roomy && <span className="lbl">{made.judge && !made.judgeStale ? tr('AI判定', 'AI') : tr('計算', 'Calc')}</span>}
+            <span className="mono gen-colhead-lv">{shownLevel(made).toFixed(2)}</span>
+            {isPassing(made) ? (
+              <span className="gen-ok" title={tr('検証OK（目標の幅の中）', 'Checks passed (inside the target range)')}>
+                ✓
+              </span>
+            ) : (
+              <span className="gen-warn" title={made.issues ? tr(`叩けない所 ${made.issues}`, `${made.issues} unplayable ${pl(made.issues, 'spot')}`) : tr('目標の幅から外れ', 'Outside the target range')}>
+                !
+              </span>
+            )}
           </>
         ) : null}
       </span>
@@ -497,7 +543,7 @@ export function GenCompare() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cols = useGen((s) => compareColumns(s).join(','))
     .split(',')
-    .filter(Boolean) as Listen[];
+    .filter(Boolean) as Slot[];
   const [width, setWidth] = useState(0);
   const lay = useMemo(() => layoutColumns(width, cols.length), [width, cols.length]);
   const L = useRef<Local>({ w: 0, h: 0, dpr: 1, cols, lay, dirty: true, followScroll: null, hover: null, drag: null, downOnChip: false });
@@ -597,11 +643,7 @@ export function GenCompare() {
     const ci = columnAt(l.lay, x);
     if (ci === null) return;
     // 列の空いた所を押したら、その譜面を聴く
-    if (ci >= 0) {
-      const col = l.cols[ci];
-      if (col === 'MASTER') setListen('MASTER');
-      else selectDiff(col);
-    }
+    if (ci >= 0) pickColumn(l.cols[ci]);
     // ▶ を置く（ドラッグで動かせる。再生中なら離したときにそこから続けて再生）
     setCursorBeat(snappedBeat(geo.yToBeat(y)));
     l.drag = { pointer: e.pointerId };

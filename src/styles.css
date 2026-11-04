@@ -5247,6 +5247,93 @@ button.ms.s.on {
   padding: 0 3px;
 }
 
+.gen-diff-line.wrap {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.gen-aim {
+  gap: 6px;
+}
+
+/* 作る元・置き換え・底上げの説明（長いので折り返す） */
+.gen-diff-note {
+  display: block;
+  white-space: normal;
+}
+
+.gen-diff.off > .row:first-child b {
+  color: var(--mute);
+}
+
+.gen-band {
+  color: var(--text2);
+  font-weight: 600;
+}
+
+.gen-raised {
+  color: var(--amber);
+}
+
+/* 曲の難易度の並び：元の譜面・曲に既にある譜面（チェックボックスの代わりの余白で、作る難易度と頭をそろえる） */
+.gen-slot-pad {
+  width: 14px;
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.gen-slot.existing {
+  background: var(--panel);
+}
+
+.gen-slot.existing.on {
+  background: #121d27;
+}
+
+.gen-slot-missing {
+  gap: 8px;
+  margin-top: 6px;
+  padding: 4px 12px;
+  border: 1px dashed var(--line2);
+  border-radius: 8px;
+}
+
+/* 譜面の出どころの印（曲に既にある作者の譜面・このアプリの AI難易度生成で作った譜面） */
+.origin-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--line3);
+  border-radius: 4px;
+  color: var(--mute);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.origin-badge.ai,
+.origin-badge.ai-edited {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.origin-badge.tab {
+  height: 13px;
+  padding: 0 3px;
+  font-size: 9px;
+  vertical-align: 1px;
+}
+
+.diff-tabs .origin-badge.tab {
+  margin-left: 4px;
+}
+
 .gen-check {
   gap: 8px;
   font-size: 12.5px;

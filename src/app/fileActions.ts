@@ -7,6 +7,7 @@ import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
 import { decodeDtx, encodeDtx } from '../dtx/encoding';
 import type { DtxDoc } from '../dtx/model';
+import { hasOriginLine, originOf, type ChartOrigin } from '../dtx/origin';
 import { parseDtx } from '../dtx/parse';
 import { serializeDtx } from '../dtx/serialize';
 import {
@@ -69,6 +70,26 @@ function siblingsOf(folder: SongFolder, labels: Map<string, string>) {
   return dtxFiles(folder).map((f) => ({ file: f.name, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, '') }));
 }
 
+/**
+ * 難易度タブの印（AI難易度生成で作った譜面か）を、曲フォルダの譜面から読む。開いたあと・保存したあとに裏で。
+ * 印の行（#DTXE_ORIGIN）がある譜面だけを読み解き、手直しの有無も見る
+ */
+async function scanSiblingOrigins(folder: SongFolder) {
+  const origins = new Map<string, ChartOrigin>();
+  for (const sb of get().meta.siblings) {
+    const f = findFile(folder, sb.file);
+    if (!f) continue;
+    try {
+      const { text } = decodeDtx(new Uint8Array(await (await f.getFile()).arrayBuffer()));
+      origins.set(sb.file.toLowerCase(), hasOriginLine(text) ? originOf(parseDtx(text).doc) : 'human');
+    } catch {
+      // 読めない譜面には印を付けない
+    }
+  }
+  if (get().folder !== folder || origins.size === 0) return;
+  useEditor.setState((st) => ({ meta: { ...st.meta, siblings: st.meta.siblings.map((x) => ({ ...x, origin: origins.get(x.file.toLowerCase()) ?? x.origin })) } }));
+}
+
 /** 作業ファイル（.dtxe.json）を読む。フォルダに無ければ自動保存の控えを使う */
 async function loadSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string) {
   const f = folder ? findFile(folder, sidecarName(fileName)) : undefined;
@@ -101,6 +122,7 @@ async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<st
     recentId: recentIdFor(folder, file.name),
   };
   openDocument(parsed.doc, meta, folder, { dirty: useRecent || decoded.encoding === 'utf-8' });
+  void scanSiblingOrigins(folder);
   await loadSidecarFor(folder, file.name, recentSidecar);
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }
@@ -489,6 +511,7 @@ export async function save(opts: { as?: boolean } = {}) {
       folder = target;
       const labels = await readSetDefLabels(folder);
       markSaved(doc, { folder, meta: { ...get().meta, fileName, siblings: siblingsOf(folder, labels), recentId: recentIdFor(folder, fileName) } });
+      void scanSiblingOrigins(folder);
       toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
       return;
     }

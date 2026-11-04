@@ -200,8 +200,8 @@ export function downloadBytes(name: string, bytes: Uint8Array, type = 'applicati
 
 export interface SetDefEntry {
   title: string;
-  /** 難易度ラベルとファイル名（L1〜L5） */
-  levels: { label: string; file: string }[];
+  /** 難易度ラベルとファイル名（L1〜L5）。index は L の番号 */
+  levels: { label: string; file: string; index?: number }[];
 }
 
 /** set.def（#L1LABEL/#L1FILE …）を読む。複数の #TITLE ブロックにも対応 */
@@ -212,7 +212,7 @@ export function parseSetDef(text: string): SetDefEntry[] {
   const files: Record<number, string> = {};
   const flush = () => {
     if (!cur) return;
-    for (let i = 1; i <= 5; i++) if (files[i]) cur.levels.push({ label: labels[i] || defaultLabel(i), file: files[i] });
+    for (let i = 1; i <= 5; i++) if (files[i]) cur.levels.push({ label: labels[i] || defaultLabel(i), file: files[i], index: i });
     out.push(cur);
     for (let i = 1; i <= 5; i++) delete labels[i], delete files[i];
   };

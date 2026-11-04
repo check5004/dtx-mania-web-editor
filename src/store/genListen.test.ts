@@ -2,7 +2,24 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { DEFAULT_KEEP, simplify } from '../gen/simplify';
 import { useEditor } from './editor';
-import { genShow, heardGenDoc, listenChoices, selectDiff, setListen, stepListen, useGen, type DiffState } from './gen';
+import {
+  belowSource,
+  columnKind,
+  compareColumns,
+  genShow,
+  heardGenDoc,
+  knownLevels,
+  listenChoices,
+  recomputeTargets,
+  selectDiff,
+  setEnabled,
+  setListen,
+  sourceFor,
+  stepListen,
+  useGen,
+  type DiffState,
+  type ExistingChart,
+} from './gen';
 
 const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
 
@@ -85,5 +102,73 @@ describe('並べて聴く：聴く譜面の切り替え', () => {
     expect(useGen.getState().view.scrollBeat).toBe(14);
     genShow(0);
     expect(useGen.getState().view.scrollBeat).toBe(-0.5);
+  });
+});
+
+describe('曲に既にある難易度', () => {
+  let doc: DtxDoc;
+  let ext: DtxDoc;
+  const chart = (slot: ExistingChart['slot'], d: DtxDoc, level: number): ExistingChart => ({ slot, label: slot, file: `${slot.toLowerCase()}.dtx`, doc: d, level, registered: true, origin: 'human', calib: 1 });
+  const diff = (d: DiffState['diff'], enabled: boolean): DiffState => ({ ...useGen.getState().diffs[d], enabled, result: null, src: null, manual: null });
+  beforeEach(() => {
+    doc = master();
+    ext = made(doc, 2)!.doc;
+    useGen.setState({
+      master: doc,
+      masterFile: 'mstr.dtx',
+      masterLabel: 'MASTER',
+      masterLevel: 7,
+      sourceSlot: 'MASTER',
+      calib: 1,
+      spans: [{ name: 'A', from: 0, to: 3 }],
+      charts: { EXTREME: chart('EXTREME', ext, 6) },
+      diffs: { EXTREME: diff('EXTREME', false), ADVANCED: diff('ADVANCED', true), BASIC: diff('BASIC', true) },
+      selected: 'ADVANCED',
+      listen: 'MASTER',
+    });
+    useEditor.setState({ doc, page: 'ai' });
+  });
+
+  it('並べて聴ける。下の難易度は既存の EXTREME から作り、目標は MASTER と EXTREME のあいだに', () => {
+    const g = useGen.getState();
+    expect(compareColumns(g)).toEqual(['MASTER', 'EXTREME', 'ADVANCED', 'BASIC']);
+    expect(columnKind(g, 'EXTREME')).toBe('existing');
+    expect(listenChoices()).toEqual(['MASTER', 'EXTREME']);
+    expect(sourceFor(g, 'ADVANCED')?.slot).toBe('EXTREME');
+    expect(sourceFor(g, 'BASIC')?.doc).toBe(ext);
+    expect(knownLevels(g)).toEqual({ MASTER: 7, EXTREME: 6 });
+    setListen('EXTREME');
+    expect(useGen.getState()).toMatchObject({ listen: 'EXTREME', selected: 'EXTREME' });
+    expect(heardGenDoc(doc)).toBe(ext);
+  });
+
+  it('作り直すことにすると、下の難易度は開いている譜面から作り、目標は MASTER だけから決め直す', () => {
+    recomputeTargets();
+    const before = useGen.getState().diffs.ADVANCED.target;
+    expect(before.max).toBeLessThanOrEqual(5.7 + 1e-9);
+    setEnabled('EXTREME', true);
+    const g = useGen.getState();
+    expect(columnKind(g, 'EXTREME')).toBe('made');
+    expect(sourceFor(g, 'ADVANCED')?.slot).toBe('MASTER');
+    expect(knownLevels(g)).toEqual({ MASTER: 7 });
+    expect(g.diffs.EXTREME.target.max).toBeLessThanOrEqual(6.7 + 1e-9);
+    // まだ作っていないので、聴けるのは元の譜面だけ
+    expect(listenChoices(g)).toEqual(['MASTER']);
+  });
+
+  it('開いている譜面が EXTREME なら、上の MASTER は残して並べ、作るのは下の難易度だけ', () => {
+    useGen.setState({ sourceSlot: 'EXTREME', masterLabel: 'EXTREME', masterLevel: 6, charts: { MASTER: chart('MASTER', ext, 7.5) }, diffs: { EXTREME: diff('EXTREME', false), ADVANCED: diff('ADVANCED', true), BASIC: diff('BASIC', true) } });
+    const g = useGen.getState();
+    expect(belowSource(g)).toEqual(['ADVANCED', 'BASIC']);
+    expect(compareColumns(g)).toEqual(['MASTER', 'EXTREME', 'ADVANCED', 'BASIC']);
+    expect(columnKind(g, 'MASTER')).toBe('existing');
+    expect(columnKind(g, 'EXTREME')).toBe('source');
+    expect(sourceFor(g, 'ADVANCED')?.slot).toBe('EXTREME');
+    // 上の譜面を聴いても、右の判定は作る難易度のまま
+    setListen('MASTER');
+    expect(useGen.getState()).toMatchObject({ listen: 'MASTER', selected: 'ADVANCED' });
+    // 元の譜面より上の難易度は作れない
+    setEnabled('EXTREME', true);
+    expect(useGen.getState().diffs.EXTREME.enabled).toBe(false);
   });
 });
