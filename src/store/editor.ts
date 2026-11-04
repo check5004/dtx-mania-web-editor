@@ -1,4 +1,5 @@
 // エディタの状態。譜面の変更は immer のパッチで Undo/Redo できるようにする。
+import { tr, pl, isJa } from '../i18n';
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer';
 import { create } from 'zustand';
 import { engine, type Mix } from '../audio/engine';
@@ -354,7 +355,8 @@ export function placeChips(items: readonly PlaceItem[], opts: { label?: string; 
   const hadKit = Object.keys(get().doc.fields).length;
   const one = items[0];
   const def = DRUM_LANES[one.lane];
-  const label = opts.label ?? (items.length === 1 ? `${one.alt && def.altName ? def.altName : def.mainName}を置く` : `${items.length}個のチップを置く`);
+  const oneName = one.alt && def.altName ? def.altName : def.mainName;
+  const label = opts.label ?? (items.length === 1 ? tr(`${oneName}を置く`, `Place ${oneName}`) : tr(`${items.length}個のチップを置く`, `Place ${items.length} chips`));
   const step = useInputSettings.getState().velStep;
   const defVel = placeVelProvider();
   edit(
@@ -391,7 +393,7 @@ export function wavForLane(lane: number, alt: boolean): number | null {
 /** 前の小節のドラムをこの小節に写す（Ctrl+D） */
 export function duplicatePrevMeasure(m: number) {
   if (m <= 0) return;
-  edit(`小節 ${toMeasure(m - 1)} を ${toMeasure(m)} に複製`, (d) => {
+  edit(tr(`小節 ${toMeasure(m - 1)} を ${toMeasure(m)} に複製`, `Copy measure ${toMeasure(m - 1)} to ${toMeasure(m)}`), (d) => {
     const src = d.chips.filter((c) => c.m === m - 1 && drumChannel(c.ch)).map((c) => ({ ch: c.ch, f: { ...c.f }, v: c.v }));
     for (let i = d.chips.length - 1; i >= 0; i--) if (d.chips[i].m === m && drumChannel(d.chips[i].ch)) d.chips.splice(i, 1);
     for (const c of src) d.chips.push({ id: d.nextId++, ch: c.ch, m, f: c.f, v: c.v });
@@ -405,11 +407,11 @@ export function insertMeasures(m: number, n = 1): boolean {
   const anchors = before.anchors.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
   let ok = false;
   const side = sideForMeasures(before.sections, before.anchors, sections, anchors);
-  edit(`小節 ${toMeasure(m)} の前に ${n} 小節を挿入`, (d) => {
+  edit(tr(`小節 ${toMeasure(m)} の前に ${n} 小節を挿入`, `Insert ${n} ${pl(n, 'measure')} before measure ${toMeasure(m)}`), (d) => {
     ok = opInsertMeasures(d, m, n);
   }, { side });
   if (ok) side.redo();
-  else toast('これ以上小節を増やせません（Z99 まで）', 'error');
+  else toast(tr('これ以上小節を増やせません（Z99 まで）', "Can't add more measures (the limit is Z99)"), 'error');
   return ok;
 }
 
@@ -426,7 +428,7 @@ export function deleteMeasures(m: number, n = 1): DeleteResult {
   });
   let res: DeleteResult = { removed: 0, kept: 0 };
   const side = sideForMeasures(before.sections, before.anchors, sections, anchors);
-  const changed = edit(`小節 ${toMeasure(m)}${n > 1 ? `〜${toMeasure(m + n - 1)}` : ''} を削除`, (d) => {
+  const changed = edit(tr(`小節 ${toMeasure(m)}${n > 1 ? `〜${toMeasure(m + n - 1)}` : ''} を削除`, `Delete measure${n > 1 ? 's' : ''} ${toMeasure(m)}${n > 1 ? `–${toMeasure(m + n - 1)}` : ''}`), (d) => {
     res = opDeleteMeasures(d, m, n);
   }, { side });
   if (changed) side.redo();
@@ -492,7 +494,7 @@ export function goBack() {
 export function deleteChips(ids: readonly number[]) {
   if (ids.length === 0) return;
   const set_ = new Set(ids);
-  edit(`${ids.length}個のチップを消す`, (d) => {
+  edit(tr(`${ids.length}個のチップを消す`, `Delete ${ids.length} ${pl(ids.length, 'chip')}`), (d) => {
     opDelete(d, set_);
   });
   set((s) => ({ selection: s.selection.filter((id) => !set_.has(id)) }));
@@ -507,7 +509,7 @@ export function moveSelection(dBeat: Frac, dLane: number): boolean {
   if (s.selection.length === 0) return false;
   const tempo = tempoOf(s.doc);
   let ok = false;
-  edit('チップを動かす', (d) => {
+  edit(tr('チップを動かす', 'Move chips'), (d) => {
     ok = opMove(d, new Set(s.selection), tempo, dBeat, dLane, shiftLane);
   });
   return ok;
@@ -534,7 +536,7 @@ export function paste(atBeat0?: number) {
   const at = snapToGrid(tempo, typeof atBeat0 === 'number' ? atBeat0 : s.cursorBeat, s.view.div);
   const atBeat = tempo.beatOfFrac(at.m, at.f);
   let ids: number[] = [];
-  edit(`${s.clipboard.length}個のチップを貼り付け`, (d) => {
+  edit(tr(`${s.clipboard.length}個のチップを貼り付け`, `Paste ${s.clipboard.length} ${pl(s.clipboard.length, 'chip')}`), (d) => {
     ids = opPaste(d, s.clipboard, atBeat, tempo);
   });
   set({ selection: ids });
@@ -546,7 +548,9 @@ export function selectAll() {
 
 export function setKind(kind: 'normal' | 'hidden' | 'nochip', ids0: readonly number[] = get().selection) {
   const ids = new Set(ids0);
-  edit(kind === 'normal' ? '通常チップにする' : kind === 'hidden' ? '不可視チップにする' : '音だけのチップにする', (d) =>
+  const label =
+    kind === 'normal' ? tr('通常チップにする', 'Make normal chips') : kind === 'hidden' ? tr('不可視チップにする', 'Make invisible chips') : tr('音だけのチップにする', 'Make sound-only chips');
+  edit(label, (d) =>
     opSetKind(d, ids, kind),
   );
 }
@@ -563,7 +567,7 @@ export function relaneChips(ids0: readonly number[], lane: number, alt: AltMode 
   const hadKit = Object.keys(get().doc.fields).length;
   const name = alt === 'alt' && def.altName ? def.altName : alt === 'main' && def.alt !== undefined ? def.mainName : def.name;
   let n = 0;
-  edit(`${ids.size === 1 ? 'チップ' : `${ids.size}個のチップ`}を${name}にする`, (d) => {
+  edit(tr(`${ids.size === 1 ? 'チップ' : `${ids.size}個のチップ`}を${name}にする`, `Change ${ids.size === 1 ? 'chip' : `${ids.size} chips`} to ${name}`), (d) => {
     n = opRelane(d, ids, lane, alt);
     for (const c of d.chips) {
       if (!ids.has(c.id) || before.get(c.id) === c.ch) continue;
@@ -578,12 +582,12 @@ export function relaneChips(ids0: readonly number[], lane: number, alt: AltMode 
 
 export function setSelectionWav(v: number) {
   const ids = new Set(get().selection);
-  edit('チップの音（WAV）を変える', (d) => {
+  edit(tr('チップの音（WAV）を変える', 'Change chip sound (WAV)'), (d) => {
     for (const c of d.chips) if (ids.has(c.id) && drumChannel(c.ch)) c.v = v;
   });
 }
 
-export function setFieldValue(key: string, value: string | undefined, label = `#${key} を変更`) {
+export function setFieldValue(key: string, value: string | undefined, label = tr(`#${key} を変更`, `Change #${key}`)) {
   edit(label, (d) => setField(d, key, value));
   if (/^(WAV|VOLUME|PAN|WAVVOL|WAVPAN)[0-9A-Z]{2}$|^PATH_WAV$/i.test(key)) void prepareSounds();
 }
@@ -598,7 +602,7 @@ export function setLaneWav(base: number, no: number | null) {
 }
 
 /** BPM を変える（#BPM ヘッダ。曲頭に ch08/ch03 のBPMチップがあればそれも合わせる） */
-export function setInitialBpm(bpm: number, label = 'BPMを変更') {
+export function setInitialBpm(bpm: number, label = tr('BPMを変更', 'Change BPM')) {
   edit(label, (d) => {
     setField(d, 'BPM', String(bpm));
   });
@@ -615,7 +619,7 @@ export function setMeasureLength(m: number, len: number) {
   if (cur === len) return;
   const prev = m > 0 ? tempo.barLen(m - 1) : 1;
   const nextOwn = doc.barLengths[m + 1];
-  edit(`小節${toMeasure(m)}の拍子を変更`, (d) => {
+  edit(tr(`小節${toMeasure(m)}の拍子を変更`, `Change the meter of measure ${toMeasure(m)}`), (d) => {
     if (len === prev) delete d.barLengths[m];
     else d.barLengths[m] = len;
     if (nextOwn === undefined && m + 1 < 3600) {
@@ -629,7 +633,7 @@ export function setMeasureLength(m: number, len: number) {
 
 /** BPM変化を置く（ch08 と #BPMzz を使う） */
 export function placeBpmChange(pos: Pos, bpm: number) {
-  edit(`BPM ${bpm} を置く`, (d) => {
+  edit(tr(`BPM ${bpm} を置く`, `Place BPM ${bpm}`), (d) => {
     let no = -1;
     for (const [k, v] of Object.entries(d.fields)) {
       if (/^BPM[0-9A-Z]{2}$/.test(k) && Number(v) === bpm) no = parseInt(k.slice(3), 36);
@@ -683,10 +687,10 @@ export async function prepareSounds(): Promise<void> {
   if (sig === preparedSig && preparing) return preparing;
   preparedSig = sig;
   const p = (async () => {
-    if (sources.length > 8) set({ loading: '音を読み込んでいます…' });
+    if (sources.length > 8) set({ loading: tr('音を読み込んでいます…', 'Loading sounds…') });
     try {
       const failed = await engine.prepare(sources, (done, total) => {
-        if (total > 8 && done % 8 === 0) set({ loading: `音を読み込んでいます… ${done}/${total}` });
+        if (total > 8 && done % 8 === 0) set({ loading: tr(`音を読み込んでいます… ${done}/${total}`, `Loading sounds… ${done}/${total}`) });
       });
       if (preparedSig === sig) set({ missingWavs: failed });
     } finally {
@@ -878,7 +882,7 @@ export function setSongEnd(m: number | null, opts: { group?: string } = {}): num
   const want = auto ? (autoEndMeasure(doc) ?? naturalEndMeasure(doc)) : Math.round(m);
   const to = Math.max(minSongEnd(doc), Math.min(MAX_MEASURES - 1, want));
   if (to === from && (auto ? doc.endMeasure === undefined : doc.endMeasure === to)) return to;
-  const label = auto ? '曲の終わりを原曲に合わせる' : `曲の終わりを小節 ${toMeasure(to)} の頭にする`;
+  const label = auto ? tr('曲の終わりを原曲に合わせる', 'Match the song end to the original') : tr(`曲の終わりを小節 ${toMeasure(to)} の頭にする`, `Set the song end to the start of measure ${toMeasure(to)}`);
   edit(
     label,
     (d) => {
@@ -904,17 +908,29 @@ export function dragSongEnd(beat: number, group: string): number {
   return setSongEnd(m === autoEndMeasure(doc) ? null : m, { group });
 }
 
-const END_WHAT = { audio: '原曲の鳴り終わり', video: '参照映像の終わり', chips: '最後のチップのすぐ後', set: '' } as const;
+const endWhat = (k: 'audio' | 'video' | 'chips' | 'set'): string =>
+  ({
+    audio: tr('原曲の鳴り終わり', 'where the original ends'),
+    video: tr('参照映像の終わり', 'the end of the reference video'),
+    chips: tr('最後のチップのすぐ後', 'right after the last chip'),
+    set: '',
+  })[k];
 
 /** 決めた曲の終わりをやめて、自動（原曲の鳴り終わり。原曲が無ければ最後のチップのすぐ後）に戻す */
 export function resetSongEnd() {
   const doc = get().doc;
   if (doc.endMeasure === undefined) {
-    toast(`曲の終わりはいま自動（${END_WHAT[songEndReason(doc)] || '原曲の鳴り終わり'}）です。END の札をドラッグすると動かせます`);
+    const what = endWhat(songEndReason(doc)) || endWhat('audio');
+    toast(tr(`曲の終わりはいま自動（${what}）です。END の札をドラッグすると動かせます`, `The song end is automatic now (${what}). Drag the END tag to move it`));
     return;
   }
   const m = setSongEnd(null);
-  toast(`曲の終わりを${END_WHAT[songEndReason(get().doc)] || '自動'}（小節 ${toMeasure(m)} の頭）に合わせました`);
+  const what = endWhat(songEndReason(get().doc));
+  toast(
+    isJa()
+      ? `曲の終わりを${what || '自動'}（小節 ${toMeasure(m)} の頭）に合わせました`
+      : `Set the song end to ${what || 'automatic'} (start of measure ${toMeasure(m)})`,
+  );
 }
 
 /** 曲の終わりを ▶ の所にする（▶ のある小節の次の小節の頭。▶ が小節の頭ならそこ） */
@@ -922,13 +938,17 @@ export function songEndAtCursor() {
   const s = get();
   const want = measureAfter(tempoOf(s.doc), Math.max(0, s.cursorBeat));
   const m = setSongEnd(want);
-  toast(m > want ? `最後のチップより前にはできないので、小節 ${toMeasure(m)} の頭を曲の終わりにしました` : `曲の終わりを小節 ${toMeasure(m)} の頭にしました`);
+  toast(
+    m > want
+      ? tr(`最後のチップより前にはできないので、小節 ${toMeasure(m)} の頭を曲の終わりにしました`, `It can't be before the last chip, so the song now ends at the start of measure ${toMeasure(m)}`)
+      : tr(`曲の終わりを小節 ${toMeasure(m)} の頭にしました`, `The song now ends at the start of measure ${toMeasure(m)}`),
+  );
 }
 
 /** 曲の終わりを最後のチップのすぐ後（その次の小節の頭）にする。原曲の後ろの余白を切るとき */
 export function songEndAtLastChip() {
   const m = setSongEnd(minSongEnd(get().doc));
-  toast(`曲の終わりを最後のチップのすぐ後（小節 ${toMeasure(m)} の頭）にしました`);
+  toast(tr(`曲の終わりを最後のチップのすぐ後（小節 ${toMeasure(m)} の頭）にしました`, `The song now ends right after the last chip (start of measure ${toMeasure(m)})`));
 }
 
 /** 曲の長さが何も分からない（チップも原曲も映像も無い）ときに流し続ける長さ */
@@ -1023,11 +1043,11 @@ export async function playFrom(beat: number, opts: { keepStart?: boolean } = {})
   const longs = new Map<number, number>();
   for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
   if (rate < 0.999 && longs.size > 0) {
-    set({ loading: 'スロー再生の準備中…' });
+    set({ loading: tr('スロー再生の準備中…', 'Preparing slow playback…') });
     try {
       await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
     } catch (e) {
-      toast(`スロー再生の準備ができませんでした: ${(e as Error).message}`, 'error');
+      toast(tr(`スロー再生の準備ができませんでした: ${(e as Error).message}`, `Couldn't prepare slow playback: ${(e as Error).message}`), 'error');
     } finally {
       set({ loading: null });
     }
@@ -1143,7 +1163,7 @@ export function createDoc(info: NewSongInfo): DtxDoc {
     header.push({ kind: 'field', key, name: key, sep: ': ', comment: null });
     fields[key] = value;
   };
-  add('TITLE', info.title || '無題');
+  add('TITLE', info.title || tr('無題', 'Untitled'));
   add('ARTIST', info.artist);
   add('BPM', String(info.bpm));
   add('DLEVEL', String(info.level ?? 50));

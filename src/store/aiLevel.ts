@@ -1,4 +1,5 @@
 // AI のレベル判定（「確かめる」に機械的な推定と並べて出す）。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { cleanJudgement, levelSchema, levelPrompt, sectionSpans, type LevelJudgement } from '../ai/judge';
 import { AiError } from '../ai/openrouter';
@@ -52,6 +53,6 @@ export async function judgeCurrent() {
     if (r) useAiLevel.setState({ doc: s.doc, result: r, loading: false });
     else useAiLevel.setState({ loading: false });
   } catch (e) {
-    useAiLevel.setState({ loading: false, error: e instanceof AiError ? e.message : `判定できませんでした: ${(e as Error).message}` });
+    useAiLevel.setState({ loading: false, error: e instanceof AiError ? e.message : tr(`判定できませんでした: ${(e as Error).message}`, `Couldn't rate it: ${(e as Error).message}`) });
   }
 }

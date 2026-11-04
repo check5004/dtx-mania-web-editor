@@ -1,4 +1,5 @@
 // DTXファイルの文字コード。NX は Shift_JIS（CP932）として読む。BOM付きUTF-8は .NET が自動判定して読める見込み。
+import { tr } from '../i18n';
 
 export type DtxEncoding = 'shift_jis' | 'utf-8-bom' | 'utf-8' | 'utf-16le' | 'utf-16be';
 
@@ -9,7 +10,8 @@ export interface DecodedText {
   note?: string;
 }
 
-const UTF16_NOTE = 'このファイルはBOM付きUTF-16です。保存するとShift_JISで書き出します（NXはどちらも読めます）。';
+const utf16Note = () =>
+  tr('このファイルはBOM付きUTF-16です。保存するとShift_JISで書き出します（NXはどちらも読めます）。', 'This file is UTF-16 with a BOM. Saving writes it as Shift_JIS (NX reads both).');
 
 export function decodeDtx(bytes: Uint8Array): DecodedText {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
@@ -17,10 +19,10 @@ export function decodeDtx(bytes: Uint8Array): DecodedText {
   }
   // BOM付きUTF-16（DTXCreatorAL などが書く）。.NET の StreamReader は BOM で判定するので NX も読める
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-    return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), encoding: 'utf-16le', note: UTF16_NOTE };
+    return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), encoding: 'utf-16le', note: utf16Note() };
   }
   if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), encoding: 'utf-16be', note: UTF16_NOTE };
+    return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), encoding: 'utf-16be', note: utf16Note() };
   }
   let ascii = true;
   for (let i = 0; i < bytes.length; i++) {
@@ -35,7 +37,10 @@ export function decodeDtx(bytes: Uint8Array): DecodedText {
       return {
         text,
         encoding: 'utf-8',
-        note: 'このファイルはBOMなしのUTF-8です。NXはShift_JISとして読むため、日本語が文字化けします。保存するとShift_JISに直ります。',
+        note: tr(
+          'このファイルはBOMなしのUTF-8です。NXはShift_JISとして読むため、日本語が文字化けします。保存するとShift_JISに直ります。',
+          'This file is UTF-8 without a BOM. NX reads it as Shift_JIS, so Japanese text would be garbled. Saving fixes it to Shift_JIS.',
+        ),
       };
     } catch {
       // UTF-8 として不正 → Shift_JIS
@@ -45,6 +50,7 @@ export function decodeDtx(bytes: Uint8Array): DecodedText {
 }
 
 /** Shift_JIS に無い文字のうち、見た目が同じ文字に置き換えられるもの */
+// i18n-ignore-start 文字の置き換え表（画面の文ではない）
 const SJIS_FRIENDLY: Record<string, string> = {
   '〜': '～', // 〜 → ～
   '—': '―', // — → ―
@@ -55,6 +61,7 @@ const SJIS_FRIENDLY: Record<string, string> = {
   '¬': '￢', // ¬ → ￢
   '\u00a0': ' ',
 };
+// i18n-ignore-end
 
 export interface EncodedText {
   bytes: Uint8Array;

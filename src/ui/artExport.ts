@@ -1,4 +1,5 @@
 // 画像の候補を読み込み、切り取って曲フォルダに PNG で書き出し、#PREIMAGE などに設定する。
+import { tr, withTr } from '../i18n';
 import type { ArtCandidate } from '../ai/songInfo';
 import { downloadBytes, findFile, putFile } from '../fs/folder';
 import { setFieldValue, useEditor } from '../store/editor';
@@ -13,8 +14,8 @@ export interface ArtPreset {
 }
 
 export const ART_PRESETS: ArtPreset[] = [
-  { id: 'pre-sq', label: 'PREIMAGE 正方形 400×400', key: 'PREIMAGE', w: 400, h: 400, file: 'preimage.png' },
-  { id: 'pre-old', label: 'PREIMAGE 縦長 204×269（旧DTXMania）', key: 'PREIMAGE', w: 204, h: 269, file: 'preimage.png' },
+  withTr({ id: 'pre-sq', label: '', key: 'PREIMAGE', w: 400, h: 400, file: 'preimage.png' }, { label: ['PREIMAGE 正方形 400×400', 'PREIMAGE square 400×400'] }),
+  withTr({ id: 'pre-old', label: '', key: 'PREIMAGE', w: 204, h: 269, file: 'preimage.png' }, { label: ['PREIMAGE 縦長 204×269（旧DTXMania）', 'PREIMAGE portrait 204×269 (old DTXMania)'] }),
   { id: 'stage', label: 'STAGEFILE 1280×720', key: 'STAGEFILE', w: 1280, h: 720, file: 'stagefile.png' },
   { id: 'bg', label: 'BACKGROUND 1280×720', key: 'BACKGROUND', w: 1280, h: 720, file: 'background.png' },
 ];
@@ -26,7 +27,7 @@ function loadImg(src: string, cors: boolean): Promise<HTMLImageElement> {
     const im = new Image();
     if (cors) im.crossOrigin = 'anonymous';
     im.onload = () => resolve(im);
-    im.onerror = () => reject(new Error('読み込めませんでした'));
+    im.onerror = () => reject(new Error(tr('読み込めませんでした', "Couldn't load it")));
     im.src = src;
   });
 }
@@ -50,7 +51,7 @@ export async function loadArtImage(cand: ArtCandidate): Promise<{ img: HTMLImage
       }
     }
   }
-  throw new Error('画像を読み込めませんでした');
+  throw new Error(tr('画像を読み込めませんでした', "Couldn't load the image"));
 }
 
 /** 縦横比を合わせて真ん中を切り取る範囲（画像の画素） */
@@ -78,7 +79,13 @@ export async function saveArt(img: HTMLImageElement, rect: { x: number; y: numbe
   } catch {
     blob = null;
   }
-  if (!blob) throw new Error('この画像は配信元が書き出しを許可していないため切り取れません。画像を保存してから「画像ファイルを選ぶ」で選んでください');
+  if (!blob)
+    throw new Error(
+      tr(
+        'この画像は配信元が書き出しを許可していないため切り取れません。画像を保存してから「画像ファイルを選ぶ」で選んでください',
+        "This image's host doesn't allow exporting it, so it can't be cropped. Save the image, then pick it with “Choose an image file”",
+      ),
+    );
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const folder = useEditor.getState().folder;
   let name = preset.file;
@@ -86,11 +93,11 @@ export async function saveArt(img: HTMLImageElement, rect: { x: number; y: numbe
     // 同じ名前があれば番号を付ける
     for (let i = 2; findFile(folder, name) && i < 50; i++) name = preset.file.replace('.png', `_${i}.png`);
     const where = await putFile(folder, name, bytes);
-    setFieldValue(preset.key, name, `#${preset.key} を ${name} にする`);
+    setFieldValue(preset.key, name, tr(`#${preset.key} を ${name} にする`, `Set #${preset.key} to ${name}`));
     return { name, where };
   }
   downloadBytes(name, bytes, 'image/png');
-  setFieldValue(preset.key, name, `#${preset.key} を ${name} にする`);
+  setFieldValue(preset.key, name, tr(`#${preset.key} を ${name} にする`, `Set #${preset.key} to ${name}`));
   return { name, where: 'download' };
 }
 

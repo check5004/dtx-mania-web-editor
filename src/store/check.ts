@@ -1,4 +1,5 @@
 // 確かめる：無理な配置の警告と推定レベル（譜面が変わるたびに計算し直す）。
+import { tr, getLang, type Lang } from '../i18n';
 import { create } from 'zustand';
 import { estimateLevel, levelToField, type LevelEstimate } from '../check/level';
 import { findIssues, type Issue } from '../check/playability';
@@ -28,14 +29,16 @@ export function setShowIssues(on: boolean) {
   }
 }
 
-const issueCache = new WeakMap<DtxDoc, Issue[]>();
+// 警告の文は言語ごとに作る（言語を切り替えたら作り直す）
+const issueCache: Record<Lang, WeakMap<DtxDoc, Issue[]>> = { ja: new WeakMap(), en: new WeakMap() };
 const levelCache = new WeakMap<DtxDoc, LevelEstimate | null>();
 
 export function issuesOf(doc: DtxDoc): Issue[] {
-  let v = issueCache.get(doc);
+  const cache = issueCache[getLang()];
+  let v = cache.get(doc);
   if (!v) {
     v = findIssues(doc, tempoOf(doc));
-    issueCache.set(doc, v);
+    cache.set(doc, v);
   }
   return v;
 }
@@ -60,7 +63,7 @@ export function gotoNextIssue() {
 
 /** 警告の種類の名前 */
 export function issueLevelName(level: Issue['level']): string {
-  return level === 'error' ? '叩けない配置' : '難しい配置';
+  return level === 'error' ? tr('叩けない配置', 'Unplayable') : tr('難しい配置', 'Hard to play');
 }
 
 /** 警告の場所へ移って、かかわるチップを選ぶ */
@@ -72,5 +75,5 @@ export function gotoIssue(is: Issue) {
 }
 
 export function adoptLevel(lv: number) {
-  setFieldValue('DLEVEL', levelToField(lv), `ドラムのレベルを ${lv.toFixed(2)} にする`);
+  setFieldValue('DLEVEL', levelToField(lv), tr(`ドラムのレベルを ${lv.toFixed(2)} にする`, `Set the drum level to ${lv.toFixed(2)}`));
 }

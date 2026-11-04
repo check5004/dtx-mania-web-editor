@@ -156,7 +156,7 @@ export function nudgeVel(ids0: readonly number[], delta: number, group = 'vel-nu
   const step = Math.abs(delta) < velStep() ? 1 : velStep();
   const idSet = new Set(ids);
   edit(
-    `ベロシティを ${delta > 0 ? '+' : ''}${delta}`,
+    tr(`ベロシティを ${delta > 0 ? '+' : ''}${delta}`, `Velocity ${delta > 0 ? '+' : ''}${delta}`),
     (d) => {
       opSetVelocity(d, idSet, (cur) => cur + delta, step);
     },
@@ -171,7 +171,7 @@ export function setSelectionVel(v: number) {
 
 /** チップのベロシティを v にする（右のパネル・右クリックのメニュー） */
 export function setVelOf(ids: readonly number[], v: number, group?: string): number {
-  return applyVel(`ベロシティを ${v} にする`, ids, () => v, { similar: false, group });
+  return applyVel(tr(`ベロシティを ${v} にする`, `Set velocity to ${v}`), ids, () => v, { similar: false, group });
 }
 
 // ---- ベロシティの編集モード -------------------------------------------------------------
@@ -324,7 +324,7 @@ export function setProposal(p: Map<number, number> | null) {
 export function adoptProposal() {
   const p = vget().proposal;
   if (!p) return;
-  applyVel(`原曲の打点からベロシティを決める（${p.size}個）`, [...p.keys()], (_cur, c) => p.get(c.id) ?? null, { similar: false });
+  applyVel(tr(`原曲の打点からベロシティを決める（${p.size}個）`, `Velocity from the original audio (${p.size})`), [...p.keys()], (_cur, c) => p.get(c.id) ?? null, { similar: false });
   vset({ proposal: null });
 }
 

@@ -1,4 +1,5 @@
 // NX 風の落下プレビュー。上から落ちてくるチップが判定ラインに重なる時刻に鳴る（再生中は再生位置、止まっているときはカーソル位置）。
+import { tr } from '../i18n';
 import { useEffect, useRef } from 'react';
 import { engine } from '../audio/engine';
 import { toMeasure } from '../dtx/base36';
@@ -278,7 +279,7 @@ export function NxPreview({ full = false }: { full?: boolean }) {
       ctx.textAlign = 'left';
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillStyle = '#E7EBF1';
-      ctx.fillText(doc.fields['TITLE'] || '無題', 10, 18);
+      ctx.fillText(doc.fields['TITLE'] || tr('無題', 'Untitled'), 10, 18);
       ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
       ctx.fillStyle = '#A3ADBB';
       ctx.fillText(`BPM ${Math.round(t.bpmAt(t.secToBeat(now)) * 10) / 10}  #${toMeasure(m)}`, 10, 34);
@@ -295,10 +296,10 @@ export function NxPreview({ full = false }: { full?: boolean }) {
   return (
     <div className={`nx-preview ${full ? 'full' : ''}`}>
       <div className="nx-head row">
-        <b>NX風プレビュー</b>
+        <b>{tr('NX風プレビュー', 'NX-style preview')}</b>
         <span className="grow" />
-        <label className="row lbl" style={{ gap: 6 }} title="落ちてくる速さ（NX のハイスピード）">
-          速さ
+        <label className="row lbl" style={{ gap: 6 }} title={tr('落ちてくる速さ（NX のハイスピード）', 'Scroll speed (NX hi-speed)')}>
+          {tr('速さ', 'Speed')}
           <input type="range" min={0.5} max={4} step={0.25} value={speed} onChange={(e) => usePreview.setState({ speed: Number(e.target.value) })} style={{ width: 90 }} />
           <span className="mono">×{speed.toFixed(2)}</span>
         </label>
@@ -306,18 +307,22 @@ export function NxPreview({ full = false }: { full?: boolean }) {
           <input type="checkbox" checked={bgaOn} onChange={(e) => usePreview.setState({ bga: e.target.checked })} />
           BGA
         </label>
-        <button className="ib tiny" onClick={() => togglePreview(full ? 'side' : 'full')} title={full ? '右のパネルに戻す' : '全画面（Shift+P）'}>
+        <button className="ib tiny" onClick={() => togglePreview(full ? 'side' : 'full')} title={full ? tr('右のパネルに戻す', 'Back to the right panel') : tr('全画面（Shift+P）', 'Full screen (Shift+P)')}>
           {full ? '⤡' : '⤢'}
         </button>
-        <button className="ib tiny" onClick={() => usePreview.setState({ mode: 'off' })} aria-label="閉じる" title="閉じる（P）">
+        <button className="ib tiny" onClick={() => usePreview.setState({ mode: 'off' })} aria-label={tr('閉じる', 'Close')} title={tr('閉じる（P）', 'Close (P)')}>
           ✕
         </button>
       </div>
       <div ref={wrap} className="nx-canvas" onDoubleClick={togglePlay}>
-        <canvas ref={cv} aria-label="NX風プレビュー" />
+        <canvas ref={cv} aria-label={tr('NX風プレビュー', 'NX-style preview')} />
       </div>
       <div className="nx-foot lbl">
-        {Icon.play(11)} Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。
+        {Icon.play(11)}{' '}
+        {tr(
+          'Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。',
+          'Space plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of NX; do the final check in NX.',
+        )}
       </div>
     </div>
   );

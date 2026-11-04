@@ -1,4 +1,5 @@
 // 譜面の編集操作。immer の draft に対して書き換える（呼び出し側で Undo 用のパッチを取る）。
+import { tr } from '../i18n';
 import type { Draft } from 'immer';
 import { toBase36x2 } from '../dtx/base36';
 import { add, cmp, frac, sub, ZERO, type Frac } from '../dtx/fraction';
@@ -9,9 +10,9 @@ import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
 export const GRID_DIVS = [4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 64, 96, 192] as const;
 
 export function gridLabel(div: number): string {
-  if (div % 7 === 0) return `1/${div}（7連）`;
-  if (div % 5 === 0) return `1/${div}（5連）`;
-  if (div % 3 === 0) return `1/${div}（3連）`;
+  if (div % 7 === 0) return tr(`1/${div}（7連）`, `1/${div} (septuplet)`);
+  if (div % 5 === 0) return tr(`1/${div}（5連）`, `1/${div} (quintuplet)`);
+  if (div % 3 === 0) return tr(`1/${div}（3連）`, `1/${div} (triplet)`);
   return `1/${div}`;
 }
 

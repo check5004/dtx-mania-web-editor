@@ -1,4 +1,5 @@
 // 入力の設定（キーボードの割り当て、電子ドラムの割り当て、遅延補正）。ブラウザに保存する。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 
 export interface LaneTarget {
@@ -114,7 +115,7 @@ function load(): InputSettings {
   } catch {
     // 読めなければ初期値
   }
-  if (base.profiles.length === 0) base.profiles = [newProfile('標準（General MIDI）')];
+  if (base.profiles.length === 0) base.profiles = [newProfile(tr('標準（General MIDI）', 'Standard (General MIDI)'))];
   if (!base.profiles.some((p) => p.id === base.profileId)) base.profileId = base.profiles[0].id;
   return base;
 }
@@ -154,7 +155,7 @@ export function setNote(id: string, note: number, target: LaneTarget | null) {
 }
 
 export function addProfile(copyFrom?: MidiProfile): MidiProfile {
-  const p = copyFrom ? { ...copyFrom, notes: { ...copyFrom.notes }, id: newProfile('').id, name: `${copyFrom.name} のコピー` } : newProfile('新しいプロファイル');
+  const p = copyFrom ? { ...copyFrom, notes: { ...copyFrom.notes }, id: newProfile('').id, name: tr(`${copyFrom.name} のコピー`, `${copyFrom.name} copy`) } : newProfile(tr('新しいプロファイル', 'New profile'));
   useInputSettings.setState((s) => ({ profiles: [...s.profiles, p], profileId: p.id }));
   return p;
 }
@@ -162,7 +163,7 @@ export function addProfile(copyFrom?: MidiProfile): MidiProfile {
 export function removeProfile(id: string) {
   useInputSettings.setState((s) => {
     const profiles = s.profiles.filter((p) => p.id !== id);
-    if (profiles.length === 0) profiles.push(newProfile('標準（General MIDI）'));
+    if (profiles.length === 0) profiles.push(newProfile(tr('標準（General MIDI）', 'Standard (General MIDI)')));
     return { profiles, profileId: profiles.some((p) => p.id === s.profileId) ? s.profileId : profiles[0].id };
   });
 }
@@ -180,7 +181,7 @@ export function setKey(code: string, lane: number | null) {
 export function keyLabel(code: string): string {
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
-  if (code.startsWith('Numpad')) return 'テンキー' + code.slice(6);
+  if (code.startsWith('Numpad')) return tr('テンキー', 'Num') + code.slice(6);
   const map: Record<string, string> = { Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Minus: '-', Equal: '=' };
   return map[code] ?? code;
 }

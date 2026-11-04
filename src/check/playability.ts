@@ -1,4 +1,5 @@
 // 無理な配置の警告：手が3本いる同時打ち、足が足りない同時打ち、同じレーンの速すぎる連打（フラムは除く）。
+import { tr } from '../i18n';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { FLAM_MAX_SEC, flamPairStarts } from '../edit/flam';
@@ -64,13 +65,13 @@ export function findIssues(doc: DtxDoc, tempo: TempoMap, opt: IssueOptions = DEF
     if (g.length < 2) continue;
     const hands = [...new Set(g.filter((n) => HAND_LANES.has(n.lane)).map((n) => n.lane))];
     if (hands.length > 2) {
-      push('hands', 'error', g.filter((n) => HAND_LANES.has(n.lane)), `手が${hands.length}本いる同時打ち（${hands.map((l) => LANE_KEYS[l]).join('・')}）`);
+      push('hands', 'error', g.filter((n) => HAND_LANES.has(n.lane)), tr(`手が${hands.length}本いる同時打ち（${hands.map((l) => LANE_KEYS[l]).join('・')}）`, `Needs ${hands.length} hands at once (${hands.map((l) => LANE_KEYS[l]).join(', ')})`));
     }
     const chs = new Set(g.map((n) => n.ch));
     const feet = [CH.BD, CH.LBD, CH.LP].filter((c) => chs.has(c));
-    if (feet.length > 2) push('feet', 'error', g.filter((n) => feet.includes(n.ch as never)), '足が3本いる同時打ち（BD・LBD・LP）');
-    else if (chs.has(CH.LBD) && chs.has(CH.LP)) push('leftFoot', 'error', g.filter((n) => n.ch === CH.LBD || n.ch === CH.LP), '左足で2つ同時（左ペダルと左バスドラム）');
-    if (chs.has(CH.HHC) && chs.has(CH.HHO)) push('hhBoth', 'warn', g.filter((n) => n.ch === CH.HHC || n.ch === CH.HHO), 'HHクローズとHHオープンが同時');
+    if (feet.length > 2) push('feet', 'error', g.filter((n) => feet.includes(n.ch as never)), tr('足が3本いる同時打ち（BD・LBD・LP）', 'Needs 3 feet at once (BD, LBD, LP)'));
+    else if (chs.has(CH.LBD) && chs.has(CH.LP)) push('leftFoot', 'error', g.filter((n) => n.ch === CH.LBD || n.ch === CH.LP), tr('左足で2つ同時（左ペダルと左バスドラム）', 'Two left-foot notes at once (left pedal and left bass drum)'));
+    if (chs.has(CH.HHC) && chs.has(CH.HHO)) push('hhBoth', 'warn', g.filter((n) => n.ch === CH.HHC || n.ch === CH.HHO), tr('HHクローズとHHオープンが同時', 'Closed and open hi-hat at the same time'));
   }
 
   // 同じ手足の速すぎる連打（HH は開閉を同じ、左足は LP と LBD を同じとみなす）
@@ -119,9 +120,11 @@ export function findIssues(doc: DtxDoc, tempo: TempoMap, opt: IssueOptions = DEF
     }
     reported.add(`${limb}:${n.id}`);
     const ms = Math.round(dt * 1000);
-    const what = limb === 'rf' ? 'バスドラム（右足）' : limb === 'lf' ? '左足（左ペダル・左バスドラム）' : LANE_KEYS[n.lane];
-    const hint = limb === 'rf' ? '。左バスドラムに振り分けると楽になります' : '';
-    out.push({ kind: 'fast', level: 'warn', sec: prev.sec, beat: prev.beat, m: prev.m, ids: [prev.id, n.id], message: `${what}の連打が速すぎます（${ms}ミリ秒間隔）${hint}` });
+    const what =
+      limb === 'rf' ? tr('バスドラム（右足）', 'Bass drum (right foot)') : limb === 'lf' ? tr('左足（左ペダル・左バスドラム）', 'Left foot (left pedal, left bass drum)') : LANE_KEYS[n.lane];
+    const hint = limb === 'rf' ? tr('。左バスドラムに振り分けると楽になります', '. Moving some to the left bass drum makes it easier') : '';
+    const message = tr(`${what}の連打が速すぎます（${ms}ミリ秒間隔）${hint}`, `${what} repeats too fast (${ms} ms apart)${hint}`);
+    out.push({ kind: 'fast', level: 'warn', sec: prev.sec, beat: prev.beat, m: prev.m, ids: [prev.id, n.id], message });
   }
   out.sort((a, b) => a.sec - b.sec || (a.level === 'error' ? -1 : 1));
   return out;

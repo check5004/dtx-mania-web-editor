@@ -1,6 +1,7 @@
 // AI 難易度生成：MASTER（いま開いている譜面）から BASIC・ADVANCED・EXTREME を作り、並べて聴き比べて手直しし、set.def と一緒に書き出す。
 // AI は区間ごとの方針だけを決め、配置は gen/simplify のルールで行う。キーが無ければ標準の方針で作る。
 // 再生はエディタと共通（▶・ループ・速さ）で、この画面にいる間は「聴く」譜面（元の譜面か作った難易度）の音を鳴らす。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { cleanPlan, planSchema, planPrompt, sectionSpans, type DifficultyPlan, type SectionSpan } from '../ai/judge';
 import { AiError } from '../ai/openrouter';
@@ -157,7 +158,12 @@ export function initGen() {
 }
 
 function defaultPlan(spans: SectionSpan[]): DifficultyPlan {
-  return { summary: '標準の方針です。機械的な推定が目標のレベルに入るまで簡略化の段を上げ下げし、段のあいだは4小節のうち何小節かだけ次の段にして合わせます。', sections: spans.map((s) => ({ name: s.name, from: s.from, to: s.to, shift: 0 })) };
+  return {
+    summary: tr(
+      '標準の方針です。機械的な推定が目標のレベルに入るまで簡略化の段を上げ下げし、段のあいだは4小節のうち何小節かだけ次の段にして合わせます。',
+      'Standard plan: the simplification step goes up or down until the computed estimate lands in the target level; between two steps, only some of every 4 measures use the next step to fine-tune.',
+    ),
+    sections: spans.map((s) => ({ name: s.name, from: s.from, to: s.to, shift: 0 })) };
 }
 
 /** 目標より難しくなる指定（元に近く・フィルを残す）を外した方針。外すものが無ければ null */
@@ -165,7 +171,10 @@ export function relaxPlan(plan: DifficultyPlan): DifficultyPlan | null {
   const strong = (s: DifficultyPlan['sections'][number]) => s.shift < 0 || s.fill === 'keep' || s.fill === 'thin';
   if (!plan.sections.some(strong)) return null;
   return {
-    summary: `${plan.summary}${plan.summary ? ' ' : ''}（この方針では目標のレベルまで簡単にできなかったので、「元の譜面に近く」「フィルを残す」の指定を外して作りました）`,
+    summary: `${plan.summary}${plan.summary ? ' ' : ''}${tr(
+      '（この方針では目標のレベルまで簡単にできなかったので、「元の譜面に近く」「フィルを残す」の指定を外して作りました）',
+      '(This plan could not get down to the target level, so it was made without the “closer to the original” and “keep fills” settings.)',
+    )}`,
     sections: plan.sections.map((s) => ({ ...s, shift: Math.max(0, s.shift), fill: s.fill === 'keep' || s.fill === 'thin' ? undefined : s.fill })),
   };
 }
@@ -276,7 +285,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
     // 初めて作れたら、選んでいる難易度を聴く（元の譜面を聴いていたときだけ）
     if (!hadResult && get().selected === diff && get().listen === 'MASTER') set({ listen: diff });
   } catch (e) {
-    patchDiff(diff, { status: 'error', error: e instanceof AiError ? e.message : `作れませんでした: ${(e as Error).message}`, cost });
+    patchDiff(diff, { status: 'error', error: e instanceof AiError ? e.message : tr(`作れませんでした: ${(e as Error).message}`, `Couldn't make it: ${(e as Error).message}`), cost });
   }
 }
 
@@ -474,11 +483,11 @@ export async function writeOut(): Promise<boolean> {
   if (!g.master) return false;
   const made = DIFFICULTIES.filter((d) => g.diffs[d].enabled && g.diffs[d].result);
   if (made.length === 0) {
-    toast('まだ難易度を作っていません', 'warn');
+    toast(tr('まだ難易度を作っていません', "You haven't made any difficulties yet"), 'warn');
     return false;
   }
   if (!folder) {
-    toast('先に曲を保存して、曲フォルダを決めてください', 'warn', 6000);
+    toast(tr('先に曲を保存して、曲フォルダを決めてください', 'Save the song first to choose its song folder'), 'warn', 6000);
     return false;
   }
   const files = made.map((d) => ({ diff: d, file: outFileName(g.masterFile, d) }));
@@ -494,12 +503,23 @@ export async function writeOut(): Promise<boolean> {
   const exists = files.filter((f) => findFile(folder, f.file));
   const replaced = replacedInSetDef(existing, g.masterFile, files);
   if (exists.length || replaced.length) {
+    const sep = tr('、', ', ');
     const body = [
-      exists.length ? `${exists.map((f) => f.file).join('、')} を上書きします。` : '',
-      replaced.length ? `set.def の ${replaced.map((l) => `${l.label}（${l.file}）`).join('、')} を、作った譜面に置き換えます（元の譜面のファイルは消しません）。` : '',
-      'よろしいですか？',
+      exists.length ? tr(`${exists.map((f) => f.file).join(sep)} を上書きします。`, `This overwrites ${exists.map((f) => f.file).join(sep)}.`) : '',
+      replaced.length
+        ? tr(
+            `set.def の ${replaced.map((l) => `${l.label}（${l.file}）`).join(sep)} を、作った譜面に置き換えます（元の譜面のファイルは消しません）。`,
+            `In set.def, ${replaced.map((l) => `${l.label} (${l.file})`).join(sep)} will point to the new charts (the old chart files are not deleted).`,
+          )
+        : '',
+      tr('よろしいですか？', 'Continue?'),
     ].filter(Boolean).join('\n');
-    const ok = await confirmDialog({ title: exists.length ? '同じ名前の譜面があります' : 'set.def の難易度を置き換えます', body, ok: exists.length ? '上書き' : '置き換える', danger: true });
+    const ok = await confirmDialog({
+      title: exists.length ? tr('同じ名前の譜面があります', 'Charts with the same names exist') : tr('set.def の難易度を置き換えます', 'Replace difficulties in set.def'),
+      body,
+      ok: exists.length ? tr('上書き', 'Overwrite') : tr('置き換える', 'Replace'),
+      danger: true,
+    });
     if (!ok) return false;
   }
   let memory = false;
@@ -521,7 +541,10 @@ export async function writeOut(): Promise<boolean> {
   for (const b of parseSetDef(text)) for (const l of b.levels) labels.set(l.file.toLowerCase(), l.label);
   useEditor.setState((st) => ({ meta: { ...st.meta, siblings: dtxFiles(folder).map((f) => ({ file: f.name, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, '') })) } }));
   toast(
-    `${files.map((f) => `${f.diff}（${f.file}）`).join('、')} と set.def を${memory ? '作りました。保存（Ctrl+S）で曲フォルダに書き出します' : '曲フォルダに書き出しました'}`,
+    tr(
+      `${files.map((f) => `${f.diff}（${f.file}）`).join('、')} と set.def を${memory ? '作りました。保存（Ctrl+S）で曲フォルダに書き出します' : '曲フォルダに書き出しました'}`,
+      `${memory ? 'Made' : 'Wrote'} ${files.map((f) => `${f.diff} (${f.file})`).join(', ')} and set.def${memory ? '. Save (Ctrl+S) to write them to the song folder' : ' to the song folder'}`,
+    ),
     'ok',
     8000,
   );

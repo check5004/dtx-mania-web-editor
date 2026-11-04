@@ -1,4 +1,5 @@
 // 試聴の ▶／■ ボタンと、鳴っている間の進み具合（store/audition）。
+import { tr } from '../i18n';
 import type { CSSProperties, ReactNode } from 'react';
 import { toggleAudition, useAudition, type AuditionSound } from '../store/audition';
 import { Icon } from './icons';
@@ -38,8 +39,8 @@ export function AuditionButton({
         onPress?.();
         void toggleAudition(k, load);
       }}
-      title={on ? '止める（Esc）' : '試聴'}
-      aria-label={on ? `${label}を止める` : `${label}を試聴`}
+      title={on ? tr('止める（Esc）', 'Stop (Esc)') : tr('試聴', 'Preview')}
+      aria-label={on ? tr(`${label}を止める`, `Stop ${label}`) : tr(`${label}を試聴`, `Preview ${label}`)}
       aria-pressed={on}
     >
       {on ? Icon.stop(size) : (idleIcon ?? Icon.play(size))}

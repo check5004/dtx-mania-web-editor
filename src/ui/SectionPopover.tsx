@@ -1,4 +1,5 @@
 // セクション（Aメロ・サビなど）のメモを付ける小窓。DTXには書かず、作業ファイル（.dtxe.json）に残す。
+import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { toMeasure } from '../dtx/base36';
 import { SECTION_COLORS, SECTION_PRESETS, removeSection, sectionColor, setSection, setSectionColor, useSidecar } from '../store/sidecar';
@@ -40,9 +41,9 @@ export function SectionPopover({ m, x, y, onClose }: { m: number; x: number; y: 
   return (
     <div ref={ref} className="popover" style={{ left: x, top: y, width: 268 }} onPointerDown={(e) => e.stopPropagation()}>
       <div className="row" style={{ marginBottom: 8 }}>
-        <b>小節 {toMeasure(m)} からのセクション</b>
+        <b>{tr(`小節 ${toMeasure(m)} からのセクション`, `Section from measure ${toMeasure(m)}`)}</b>
         <span className="grow" />
-        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label="閉じる">
+        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label={tr('閉じる', 'Close')}>
           ✕
         </button>
       </div>
@@ -66,24 +67,24 @@ export function SectionPopover({ m, x, y, onClose }: { m: number; x: number; y: 
         }}
       >
         <span className="dot" style={{ background: color, width: 10, height: 10, flex: 'none' }} />
-        <input ref={input} className="field" style={{ height: 28 }} value={name} placeholder="名前（例: サビ2）" onChange={(e) => setName(e.target.value)} />
+        <input ref={input} className="field" style={{ height: 28 }} value={name} placeholder={tr('名前（例: サビ2）', 'Name (e.g. Chorus 2)')} onChange={(e) => setName(e.target.value)} />
         <button className="btn small primary" type="submit" disabled={!name.trim()}>
-          付ける
+          {tr('付ける', 'Set')}
         </button>
       </form>
       {name.trim() && (
         <div className="row" style={{ gap: 4, marginTop: 8 }}>
           <span className="lbl" style={{ marginRight: 4 }}>
-            色
+            {tr('色', 'Color')}
           </span>
           {SECTION_COLORS.map((c) => (
             <button
               key={c}
               className={`swatch ${color.toLowerCase() === c.toLowerCase() ? 'on' : ''}`}
               style={{ background: c }}
-              title="同じ名前のセクションはすべてこの色になります"
+              title={tr('同じ名前のセクションはすべてこの色になります', 'All sections with this name get this color')}
               onClick={() => setSectionColor(name.trim(), c)}
-              aria-label={`色 ${c}`}
+              aria-label={tr(`色 ${c}`, `Color ${c}`)}
             />
           ))}
         </div>
@@ -97,12 +98,15 @@ export function SectionPopover({ m, x, y, onClose }: { m: number; x: number; y: 
               onClose();
             }}
           >
-            前とつなげる（区切りを消す）
+            {tr('前とつなげる（区切りを消す）', 'Join with the previous (remove this break)')}
           </button>
         </div>
       )}
       <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-        同じ名前は同じ色になります。セクションはDTXに入らず、作業ファイル（.dtxe.json）に保存します。
+        {tr(
+          '同じ名前は同じ色になります。セクションはDTXに入らず、作業ファイル（.dtxe.json）に保存します。',
+          'The same name gets the same color. Sections are not written to the DTX; they are saved in the work file (.dtxe.json).',
+        )}
       </p>
     </div>
   );

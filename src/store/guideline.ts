@@ -1,5 +1,6 @@
 // 難易度ガイドライン：手元の曲の譜面を解析してレベル帯ごとに集計し、基準文（AI の下書き → 作者が確定）を持つ。
 // 集計した譜面と基準文はブラウザ内（IndexedDB）に保存する。基準文は JSON で書き出し・読み込みできる。
+import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { decodeDtx } from '../dtx/encoding';
 import { parseDtx } from '../dtx/parse';
@@ -118,7 +119,7 @@ async function saveGuide(g: Guideline) {
   try {
     await wrap((await os('kv', 'readwrite')).put(g, 'guideline'));
   } catch {
-    toast('ガイドラインを保存できませんでした（ブラウザの保存領域）', 'error');
+    toast(tr('ガイドラインを保存できませんでした（ブラウザの保存領域）', "Couldn't save the guidelines (browser storage)"), 'error');
   }
 }
 
@@ -140,7 +141,7 @@ export async function scanCharts(folder: SongFolder, opts: { quiet?: boolean } =
   await loadGuideline();
   const dtx = [...folder.files.values()].filter((f) => /\.dtx$/i.test(f.name));
   if (dtx.length === 0) {
-    if (!opts.quiet) toast('DTXファイルが見つかりませんでした', 'warn');
+    if (!opts.quiet) toast(tr('DTXファイルが見つかりませんでした', 'No DTX files found'), 'warn');
     return 0;
   }
   // set.def のラベル
@@ -158,7 +159,7 @@ export async function scanCharts(folder: SongFolder, opts: { quiet?: boolean } =
   const prev = new Map(get().charts.map((c) => [c.id, c]));
   const added: ChartEntry[] = [];
   let done = 0;
-  set({ scanning: { done: 0, total: dtx.length, label: '譜面を解析しています…' } });
+  set({ scanning: { done: 0, total: dtx.length, label: tr('譜面を解析しています…', 'Analyzing charts…') } });
   for (const f of dtx) {
     try {
       const { text } = decodeDtx(new Uint8Array(await (await f.getFile()).arrayBuffer()));
@@ -184,7 +185,7 @@ export async function scanCharts(folder: SongFolder, opts: { quiet?: boolean } =
       // 読めない譜面は飛ばす
     }
     done++;
-    if (done % 5 === 0) set({ scanning: { done, total: dtx.length, label: '譜面を解析しています…' } });
+    if (done % 5 === 0) set({ scanning: { done, total: dtx.length, label: tr('譜面を解析しています…', 'Analyzing charts…') } });
   }
   try {
     const store = await os('charts', 'readwrite');
@@ -195,7 +196,7 @@ export async function scanCharts(folder: SongFolder, opts: { quiet?: boolean } =
   const map = new Map(get().charts.map((c) => [c.id, c]));
   for (const e of added) map.set(e.id, e);
   set({ charts: [...map.values()], scanning: null });
-  if (!opts.quiet) toast(`${added.length} 譜面を集計しました（全 ${map.size} 譜面）`, 'ok');
+  if (!opts.quiet) toast(tr(`${added.length} 譜面を集計しました（全 ${map.size} 譜面）`, `Added ${added.length} ${pl(added.length, 'chart')} (${map.size} in total)`), 'ok');
   return added.length;
 }
 
@@ -203,11 +204,11 @@ export async function pickAndScan(fallbackInput?: HTMLInputElement | null) {
   if (window.showDirectoryPicker) {
     try {
       const dir = await window.showDirectoryPicker({ id: 'dtx-guideline', mode: 'read' });
-      set({ scanning: { done: 0, total: 0, label: 'フォルダを読んでいます…' } });
+      set({ scanning: { done: 0, total: 0, label: tr('フォルダを読んでいます…', 'Reading the folder…') } });
       await scanCharts(await folderFromHandle(dir));
     } catch (e) {
       set({ scanning: null });
-      if (!(e instanceof DOMException && e.name === 'AbortError')) toast(`読めませんでした: ${(e as Error).message}`, 'error');
+      if (!(e instanceof DOMException && e.name === 'AbortError')) toast(tr(`読めませんでした: ${(e as Error).message}`, `Couldn't read it: ${(e as Error).message}`), 'error');
     }
     return;
   }
@@ -403,7 +404,11 @@ export async function draftWithAi(bands: number[]): Promise<boolean> {
   const stats = bandStats(s.charts);
   const target = bands.filter((b) => stats[b - 1].count > 0);
   if (target.length === 0) {
-    toast('このレベル帯の譜面がまだありません。「曲を取り込んで再集計」で手元の曲を読み込んでください', 'warn', 6000);
+    toast(
+      tr('このレベル帯の譜面がまだありません。「曲を取り込んで再集計」で手元の曲を読み込んでください', 'No charts in this level range yet. Load your songs with “Import songs and recount”'),
+      'warn',
+      6000,
+    );
     return false;
   }
   const reps: Record<number, ChartEntry[]> = {};
@@ -430,6 +435,15 @@ export async function draftWithAi(bands: number[]): Promise<boolean> {
     n++;
   }
   await saveGuide(next);
-  toast(n ? `${n} 個のレベル帯の基準を下書きしました（$${r.costUsed.toFixed(3)}）。読んで直してから「確定」してください` : 'AIの答えに使える基準文がありませんでした', n ? 'ok' : 'warn', 7000);
+  toast(
+    n
+      ? tr(
+          `${n} 個のレベル帯の基準を下書きしました（$${r.costUsed.toFixed(3)}）。読んで直してから「確定」してください`,
+          `Drafted guidelines for ${n} level ${pl(n, 'range')} ($${r.costUsed.toFixed(3)}). Read and edit them, then press “Confirm”`,
+        )
+      : tr('AIの答えに使える基準文がありませんでした', "The AI's answer had no usable guideline text"),
+    n ? 'ok' : 'warn',
+    7000,
+  );
   return n > 0;
 }

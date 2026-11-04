@@ -1,4 +1,5 @@
 // 有理数。小節内の位置や拍の位置を誤差なく扱うために使う（3連・5連もずれない）。
+import { tr } from '../i18n';
 
 export interface Frac {
   readonly n: number;
@@ -21,8 +22,8 @@ export function lcm(a: number, b: number): number {
 }
 
 export function frac(n: number, d = 1): Frac {
-  if (d === 0) throw new RangeError('分母が0');
-  if (!Number.isInteger(n) || !Number.isInteger(d)) throw new RangeError(`整数でない分数: ${n}/${d}`);
+  if (d === 0) throw new RangeError(tr('分母が0', 'Zero denominator'));
+  if (!Number.isInteger(n) || !Number.isInteger(d)) throw new RangeError(tr(`整数でない分数: ${n}/${d}`, `Fraction with non-integer parts: ${n}/${d}`));
   if (d < 0) {
     n = -n;
     d = -d;
@@ -48,7 +49,7 @@ export const floor = (a: Frac): number => Math.floor(a.n / a.d);
  * 小節長 0.75 → 3/4、0.875 → 7/8 のように、DTXに書かれた小数を拍子として扱うために使う。
  */
 export function fromNumber(x: number, maxDen = 3840): Frac {
-  if (!Number.isFinite(x)) throw new RangeError(`有限でない値: ${x}`);
+  if (!Number.isFinite(x)) throw new RangeError(tr(`有限でない値: ${x}`, `Not a finite value: ${x}`));
   const sign = x < 0 ? -1 : 1;
   x = Math.abs(x);
   let h1 = 1, h0 = 0, k1 = 0, k0 = 1;

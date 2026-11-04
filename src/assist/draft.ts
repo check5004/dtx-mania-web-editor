@@ -197,6 +197,7 @@ export function draftFromHits(hits: readonly DraftHit[], tempo: TempoMap, from: 
   return enforcePlayable(notes);
 }
 
+// i18n-ignore-start AI に渡す文（プロンプトの中身。答えの言語は aiLangRule で決める）
 const CH_LABEL: Record<number, string> = {
   [CH.LC]: 'LC（左シンバル）',
   [CH.HHC]: 'HH（クローズ）',
@@ -236,3 +237,4 @@ export function styleLines(style: Style): string[] {
   both('TT', 'タム');
   return out;
 }
+// i18n-ignore-end

@@ -1,5 +1,6 @@
 // 曲フォルダの読み書き。Chrome/Edge は File System Access API でフォルダに直接保存する。
 // 使えないブラウザはフォルダを読み込みだけ行い、保存はダウンロードにする。
+import { tr } from '../i18n';
 
 declare global {
   interface Window {
@@ -105,11 +106,11 @@ export function folderFromFileList(list: FileList | File[]): SongFolder {
     const path = parts.join('/');
     files.set(normPath(path), { path, name: f.name, size: f.size, getFile: async () => f });
   }
-  return { name: root || '選んだファイル', files };
+  return { name: root || tr('選んだファイル', 'Selected files'), files };
 }
 
 /** 単体のファイル（DTX や音声）から作る仮のフォルダ */
-export function folderFromFiles(list: File[], name = '新しい曲'): SongFolder {
+export function folderFromFiles(list: File[], name = tr('新しい曲', 'New song')): SongFolder {
   const files = new Map<string, FolderFile>();
   for (const f of list) files.set(normPath(f.name), { path: f.name, name: f.name, size: f.size, getFile: async () => f });
   return { name, files };
@@ -142,7 +143,7 @@ export async function ensureWritable(folder: SongFolder): Promise<boolean> {
 
 /** フォルダにファイルを書く（サブフォルダは作る） */
 export async function writeFile(folder: SongFolder, path: string, bytes: Uint8Array): Promise<void> {
-  if (!folder.dir) throw new Error('このフォルダには直接保存できません');
+  if (!folder.dir) throw new Error(tr('このフォルダには直接保存できません', "Can't save directly to this folder"));
   const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
   const name = parts.pop()!;
   let dir = folder.dir;

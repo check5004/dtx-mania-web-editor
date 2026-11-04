@@ -1,4 +1,5 @@
 // 耳コピアシストの状態：原曲の解析、ループ・速度・帯域フィルタ・ミュート、入力方法。
+import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { pickOnsets, type AnalysisData, type Band, type Onset } from '../audio/analysis';
 import { engine, type BgmFilter, type StretchProvider } from '../audio/engine';
@@ -322,8 +323,8 @@ export function toggleLoop() {
   if (loopMark) {
     toast(
       loopMark.side === 'a'
-        ? 'ループの終わり（B）がまだ決まっていません。B ボタンか O キーで決めるとループします'
-        : 'ループの始まり（A）がまだ決まっていません。A ボタンか I キーで決めるとループします',
+        ? tr('ループの終わり（B）がまだ決まっていません。B ボタンか O キーで決めるとループします', "The loop end (B) isn't set yet. Set it with the B button or the O key to loop")
+        : tr('ループの始まり（A）がまだ決まっていません。A ボタンか I キーで決めるとループします', "The loop start (A) isn't set yet. Set it with the A button or the I key to loop"),
     );
     return;
   }
@@ -517,7 +518,7 @@ export function applySimilar(targets?: number[]): number {
   let n = 0;
   applyingSimilar = true;
   try {
-    edit(`似た小節 ${to.length} 個にまとめて反映`, (d) => {
+    edit(tr(`似た小節 ${to.length} 個にまとめて反映`, `Apply to ${to.length} similar ${pl(to.length, 'measure')}`), (d) => {
       n = copyMeasureInto(d, pin.base, to);
     });
   } finally {

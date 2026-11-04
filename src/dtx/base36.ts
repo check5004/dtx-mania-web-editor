@@ -1,4 +1,5 @@
 // DTXで使う数値表記の変換。NX（FDK/CConversion.cs）と同じ解釈にそろえる。
+import { tr } from '../i18n';
 
 const B36 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -18,7 +19,7 @@ export function parseBase36x2(s: string): number {
 }
 
 export function toBase36x2(n: number): string {
-  if (n < 0 || n >= 36 * 36) throw new RangeError(`36進数2桁にできない値: ${n}`);
+  if (n < 0 || n >= 36 * 36) throw new RangeError(tr(`36進数2桁にできない値: ${n}`, `Value doesn't fit in 2 base-36 digits: ${n}`));
   return B36[Math.floor(n / 36)] + B36[n % 36];
 }
 
@@ -29,7 +30,7 @@ export function parseHex2(s: string): number {
 }
 
 export function toHex2(n: number): string {
-  if (n < 0 || n > 255) throw new RangeError(`16進数2桁にできない値: ${n}`);
+  if (n < 0 || n > 255) throw new RangeError(tr(`16進数2桁にできない値: ${n}`, `Value doesn't fit in 2 hex digits: ${n}`));
   return n.toString(16).toUpperCase().padStart(2, '0');
 }
 
@@ -43,7 +44,7 @@ export function parseMeasure(s: string): number {
 }
 
 export function toMeasure(n: number): string {
-  if (n < 0 || n >= 3600) throw new RangeError(`小節番号にできない値: ${n}`);
+  if (n < 0 || n >= 3600) throw new RangeError(tr(`小節番号にできない値: ${n}`, `Not a valid measure number: ${n}`));
   return B36[Math.floor(n / 100)] + String(n % 100).padStart(2, '0');
 }
 

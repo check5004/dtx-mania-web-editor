@@ -190,10 +190,12 @@ export function parseSteps(steps: string, beats: readonly BeatSlot[], total: Fra
   return out;
 }
 
-/** 小節の長さの書き方（見出し用。「4拍」「3拍と半分」など） */
+/** 小節の長さの書き方（AI に渡すプロンプトの見出し用。「4拍」「3拍と半分」など） */
+// i18n-ignore-start プロンプトの中身
 export function beatsLabel(beats: readonly BeatSlot[]): string {
   const last = beats[beats.length - 1];
   if (!last || cmp(last.dur, ONE) === 0) return `${beats.length}拍`;
   return `${beats.length - 1}拍と${last.dur.n}/${last.dur.d}拍（最後の拍が短い）`;
 }
+// i18n-ignore-end
 

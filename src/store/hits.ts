@@ -1,5 +1,6 @@
 // 叩いた（キー・電子ドラム）ときの処理。マウス入力では試し打ち、キー入力ではカーソル位置に置く、
 // 録音では再生中の位置に置く（グリッドに吸着、ループ毎に重ね録り）。
+import { tr, pl } from '../i18n';
 import { engine } from '../audio/engine';
 import { virtualSound } from '../audio/sounds';
 import { DRUM_LANES } from '../dtx/model';
@@ -84,7 +85,7 @@ function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, sou
       pos = snapToGrid(tempo, a.loop.a, s.view.div);
     }
     takeHits++;
-    const label = `録音で ${takeHits} 打を置く`;
+    const label = tr(`録音で ${takeHits} 打を置く`, `Record ${takeHits} ${pl(takeHits, 'hit')}`);
     // 同じレーンをすばやく2回（グリッドでは分けられない間）叩いたら、フラムにする
     if (recFlam(lane, alt, sec, pos, vel, take, `rec-${take}`, label)) return;
     const [id] = placeChips([{ lane, alt, pos, vel }], { label, group: `rec-${take}`, select: false });

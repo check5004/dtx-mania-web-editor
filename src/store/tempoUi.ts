@@ -1,4 +1,5 @@
 // テンポ合わせ画面の状態（譜面に反映するまでは「案」として持つ）。
+import { tr, pl } from '../i18n';
 import { produce } from 'immer';
 import { create } from 'zustand';
 import { combinedOdf, downbeatPhase, trackBeats } from '../audio/analysis';
@@ -241,7 +242,7 @@ export function shiftAnchors(k: number) {
 export function resetToEstimate() {
   const est = estimatePlan();
   if (!est) {
-    toast('原曲の解析が終わっていないため推定できません', 'warn');
+    toast(tr('原曲の解析が終わっていないため推定できません', "Can't estimate until the original audio is analyzed"), 'warn');
     return;
   }
   set({ plan: est, touched: true, fromEstimate: true, view: viewAround(est.anchors[0]?.t ?? 0, est.bpm) });
@@ -319,20 +320,36 @@ export function applyTempo(): boolean {
   const r = planResult();
   const anchors = normalizeAnchors(s.plan.anchors);
   if (anchors.length && !r.bgm) {
-    toast(`1小節目の頭が原曲の始まりから遠いため、BGMを置けません。小節番号を ${r.shift} 個うしろにしてください。`, 'warn', 6000);
+    toast(
+      tr(
+        `1小節目の頭が原曲の始まりから遠いため、BGMを置けません。小節番号を ${r.shift} 個うしろにしてください。`,
+        `Measure 1 starts too far from the start of the original audio to place the BGM. Shift the measure numbers back by ${r.shift}.`,
+      ),
+      'warn',
+      6000,
+    );
     return false;
   }
   const hadBgm = doc.chips.some((c) => c.ch === CH.BGM);
-  const ok = edit('テンポ合わせを反映', (d) => applyPlan(d, r, null));
+  const ok = edit(tr('テンポ合わせを反映', 'Apply tempo map'), (d) => applyPlan(d, r, null));
   setAnchors(anchors);
   set({ touched: false, fromEstimate: false });
-  toast(ok ? `譜面に反映しました（${r.segs.length > 1 ? `BPM変化 ${r.segs.length - 1} か所` : `BPM ${r.segs[0].bpm}`}${hadBgm ? '・BGMの位置' : ''}）` : '譜面は今のままで合っています', 'ok');
+  const changes = r.segs.length - 1;
+  toast(
+    ok
+      ? tr(
+          `譜面に反映しました（${changes > 0 ? `BPM変化 ${changes} か所` : `BPM ${r.segs[0].bpm}`}${hadBgm ? '・BGMの位置' : ''}）`,
+          `Applied to the chart (${changes > 0 ? `${changes} BPM ${pl(changes, 'change')}` : `BPM ${r.segs[0].bpm}`}${hadBgm ? ', BGM position' : ''})`,
+        )
+      : tr('譜面は今のままで合っています', 'The chart already matches'),
+    'ok',
+  );
   return ok;
 }
 
 /** 原曲（BGMチップ）が無い譜面に、WAV を原曲として置く */
 export function chooseBgm(no: number) {
-  edit('原曲（BGM）を置く', (d) => {
+  edit(tr('原曲（BGM）を置く', 'Place the original audio (BGM)'), (d) => {
     d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 0, f: { n: 0, d: 1 }, v: no });
   });
   set({ initialized: false });

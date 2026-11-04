@@ -1,4 +1,5 @@
 // ステムのトラックの名前と種類を変える小窓。下のトラック・ステムの画面の ✎（名前のダブルクリック・右クリックでも）から開く。
+import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { STEM_KINDS, stemKindInfo } from '../audio/stems';
@@ -73,12 +74,12 @@ export function StemTrackPopover({ file, anchor, onClose }: { file: string; anch
       onPointerDown={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
       role="dialog"
-      aria-label="トラックの名前と種類"
+      aria-label={tr('トラックの名前と種類', 'Track name and type')}
     >
       <div className="row" style={{ marginBottom: 8 }}>
-        <b>トラックの名前と種類</b>
+        <b>{tr('トラックの名前と種類', 'Track name and type')}</b>
         <span className="grow" />
-        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label="閉じる" title="閉じる（Esc）">
+        <button className="ib" style={{ width: 24, height: 24 }} onClick={onClose} aria-label={tr('閉じる', 'Close')} title={tr('閉じる（Esc）', 'Close (Esc)')}>
           ✕
         </button>
       </div>
@@ -97,19 +98,19 @@ export function StemTrackPopover({ file, anchor, onClose }: { file: string; anch
           style={{ height: 28 }}
           value={name}
           maxLength={40}
-          placeholder="名前（例: ドラム）"
-          aria-label="トラックの名前"
+          placeholder={tr('名前（例: ドラム）', 'Name (e.g. Drums)')}
+          aria-label={tr('トラックの名前', 'Track name')}
           onChange={(e) => {
             typed.current = true;
             setName(e.target.value);
           }}
         />
         <button className="btn small primary" type="submit" disabled={!name.trim()}>
-          決定
+          {tr('決定', 'OK')}
         </button>
       </form>
       <div className="lbl" style={{ margin: '10px 0 5px' }}>
-        種類
+        {tr('種類', 'Type')}
       </div>
       <div className="chip-wrap">
         {STEM_KINDS.map((k) => (
@@ -125,7 +126,10 @@ export function StemTrackPopover({ file, anchor, onClose }: { file: string; anch
         ))}
       </div>
       <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-        種類は色と、聞こえ方（ゲームと同じ・ドラムだけ）、BGM用（ドラム抜き）の書き出しに使います。ドラムの音が入ったトラックは「ドラム」にしてください。
+        {tr(
+          '種類は色と、聞こえ方（ゲームと同じ・ドラムだけ）、BGM用（ドラム抜き）の書き出しに使います。ドラムの音が入ったトラックは「ドラム」にしてください。',
+          'The type sets the color, the listening modes (Like the game, Drums only), and the BGM export (without drums). Set any track that contains the drums to “Drums”.',
+        )}
       </p>
       <div className="stem-pop-file">
         <span className="mono ellipsis" title={t.file}>
@@ -134,15 +138,17 @@ export function StemTrackPopover({ file, anchor, onClose }: { file: string; anch
         {showGuess && (
           <button
             className="link-btn"
-            title="ファイル名から種類と名前を決め直す"
+            title={tr('ファイル名から種類と名前を決め直す', 'Set the type and name again from the file name')}
             onClick={() => {
               setStemKind(file, guess.kind);
               renameStem(file, guess.name);
               typed.current = false;
             }}
           >
-            ファイル名から付け直す（{guess.name}
-            {guess.kind !== t.kind ? ` · ${stemKindInfo(guess.kind).label}` : ''}）
+            {tr('ファイル名から付け直す（', 'Reset from file name (')}
+            {guess.name}
+            {guess.kind !== t.kind ? ` · ${stemKindInfo(guess.kind).label}` : ''}
+            {tr('）', ')')}
           </button>
         )}
       </div>

@@ -267,7 +267,12 @@ export interface AiSession {
 export function checkMonthlyCap(add: number) {
   const s = get();
   if (freshSpend(s.spend).monthTotal + add > s.monthlyCap) {
-    throw new AiError(`今月の上限（$${s.monthlyCap.toFixed(2)}）に届くため止めました。設定 › AI で上限を変えられます`);
+    throw new AiError(
+      tr(
+        `今月の上限（$${s.monthlyCap.toFixed(2)}）に届くため止めました。設定 › AI で上限を変えられます`,
+        `Stopped because this would go over this month's limit ($${s.monthlyCap.toFixed(2)}). You can change the limit in Settings › AI`,
+      ),
+    );
   }
 }
 
@@ -284,9 +289,12 @@ export async function beginAi(task: AiTask, est: number, quiet = false): Promise
   checkMonthlyCap(est);
   if (!quiet && est > s.confirmOver) {
     const ok = await confirmDialog({
-      title: `${def.label}をAIに頼みますか？`,
-      body: `1回の目安は約 $${est.toFixed(3)} です（設定の「確認する額」$${s.confirmOver.toFixed(2)} を超えています）。\nモデル: ${info?.name ?? cfg.model}`,
-      ok: '頼む',
+      title: tr(`${def.label}をAIに頼みますか？`, `Ask AI for: ${def.label}?`),
+      body: tr(
+        `1回の目安は約 $${est.toFixed(3)} です（設定の「確認する額」$${s.confirmOver.toFixed(2)} を超えています）。\nモデル: ${info?.name ?? cfg.model}`,
+        `One run costs about $${est.toFixed(3)} (more than the “ask first above” amount of $${s.confirmOver.toFixed(2)} in Settings).\nModel: ${info?.name ?? cfg.model}`,
+      ),
+      ok: tr('頼む', 'Ask AI'),
     });
     if (!ok) return null;
   }
@@ -355,8 +363,11 @@ export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T
     if (!r.text.trim()) {
       throw new AiError(
         r.finish === 'length'
-          ? 'AIが考えている途中で出力の上限に届き、答えが空でした。推論の強さを下げるか、別のモデルを選んでください'
-          : 'AIの答えが空でした。もう一度試すか、別のモデルを選んでください',
+          ? tr(
+              'AIが考えている途中で出力の上限に届き、答えが空でした。推論の強さを下げるか、別のモデルを選んでください',
+              'The AI hit its output limit while thinking and returned nothing. Lower the reasoning effort or choose another model',
+            )
+          : tr('AIの答えが空でした。もう一度試すか、別のモデルを選んでください', 'The AI returned an empty answer. Try again or choose another model'),
       );
     }
     // 形が崩れていたら（Web 検索を使うと指定の形を無視するモデルがある）、同じモデルに形だけ直してもらう。
@@ -381,7 +392,13 @@ export async function runAi<T>(task: AiTask, o: RunOptions): Promise<RunResult<T
     const cost2 = spent(r2);
     const fixed = parseJsonLoose<T>(r2.text);
     const still = missingKeys(o.schema.schema, fixed);
-    if (still.length) throw new AiError(`AIの答えに必要な項目（${still.join('、')}）がありませんでした。もう一度試すか、別のモデルを選んでください`);
+    if (still.length)
+      throw new AiError(
+        tr(
+          `AIの答えに必要な項目（${still.join('、')}）がありませんでした。もう一度試すか、別のモデルを選んでください`,
+          `The AI's answer was missing required fields (${still.join(', ')}). Try again or choose another model`,
+        ),
+      );
     // 出典（Web 検索の結果）は最初の答えのものを使う
     return { ...r2, citations: r.citations.length ? r.citations : r2.citations, webSearches: r.webSearches, data: fixed, costUsed: cost + cost2 };
   } finally {

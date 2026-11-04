@@ -1,5 +1,6 @@
 // 作業ファイル（.dtxe.json）の中身。DTXには書けない補助情報（セクションのメモ、YouTube、拍アンカー）。
 // NX はこのファイルを読まないので、無くても譜面は遊べる。
+import { withTr } from '../i18n';
 import { create } from 'zustand';
 import { renameOldOtherStems } from '../audio/stemNames';
 
@@ -91,18 +92,21 @@ export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {
 
 export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, loadSeq: 0 }));
 
-export const SECTION_PRESETS: { name: string; color: string }[] = [
-  { name: 'イントロ', color: '#8B95A4' },
-  { name: 'Aメロ', color: '#4FA3E0' },
-  { name: 'Bメロ', color: '#A08CF0' },
-  { name: 'Cメロ', color: '#5BD69A' },
-  { name: 'サビ', color: '#F0965A' },
-  { name: '落ちサビ', color: '#D8B07A' },
-  { name: 'ラスサビ', color: '#FF8A3D' },
-  { name: '間奏', color: '#D6C85A' },
-  { name: 'ソロ', color: '#E57BC4' },
-  { name: 'ブレイク', color: '#6FC2D0' },
-  { name: 'アウトロ', color: '#8B95A4' },
+/** セクション名の候補。name は今の言語の名前。色はどちらの言語の名前でも同じ（names で引く） */
+type SectionPreset = { name: string; names: readonly [string, string]; color: string };
+const preset = (names: readonly [string, string], color: string): SectionPreset => withTr({ name: '', names, color }, { name: names });
+export const SECTION_PRESETS: SectionPreset[] = [
+  preset(['イントロ', 'Intro'], '#8B95A4'),
+  preset(['Aメロ', 'Verse'], '#4FA3E0'),
+  preset(['Bメロ', 'Pre-chorus'], '#A08CF0'),
+  preset(['Cメロ', 'Bridge'], '#5BD69A'),
+  preset(['サビ', 'Chorus'], '#F0965A'),
+  preset(['落ちサビ', 'Quiet chorus'], '#D8B07A'),
+  preset(['ラスサビ', 'Final chorus'], '#FF8A3D'),
+  preset(['間奏', 'Interlude'], '#D6C85A'),
+  preset(['ソロ', 'Solo'], '#E57BC4'),
+  preset(['ブレイク', 'Break'], '#6FC2D0'),
+  preset(['アウトロ', 'Outro'], '#8B95A4'),
 ];
 
 export const SECTION_COLORS = ['#8B95A4', '#4FA3E0', '#A08CF0', '#5BD69A', '#F0965A', '#FF8A3D', '#D6C85A', '#E57BC4', '#6FC2D0', '#EF5350'];
@@ -110,7 +114,7 @@ export const SECTION_COLORS = ['#8B95A4', '#4FA3E0', '#A08CF0', '#5BD69A', '#F09
 export function sectionColor(name: string, colors: Record<string, string> = useSidecar.getState().sectionColors): string {
   const own = colors[name];
   if (own) return own;
-  const p = SECTION_PRESETS.find((x) => x.name === name);
+  const p = SECTION_PRESETS.find((x) => x.names.includes(name));
   if (p) return p.color;
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;

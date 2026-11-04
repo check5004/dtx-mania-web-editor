@@ -1,5 +1,6 @@
 // AI難易度生成：元の譜面と作った難易度を、曲全体を縦にスクロールする譜面にして横に並べる。
 // 再生はエディタと同じ（▶・止めると ▶ に戻る・小節番号のクリックで ▶ を移す）。列を押すとその譜面を聴く。
+import { tr, pl, locale, subscribeLang } from '../i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
 import { estimateLevel } from '../check/level';
@@ -286,8 +287,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     const ds = g.diffs[col];
     if (ds.result) return;
     const box = lay.cols[ci];
-    const msg =
-      ds.status === 'planning' ? 'AIが方針を考えています…' : ds.status === 'building' ? '作っています…' : ds.status === 'judging' ? 'AIがレベルを判定しています…' : ds.status === 'error' ? '作れませんでした' : 'まだ作っていません';
+    const msg = statusText(ds.status);
     ctx.fillStyle = ds.status === 'error' ? '#FF7A7F' : C.dim;
     ctx.fillText(fitText(ctx, msg, box.w - 12), box.x + box.w / 2, H / 2);
   });
@@ -414,6 +414,15 @@ function chipAt(l: Local, geo: CompareGeom, x: number, y: number): { diff: Diffi
 
 const SHORT: Record<Listen, string> = { MASTER: 'MAS', EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
 
+/** 作っている途中・作れなかった・まだの文 */
+function statusText(st: GenState['diffs'][Difficulty]['status']): string {
+  if (st === 'planning') return tr('AIが方針を考えています…', 'AI is planning…');
+  if (st === 'building') return tr('作っています…', 'Building…');
+  if (st === 'judging') return tr('AIがレベルを判定しています…', 'AI is rating the level…');
+  if (st === 'error') return tr('作れませんでした', "Couldn't make it");
+  return tr('まだ作っていません', 'Not made yet');
+}
+
 /** 列の見出し：押すとその譜面を聴く（作った難易度なら右の判定・方針もその難易度に）。w は列の幅（狭いときは短く書く） */
 function ColHead({ col, w }: { col: Listen; w: number }) {
   const listen = useGen((s) => s.listen);
@@ -436,22 +445,33 @@ function ColHead({ col, w }: { col: Listen; w: number }) {
   const busy = ds && (ds.status === 'planning' || ds.status === 'building' || ds.status === 'judging');
   // 2行目：作っている途中ならその様子、作ってあればノーツ数（元の譜面に対する割合）・平均の密度・最大同時打数
   let sub: string;
-  if (busy && ds) sub = ds.status === 'planning' ? 'AIが方針を考えています…' : ds.status === 'judging' ? 'AIがレベルを判定しています…' : '作っています…';
+  if (busy && ds) sub = statusText(ds.status);
   else if (est) {
-    const ratio = col !== 'MASTER' && masterNotes ? `（${Math.round((est.notes / masterNotes) * 100)}%）` : '';
-    sub = `${est.notes.toLocaleString()}${tiny ? '' : 'ノーツ'}${ratio} · ${est.avgNps.toFixed(1)}/秒 · 同時${est.maxChord}`;
-  } else sub = ds?.status === 'error' ? '作れませんでした' : 'まだ作っていません';
+    const pct = col !== 'MASTER' && masterNotes ? Math.round((est.notes / masterNotes) * 100) : null;
+    const ratio = pct === null ? '' : tr(`（${pct}%）`, ` (${pct}%)`);
+    sub = tr(
+      `${est.notes.toLocaleString()}${tiny ? '' : 'ノーツ'}${ratio} · ${est.avgNps.toFixed(1)}/秒 · 同時${est.maxChord}`,
+      `${est.notes.toLocaleString(locale())}${tiny ? '' : ' notes'}${ratio} · ${est.avgNps.toFixed(1)}/s · max ${est.maxChord}`,
+    );
+  } else sub = statusText(ds?.status === 'error' ? 'error' : 'idle');
   return (
     <button
       className={`gen-colhead ${on ? 'on' : ''} ${sel ? 'sel' : ''} ${playable ? '' : 'empty'}`}
       onClick={() => (col === 'MASTER' ? setListen('MASTER') : selectDiff(col))}
       aria-pressed={on}
-      title={playable ? `${full}${col === 'MASTER' ? '（元の譜面）' : ''} を聴く（←→ で切り替え。再生中ならそのまま切り替わります）` : `${full} はまだ作っていません`}
+      title={
+        playable
+          ? tr(
+              `${full}${col === 'MASTER' ? '（元の譜面）' : ''} を聴く（←→ で切り替え。再生中ならそのまま切り替わります）`,
+              `Listen to ${full}${col === 'MASTER' ? ' (the original chart)' : ''} (←→ to switch; switches right away while playing)`,
+            )
+          : tr(`${full} はまだ作っていません`, `${full} isn't made yet`)
+      }
     >
       <span className="gen-colhead-top">
         <span className="gen-spk">{on ? Icon.speaker(13) : null}</span>
         <b className="ellipsis">{name}</b>
-        {col === 'MASTER' && !narrow && <span className="lbl">元の譜面</span>}
+        {col === 'MASTER' && !narrow && <span className="lbl">{tr('元の譜面', 'Original')}</span>}
         <span className="grow" />
         {col === 'MASTER' ? (
           <span className="mono gen-colhead-lv">
@@ -460,9 +480,9 @@ function ColHead({ col, w }: { col: Listen; w: number }) {
           </span>
         ) : ds?.result ? (
           <>
-            {!narrow && <span className="lbl">{ds.judge && !ds.judgeStale ? 'AI' : '計算'}</span>}
+            {!narrow && <span className="lbl">{ds.judge && !ds.judgeStale ? 'AI' : tr('計算', 'Calc')}</span>}
             <span className="mono gen-colhead-lv">{shownLevel(ds, calib).toFixed(2)}</span>
-            {isPassing(ds, calib) ? <span className="gen-ok" title="検証OK">✓</span> : <span className="gen-warn" title={ds.issues ? `叩けない所 ${ds.issues}` : '目標から外れ'}>!</span>}
+            {isPassing(ds, calib) ? <span className="gen-ok" title={tr('検証OK', 'Checks passed')}>✓</span> : <span className="gen-warn" title={ds.issues ? tr(`叩けない所 ${ds.issues}`, `${ds.issues} unplayable ${pl(ds.issues, 'spot')}`) : tr('目標から外れ', 'Off target')}>!</span>}
           </>
         ) : null}
       </span>
@@ -505,7 +525,7 @@ export function GenCompare() {
     const mark = () => {
       l.dirty = true;
     };
-    const unsubs = [useGen.subscribe(mark), useEditor.subscribe(mark), useAssist.subscribe(mark), useInputSettings.subscribe(mark)];
+    const unsubs = [useGen.subscribe(mark), useEditor.subscribe(mark), useAssist.subscribe(mark), useInputSettings.subscribe(mark), subscribeLang(mark)];
     let raf = 0;
     const loop = () => {
       raf = requestAnimationFrame(loop);
@@ -618,8 +638,8 @@ export function GenCompare() {
   return (
     <div className="gen-compare" ref={wrap}>
       <div className="gen-heads" style={{ gridTemplateColumns: `${lay.gutter - 10}px ${lay.cols.map((c) => `${c.w}px`).join(' ')}`, width: lay.width }}>
-        <span className="gen-heads-gut lbl" title="小節番号。押すと ▶（再生を始める位置）を置きます">
-          小節
+        <span className="gen-heads-gut lbl" title={tr('小節番号。押すと ▶（再生を始める位置）を置きます', 'Measure numbers. Click to put ▶ (where playback starts)')}>
+          {tr('小節', 'Bar')}
         </span>
         {cols.map((c, i) => (
           <ColHead key={c} col={c} w={lay.cols[i]?.w ?? 200} />

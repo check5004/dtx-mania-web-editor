@@ -1,4 +1,5 @@
 // DTXテキストの読み込み。行の解釈は NX の CDTX.cs（tRead_FromString とその下の行解析）に合わせる。
+import { tr } from '../i18n';
 import { parseBase36x2, parseHex2, parseMeasure, parseNxNumber } from './base36';
 import { frac } from './fraction';
 import { takeEndMarker } from './end';
@@ -116,7 +117,7 @@ export function parseDtx(text: string): ParseResult {
       if (target.ch === CH.BAR_LENGTH) {
         const v = parseNxNumber(p.param);
         if (v === null || v <= 0) {
-          warnings.push({ line: lineNo, message: `小節長の値を読めません: ${p.param}` });
+          warnings.push({ line: lineNo, message: tr(`小節長の値を読めません: ${p.param}`, `Can't read the measure length: ${p.param}`) });
           header.push({ kind: 'raw', text: line });
           return;
         }
@@ -125,7 +126,7 @@ export function parseDtx(text: string): ParseResult {
       }
       const data = splitChipData(target.ch, p.param);
       if (!data) {
-        warnings.push({ line: lineNo, message: `チップの並びを読めません（NXでも無視される行です）: ${line.trim()}` });
+        warnings.push({ line: lineNo, message: tr(`チップの並びを読めません（NXでも無視される行です）: ${line.trim()}`, `Can't read the chip data (NX ignores this line too): ${line.trim()}`) });
         header.push({ kind: 'raw', text: line });
         return;
       }
@@ -143,7 +144,7 @@ export function parseDtx(text: string): ParseResult {
       const old = header[prev];
       header[prev] = { kind: 'raw', text: old.kind === 'field' ? (old.orig?.text ?? '') : '' };
       if (/^(WAV|BPM|VOLUME|PAN|SIZE|BMP|AVI)[0-9A-Z]{2}$/.test(key)) {
-        warnings.push({ line: lineNo, message: `#${cmd} が再定義されています。保存すると後の定義だけが使われます` });
+        warnings.push({ line: lineNo, message: tr(`#${cmd} が再定義されています。保存すると後の定義だけが使われます`, `#${cmd} is defined more than once. Only the last one is kept when saving`) });
       }
     }
     fieldIndex.set(key, header.length);
@@ -154,7 +155,7 @@ export function parseDtx(text: string): ParseResult {
   const doc: DtxDoc = { header, fields, chips, barLengths, nextId };
   // 曲の終わり（書き出した印を戻す。無ければ NX と同じ終わりに決める）
   takeEndMarker(doc);
-  if (ifDepth > 0) warnings.push({ line: lines.length, message: '#IF に対応する #ENDIF がありません' });
+  if (ifDepth > 0) warnings.push({ line: lines.length, message: tr('#IF に対応する #ENDIF がありません', '#IF has no matching #ENDIF') });
   return { doc, warnings, hasRandom };
 }
 

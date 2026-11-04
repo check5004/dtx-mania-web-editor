@@ -1,4 +1,5 @@
 // 電子ドラム（Web MIDI）。ノートをレーンに振り分けて drumHit に渡す。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { activeProfile, setNote, type LaneTarget } from './settings';
 
@@ -41,7 +42,7 @@ function refreshInputs() {
   if (!access) return;
   const inputs: { id: string; name: string }[] = [];
   access.inputs.forEach((inp) => {
-    inputs.push({ id: inp.id, name: inp.name || inp.manufacturer || 'MIDI機器' });
+    inputs.push({ id: inp.id, name: inp.name || inp.manufacturer || tr('MIDI機器', 'MIDI device') });
     inp.onmidimessage = onMessage;
   });
   useMidi.setState({ inputs, status: inputs.length ? 'on' : 'none' });

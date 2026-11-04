@@ -1,4 +1,5 @@
 // BGA（画像）と動画：#BMP・#AVI の一覧、置くときのレイヤー、譜面の BGA 列の表示。
+import { tr } from '../i18n';
 import { create } from 'zustand';
 import { parseBase36x2, toBase36x2, toMeasure } from '../dtx/base36';
 import { bgaChannel, BGA_CHANNELS, type DtxDoc } from '../dtx/model';
@@ -102,7 +103,8 @@ export function addMaterials(kind: MaterialKind, paths: string[]): number {
   if (!todo.length) return 0;
   let first: number | null = null;
   let n = 0;
-  edit(`${kind === 'avi' ? '動画' : '画像'}を${todo.length}個登録`, (d) => {
+  const what = kind === 'avi' ? tr('動画', 'video') : tr('画像', 'image');
+  edit(tr(`${what}を${todo.length}個登録`, `Add ${todo.length} ${what}${todo.length === 1 ? '' : 's'}`), (d) => {
     for (const p of todo) {
       const no = freeNo(d as DtxDoc, kind);
       if (no === null) break;
@@ -116,11 +118,11 @@ export function addMaterials(kind: MaterialKind, paths: string[]): number {
 }
 
 export function removeMaterial(key: string) {
-  edit(`#${key} を削除`, (d) => setField(d, key, undefined));
+  edit(tr(`#${key} を削除`, `Delete #${key}`), (d) => setField(d, key, undefined));
 }
 
 export function setMaterialPath(key: string, path: string) {
-  edit(`#${key} を変更`, (d) => setField(d, key, path || undefined));
+  edit(tr(`#${key} を変更`, `Change #${key}`), (d) => setField(d, key, path || undefined));
 }
 
 /** 置くときの素材を選ぶ */
@@ -132,14 +134,15 @@ export function pickMaterial(kind: MaterialKind, no: number) {
 export function placeBga(pos: Pos) {
   const st = useBga.getState();
   if (st.no === null) {
-    toast('左の「画像」タブで、置く画像か動画を選んでください', 'info', 5000);
+    toast(tr('左の「画像」タブで、置く画像か動画を選んでください', 'Choose an image or video to place in the Images tab on the left'), 'info', 5000);
     useEditor.setState({ leftTab: 'bga' });
     return;
   }
   const ch = st.kind === 'avi' ? st.movieCh : st.layer;
   const name = BGA_CHANNELS.find((b) => b.ch === ch)?.name ?? '';
   let id = 0;
-  edit(`${name}に ${st.kind === 'avi' ? 'AVI' : 'BMP'}${toBase36x2(st.no)} を置く（${toMeasure(pos.m)}）`, (d) => {
+  const what = `${st.kind === 'avi' ? 'AVI' : 'BMP'}${toBase36x2(st.no)}`;
+  edit(tr(`${name}に ${what} を置く（${toMeasure(pos.m)}）`, `Place ${what} on ${name} (${toMeasure(pos.m)})`), (d) => {
     id = opPlace(d, ch, pos, st.no!);
   });
   useEditor.setState({ selection: [id] });
