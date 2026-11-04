@@ -30,9 +30,9 @@ import { opRelane, type AltMode } from '../edit/transform';
 import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
-import { applyLoopToEngine, loopSec, prepareStretch, resetAssistForDoc, syncAnalysis, trackSimilar, useAssist } from './assist';
+import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssistForDoc, stretchReady, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
-import { loadSidecar, useSidecar, type SectionMark, type TempoAnchor } from './sidecar';
+import { loadSidecar, sameStemFiles, useSidecar, withListening, type SectionMark, type SidecarData, type TempoAnchor } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
 enablePatches();
@@ -194,6 +194,118 @@ export function openDocument(doc: DtxDoc, meta: DocMeta, folder: SongFolder | nu
   resetAssistForDoc();
   loadSidecar(null);
   void prepareSounds();
+}
+
+/** テンポ from の拍 beat と同じ秒になる、テンポ to での拍（テンポが同じならそのまま） */
+export function sameTimeBeat(from: TempoMap, to: TempoMap, beat: number): number {
+  if (from === to) return beat;
+  const b = to.secToBeat(from.beatToSec(beat));
+  return Math.abs(b - beat) < 1e-6 ? beat : b;
+}
+
+/**
+ * 途中から鳴らし続ける音（原曲・SE・ステム）の置き方。同じなら、いま鳴っている音をそのまま使い続けられる
+ * （違えば engine.spliceLong で違う音だけつなぎ替える）。スロー再生では伸ばした原曲を WAV 番号で引くので、番号も比べる
+ */
+export function longSoundLayout(doc: DtxDoc, folder: SongFolder | null): string {
+  const src = new Map(wavSources(doc, folder).map((x) => [x.no, x]));
+  const slow = engine.playing && engine.rate < 0.999;
+  const out: string[] = [];
+  for (const e of playbackEvents(heardDoc(doc))) {
+    if (e.bus === 'drum') continue;
+    const x = src.get(e.wav);
+    out.push(`${e.bus}|${e.sec.toFixed(4)}|${x ? `${x.key}|${x.volume}|${x.pan}` : `#${e.wav}`}${slow ? `|${e.wav}` : ''}`);
+  }
+  // 同じ時刻の音は、譜面に書いた順で並ぶ（難易度で順が違うことがある）ので、並びは比べない
+  return out.sort().join('\n');
+}
+
+/**
+ * スロー再生のとき、今の位置（とループの頭）から鳴らす原曲・ステムの伸ばした音がもうあるか。
+ * 無い（難易度で原曲のファイルが違う）ときにつなぎ替えると、伸ばし終わるまで音が途切れる
+ */
+function stretchedNow(doc: DtxDoc): boolean {
+  const rate = engine.rate;
+  if (rate >= 0.999) return true;
+  const at = [engine.currentSec() ?? 0, ...(engine.loop ? [engine.loop.from] : [])];
+  return playbackEvents(heardDoc(doc)).every((e) => (e.bus !== 'bgm' && e.bus !== 'stem') || at.every((sec) => stretchReady(e.wav, rate, sec - e.sec)));
+}
+
+let switchSeq = 0;
+
+/**
+ * 同じ曲の別の難易度（同じフォルダの別の DTX）に切り替える。譜面を開き直す openDocument と違い、再生は止めない。
+ * ▶・表示の位置・ループはそのまま（テンポが違えば同じ秒の所）。鳴らす譜面は、まだ鳴らしていない所から新しい譜面になる。
+ * 聴く設定（ミックス）も引き継ぐ。原曲・SE の置き方や音量が違うときは、違う音だけを今の位置からクロスフェードでつなぎ替える。
+ * もっと新しい切り替えが始まった（stale が true）ときはやめて false を返す
+ */
+export async function switchDocument(
+  doc: DtxDoc,
+  meta: DocMeta,
+  sidecar: SidecarData | null,
+  opts: { dirty?: boolean; stale?: () => boolean } = {},
+): Promise<boolean> {
+  const seq = ++switchSeq;
+  const stale = () => seq !== switchSeq || !!opts.stale?.();
+  if (engine.playing) {
+    // 新しい譜面の音を先に読み込んでおく（切り替えた瞬間から、新しい譜面のチップが正しい音で鳴るように。
+    // prepareSounds が読むものと同じだけ読んでおけば、譜面を替えたあとの音の表はすぐにできる）
+    const sources = allWavSources(doc, get().folder);
+    const wait = engine.uncached(sources) > 0;
+    if (wait) set({ loading: tr('切り替える難易度の音を読み込んでいます…', 'Loading the sounds of the other difficulty…') });
+    try {
+      await engine.preload(sources);
+    } finally {
+      if (wait) set({ loading: null });
+    }
+    if (stale()) return false;
+  }
+  const s = get();
+  const from = tempoOf(s.doc);
+  const to = tempoOf(doc);
+  const at = (b: number) => sameTimeBeat(from, to, b);
+  const sameLong = longSoundLayout(s.doc, s.folder) === longSoundLayout(doc, s.folder);
+  const curStems = useSidecar.getState().stems;
+  const nextStems = sidecar?.stems ?? [];
+  const sameStems = sameStemFiles(curStems, nextStems);
+  // スペクトルに選んだ音：原曲などの譜面の音なら切り替え先にも同じ音があるか、ステムなら同じステムを同じずれで読むか
+  const oldKeys = new Set(wavSources(s.doc, s.folder).map((x) => x.key));
+  const newKeys = new Set(wavSources(doc, s.folder).map((x) => x.key));
+  const sameStemAudio = sameStems && curStems.every((t) => nextStems.some((n) => n.file === t.file && n.offsetMs === t.offsetMs));
+  const keepSpec = (key: string) => (oldKeys.has(key) ? newKeys.has(key) : sameStemAudio);
+  const used = mostUsedWav(doc);
+  const laneWav: Record<number, number> = {};
+  for (const [ch, v] of used) laneWav[ch] = v;
+  openedDocs++;
+  // ループは譜面を替える前に新しい譜面の拍へ直す（譜面が替わるとエンジンのループを当て直すので）
+  carryAssistToDoc(at, keepSpec);
+  set({
+    doc,
+    meta,
+    savedDoc: opts.dirty ? null : doc,
+    savedAt: null,
+    past: [],
+    future: [],
+    selection: [],
+    cursorBeat: Math.max(0, at(s.cursorBeat)),
+    view: { ...s.view, scrollBeat: at(s.view.scrollBeat) },
+    laneWav,
+    missingWavs: [],
+  });
+  loadSidecar(sameStems ? withListening(sidecar) : sidecar);
+  await prepareSounds();
+  if (stale() || !engine.playing) return true;
+  if (sameLong || stretchedNow(get().doc)) {
+    // 原曲・SE の置き方や音量が違う（難易度ごとに SE の音量が違う譜面は多い）ときは、違う音だけを今の位置からつなぎ替える。
+    // 新しい譜面の音の表（prepareSounds）ができた直後、次の予約より前に替える
+    if (!sameLong) engine.spliceLong();
+    // 曲の終わり（原曲の鳴り終わり）は新しい譜面の音を読み込んでから決まるので、止める所を合わせ直す
+    engine.setEndSec(playEndSec(get().doc, playStartSec));
+  } else {
+    // スロー再生で、切り替え先の原曲を伸ばした音がまだ無い：伸ばしてから今の位置で鳴らし直す（準備中と出る）
+    restartIfPlaying();
+  }
+  return true;
 }
 
 export function goHome() {

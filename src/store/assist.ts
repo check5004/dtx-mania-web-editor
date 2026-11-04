@@ -541,6 +541,24 @@ export function resetAssistForDoc() {
   aset({ loop: null, loopMark: null, similarPin: null });
 }
 
+/**
+ * 同じ曲の別の難易度に切り替えるとき（store/editor の switchDocument）。ループと A・B の印は残す（at で新しい譜面の拍に直す）。
+ * スペクトルに選んだ音（原曲・ステム）は、切り替え先にも同じ音があるときだけ残す（無ければ解析元の音のスペクトルを作り直す）
+ */
+export function carryAssistToDoc(at: (beat: number) => number, keepSpec: (key: string) => boolean) {
+  const { loop, loopMark } = aget();
+  if (specSrc && !keepSpec(specSrc.key)) {
+    specSrc = null;
+    aset({ specSource: null, spectro: null, spectroStatus: 'none' });
+    if (aget().waveMode === 'spec') void loadSpectrogram();
+  }
+  aset({
+    loop: loop ? { ...loop, a: at(loop.a), b: at(loop.b) } : null,
+    loopMark: loopMark ? { ...loopMark, beat: at(loopMark.beat) } : null,
+    similarPin: null,
+  });
+}
+
 // ---- スロー再生の BGM（伸ばした音をワーカーで作る） --------------------------------------
 
 const CHUNK = 20;
@@ -591,6 +609,12 @@ export const stretchProvider: StretchProvider = {
   },
 };
 engine.stretch = stretchProvider;
+
+/** スロー再生で、WAV no の srcSec 秒の所を伸ばした音がもうできているか（無い所・鳴り終わった所は true） */
+export function stretchReady(wav: number, rate: number, srcSec: number): boolean {
+  if (rate >= 0.999 || srcSec < 0 || srcSec >= engine.duration(wav)) return true;
+  return stretchProvider.get(wav, rate, Math.floor(srcSec / CHUNK)) !== null;
+}
 
 /** スロー再生を始める前に、最初に鳴らす区切りを用意する */
 export async function prepareStretch(wav: number, rate: number, srcSecs: number[]) {

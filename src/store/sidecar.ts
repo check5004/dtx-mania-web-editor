@@ -142,6 +142,31 @@ export function loadSidecar(d: SidecarData | null) {
   set({ ...emptySidecar(), ...(d ?? {}), dirty: false, loadSeq: get().loadSeq + 1 });
 }
 
+/** ステムのファイルが同じか（並びは問わない） */
+export function sameStemFiles(a: readonly StemTrack[], b: readonly StemTrack[]): boolean {
+  if (a.length !== b.length) return false;
+  const fb = new Set(b.map((t) => t.file));
+  return a.every((t) => fb.has(t.file));
+}
+
+/**
+ * 同じ曲の別の難易度へ切り替えるときに読み込む作業ファイル。聴く設定（ミックス、ステムのミュート・ソロ）は今のまま引き継ぐ。
+ * 再生を止めずに切り替えるので、鳴らす譜面のほかは聞こえ方を変えない（ステムのファイルが同じときに使う。違えば聴く設定の既定も違う）
+ */
+export function withListening(next: SidecarData | null): SidecarData {
+  const cur = get();
+  const d = next ?? emptySidecar();
+  const now = new Map(cur.stems.map((t) => [t.file, t]));
+  return {
+    ...d,
+    mix: cur.mix ?? d.mix,
+    stems: d.stems.map((t) => {
+      const c = now.get(t.file);
+      return c && (c.mute !== t.mute || c.solo !== t.solo) ? { ...t, mute: c.mute, solo: c.solo } : t;
+    }),
+  };
+}
+
 export function markSidecarSaved() {
   set({ dirty: false });
 }

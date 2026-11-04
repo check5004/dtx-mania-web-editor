@@ -96,7 +96,17 @@ export type BgmFilter = 'all' | 'low' | 'mid' | 'high';
 interface Voice {
   src: AudioBufferSourceNode;
   gain: GainNode;
+  /** 長い音（原曲・SE・ステム）なら、その中身と鳴り始める時刻（ctx）。難易度を切り替えたとき、同じ音は鳴らし続ける（spliceLong） */
+  long?: LongKey & { when: number };
 }
+
+/** 長い音の中身：いつ・どの音を・どこへ鳴らすか（base）と音量 */
+interface LongKey {
+  base: string;
+  volume: number;
+}
+
+const longSig = (k: LongKey) => `${k.base}|${k.volume}`;
 
 /** スロー再生のときの BGM。伸ばした音を区切り（チャンク）ごとにつないで鳴らす */
 interface Stream {
@@ -106,6 +116,8 @@ interface Stream {
   nextCtx: number;
   voices: Voice[];
   dead: boolean;
+  /** 鳴らしている音の中身（Voice の long と同じ） */
+  long: LongKey;
 }
 
 /** 伸ばした BGM を返す（無ければ null で、作り始める） */
@@ -370,8 +382,11 @@ class AudioEngine {
     return p;
   }
 
-  /** 使う音をすべて読み込む。読めなかった WAV 番号を返す */
+  private prepareSeq = 0;
+
+  /** 使う音をすべて読み込む。読めなかった WAV 番号を返す。続けて呼ばれたときは、最後に呼ばれた分の表を使う */
   async prepare(sources: WavSource[], onProgress?: (done: number, total: number) => void): Promise<number[]> {
+    const seq = ++this.prepareSeq;
     const failed: number[] = [];
     let done = 0;
     const next = new Map<number, { buf: AudioBuffer | null; volume: number; pan: number; key: string }>();
@@ -383,8 +398,22 @@ class AudioEngine {
         onProgress?.(++done, sources.length);
       }),
     );
-    this.table = next;
+    // 前の譜面の読み込みが後から終わっても、今の譜面の表を上書きしない（難易度を続けて切り替えたときなど）
+    if (seq === this.prepareSeq) this.table = next;
     return failed.sort((a, b) => a - b);
+  }
+
+  /** まだ読み込んでいない音の数 */
+  uncached(sources: WavSource[]): number {
+    return sources.filter((s) => !this.cache.has(s.key)).length;
+  }
+
+  /**
+   * 音を読み込んでおくだけ（鳴らす音の表は変えない）。再生中に別の難易度へ切り替える前に読み込んでおけば、
+   * 切り替えたあとの prepare はすぐ終わり、新しい譜面のチップが初めから正しい音で鳴る
+   */
+  async preload(sources: WavSource[]): Promise<void> {
+    await Promise.all(sources.map((s) => this.decode(s)));
   }
 
   duration(no: number): number {
@@ -418,7 +447,7 @@ class AudioEngine {
     return { src, gain };
   }
 
-  private startVoice(no: number, when: number, offset: number, bus: SoundEvent['bus']): Voice | null {
+  private startVoice(no: number, when: number, offset: number, bus: SoundEvent['bus'], fadeIn = 0.006): Voice | null {
     const t = this.entry(no);
     if (!this.ctx || !t?.buf) return null;
     if (offset >= t.buf.duration) return null;
@@ -427,7 +456,7 @@ class AudioEngine {
       // 途中から鳴らすときは小さくフェードイン（プチッと鳴らさない）
       const g = v.gain.gain.value;
       v.gain.gain.setValueAtTime(0, when);
-      v.gain.gain.linearRampToValueAtTime(g, when + 0.006);
+      v.gain.gain.linearRampToValueAtTime(g, when + fadeIn);
     }
     v.src.start(when, Math.max(0, offset));
     return v;
@@ -623,17 +652,102 @@ class AudioEngine {
     run.sched = song;
   }
 
-  private startLong(run: Run, e: SoundEvent, song: number, when: number, offset: number) {
-    if ((e.bus === 'bgm' || e.bus === 'stem') && run.rate < 0.999 && this.stretch) {
-      run.streams.push({ wav: e.wav, bus: e.bus, nextSrc: offset, nextCtx: when, voices: [], dead: false });
+  /** スロー再生では、原曲とステムは伸ばした音を区切りごとにつないで鳴らす */
+  private streamed(run: Run, e: SoundEvent): e is SoundEvent & { bus: Stream['bus'] } {
+    return (e.bus === 'bgm' || e.bus === 'stem') && run.rate < 0.999 && this.stretch !== null;
+  }
+
+  /**
+   * 長い音の中身（いつ・どの音を・どの位置へ、と音量）。同じなら同じ音が鳴る。
+   * つないで鳴らす音とステムは WAV 番号で音や出口を引くので、番号も比べる
+   */
+  private longKey(run: Run, e: SoundEvent): LongKey {
+    const t = this.entry(e.wav);
+    const no = this.streamed(run, e) || e.bus === 'stem' ? `|${e.wav}` : '';
+    return { base: `${e.bus}|${e.sec.toFixed(4)}|${t ? `${t.key}|${t.pan}` : '-'}${no}`, volume: t?.volume ?? 0 };
+  }
+
+  private startLong(run: Run, e: SoundEvent, song: number, when: number, offset: number, fadeIn?: number) {
+    const long = this.longKey(run, e);
+    if (this.streamed(run, e)) {
+      run.streams.push({ wav: e.wav, bus: e.bus, nextSrc: offset, nextCtx: when, voices: [], dead: false, long });
       void song;
       return;
     }
-    const v = this.startVoice(e.wav, when, offset, e.bus);
+    const v = this.startVoice(e.wav, when, offset, e.bus, fadeIn);
     if (v) {
+      v.long = { ...long, when };
       this.track(run, v, null);
       run.longVoices.add(v);
     }
+  }
+
+  /**
+   * 再生中に、鳴っている長い音（原曲・SE・ステム）を今の譜面のもの（replaceEvents で替えたもの）に合わせる。
+   * 同じ音はそのまま鳴らし続ける。音量だけが違う音（難易度で SE の音量が違う）は鳴らし直さずに音量を変え、
+   * ほかの違う音（原曲の位置が違うなど）は、少し先の時刻に同じ位置から短いクロスフェードでつなぎ替える。
+   * 止めて鳴らし直すより途切れない
+   */
+  spliceLong() {
+    const run = this.run;
+    const ctx = this.ctx;
+    if (!run || !ctx) return;
+    const seg = run.segs[run.segs.length - 1];
+    const at = Math.max(ctx.currentTime + 0.03, seg.ctx);
+    const song = seg.song + (at - seg.ctx) * run.rate;
+    // 予約を済ませた所まで（そこから先は pump がいつもどおり鳴らす）
+    const limit = run.loop ? Math.min(run.sched, run.loop.to) : run.sched;
+    const want: { e: SoundEvent; k: LongKey }[] = [];
+    for (const e of run.req.events) {
+      if (e.sec >= limit) break;
+      // 鳴り終わった音は除く（区間の頭より前の音も、まだ鳴っていれば途中から鳴らす。startSegment と同じ）
+      if (e.bus === 'drum' || (e.sec <= song && song - e.sec >= this.duration(e.wav))) continue;
+      want.push({ e, k: this.longKey(run, e) });
+    }
+    // 1. 同じ音（音量も同じ）は鳴らし続ける
+    const left = new Map<string, number>();
+    for (const w of want) left.set(longSig(w.k), (left.get(longSig(w.k)) ?? 0) + 1);
+    const take = (k: LongKey | undefined) => {
+      const sig = k ? longSig(k) : '';
+      const n = left.get(sig) ?? 0;
+      if (n <= 0) return false;
+      left.set(sig, n - 1);
+      return true;
+    };
+    const keep = new Set<Voice>();
+    for (const st of run.streams) {
+      if (take(st.long)) for (const v of st.voices) keep.add(v);
+      else st.dead = true;
+    }
+    run.streams = run.streams.filter((st) => !st.dead);
+    const others = [...run.longVoices].filter((v) => !keep.has(v) && !take(v.long));
+    const rest = want.filter((w) => take(w.k));
+    // 2. 鳴り始めた音で音量だけが違うものは、その音のまま音量を変える（スロー再生でも位置が飛ばない）
+    for (const v of others) {
+      const cur = v.long;
+      const i = cur && cur.when + 0.01 <= at ? rest.findIndex((w) => !this.streamed(run, w.e) && w.k.base === cur.base) : -1;
+      if (i < 0) {
+        this.fadeStop(v, at);
+        run.longVoices.delete(v);
+        continue;
+      }
+      const g = v.gain.gain;
+      try {
+        g.cancelScheduledValues(at);
+        g.setValueAtTime(g.value, at);
+        g.linearRampToValueAtTime(Math.max(0, Math.min(1, rest[i].k.volume / 100)), at + XF);
+      } catch {
+        // もう止まっている
+      }
+      v.long = { ...rest[i].k, when: cur!.when };
+      rest.splice(i, 1);
+    }
+    // 3. 足りない音を、鳴っていた所から（まだ先の音はその時刻に）鳴らす
+    for (const { e } of rest) {
+      if (e.sec <= song) this.startLong(run, e, song, at, song - e.sec, XF);
+      else this.startLong(run, e, e.sec, seg.ctx + (e.sec - seg.song) / run.rate, 0);
+    }
+    this.pumpStreams(run, ctx.currentTime + LOOKAHEAD);
   }
 
   private track(run: Run, v: Voice, choke: string | null) {

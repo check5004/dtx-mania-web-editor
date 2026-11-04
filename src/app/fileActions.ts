@@ -29,13 +29,13 @@ import {
   type SongFolder,
 } from '../fs/folder';
 import { listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
-import { createDoc, edit, isDirty, openDocument, prepareSounds, toast, useEditor, withSongEnd, type DocMeta } from '../store/editor';
+import { createDoc, edit, isDirty, openDocument, prepareSounds, switchDocument, toast, useEditor, withSongEnd, type DocMeta } from '../store/editor';
 import { bgmSource } from '../store/derived';
 import { freeWavNumber, setField } from '../edit/ops';
 import { toBase36x2 } from '../dtx/base36';
 import { CH } from '../dtx/model';
 import { frac } from '../dtx/fraction';
-import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar } from '../store/sidecar';
+import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 
 const get = useEditor.getState;
@@ -90,8 +90,8 @@ async function scanSiblingOrigins(folder: SongFolder) {
   useEditor.setState((st) => ({ meta: { ...st.meta, siblings: st.meta.siblings.map((x) => ({ ...x, origin: origins.get(x.file.toLowerCase()) ?? x.origin })) } }));
 }
 
-/** 作業ファイル（.dtxe.json）を読む。フォルダに無ければ自動保存の控えを使う */
-async function loadSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string) {
+/** 作業ファイル（.dtxe.json）の中身。フォルダに無ければ自動保存の控えを使う */
+async function readSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string): Promise<SidecarData | null> {
   const f = folder ? findFile(folder, sidecarName(fileName)) : undefined;
   let data = null;
   if (f) {
@@ -102,10 +102,26 @@ async function loadSidecarFor(folder: SongFolder | null, fileName: string, recen
     }
   }
   if (!data && recentSidecar) data = parseSidecar(recentSidecar);
-  loadSidecar(data);
+  return data;
 }
 
-async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<string, string>, recentText?: string, recentSidecar?: string) {
+/** 作業ファイル（.dtxe.json）を読む。フォルダに無ければ自動保存の控えを使う */
+async function loadSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string) {
+  loadSidecar(await readSidecarFor(folder, fileName, recentSidecar));
+}
+
+/**
+ * DTX を開く。switching を渡すと同じ曲の別の難易度への切り替え：再生を止めず、▶・表示の位置・ループ・聴く設定はそのまま。
+ * switching.stale() が true になったら（もっと新しい切り替えが始まった）途中でやめる
+ */
+async function openDtxFile(
+  folder: SongFolder,
+  file: FolderFile,
+  labels?: Map<string, string>,
+  recentText?: string,
+  recentSidecar?: string,
+  switching?: { stale: () => boolean },
+) {
   const bytes = new Uint8Array(await (await file.getFile()).arrayBuffer());
   const decoded = decodeDtx(bytes);
   let parsed = parseDtx(decoded.text);
@@ -121,9 +137,20 @@ async function openDtxFile(folder: SongFolder, file: FolderFile, labels?: Map<st
     siblings: siblingsOf(folder, labels),
     recentId: recentIdFor(folder, file.name),
   };
-  openDocument(parsed.doc, meta, folder, { dirty: useRecent || decoded.encoding === 'utf-8' });
-  void scanSiblingOrigins(folder);
-  await loadSidecarFor(folder, file.name, recentSidecar);
+  const dirty = useRecent || decoded.encoding === 'utf-8';
+  if (switching) {
+    if (switching.stale()) return;
+    const side = await readSidecarFor(folder, file.name, recentSidecar);
+    // 難易度タブの印（AI で作った譜面か）は読み直すまで今のものを出しておく（ちらつかせない）
+    const known = new Map(get().meta.siblings.map((x) => [x.file.toLowerCase(), x.origin]));
+    meta.siblings = meta.siblings.map((x) => ({ ...x, origin: known.get(x.file.toLowerCase()) ?? x.origin }));
+    if (switching.stale() || !(await switchDocument(parsed.doc, meta, side, { dirty, stale: switching.stale }))) return;
+    void scanSiblingOrigins(folder);
+  } else {
+    openDocument(parsed.doc, meta, folder, { dirty });
+    void scanSiblingOrigins(folder);
+    await loadSidecarFor(folder, file.name, recentSidecar);
+  }
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }
 
@@ -196,13 +223,28 @@ export async function openFolderFromInput(list: FileList | null) {
   await openFolder(folderFromFileList(list));
 }
 
-/** 難易度タブの切り替え（同じフォルダの別の DTX） */
+let switchSeq = 0;
+
+/**
+ * 難易度タブの切り替え（同じフォルダの別の DTX）。再生中でも止めずに、今の位置から新しい譜面を鳴らす。
+ * ▶・表示の位置・ループ・聴く設定（ミックス）はそのまま
+ */
 export async function switchDifficulty(fileName: string) {
   const s = get();
-  if (!s.folder || fileName === s.meta.fileName) return;
+  const folder = s.folder;
+  if (!folder) return;
+  if (fileName === s.meta.fileName) {
+    // 今の難易度をもう一度押したら、読み込み中の切り替えはやめる（気が変わって戻したとき）
+    switchSeq++;
+    return;
+  }
   if (!(await confirmDiscard())) return;
-  const f = findFile(s.folder, fileName);
-  if (f) await openDtxFile(s.folder, f);
+  const f = findFile(folder, fileName);
+  if (!f) return;
+  const seq = ++switchSeq;
+  // 保存していない変更は、いまの内容を「最近の曲」の自動保存に残してから切り替える（確認で伝えたとおりに）
+  if (isDirty(get())) await autosaveNow();
+  await openDtxFile(folder, f, undefined, undefined, undefined, { stale: () => seq !== switchSeq || get().folder !== folder });
 }
 
 /** 落としたファイル（DTX・音声）から開く */

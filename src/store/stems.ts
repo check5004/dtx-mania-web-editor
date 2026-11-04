@@ -155,11 +155,27 @@ function applyStems() {
   sset((s) => ({ version: s.version + 1 }));
   useEditor.setState((s) => ({ soundsVersion: s.soundsVersion + 1 }));
   syncAnalysis();
-  restartIfPlaying();
+  restartIfStemsChanged();
 }
 
 /** 再生に原曲（BGM）を入れているか。ステムがあるときは、原曲のトラックが鳴る設定のときだけ入れる */
 let origInPlayback = true;
+
+/** 最後に再生へ反映したステム（音と頭のずれ）と、原曲を一緒に鳴らすか */
+let playedStems = '';
+
+/**
+ * 鳴らすステムか、原曲を一緒に鳴らすかが変わったときだけ、再生中なら今の位置から鳴らし直す。
+ * 同じなら鳴っている音をそのまま使う（難易度を切り替えて同じステムを読み直したときに途切れさせない）
+ */
+function restartIfStemsChanged() {
+  const ready = readyStems();
+  // ステムが無いときは、原曲を消しても音量で消すだけ（鳴らす音は変わらない）
+  const sig = ready.length ? `${origInPlayback}|${ready.map((t) => `${stemNo(t.file)}=${loaded.get(t.file)!.key}:${t.offsetMs}`).join('|')}` : '';
+  if (sig === playedStems) return;
+  playedStems = sig;
+  restartIfPlaying();
+}
 
 /** 再生で鳴らす音にステムを足す */
 function applyTransform() {
@@ -185,7 +201,7 @@ function syncOrigPlayback() {
   if (!stemsActive()) return;
   if (engine.audible().orig === origInPlayback) return;
   applyTransform();
-  restartIfPlaying();
+  restartIfStemsChanged();
 }
 
 /** ソロがどれかのトラックに付いているか（ソロはトラックをまたいで効く） */
