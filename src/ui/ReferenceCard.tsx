@@ -3,6 +3,7 @@ import { tr, pl, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { useAssist } from '../store/assist';
 import { bgmSource } from '../store/derived';
+import { IS_IOS, useDevice } from '../store/device';
 import { useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { Icon } from './icons';
@@ -17,6 +18,7 @@ export function ReferenceCard() {
   const hasBgm = useEditor((s) => bgmSource(s.doc) !== null);
   const [url, setUrl] = useState('');
   const autoOnLoad = useYtAlign((a) => a.autoOnLoad);
+  const tablet = useDevice((s) => s.tablet);
   const box = useRef<HTMLDivElement>(null);
   const id = yt ? youtubeId(yt.url) : null;
 
@@ -134,22 +136,52 @@ export function ReferenceCard() {
             </button>
           </div>
         </div>
-        <div className="row">
-          <span className="lbl" title={tr('映像が音より遅れて見えるときは ＋ に', 'Use + when the video looks late compared with the audio')}>
-            {tr('YouTubeとのずれ', 'YouTube offset')}
-          </span>
-          <span className="grow" />
-          <button className="ib" style={{ width: 24, height: 24, borderColor: 'var(--line3)' }} onClick={(e) => nudge(e.shiftKey ? -0.1 : -0.01)} title={tr('10ms（Shiftで100ms）早める', 'Earlier by 10 ms (100 ms with Shift)')}>
-            −
-          </button>
-          <span className="mono" style={{ fontSize: 12, minWidth: 64, padding: '0 2px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-            {offset >= 0 ? '+' : '−'}
-            {Math.abs(offset).toFixed(3)} s
-          </span>
-          <button className="ib" style={{ width: 24, height: 24, borderColor: 'var(--line3)' }} onClick={(e) => nudge(e.shiftKey ? 0.1 : 0.01)} title={tr('10ms（Shiftで100ms）遅らせる', 'Later by 10 ms (100 ms with Shift)')}>
-            {tr('＋', '+')}
-          </button>
-        </div>
+        {tablet ? (
+          // タブレット：Shift が無いので 0.1 秒と 0.01 秒のボタンを並べる
+          <div className="row t-yt-offset">
+            <span className="grow" title={tr('映像が音より遅れて見えるときは ＋ に', 'Use + when the video looks late compared with the audio')}>
+              {tr('映像のずれ', 'Video offset')}{' '}
+              <b className="mono">
+                {offset >= 0 ? '+' : '−'}
+                {Math.abs(offset).toFixed(2)} s
+              </b>
+            </span>
+            {(
+              [
+                [-0.1, '−.1'],
+                [-0.01, '−.01'],
+                [0.01, '+.01'],
+                [0.1, '+.1'],
+              ] as const
+            ).map(([d, label]) => (
+              <button
+                key={label}
+                className="t-ib boxed mono"
+                onClick={() => nudge(d)}
+                aria-label={d < 0 ? tr(`${Math.abs(d)} 秒早める`, `Earlier by ${Math.abs(d)} s`) : tr(`${d} 秒遅らせる`, `Later by ${d} s`)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="row">
+            <span className="lbl" title={tr('映像が音より遅れて見えるときは ＋ に', 'Use + when the video looks late compared with the audio')}>
+              {tr('YouTubeとのずれ', 'YouTube offset')}
+            </span>
+            <span className="grow" />
+            <button className="ib" style={{ width: 24, height: 24, borderColor: 'var(--line3)' }} onClick={(e) => nudge(e.shiftKey ? -0.1 : -0.01)} title={tr('10ms（Shiftで100ms）早める', 'Earlier by 10 ms (100 ms with Shift)')}>
+              −
+            </button>
+            <span className="mono" style={{ fontSize: 12, minWidth: 64, padding: '0 2px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+              {offset >= 0 ? '+' : '−'}
+              {Math.abs(offset).toFixed(3)} s
+            </span>
+            <button className="ib" style={{ width: 24, height: 24, borderColor: 'var(--line3)' }} onClick={(e) => nudge(e.shiftKey ? 0.1 : 0.01)} title={tr('10ms（Shiftで100ms）遅らせる', 'Later by 10 ms (100 ms with Shift)')}>
+              {tr('＋', '+')}
+            </button>
+          </div>
+        )}
         <AutoAlign />
         <div className="lbl" style={{ lineHeight: 1.6, padding: '7px 9px', borderRadius: 7, background: '#151A21' }}>
           {srcName
@@ -199,10 +231,9 @@ function AutoAlign() {
   if (!canCaptureTab()) {
     return (
       <div className="lbl" style={{ lineHeight: 1.6, color: 'var(--dim)' }}>
-        {tr(
-          '原曲とのずれを自動で合わせるのは Chrome・Edge で使えます（このタブの音を聞き取るため）。',
-          'Automatic sync with the original works in Chrome and Edge (it needs to listen to this tab).',
-        )}
+        {IS_IOS
+          ? tr('iPad では自動合わせ（タブの音の共有）が使えません。音を聞き比べて ± で合わせます。', 'Auto-sync (tab audio sharing) is not available on iPad. Match the offset by ear with ±.')
+          : tr('原曲とのずれを自動で合わせるのは Chrome・Edge で使えます（このタブの音を聞き取るため）。', 'Automatic sync with the original works in Chrome and Edge (it needs to listen to this tab).')}
       </div>
     );
   }

@@ -9,6 +9,7 @@ import { clearSavedModels, decodeForSeparation, savedModels, separate, SeparateE
 import { SEP_MODELS, SEP_SR, type SepModelId, type SepPrecision } from '../separate/models';
 import { plannedFiles, sourceNameInfo, type SepOutputs } from '../separate/names';
 import { bgmSource, wavPath } from './derived';
+import { IS_IOS } from './device';
 import { openPage, openedDocs, toast, useEditor } from './editor';
 import { useSidecar } from './sidecar';
 import { chooseAnalysisStem, defaultExportName, exportStems, importStems, removeStem } from './stems';
@@ -57,14 +58,17 @@ export interface SeparateState {
 
 const PREF_KEY = 'dtxe.separate.v1';
 
+/** はじめのモデル。iPad は使えるメモリが少ないので軽いモデルから */
+const DEFAULT_MODEL: SepModelId = IS_IOS ? 'scnet_small' : 'bs_roformer_sw';
+
 function loadPrefs(): Pick<SeparateState, 'model' | 'outputs'> {
   try {
     const j = JSON.parse(localStorage.getItem(PREF_KEY) || 'null') as { model?: string; outputs?: string } | null;
-    const model = j?.model && j.model in SEP_MODELS ? (j.model as SepModelId) : 'bs_roformer_sw';
+    const model = j?.model && j.model in SEP_MODELS ? (j.model as SepModelId) : DEFAULT_MODEL;
     const outputs = j?.outputs === 'all' ? 'all' : 'two';
     return { model, outputs };
   } catch {
-    return { model: 'bs_roformer_sw', outputs: 'two' };
+    return { model: DEFAULT_MODEL, outputs: 'two' };
   }
 }
 

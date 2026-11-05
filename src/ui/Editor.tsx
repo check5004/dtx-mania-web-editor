@@ -57,6 +57,9 @@ import { TopBar } from './TopBar';
 import { effectiveColumns, useLayout } from '../store/layout';
 import { PanelRail, VSplitter } from './Splitter';
 import { Transport } from './Transport';
+import { useDevice } from '../store/device';
+import { TabletEditor } from './tablet/TabletEditor';
+import { tabletSave } from './tablet/shared';
 
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
@@ -82,7 +85,9 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
   // 入力欄の中でも効くもの
   if (mod && k.toLowerCase() === 's') {
     e.preventDefault();
-    void save({ as: e.shiftKey });
+    // タブレット版：曲フォルダに書けなければ「保存と書き出し」
+    if (useDevice.getState().tablet && !e.shiftKey) tabletSave();
+    else void save({ as: e.shiftKey });
     return;
   }
   if (k === 'F5' || k === 'F6' || k === 'F7') {
@@ -305,6 +310,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
 export function Editor() {
   const folderInput = useRef<HTMLInputElement>(null);
   const page = useEditor((s) => s.page);
+  const tablet = useDevice((s) => s.tablet);
   const velMode = useVel((s) => s.mode);
   const findOpen = useFind((s) => s.open);
   const previewMode = usePreview((s) => s.mode);
@@ -361,6 +367,8 @@ export function Editor() {
         <GuidelinePage />
       ) : page === 'ai' ? (
         <AiGenPage />
+      ) : tablet ? (
+        <TabletEditor folderInput={folderInput} />
       ) : (
         <>
           <TopBar folderInput={folderInput} />

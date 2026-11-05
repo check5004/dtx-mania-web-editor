@@ -8,6 +8,7 @@ import { decodeDtx } from '../dtx/encoding';
 import { drumChannel } from '../dtx/model';
 import { parseDtx } from '../dtx/parse';
 import { downloadBytes, folderFromFileList, folderFromHandle, normPath, type FolderFile, type SongFolder } from '../fs/folder';
+import { folderOf, readZip } from '../fs/zip';
 import * as db from '../library/db';
 import type { Inst, LibraryKit, RefFolder, SampleMeta } from '../library/db';
 import { classifyUsage, features, instOfChannel, miniPeaks, monoOf, similarity } from '../library/analyze';
@@ -383,6 +384,18 @@ export async function pickAndImport(mode: 'copy' | 'ref', fallbackInput?: HTMLIn
 export async function importFromFileList(list: FileList | null) {
   if (!list || list.length === 0) return;
   await importFolder(folderFromFileList(list));
+}
+
+/** 曲フォルダの ZIP から取り込む（フォルダを選べない iPad 用。中に曲フォルダがいくつあってもよい） */
+export async function importSongZip(file: File) {
+  lset({ importing: { label: tr('ZIP を読んでいます…', 'Reading the ZIP…'), done: 0, total: 0 } });
+  try {
+    const z = await readZip(file);
+    await importFolder(folderOf(z, ''));
+  } catch (e) {
+    lset({ importing: null });
+    toast(tr(`ZIP を読めませんでした: ${(e as Error).message}`, `Couldn't read the ZIP: ${(e as Error).message}`), 'error', 7000);
+  }
 }
 
 export async function importFolder(folder: SongFolder, refFolderId?: string) {

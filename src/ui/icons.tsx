@@ -275,4 +275,149 @@ export const Icon = {
       <rect x="2" y="4.2" width="12" height="3.6" rx="1.2" fill="currentColor" stroke="none" />
     </Svg>
   ),
+  // ---- タブレット版 ----
+  menu: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+    </Svg>
+  ),
+  grid: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" />
+      <rect x="9" y="2.5" width="4.5" height="4.5" rx="1" />
+      <rect x="2.5" y="9" width="4.5" height="4.5" rx="1" />
+      <rect x="9" y="9" width="4.5" height="4.5" rx="1" />
+    </Svg>
+  ),
+  /** レーンのパッド（縦に並んだ細い枠） */
+  lanes: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 13.5h11" />
+      <rect x="3" y="5" width="2.4" height="6" rx=".6" />
+      <rect x="6.8" y="5" width="2.4" height="6" rx=".6" />
+      <rect x="10.6" y="5" width="2.4" height="6" rx=".6" />
+      <path d="M4.2 3v1.4M8 3v1.4M11.8 3v1.4" />
+    </Svg>
+  ),
+  db: (s?: number) => (
+    <Svg size={s}>
+      <ellipse cx="8" cy="4" rx="5" ry="2" />
+      <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" />
+      <path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" />
+    </Svg>
+  ),
+  ear: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4.5 6.2a3.5 3.5 0 1 1 7 0c0 1.9-1.6 2.6-2.2 3.8-.5 1-.4 3-2.3 3-1 0-1.6-.6-1.8-1.3" />
+      <path d="M6.6 6.3a1.4 1.4 0 1 1 2.6.8c-.3.4-.9.7-.9 1.4" />
+    </Svg>
+  ),
+  checkCircle: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="5.8" />
+      <path d="m5.4 8.2 1.8 1.8 3.5-3.7" />
+    </Svg>
+  ),
+  check: (s?: number) => (
+    <Svg size={s}>
+      <path d="m3.5 8.4 2.9 2.9 6.1-6.6" />
+    </Svg>
+  ),
+  /** 選ぶ道具：点線の四角と矢印 */
+  selectBox: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 9V2.5H9" strokeDasharray="1.6 1.6" />
+      <path d="M7.5 7.5l5.7 2.2-2.4.9-.9 2.4z" fill="currentColor" />
+    </Svg>
+  ),
+  zoomIn: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="m10.4 10.4 3.1 3.1M5 7h4M7 5v4" />
+    </Svg>
+  ),
+  zoomOut: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="m10.4 10.4 3.1 3.1M5 7h4" />
+    </Svg>
+  ),
+  arrowUp: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 13V3M4 7l4-4 4 4" />
+    </Svg>
+  ),
+  arrowDown: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 3v10M4 9l4 4 4-4" />
+    </Svg>
+  ),
+  arrowLeft: (s?: number) => (
+    <Svg size={s}>
+      <path d="M13 8H3M7 4 3 8l4 4" />
+    </Svg>
+  ),
+  arrowRight: (s?: number) => (
+    <Svg size={s}>
+      <path d="M3 8h10M9 4l4 4-4 4" />
+    </Svg>
+  ),
+  copy: (s?: number) => (
+    <Svg size={s}>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.4" />
+      <path d="M10.5 5.5V3.9c0-.8-.6-1.4-1.4-1.4H3.9c-.8 0-1.4.6-1.4 1.4v5.2c0 .8.6 1.4 1.4 1.4h1.6" />
+    </Svg>
+  ),
+  cut: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="4.5" cy="11.5" r="2" />
+      <circle cx="11.5" cy="11.5" r="2" />
+      <path d="M6 10 12 2.5M10 10 4 2.5" />
+    </Svg>
+  ),
+  paste: (s?: number) => (
+    <Svg size={s}>
+      <rect x="3.5" y="3" width="9" height="11" rx="1.4" />
+      <path d="M6 3V2h4v1M6 7h4M6 10h4" />
+    </Svg>
+  ),
+  dots: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="3.5" cy="8" r=".9" fill="currentColor" />
+      <circle cx="8" cy="8" r=".9" fill="currentColor" />
+      <circle cx="12.5" cy="8" r=".9" fill="currentColor" />
+    </Svg>
+  ),
+  share: (s?: number) => (
+    <Svg size={s}>
+      <path d="M5.5 6H4.2c-.7 0-1.2.5-1.2 1.2v5.6c0 .7.5 1.2 1.2 1.2h7.6c.7 0 1.2-.5 1.2-1.2V7.2c0-.7-.5-1.2-1.2-1.2h-1.3" />
+      <path d="M8 9.5V1.8M5.5 4.2 8 1.8l2.5 2.4" />
+    </Svg>
+  ),
+  zip: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4 2h5l3 3v9H4z" />
+      <path d="M7 2v1.5M7 5v1.5M7 8v1.5" />
+      <rect x="6.2" y="10" width="1.6" height="2" rx=".4" />
+    </Svg>
+  ),
+  /** 上下左右の矢印（スクロール・動かす） */
+  move: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 1.8v12.4M1.8 8h12.4" />
+      <path d="M6.2 3.6 8 1.8l1.8 1.8M6.2 12.4 8 14.2l1.8-1.8M3.6 6.2 1.8 8l1.8 1.8M12.4 6.2 14.2 8l-1.8 1.8" />
+    </Svg>
+  ),
+  /** 指（長押し） */
+  hand: (s?: number) => (
+    <Svg size={s}>
+      <path d="M6 8.5V3.2a1 1 0 0 1 2 0V7.5" />
+      <path d="M8 7V5.6a1 1 0 0 1 2 0V7.5M10 6.4a1 1 0 0 1 2 0v3.4c0 2.4-1.6 4.2-4 4.2-1.6 0-2.6-.8-3.4-2L3.2 9.6a1 1 0 0 1 1.6-1.2L6 9.7" />
+    </Svg>
+  ),
+  plusMinus: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 2.5v6M5 5.5h6M5 12.5h6" />
+    </Svg>
+  ),
 };

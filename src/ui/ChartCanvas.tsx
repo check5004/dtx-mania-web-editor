@@ -2,6 +2,7 @@
 // 右に「原曲の打点」（ドラムの採譜モデルの5種。使えないときは低・中・高の3帯域）と「原曲の波形」の列を出す。
 import { tr, pl, subscribeLang, isJa } from '../i18n';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { create } from 'zustand';
 import type { Onset } from '../audio/analysis';
 import { engine } from '../audio/engine';
 import { SPEC_F_HI, SPEC_F_LO, specFreq, specPos, type SpectroData } from '../audio/spectro';
@@ -10,7 +11,7 @@ import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
 import { bgaChannel, CH, DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
-import { posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
+import { gridStep, posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import {
   bandOnsets,
   beginLoopDrag,
@@ -28,20 +29,27 @@ import { bgmSource, COL_BGA, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, vie
 import {
   autoEndMeasure,
   deleteChips,
+  dismissToast,
   dragSongEnd,
   minSongEnd,
   moveSelection,
   openPage,
   placeBpmChange,
   placeChip,
+  placeChips,
   playFrom,
+  redo,
   resetSongEnd,
   setCursorBeat,
   setView,
   songEndReason,
+  toast,
+  undo,
   useEditor,
   zoom,
 } from '../store/editor';
+import { penUsed, setPenMode, setTouchPrefs, useDevice, type Tool } from '../store/device';
+import { setPadViewport } from '../store/pads';
 import { fixBpm, fixStart, fixStemLag, fmtMs, offsetBadge, offsetReport, stemLag, stemLagWarn, useOffset, STEM_LAG_LIMIT } from '../store/offset';
 import { chooseAnalysisStem } from '../store/stems';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
@@ -69,7 +77,7 @@ import { chipBpmLabel, formatTime, meterLabel } from './format';
 import { SectionPopover } from './SectionPopover';
 import { SPEC_ZONES, zoneLut, type SpecZone } from './specColors';
 import { pickBgmFile } from '../app/fileActions';
-import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
+import { addLaneMenuItems, closeCtxMenu, dismissedBy, openCtxMenu, type CtxItem } from '../store/ctxMenu';
 
 export const GEO = {
   head: 30,
@@ -95,22 +103,94 @@ export const GEO = {
   /** ベロシティのレーン（ベロシティの編集モード） */
   velGap: 10,
   velW: 84,
+  /** チップの半分の幅・フラムの1打目の半分の幅・高さ */
+  chipHW: 17,
+  graceHW: 12,
+  chipH: 10,
 };
 
-const BASE_W = GEO.bgmX + GEO.bgmW;
+/** デスクトップの寸法（タブレット版から戻すとき） */
+const DESK_GEO = { ...GEO };
+
+let BASE_W = GEO.bgmX + GEO.bgmW;
 
 /** 小節番号の列の左端（✨ の列の右） */
-const GUT_X = GEO.loopW + GEO.genW;
+let GUT_X = GEO.loopW + GEO.genW;
 /** ✨ のボタンの中心（譜面の左端から）と、小節線からの当たりの幅 */
-const GEN_CX = GEO.loopW + GEO.genW / 2;
+let GEN_CX = GEO.loopW + GEO.genW / 2;
 const GEN_HIT = 9;
+
+/**
+ * タブレット版の寸法か。タブレット版は画面の幅に合わせてレーンを 22〜64px に広げ、
+ * 小節番号は押せるボタン（48×44）、チップの当たりは上下 ±11px、ループの A・B は 44px のつまみにする
+ */
+let tabletGeo = false;
+let geoKey = '';
+
+/** タブレット版の小節番号のボタンの高さ（小節線から上） */
+const MEASURE_BTN_H = 44;
+
+/**
+ * 列の幅を決め直す（画面の幅・タブレットか・原曲の列・ベロシティのレーン・BGA の列で変わる）。変えたら true
+ */
+/** タブレットで譜面の幅が w のときのレーンの幅（applyGeo と同じ計算。パネルを重ねるかどうかを決めるのに使う） */
+export function tabletLaneW(w: number): number {
+  const a = useAssist.getState();
+  const v = useVel.getState();
+  const bga = bgaVisible() ? bgaW() + 6 : 0;
+  const velW = v.mode ? DESK_GEO.velGap + v.lanes.length * DESK_GEO.velW : 0;
+  const audio = a.audioCols ? 4 + 40 + 4 + 38 : 0;
+  return Math.floor((w - 54 - 6 - 98 - audio - velW - bga) / 10);
+}
+
+function applyGeo(w: number): boolean {
+  const tablet = useDevice.getState().tablet;
+  const a = useAssist.getState();
+  const v = useVel.getState();
+  const bga = bgaVisible() ? bgaW() + 6 : 0;
+  const key = `${tablet}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}`;
+  if (key === geoKey) return false;
+  geoKey = key;
+  tabletGeo = tablet;
+  Object.assign(GEO, DESK_GEO);
+  if (tablet) {
+    const velW = v.mode ? DESK_GEO.velGap + v.lanes.length * DESK_GEO.velW : 0;
+    GEO.head = 34;
+    GEO.loopW = 14;
+    GEO.genW = 0;
+    GEO.bpmX = 64;
+    GEO.bpmW = 34;
+    GEO.laneX = 98;
+    GEO.miniW = 54;
+    const audio = a.audioCols ? 4 + 40 + 4 + 38 : 0;
+    const room = w - GEO.miniW - 6 - GEO.laneX - audio - velW - bga;
+    GEO.laneW = Math.max(22, Math.min(64, Math.floor(room / 10)));
+    let x = GEO.laneX + GEO.laneW * 10;
+    // 余れば BGM・SE の列を出す（足りなければ出さない。BGM の開始はテンポ合わせの画面でも決められる）
+    const spare = room - GEO.laneW * 10;
+    GEO.bgmX = spare >= 34 ? x + 4 : x;
+    GEO.bgmW = spare >= 34 ? 28 : 0;
+    x = GEO.bgmX + GEO.bgmW;
+    GEO.hitsX = x + 4;
+    GEO.hitsW = 40;
+    GEO.waveX = GEO.hitsX + GEO.hitsW + 4;
+    GEO.waveW = Math.max(38, Math.min(196, w - GEO.miniW - 6 - GEO.waveX - velW - bga));
+    GEO.chipHW = Math.max(8, Math.round((GEO.laneW - 10) / 2));
+    GEO.graceHW = Math.max(6, Math.round(GEO.chipHW * 0.7));
+    GEO.chipH = 12;
+  }
+  BASE_W = GEO.bgmX + GEO.bgmW;
+  GUT_X = GEO.loopW + GEO.genW;
+  GEN_CX = GEO.loopW + GEO.genW / 2;
+  return true;
+}
 
 /** スペクトルを出すときの列の最大幅（画面に余裕があれば広げる） */
 const SPEC_W_MAX = 196;
 
 /** 原曲の波形・スペクトルの列の幅 */
 function waveColW(): number {
-  if (useAssist.getState().waveMode !== 'spec') return GEO.waveW;
+  if (tabletGeo || useAssist.getState().waveMode !== 'spec') return GEO.waveW;
   const v = useVel.getState();
   const vel = v.mode ? GEO.velGap + v.lanes.length * GEO.velW : 0;
   const room = viewport.w - GEO.miniW - 24 - GEO.waveX - vel;
@@ -219,7 +299,87 @@ interface Local {
   down1: number | null;
   /** Ctrl（Mac は ⌘）を押しているか（1回だけフラムで置く） */
   mod: boolean;
+  /** 譜面の枠の左端（画面の x。入力パッドのレーンを譜面のレーンにそろえる） */
+  left: number;
+  /** タブレット版：押している小節番号のボタン（押した色にする） */
+  pressM?: number;
+  /** 指の操作（タブレット版） */
+  touch: TouchG | null;
+  /** 「ペンで書く」のペンを押している（ペンはマウスと同じ扱いで、道具で置く・選ぶを分ける） */
+  penPress: PenPress | null;
+  penTool: Tool | null;
+  /** 長押しの輪（指の周り。閉じたらメニュー） */
+  ring: { x: number; y: number; t0: number; ms: number } | null;
+  /** 弾いたあとの慣性スクロール（px/ms） */
+  fling: { v: number; t: number } | null;
+  /** 前のタップ（ダブルタップで消す）。id は叩いたチップ（置いたときは null：置いたばかりのチップは消さない） */
+  lastTap: { t: number; x: number; y: number; id: number | null } | null;
+  /** 直前の押下の種類（タブレット版の指・ペンではダブルクリックを使わない） */
+  lastType: string;
 }
+
+/** 指1本の位置（x・y は譜面の枠の中、cx・cy は画面） */
+interface TouchPt {
+  x: number;
+  y: number;
+  x0: number;
+  y0: number;
+  cx: number;
+  cy: number;
+}
+
+/**
+ * 指の操作。wait: 1本指でまだ決まっていない（動かせばスクロールか範囲選択、離せばタップ、長押しでメニュー）／
+ * scroll: 1本指のスクロール／drag: 譜面の操作（▶・ループの端・範囲選択・チップの移動・END）／
+ * mouse: ベロシティのレーン（マウスと同じ）／menu: 長押しでメニューを出した／multi: 2本指以上（スクロールとピンチ）
+ */
+interface TouchG {
+  pts: Map<number, TouchPt>;
+  /** この操作で同時に触れた指の最大数（2本指タップ・3本指タップ） */
+  max: number;
+  mode: 'wait' | 'scroll' | 'drag' | 'mouse' | 'menu' | 'multi' | 'done';
+  t0: number;
+  hit: Hit | null;
+  /** 押した所の拍（範囲選択の角・置く位置） */
+  b0: number;
+  /** メニューを出す拍（全体図なら全体図の拍） */
+  menuBeat: number;
+  /** 「ペンで書く」の指：譜面の中ではスクロールとピンチだけ（手のひらで置かない） */
+  fingerOnly: boolean;
+  timer: number;
+  moved: boolean;
+  /** 2本目の指が来たとき、まだ何もしていなかった（2本指タップで元に戻してよい） */
+  tapOk: boolean;
+  lastY: number;
+  lastT: number;
+  vy: number;
+  d0: number;
+  px0: number;
+  pinchBeat: number;
+  zooming: boolean;
+  /** 慣性で流れているのを止めた指（タップしても置かない。iPad のスクロールと同じ） */
+  stopper: boolean;
+}
+
+interface PenPress {
+  id: number;
+  x0: number;
+  y0: number;
+  cx: number;
+  cy: number;
+  moved: boolean;
+  hit: Hit | null;
+  beat: number;
+  timer: number;
+  /** 長押しでメニューを出した */
+  menu: boolean;
+}
+
+/** 指を動かしたと見なす距離（これより小さければタップ） */
+const TOUCH_SLOP = 10;
+/** ダブルタップの間（ミリ秒）と、ずれてよい距離 */
+const DBL_TAP_MS = 350;
+const DBL_TAP_PX = 30;
 
 /** 右のパネルから「表示中の範囲」を知るための値 */
 const viewport = { h: 600, w: 1000, follow: null as number | null };
@@ -289,10 +449,231 @@ function velFromX(rx: number, i: number): number {
   return Math.max(1, Math.min(100, Math.round(((rx - velLaneX(i) - VEL_PAD) / velBarW()) * 100)));
 }
 
+// ---- 指の操作の部品（タブレット版） ------------------------------------------------------
+
+/** 譜面のレーンの位置（入力パッドのレーンの並びを、譜面のレーンの真下にそろえる） */
+interface ChartLanes {
+  /** 1つ目のレーンの左端（画面の x） */
+  left: number;
+  laneW: number;
+}
+
+const useChartLanesStore = create<{ lanes: ChartLanes | null }>(() => ({ lanes: null }));
+
+/** 譜面のレーンの位置（タブレット版の譜面を出しているときだけ） */
+export function useChartLanes(): ChartLanes | null {
+  return useChartLanesStore((s) => s.lanes);
+}
+
+function publishLanes(left: number, laneW: number) {
+  const cur = useChartLanesStore.getState().lanes;
+  if (cur && Math.abs(cur.left - left) < 0.5 && cur.laneW === laneW) return;
+  useChartLanesStore.setState({ lanes: { left, laneW } });
+}
+
+/** 譜面を拡大・縮小する（見えている所の真ん中を中心に。タブレット版の拡大・縮小のボタン） */
+export function zoomChart(factor: number) {
+  const s = useEditor.getState();
+  const mid = (viewport.h - GEO.head - GEO.bottom) / 2;
+  const scroll = engine.playing && viewport.follow !== null ? viewport.follow : s.view.scrollBeat;
+  zoom(factor, scroll + mid / s.view.pxPerBeat, mid);
+}
+
+/** 譜面の中身（チップ・レーン・BPM・BGM・BGA・原曲の列）。「ペンで書く」の指はここではスクロールとピンチだけ */
+function isChartBody(h: Hit): boolean {
+  return h.kind === 'chip' || h.kind === 'lane' || h.kind === 'bpm' || h.kind === 'bgm' || h.kind === 'bga' || h.kind === 'audio';
+}
+
+/** 再生中に触ったら追従をやめる（今の表示のまま。▶ の追従ボタンで戻る） */
+function followOff(l: Local) {
+  const s = useEditor.getState();
+  if (!engine.playing || !s.view.follow) return;
+  const scroll = l.followScroll ?? s.view.scrollBeat;
+  l.followScroll = null;
+  setView({ scrollBeat: scroll, follow: false });
+}
+
+/** 指の動き（px。下へ動かすと譜面も下へ＝先の小節が見える）だけスクロールする */
+function scrollByPx(l: Local, dy: number): boolean {
+  const s = useEditor.getState();
+  const base = l.followScroll ?? s.view.scrollBeat;
+  l.followScroll = null;
+  const next = Math.max(-2, base + dy / s.view.pxPerBeat);
+  setView({ scrollBeat: next, follow: false });
+  return next > -2;
+}
+
+function scrollStep(l: Local, t: TouchG, y: number, now: number) {
+  const dy = y - t.lastY;
+  const dt = Math.max(1, now - t.lastT);
+  t.vy = t.vy * 0.5 + (dy / dt) * 0.5;
+  t.lastY = y;
+  t.lastT = now;
+  if (dy) scrollByPx(l, dy);
+}
+
+/** 弾いて離した：慣性で流す（指を置くと止まる） */
+function startFling(l: Local, t: TouchG, now: number) {
+  if (now - t.lastT > 90 || Math.abs(t.vy) < 0.25) return;
+  l.fling = { v: Math.max(-6, Math.min(6, t.vy)), t: performance.now() };
+}
+
+function stopFling(l: Local) {
+  l.fling = null;
+}
+
+function stepFling(l: Local, now: number) {
+  const f = l.fling;
+  if (!f) return;
+  const dt = Math.min(48, now - f.t);
+  f.t = now;
+  if (dt <= 0) return;
+  const more = scrollByPx(l, f.v * dt);
+  f.v *= Math.pow(0.95, dt / 16);
+  if (!more || Math.abs(f.v) < 0.02) l.fling = null;
+}
+
+/** 2本指以上：今の指の位置から、スクロールとピンチをやり直す（指が増えた・減ったとき） */
+function anchorMulti(l: Local, t: TouchG) {
+  const pts = [...t.pts.values()];
+  const s = useEditor.getState();
+  const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+  const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+  t.lastY = cy;
+  t.lastT = performance.now();
+  t.vy = 0;
+  t.pinchBeat = g.yToBeat(cy);
+  t.d0 = pts.length >= 2 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0;
+  t.px0 = s.view.pxPerBeat;
+}
+
+/**
+ * 2本指を動かした：指の間の真ん中の拍が指に付いてくる（スクロール）。指の間が 24px 以上変わったら、
+ * 時間の向きだけ拡大・縮小する（指の間を中心に）
+ */
+function multiMove(l: Local, t: TouchG, now: number) {
+  const pts = [...t.pts.values()];
+  const s = useEditor.getState();
+  const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+  let px = s.view.pxPerBeat;
+  if (pts.length >= 2 && t.d0 > 0) {
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if (!t.zooming && Math.abs(d - t.d0) > 24) {
+      t.zooming = true;
+      t.d0 = d;
+      t.px0 = px;
+    }
+    if (t.zooming) px = Math.max(10, Math.min(480, t.px0 * (d / t.d0)));
+  }
+  const dt = Math.max(1, now - t.lastT);
+  t.vy = t.vy * 0.5 + ((cy - t.lastY) / dt) * 0.5;
+  t.lastY = cy;
+  t.lastT = now;
+  const base = l.h - GEO.bottom;
+  l.followScroll = null;
+  setView({ pxPerBeat: px, scrollBeat: Math.max(-2, t.pinchBeat - (base - cy) / px), follow: false });
+  l.dirty = true;
+}
+
+/** 長押しをやめる（輪を消す） */
+function cancelPress(l: Local, t: TouchG) {
+  window.clearTimeout(t.timer);
+  t.timer = 0;
+  if (l.ring) {
+    l.ring = null;
+    l.dirty = true;
+  }
+}
+
+/** 同じチップを続けて叩いた（ダブルタップ）。設定でオフなら false */
+function isDoubleTap(l: Local, now: number, x: number, y: number, id: number): boolean {
+  const lt = l.lastTap;
+  if (!lt || lt.id !== id || now - lt.t > DBL_TAP_MS || Math.hypot(x - lt.x, y - lt.y) > DBL_TAP_PX) return false;
+  l.lastTap = null;
+  return useDevice.getState().dblTapDelete;
+}
+
+/** 2本指タップで元に戻す・3本指タップでやり直す（何をしたかを出す） */
+/** 2本指・3本指のタップの知らせ（続けてタップしたら前のを消して1つだけにする） */
+let undoToast = 0;
+function touchUndo(isRedo: boolean) {
+  const s = useEditor.getState();
+  const h = isRedo ? s.future[s.future.length - 1] : s.past[s.past.length - 1];
+  if (undoToast) dismissToast(undoToast);
+  if (!h) {
+    undoToast = toast(isRedo ? tr('やり直せる操作はありません', 'Nothing to redo') : tr('元に戻せる操作はありません', 'Nothing to undo'), 'info', 1800);
+    return;
+  }
+  if (isRedo) redo();
+  else undo();
+  undoToast = toast(isRedo ? tr(`やり直し：${h.label}`, `Redo: ${h.label}`) : tr(`元に戻す：${h.label}`, `Undo: ${h.label}`), 'info', 1800);
+}
+
+/**
+ * 指・ペンで置く（選ばない）。グリッドの間が狭くて置きにくいとき（指 22px・ペン 10px 未満）は、置かずに「拡大して」と出す。
+ * flam を省くと、フラムのモードならフラムで置く
+ */
+function placeByTouch(lane: number, alt: boolean, pos: Pos, o: { pen?: boolean; check?: boolean; flam?: boolean }): boolean {
+  const s = useEditor.getState();
+  if (o.check !== false) {
+    const st = gridStep(s.view.div);
+    const gap = (st.n / st.d) * s.view.pxPerBeat;
+    const need = o.pen ? 10 : 22;
+    if (gap < need - 0.01) {
+      toast(
+        tr(`1/${s.view.div} のグリッドは間が狭くて置きにくいので、拡大してから置いてください`, `The 1/${s.view.div} grid is too tight to tap accurately. Zoom in, then place.`),
+        'info',
+        4500,
+        { label: tr('拡大する', 'Zoom in'), run: () => zoomChart(need / gap) },
+      );
+      return false;
+    }
+  }
+  if (s.selection.length) useEditor.setState({ selection: [] });
+  if (o.flam ?? wantFlam(false)) placeFlam(lane, alt, pos, { select: false });
+  else placeChips([{ lane, alt, pos }], { select: false, preview: s.previewOnPlace });
+  return true;
+}
+
+// タブレット版：レーンの何もない所の長押しメニューに「置く」（HHオープン・左バスドラムも）と「フラムで置く」
+// タブレット：長押しのメニューの先頭に「〇〇を置く」（Shift で置く物も。フラムはフラムの項目が足す）
+addLaneMenuItems((at): CtxItem[] => {
+  if (!useDevice.getState().tablet) return [];
+  const def = DRUM_LANES[at.lane];
+  const items: CtxItem[] = [{ label: tr(`${def.mainName}を置く`, `Place ${def.mainName}`), run: () => void placeByTouch(at.lane, false, at.pos, { check: false, flam: false }) }];
+  if (def.alt !== undefined && def.altName) {
+    const alt = def.altName;
+    items.push({ label: tr(`${alt}を置く`, `Place ${alt}`), run: () => void placeByTouch(at.lane, true, at.pos, { check: false, flam: false }) });
+  }
+  return items;
+}, true);
+
 export function ChartCanvas() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const L = useRef<Local>({ w: 0, h: 0, dpr: 1, dirty: true, drag: null, hover: null, followScroll: null, mini: null, spec: null, pointer: null, down0: null, down1: null, mod: false });
+  const L = useRef<Local>({
+    w: 0,
+    h: 0,
+    dpr: 1,
+    dirty: true,
+    drag: null,
+    hover: null,
+    followScroll: null,
+    mini: null,
+    spec: null,
+    pointer: null,
+    down0: null,
+    down1: null,
+    mod: false,
+    left: 0,
+    touch: null,
+    penPress: null,
+    penTool: null,
+    ring: null,
+    fling: null,
+    lastTap: null,
+    lastType: 'mouse',
+  });
   const [popover, setPopover] = useState<{ m: number; x: number; y: number } | null>(null);
   const [help, setHelp] = useState<{ x: number; y: number } | null>(null);
   const [tip, setTipState] = useState<Tip | null>(null);
@@ -357,6 +738,7 @@ export function ChartCanvas() {
       canvas.style.height = `${l.h}px`;
       viewport.h = l.h;
       viewport.w = l.w;
+      l.left = r.left;
       l.mini = null;
       l.dirty = true;
       setSized((n) => n + 1);
@@ -454,6 +836,8 @@ export function ChartCanvas() {
         l.followScroll = null;
       }
       autoScrollWhileDragging(l, now);
+      stepFling(l, now);
+      if (l.ring) l.dirty = true;
       if (!l.dirty && !playing) return;
       l.dirty = false;
       draw(ctx, l);
@@ -491,18 +875,33 @@ export function ChartCanvas() {
       dragFollowsView(l);
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
+    // 入力パッドのステップで ▶ が見えなくなったらスクロールする
+    setPadViewport(visibleBeats);
+    unsubs.push(
+      useDevice.subscribe((cur, prev) => {
+        if (cur.tablet !== prev.tablet || cur.pen !== prev.pen) l.dirty = true;
+      }),
+    );
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
       unsubs.forEach((u) => u());
       canvas.removeEventListener('wheel', onWheel);
       sectionOpener = null;
+      setPadViewport(null);
+      useChartLanesStore.setState({ lanes: null });
+      window.clearTimeout(l.touch?.timer ?? 0);
+      window.clearTimeout(l.penPress?.timer ?? 0);
+      l.touch = null;
+      l.penPress = null;
+      l.fling = null;
     };
   }, []);
 
   const local = () => L.current;
 
-  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  /** マウス（と「ペンで書く」のペン）で押した */
+  const mouseDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const l = local();
     const s = useEditor.getState();
     const x = e.nativeEvent.offsetX;
@@ -521,23 +920,11 @@ export function ChartCanvas() {
     if (dismissed && e.button === 0) return;
     if (!h) return;
     // 見出しのボタン
-    if (h.kind === 'header' && e.button === 0) {
-      const rx = x - g.ox;
-      if (useAssist.getState().audioCols && rx >= GEO.hitsX && rx < GEO.hitsX + GEO.hitsW) {
-        setHelp({ x: g.ox + GEO.hitsX, y: GEO.head + 4 });
-        return;
-      }
-      if (useAssist.getState().audioCols && rx >= GEO.waveX && rx < GEO.waveX + waveColW()) {
-        const a = useAssist.getState();
-        // スペクトルの帯域の見出し：その帯域だけ聴く（もう一度で全体）
-        const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
-        if (z) {
-          setBandFilter(a.bandFilter === z.listen ? 'all' : z.listen);
-          return;
-        }
-        setWaveMode(a.waveMode === 'wave' ? 'spec' : 'wave');
-        return;
-      }
+    if (h.kind === 'header' && e.button === 0 && headerButton(g, x, y)) return;
+    // タブレット版の小節番号のボタン：小節のメニュー（✨ 生成が先頭）
+    if (h.kind === 'measureBtn' && e.button === 0) {
+      openCtxMenu({ kind: 'measure', m: h.m }, e.clientX, e.clientY, e.pointerType !== 'mouse');
+      return;
     }
     if (h.kind === 'section') {
       setPopover({ m: h.m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, y - 10) });
@@ -637,9 +1024,11 @@ export function ChartCanvas() {
     if (h.kind === 'chip') {
       const id = h.view.c.id;
       l.down1 = id;
-      const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+      // 「ペンで書く」の選ぶ道具：タップで足す・外す（Ctrl+クリックと同じ）
+      const toggle = e.ctrlKey || e.metaKey || l.penTool === 'select';
+      const additive = toggle || e.shiftKey;
       const already = s.selection.includes(id);
-      if (e.ctrlKey || e.metaKey) {
+      if (toggle) {
         useEditor.setState({ selection: already ? s.selection.filter((i) => i !== id) : [...s.selection, id] });
         if (already) return;
       } else if (!already) {
@@ -678,7 +1067,7 @@ export function ChartCanvas() {
     }
   };
 
-  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const mouseMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const l = local();
     const s = useEditor.getState();
     const x = e.nativeEvent.offsetX;
@@ -804,7 +1193,7 @@ export function ChartCanvas() {
     }
   };
 
-  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const mouseUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const l = local();
     const d = l.drag;
     l.drag = null;
@@ -812,6 +1201,15 @@ export function ChartCanvas() {
     if (!d) return;
     const s = useEditor.getState();
     if (d.type === 'pending') {
+      // 「ペンで書く」：選ぶ道具なら何もない所のタップで選択を外す、置く道具なら置く（選ばない）
+      if (l.penTool === 'select') {
+        if (s.selection.length) useEditor.setState({ selection: [] });
+        return;
+      }
+      if (l.penTool === 'place' && d.lane >= 0) {
+        placeByTouch(d.lane, d.alt, d.pos, { pen: true, flam: d.flam });
+        return;
+      }
       if (d.lane >= 0 && d.flam) placeFlam(d.lane, d.alt, d.pos, { vel: d.weak ? weakVel() : undefined });
       else if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos, d.weak ? weakVel() : undefined);
       else if (d.bga) placeBga(d.pos);
@@ -877,12 +1275,12 @@ export function ChartCanvas() {
     }
   };
 
-  /** 右ボタンを動かさずに離した：右クリックした物のメニューを出す */
-  const openMenuFor = (d: Extract<Drag, { type: 'rpress' }>) => {
+  /** 右ボタンを動かさずに離した（指・ペンなら長押し）：右クリックした物のメニューを出す */
+  const openMenuFor = (d: Extract<Drag, { type: 'rpress' }>, touch = false) => {
     const s = useEditor.getState();
     const h = d.hit;
     const tempo = tempoOf(s.doc);
-    const open = (t: Parameters<typeof openCtxMenu>[0]) => openCtxMenu(t, d.cx, d.cy);
+    const open = (t: Parameters<typeof openCtxMenu>[0]) => openCtxMenu(t, d.cx, d.cy, touch);
     switch (h.kind) {
       case 'chip':
       case 'velChip': {
@@ -906,6 +1304,7 @@ export function ChartCanvas() {
         open({ kind: 'measure', m: tempo.locate(d.beat).m });
         return;
       case 'genBtn':
+      case 'measureBtn':
         open({ kind: 'measure', m: h.m });
         return;
       case 'loop':
@@ -921,6 +1320,8 @@ export function ChartCanvas() {
 
   const onDoubleClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     const l = local();
+    // タブレット版の指・ペンはダブルタップを自前で見る（置いたばかりのチップを消さないように）
+    if (useDevice.getState().tablet && l.lastType !== 'mouse') return;
     const s = useEditor.getState();
     const x = e.nativeEvent.offsetX;
     const y = e.nativeEvent.offsetY;
@@ -964,6 +1365,541 @@ export function ChartCanvas() {
     await editBpmAt(snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div));
   };
 
+  /** 見出しのボタン（原曲の打点の説明・波形とスペクトルの切り替え・帯域だけ聴く）。押したら true */
+  const headerButton = (g: Geom, x: number, y: number): boolean => {
+    const a = useAssist.getState();
+    if (!a.audioCols) return false;
+    const rx = x - g.ox;
+    if (rx >= GEO.hitsX && rx < GEO.hitsX + GEO.hitsW) {
+      setHelp({ x: g.ox + GEO.hitsX, y: GEO.head + 4 });
+      return true;
+    }
+    if (rx >= GEO.waveX && rx < GEO.waveX + waveColW()) {
+      // スペクトルの帯域の見出し：その帯域だけ聴く（もう一度で全体）
+      const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
+      if (z) {
+        setBandFilter(a.bandFilter === z.listen ? 'all' : z.listen);
+        return true;
+      }
+      setWaveMode(a.waveMode === 'wave' ? 'spec' : 'wave');
+      return true;
+    }
+    return false;
+  };
+
+  // ---- 指・ペンの操作（タブレット版） ---------------------------------------------------
+  // マウスはこれまでどおり。指は「タップで置く・長押しでメニュー・2本指でスクロールとピンチ・2本指タップで元に戻す」。
+  // 「ペンで書く」のペンはマウスと同じ扱い（道具で置く・選ぶを分け、長押しでメニュー）
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    l.lastType = e.pointerType;
+    if (e.pointerType === 'mouse' || !useDevice.getState().tablet) {
+      l.penTool = null;
+      mouseDown(e);
+      return;
+    }
+    if (e.pointerType === 'pen' && !l.touch) {
+      if (penUsed()) {
+        toast(
+          tr('ペンで書くモードにしました。ペンで置く・選ぶ、指はスクロールとピンチだけです', 'Pen mode is on: the pen places and selects, fingers only scroll and pinch'),
+          'info',
+          6000,
+          {
+            label: tr('やめる', 'Turn off'),
+            run: () => {
+              // またペンを使っても勝手にオンにしない（設定の「タッチ操作」でオンに戻せる）
+              setTouchPrefs({ penAuto: false });
+              setPenMode(false);
+            },
+          },
+        );
+      }
+      if (useDevice.getState().pen) {
+        penDown(e);
+        return;
+      }
+    }
+    touchDown(e);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    if (l.touch?.pts.has(e.pointerId)) {
+      touchMove(e);
+      return;
+    }
+    if (e.pointerType === 'touch' && useDevice.getState().tablet) return;
+    const pp = l.penPress;
+    if (pp && pp.id === e.pointerId) {
+      if (!pp.moved && Math.hypot(e.nativeEvent.offsetX - pp.x0, e.nativeEvent.offsetY - pp.y0) > 6) {
+        pp.moved = true;
+        window.clearTimeout(pp.timer);
+        l.ring = null;
+      }
+      if (pp.menu) return;
+    }
+    mouseMove(e);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    if (l.touch?.pts.has(e.pointerId)) {
+      touchUp(e, false);
+      return;
+    }
+    if (e.pointerType === 'touch' && useDevice.getState().tablet) return;
+    const pp = l.penPress;
+    if (pp && pp.id === e.pointerId) {
+      window.clearTimeout(pp.timer);
+      l.penPress = null;
+      l.ring = null;
+      if (!pp.menu) mouseUp(e);
+      l.penTool = null;
+      if (!pp.moved && !pp.menu) penTapped(pp, e.timeStamp);
+      return;
+    }
+    mouseUp(e);
+  };
+
+  const onPointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    if (l.touch?.pts.has(e.pointerId)) {
+      touchUp(e, true);
+      return;
+    }
+    if (l.penPress?.id === e.pointerId) {
+      window.clearTimeout(l.penPress.timer);
+      l.penPress = null;
+      l.penTool = null;
+      l.ring = null;
+    }
+    l.drag = null;
+    l.dirty = true;
+  };
+
+  /** 「ペンで書く」のペンで押した：マウスと同じ（道具で置く・選ぶを分ける）。動かさずに長押しでメニュー */
+  const penDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    stopFling(l);
+    followOff(l);
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
+    const s = useEditor.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    const h = hitTest(l, g, x, y);
+    l.penTool = useDevice.getState().tool;
+    const ms = useDevice.getState().longPressMs;
+    const pp: PenPress = {
+      id: e.pointerId,
+      x0: x,
+      y0: y,
+      cx: e.clientX,
+      cy: e.clientY,
+      moved: false,
+      hit: h,
+      beat: h && (h.kind === 'miniLoop' || h.kind === 'mini') ? miniGeom(l).beatAt(y) : Math.max(0, g.yToBeat(y)),
+      timer: 0,
+      menu: false,
+    };
+    l.penPress = pp;
+    mouseDown(e);
+    if (h && h.kind !== 'header' && h.kind !== 'section' && h.kind !== 'mini' && h.kind !== 'gutter' && h.kind !== 'vel' && h.kind !== 'velChip') {
+      l.ring = { x, y, t0: performance.now(), ms };
+      pp.timer = window.setTimeout(() => {
+        if (l.penPress !== pp || pp.moved) return;
+        pp.menu = true;
+        l.ring = null;
+        l.drag = null;
+        l.hover = null;
+        openMenuFor({ type: 'rpress', x0: pp.x0, y0: pp.y0, cx: pp.cx, cy: pp.cy, hit: h, beat: pp.beat, shift: false }, true);
+      }, ms);
+    }
+  };
+
+  /** ペンで動かさずに離した：同じチップを続けて叩いたら消す */
+  const penTapped = (pp: PenPress, now: number) => {
+    const l = local();
+    const h = pp.hit;
+    if (h?.kind === 'chip') {
+      if (isDoubleTap(l, now, pp.x0, pp.y0, h.view.c.id)) {
+        void deleteByTap(h.view);
+        return;
+      }
+      l.lastTap = { t: now, x: pp.x0, y: pp.y0, id: h.view.c.id };
+      return;
+    }
+    l.lastTap = { t: now, x: pp.x0, y: pp.y0, id: null };
+  };
+
+  const touchDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const stopper = l.fling !== null;
+    stopFling(l);
+    const pt: TouchPt = { x, y, x0: x, y0: y, cx: e.clientX, cy: e.clientY };
+    const cur = l.touch;
+    if (cur) {
+      // 2本目・3本目の指：スクロールとピンチ（1本指でしていたことはやめる）
+      cur.pts.set(e.pointerId, pt);
+      cur.max = Math.max(cur.max, cur.pts.size);
+      if (cur.mode !== 'multi') cur.tapOk = cur.mode === 'wait' && e.timeStamp - cur.t0 < 250;
+      cancelPress(l, cur);
+      if (cur.mode === 'menu') closeCtxMenu();
+      if (cur.mode === 'drag' || cur.mode === 'mouse') l.drag = null;
+      cur.mode = 'multi';
+      l.hover = null;
+      l.pressM = undefined;
+      anchorMulti(l, cur);
+      return;
+    }
+    setPopover(null);
+    setHelp(null);
+    showTip(null);
+    followOff(l);
+    // メニューを閉じるための押下は、譜面に効かせない（うっかりチップを置かないように）
+    const dismissed = dismissedBy(e.timeStamp) || closeCtxMenu();
+    const s = useEditor.getState();
+    const dev = useDevice.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    const h = hitTest(l, g, x, y);
+    const t: TouchG = {
+      pts: new Map([[e.pointerId, pt]]),
+      max: 1,
+      mode: dismissed ? 'done' : 'wait',
+      t0: e.timeStamp,
+      hit: h,
+      b0: g.yToBeat(y),
+      menuBeat: h && (h.kind === 'miniLoop' || h.kind === 'mini') ? miniGeom(l).beatAt(y) : Math.max(0, g.yToBeat(y)),
+      fingerOnly: dev.pen,
+      timer: 0,
+      moved: false,
+      tapOk: false,
+      lastY: y,
+      lastT: e.timeStamp,
+      vy: 0,
+      d0: 0,
+      px0: s.view.pxPerBeat,
+      pinchBeat: 0,
+      zooming: false,
+      stopper,
+    };
+    l.touch = t;
+    l.pointer = { x, y };
+    if (dismissed || !h) return;
+    const body = isChartBody(h);
+    switch (h.kind) {
+      case 'gutter': {
+        // ▶ をここへ（なぞれば付いてくる）
+        const tempo = tempoOf(s.doc);
+        const p = snapToGrid(tempo, Math.max(0, t.b0), s.view.div);
+        setCursorBeat(tempo.beatOf(p.m, p.f));
+        l.drag = { type: 'cursor' };
+        t.mode = 'drag';
+        return;
+      }
+      case 'mini':
+        l.drag = { type: 'mini' };
+        scrollFromMini(l, y);
+        t.mode = 'drag';
+        return;
+      case 'loop':
+      case 'miniLoop': {
+        // A・B のつまみはすぐ動かす。帯のほかの所は、なぞればスクロール・長押しでループのメニュー
+        const at = loopBandAt(l, g, h.kind, y);
+        const grab = loopGrab(at.beat, at.tol, at.tab);
+        if (grab === 'a' || grab === 'b' || grab === 'mark') {
+          l.drag = { type: 'loop', ld: beginLoopDrag(at.beat, at.tol, at.tab), y0: y, where: h.kind === 'loop' ? 'chart' : 'mini' };
+          armAutoScroll(x, y);
+          t.mode = 'drag';
+          return;
+        }
+        break;
+      }
+      case 'vel':
+      case 'velChip':
+        // ベロシティのレーンはマウスと同じ（鉛筆・直線・選ぶ）
+        mouseDown(e);
+        t.mode = 'mouse';
+        return;
+      case 'measureBtn':
+        l.pressM = h.m;
+        l.dirty = true;
+        break;
+      case 'lane':
+        if (!t.fingerOnly && dev.tool === 'place') {
+          // 置く位置を先に見せる
+          const pos = snapToGrid(tempoOf(s.doc), Math.max(0, t.b0), s.view.div);
+          l.hover = { x, y, lane: h.lane, pos, alt: false, flam: wantFlam(false) };
+          l.dirty = true;
+        }
+        break;
+    }
+    // 長押しでメニュー（指の周りの輪が閉じたら出す）
+    if ((body && t.fingerOnly) || h.kind === 'header' || h.kind === 'section') return;
+    l.ring = { x, y, t0: performance.now(), ms: dev.longPressMs };
+    t.timer = window.setTimeout(() => longPress(t), dev.longPressMs);
+  };
+
+  /** 長押し：押した物のメニューを出す（指を離さずに動かせば、チップは動かす・何もない所は範囲選択・END はドラッグ） */
+  const longPress = (t: TouchG) => {
+    const l = local();
+    l.ring = null;
+    l.dirty = true;
+    if (l.touch !== t || t.mode !== 'wait' || t.pts.size !== 1 || !t.hit) return;
+    const p = [...t.pts.values()][0];
+    t.mode = 'menu';
+    l.hover = null;
+    l.pressM = undefined;
+    openMenuFor({ type: 'rpress', x0: p.x0, y0: p.y0, cx: p.cx, cy: p.cy, hit: t.hit, beat: t.menuBeat, shift: false }, true);
+  };
+
+  const touchMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const l = local();
+    const t = l.touch!;
+    const p = t.pts.get(e.pointerId)!;
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
+    p.x = x;
+    p.y = y;
+    p.cx = e.clientX;
+    p.cy = e.clientY;
+    const far = Math.hypot(x - p.x0, y - p.y0) > TOUCH_SLOP;
+    if (far) t.moved = true;
+    if (t.mode !== 'multi') l.pointer = { x, y };
+    switch (t.mode) {
+      case 'wait': {
+        if (!far) return;
+        cancelPress(l, t);
+        l.hover = null;
+        l.pressM = undefined;
+        const h = t.hit;
+        const dev = useDevice.getState();
+        // 選ぶ道具（「置く」でも設定で範囲選択にしていれば）：なぞって範囲を選ぶ
+        if (h && (h.kind === 'lane' || h.kind === 'chip') && !t.fingerOnly && (dev.tool === 'select' || dev.oneFinger === 'select')) {
+          const s = useEditor.getState();
+          const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+          l.drag = { type: 'rubber', rx0: p.x0 - g.ox, b0: t.b0, x1: x, y1: y, additive: false, base: [] };
+          armAutoScroll(p.x0, p.y0);
+          t.mode = 'drag';
+          l.dirty = true;
+          return;
+        }
+        t.mode = 'scroll';
+        t.lastY = p.y0;
+        t.lastT = e.timeStamp;
+        t.vy = 0;
+        scrollStep(l, t, y, e.timeStamp);
+        return;
+      }
+      case 'scroll':
+        scrollStep(l, t, y, e.timeStamp);
+        return;
+      case 'menu':
+        if (!far) return;
+        closeCtxMenu();
+        startHoldDrag(t, p, x, y);
+        return;
+      case 'drag':
+      case 'mouse':
+        mouseMove(e);
+        return;
+      case 'multi':
+        multiMove(l, t, e.timeStamp);
+        return;
+    }
+  };
+
+  /** 長押しのまま動かした：チップなら動かす、何もない所なら範囲選択、END ならドラッグ */
+  const startHoldDrag = (t: TouchG, p: TouchPt, x: number, y: number) => {
+    const l = local();
+    const h = t.hit;
+    const s = useEditor.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    armAutoScroll(p.x0, p.y0);
+    if (h?.kind === 'chip') {
+      const id = h.view.c.id;
+      if (!s.selection.includes(id)) useEditor.setState({ selection: [id] });
+      const tempo = tempoOf(s.doc);
+      const d: Extract<Drag, { type: 'move' }> = {
+        type: 'move',
+        anchor: h.view,
+        anchorBeat: tempo.beatOfFrac(h.view.c.m, h.view.c.f),
+        grab: t.b0 - h.view.beat,
+        x0: p.x0,
+        dBeat: null,
+        dLane: 0,
+        moved: false,
+        clickedSelected: false,
+      };
+      l.drag = d;
+      moveTo(d, g, x, y);
+      t.mode = 'drag';
+      l.dirty = true;
+      return;
+    }
+    if (h && (h.kind === 'lane' || h.kind === 'bpm' || h.kind === 'bgm' || h.kind === 'bga')) {
+      l.drag = { type: 'rubber', rx0: p.x0 - g.ox, b0: t.b0, x1: x, y1: y, additive: false, base: [] };
+      t.mode = 'drag';
+      l.dirty = true;
+      return;
+    }
+    if (h?.kind === 'end') {
+      const eb = endBeatOf(s.doc);
+      l.drag = { type: 'end', group: `song-end-${Date.now()}`, grab: eb === null ? 0 : t.b0 - eb };
+      t.mode = 'drag';
+      return;
+    }
+    t.mode = 'done';
+  };
+
+  const touchUp = (e: React.PointerEvent<HTMLCanvasElement>, cancel: boolean) => {
+    const l = local();
+    const t = l.touch!;
+    const p = t.pts.get(e.pointerId);
+    t.pts.delete(e.pointerId);
+    if (t.pts.size > 0) {
+      // 指が減った：残りの指でスクロール・ピンチを続ける
+      if (t.mode === 'multi') anchorMulti(l, t);
+      return;
+    }
+    l.touch = null;
+    cancelPress(l, t);
+    l.hover = null;
+    l.pressM = undefined;
+    l.dirty = true;
+    if (cancel) {
+      if (t.mode === 'drag' || t.mode === 'mouse') l.drag = null;
+      return;
+    }
+    const now = e.timeStamp;
+    switch (t.mode) {
+      case 'wait':
+        if (p && !t.stopper) touchTap(t, p, now);
+        return;
+      case 'scroll':
+        startFling(l, t, now);
+        return;
+      case 'drag':
+      case 'mouse':
+        mouseUp(e);
+        return;
+      case 'multi':
+        if (t.tapOk && !t.moved && now - t.t0 < 450 && useDevice.getState().tapUndo) {
+          touchUndo(t.max >= 3);
+          return;
+        }
+        if (!t.zooming) startFling(l, t, now);
+        return;
+    }
+  };
+
+  /** 指で動かさずに離した */
+  const touchTap = (t: TouchG, p: TouchPt, now: number) => {
+    const l = local();
+    const h = t.hit;
+    if (!h) {
+      l.lastTap = null;
+      return;
+    }
+    // 「ペンで書く」の指は、譜面の中では何もしない（手のひらで置かない）
+    if (t.fingerOnly && isChartBody(h)) return;
+    const x = p.x0;
+    const y = p.y0;
+    const s = useEditor.getState();
+    const dev = useDevice.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    // 生成の案：点線を外す・戻す、消えるチップを残す
+    const gv = genView();
+    const gt = gv ? genTargetAt(g, h, x, y, gv) : null;
+    if (gt?.kind === 'note') {
+      toggleGenNote(gt.id);
+      return;
+    }
+    if (gt?.kind === 'keep') {
+      toggleGenKeep(gt.chipId);
+      return;
+    }
+    const pos = () => snapToGrid(tempoOf(s.doc), Math.max(0, t.b0), s.view.div);
+    switch (h.kind) {
+      case 'chip': {
+        const id = h.view.c.id;
+        if (isDoubleTap(l, now, x, y, id)) {
+          void deleteByTap(h.view);
+          return;
+        }
+        l.lastTap = { t: now, x, y, id };
+        if (dev.tool === 'select') {
+          // 選ぶ道具：タップで足す（もう一度で外す）
+          const already = s.selection.includes(id);
+          useEditor.setState({ selection: already ? s.selection.filter((i) => i !== id) : [...s.selection, id] });
+        } else {
+          useEditor.setState({ selection: [id] });
+        }
+        return;
+      }
+      case 'lane':
+        l.lastTap = { t: now, x, y, id: null };
+        if (dev.tool === 'select') {
+          if (s.selection.length) useEditor.setState({ selection: [] });
+          return;
+        }
+        placeByTouch(h.lane, false, pos(), {});
+        return;
+      case 'bpm':
+        if (dev.tool === 'place') void editBpmAt(pos());
+        else if (s.selection.length) useEditor.setState({ selection: [] });
+        return;
+      case 'bga':
+        if (dev.tool === 'place') placeBga(pos());
+        else if (s.selection.length) useEditor.setState({ selection: [] });
+        return;
+      case 'bgm':
+        if (s.selection.length) useEditor.setState({ selection: [] });
+        return;
+      case 'audio': {
+        const a = useAssist.getState();
+        if (!a.data && (a.status === 'nosource' || a.status === 'none')) {
+          // 原曲がまだ無い：波形の列を押すと読み込む
+          pickBgmFile();
+          return;
+        }
+        const tempo = tempoOf(s.doc);
+        const pp = pos();
+        setCursorBeat(tempo.beatOf(pp.m, pp.f));
+        if (engine.playing) void playFrom(useEditor.getState().cursorBeat);
+        return;
+      }
+      case 'header':
+        headerButton(g, x, y);
+        return;
+      case 'section':
+        setPopover({ m: h.m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, y - 10) });
+        return;
+      case 'measureBtn':
+        openCtxMenu({ kind: 'measure', m: h.m }, p.cx, p.cy, true);
+        return;
+      case 'end':
+        showTip(null);
+        openCtxMenu({ kind: 'end' }, p.cx, p.cy, true);
+        return;
+    }
+  };
+
+  /** ダブルタップで消す（BPM 変化は値を変える）。消したら「元に戻す」を出す */
+  const deleteByTap = async (v: ChipView) => {
+    const c = v.c;
+    if (c.ch === CH.BPM || c.ch === CH.BPM_EX) {
+      await editBpmAt({ m: c.m, f: c.f });
+      return;
+    }
+    deleteChips([c.id]);
+    toast(tr('チップを消しました', 'Deleted the chip'), 'info', 3500, { label: tr('元に戻す', 'Undo'), run: undo });
+  };
+
+
   return (
     <div ref={wrapRef} className="chart-wrap">
       <canvas
@@ -971,10 +1907,7 @@ export function ChartCanvas() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={() => {
-          L.current.drag = null;
-          L.current.dirty = true;
-        }}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={() => {
           L.current.hover = null;
           L.current.dirty = true;
@@ -1296,7 +2229,7 @@ function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoM
       const cx = g.ox + laneCX(info.lane);
       const lane = DRUM_LANES[info.lane];
       const color = info.alt && lane.altColor ? lane.altColor : lane.color;
-      roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
+      roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
       ctx.fillStyle = color + (info.kind === 'normal' ? '38' : '12');
       ctx.fill();
       ctx.setLineDash(info.kind === 'normal' ? [3, 2] : [1, 2]);
@@ -1312,7 +2245,7 @@ function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoM
       }
       if (gh.doubt.has(doubtKey(m, n))) {
         // 原曲でこの音が聞こえない（外れのことが多い）
-        roundRect(ctx, cx - 20, y - 8, 40, 16, 5);
+        roundRect(ctx, cx - GEO.chipHW - 3, y - GEO.chipH / 2 - 3, GEO.chipHW * 2 + 6, GEO.chipH + 6, 5);
         ctx.strokeStyle = '#FF9F43';
         ctx.lineWidth = 1.8;
         ctx.stroke();
@@ -1355,6 +2288,59 @@ function drawGenButtons(ctx: CanvasRenderingContext2D, g: Geom, tempo: TempoMap,
   }
 }
 
+/**
+ * タブレット版の小節番号のボタン（小節線のすぐ上、✦ と番号。押すと小節のメニューで、✨ 生成が先頭）。
+ * 押している間と、生成している小節は枠を出す
+ */
+function drawMeasureButtons(ctx: CanvasRenderingContext2D, g: Geom, tempo: TempoMap, firstM: number, lastM: number, H: number, cursorM: number, pressM: number | undefined) {
+  const gs = useMeasureGen.getState();
+  const x = g.ox + GUT_X + 1;
+  const w = GEO.bpmX - GUT_X - 3;
+  const cx = x + w / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let m = firstM; m <= lastM + 1 && m < 3600; m++) {
+    if (!measureBtnShown(g, tempo, m)) continue;
+    const y = g.beatToY(tempo.measureStart(m));
+    if (y < GEO.head + 20 || y - MEASURE_BTN_H > H) continue;
+    const active = gs.open && m >= gs.from && m <= gs.to;
+    const pressed = pressM === m;
+    if (pressed || active) {
+      roundRect(ctx, x, y - MEASURE_BTN_H + 2, w, MEASURE_BTN_H - 5, 8);
+      ctx.fillStyle = pressed ? 'rgba(76,194,255,.2)' : 'rgba(255,199,104,.14)';
+      ctx.fill();
+      ctx.strokeStyle = pressed ? 'rgba(76,194,255,.65)' : 'rgba(255,199,104,.55)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    sparkPath(ctx, cx, y - 31, 4.4);
+    ctx.fillStyle = active ? '#FFC768' : 'rgba(255,199,104,.8)';
+    ctx.fill();
+    ctx.font = '600 13px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = m === cursorM ? '#E7EBF1' : C.text;
+    ctx.fillText(toMeasure(m), cx, y - 14);
+  }
+}
+
+/** 長押しの輪（指の周り。閉じたらメニュー）。すぐ離すタップでは出さない */
+function drawPressRing(ctx: CanvasRenderingContext2D, ring: NonNullable<Local['ring']>) {
+  const el = performance.now() - ring.t0;
+  if (el < 90) return;
+  const k = Math.min(1, el / ring.ms);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(ring.x, ring.y, 30, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(231,235,241,.22)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(ring.x, ring.y, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k);
+  ctx.strokeStyle = C.accent;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+}
+
 /** 生成する範囲の枠（案がまだ無いときも） */
 function drawGenRange(ctx: CanvasRenderingContext2D, g: Geom, tm: TempoMap) {
   const gs = useMeasureGen.getState();
@@ -1390,7 +2376,7 @@ function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm:
     if (sk.why !== 'rejected') continue;
     const p = at(sk.note);
     if (!p) continue;
-    roundRect(ctx, p.cx - 17, p.y - 5, 34, 10, 3);
+    roundRect(ctx, p.cx - GEO.chipHW, p.y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
     ctx.globalAlpha = 0.4;
     ctx.setLineDash([2, 3]);
     ctx.strokeStyle = p.color;
@@ -1403,7 +2389,7 @@ function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm:
   for (const n of gv.plan.add) {
     const p = at(n);
     if (!p) continue;
-    roundRect(ctx, p.cx - 17, p.y - 5, 34, 10, 3);
+    roundRect(ctx, p.cx - GEO.chipHW, p.y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
     ctx.fillStyle = p.color + '44';
     ctx.fill();
     ctx.setLineDash([3, 2]);
@@ -1470,7 +2456,7 @@ function currentScroll(l: Local): number {
 const FOLLOW_AT = 0.22;
 
 function geom(l: Local, scroll: number, px: number): Geom {
-  const ox = Math.max(8, Math.floor((l.w - GEO.miniW - chartWidth()) / 2));
+  const ox = Math.max(tabletGeo ? 2 : 8, Math.floor((l.w - GEO.miniW - chartWidth()) / 2));
   const base = l.h - GEO.bottom;
   return {
     ox,
@@ -1500,7 +2486,9 @@ type Hit =
   | { kind: 'vel'; idx: number; lane: number }
   | { kind: 'velChip'; idx: number; lane: number; view: ChipView }
   /** 曲の終わり（END）の札 */
-  | { kind: 'end' };
+  | { kind: 'end' }
+  /** タブレット版：小節番号のボタン（押すと小節のメニュー） */
+  | { kind: 'measureBtn'; m: number };
 
 function colAt(g: Geom, x: number): number | 'gutter' | 'gen' | 'audio' | 'loop' | null {
   const rx = x - g.ox;
@@ -1544,6 +2532,23 @@ function genButtonAt(g: Geom, y: number): number | null {
     }
   }
   return bestD <= GEN_HIT ? best : null;
+}
+
+/** タブレット版：小節番号のボタンを出すか（小節が低すぎると重なるので出さない） */
+function measureBtnShown(g: Geom, tempo: TempoMap, m: number): boolean {
+  return g.beatToY(tempo.measureStart(m)) - g.beatToY(tempo.measureStart(m + 1)) >= MEASURE_BTN_H + 8;
+}
+
+/** タブレット版：小節番号のボタン（小節線のすぐ上、48×44）の上なら、その小節 */
+function measureBtnAt(g: Geom, y: number): number | null {
+  const tempo = tempoOf(useEditor.getState().doc);
+  const { m } = tempo.locate(Math.max(0, g.yToBeat(y)));
+  for (const mm of [m, m + 1]) {
+    if (mm >= 3600) continue;
+    const by = g.beatToY(tempo.measureStart(mm));
+    if (y <= by + 2 && y >= by - MEASURE_BTN_H - 2 && measureBtnShown(g, tempo, mm)) return mm;
+  }
+  return null;
 }
 
 /** 生成の案の点線・消えるチップの上か（クリックで外す・残す） */
@@ -1624,11 +2629,15 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
     const m = genButtonAt(g, y);
     return m === null ? { kind: 'gutter' } : { kind: 'genBtn', m };
   }
-  if (col === 'gutter') return { kind: 'gutter' };
+  if (col === 'gutter') {
+    const m = tabletGeo ? measureBtnAt(g, y) : null;
+    return m === null ? { kind: 'gutter' } : { kind: 'measureBtn', m };
+  }
   if (col === 'audio') return { kind: 'audio' };
   const s = useEditor.getState();
   const beat = g.yToBeat(y);
-  const tol = 7 / g.px;
+  // タブレット版は指で押すので、見た目より大きく（上下 ±11px。重なったら近いほう）
+  const tol = (tabletGeo ? 11 : 7) / g.px;
   let best: ChipView | null = null;
   let bestD = Infinity;
   for (const v of viewsInRange(chipViews(s.doc), beat - tol, beat + tol)) {
@@ -1797,7 +2806,7 @@ function scrollFromMini(l: Local, y: number) {
 
 /** 左端の帯・全体図の帯で、その高さの拍と、掴める近さ（線から・線の外に出ている印の長さ） */
 function loopBandAt(l: Local, g: Geom, kind: 'loop' | 'miniLoop', y: number): { beat: number; tol: number; tab: number } {
-  if (kind === 'loop') return { beat: Math.max(0, g.yToBeat(y)), tol: 7 / g.px, tab: 14 / g.px };
+  if (kind === 'loop') return tabletGeo ? { beat: Math.max(0, g.yToBeat(y)), tol: 10 / g.px, tab: 24 / g.px } : { beat: Math.max(0, g.yToBeat(y)), tol: 7 / g.px, tab: 14 / g.px };
   const mg = miniGeom(l);
   const per = mg.end / (mg.bottom - mg.top);
   return { beat: mg.beatAt(y), tol: 6 * per, tab: 11 * per };
@@ -2112,6 +3121,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 function draw(ctx: CanvasRenderingContext2D, l: Local) {
+  if (applyGeo(l.w)) l.mini = null;
   const s = useEditor.getState();
   const a = useAssist.getState();
   const side = useSidecar.getState();
@@ -2214,7 +3224,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.fillRect(x0, y - 1, x1 - x0, 2);
       ctx.fillStyle = m === cursorM ? '#C9D1DC' : C.text;
       ctx.textAlign = 'right';
-      if (y - 8 > GEO.head) ctx.fillText(toMeasure(m), ox + GEO.bpmX - 4, y - 8);
+      if (tabletGeo) {
+        if (y - 8 > GEO.head && !measureBtnShown(g, tempo, m)) ctx.fillText(toMeasure(m), ox + GEO.bpmX - 4, y - 8);
+      } else if (y - 8 > GEO.head) ctx.fillText(toMeasure(m), ox + GEO.bpmX - 4, y - 8);
     }
     // 小節長の変更
     const bl = doc.barLengths[m];
@@ -2225,8 +3237,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     }
   }
 
-  // 小節の生成の ✨（小節線ごと）
-  drawGenButtons(ctx, g, tempo, firstM, lastM, H, l.hover?.gen);
+  // 小節の生成の ✨（小節線ごと）。タブレット版は小節番号のボタン（✦ と番号。押すと小節のメニュー）
+  if (tabletGeo) drawMeasureButtons(ctx, g, tempo, firstM, lastM, H, cursorM, l.pressM);
+  else drawGenButtons(ctx, g, tempo, firstM, lastM, H, l.hover?.gen);
 
   // セクション（左端の色の帯と、始まりの札）
   if (side.sections.length) {
@@ -2318,9 +3331,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       const color = v.alt && lane.altColor ? lane.altColor : lane.color;
       const cx = ox + laneCX(col);
       const role = flams.get(v.c.id);
-      const hw = role === 'grace' ? 12 : 17;
+      const hw = role === 'grace' ? GEO.graceHW : GEO.chipHW;
+      const ch = GEO.chipH;
       ctx.globalAlpha = alpha;
-      roundRect(ctx, cx - hw, y - 5, hw * 2, 10, 3);
+      roundRect(ctx, cx - hw, y - ch / 2, hw * 2, ch, 3);
       if (v.kind === 'normal') {
         const vel = wavVel(doc, v.c.v);
         ctx.fillStyle = shade(color, vel);
@@ -2359,13 +3373,13 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
         ctx.setLineDash([]);
       }
       if (selected) {
-        roundRect(ctx, cx - hw - 2, y - 7, hw * 2 + 4, 14, 4);
+        roundRect(ctx, cx - hw - 2, y - ch / 2 - 2, hw * 2 + 4, ch + 4, 4);
         ctx.strokeStyle = '#FFFFFF';
         ctx.lineWidth = 1.6;
         ctx.stroke();
       } else if (issueIds.has(v.c.id)) {
         // 無理な配置
-        roundRect(ctx, cx - hw - 2, y - 7, hw * 2 + 4, 14, 4);
+        roundRect(ctx, cx - hw - 2, y - ch / 2 - 2, hw * 2 + 4, ch + 4, 4);
         ctx.setLineDash([3, 2]);
         ctx.strokeStyle = issueIds.get(v.c.id) === 'error' ? '#FF5A61' : '#FFB547';
         ctx.lineWidth = 1.5;
@@ -2374,7 +3388,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       }
       if (!selected && found?.has(v.c.id)) {
         // 検索で見つかったチップ
-        roundRect(ctx, cx - hw - 2, y - 7, hw * 2 + 4, 14, 4);
+        roundRect(ctx, cx - hw - 2, y - ch / 2 - 2, hw * 2 + 4, ch + 4, 4);
         ctx.strokeStyle = C.amber;
         ctx.lineWidth = current === v.c.id ? 2.4 : 1.4;
         ctx.stroke();
@@ -2423,6 +3437,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       return;
     }
     if (col === COL_BGM) {
+      if (GEO.bgmW === 0) {
+        ctx.globalAlpha = 1;
+        return;
+      }
       roundRect(ctx, cx - 11, y - 4, 22, 8, 2);
       ctx.fillStyle = v.c.ch === 1 ? C.bgm : v.c.ch === CH.FILLIN ? C.amber : v.c.ch === CH.FILLIN_SOUND ? '#F48FB1' : C.se;
       ctx.fill();
@@ -2481,7 +3499,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       const y = g.beatToY(beat);
       const cx = ox + laneCX(info.lane);
       const color = info.alt && lane.altColor ? lane.altColor : lane.color;
-      roundRect(ctx, cx - 17, y - 5, 34, 10, 3);
+      roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
       ctx.fillStyle = color + '40';
       ctx.fill();
       ctx.setLineDash([3, 2]);
@@ -2558,10 +3576,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     const color = hv.alt && lane.altColor ? lane.altColor : lane.color;
     const cx = ox + laneCX(hv.lane);
     const spot = hv.flam ? flamSpot(tempo, hv.pos, flamOptions()) : null;
-    const ghostAt = (p: Pos, alpha: number, edge: boolean, hw = 17) => {
+    const ghostAt = (p: Pos, alpha: number, edge: boolean, hw = GEO.chipHW) => {
       const y = g.beatToY(tempo.beatOf(p.m, p.f));
       ctx.globalAlpha = alpha;
-      roundRect(ctx, cx - hw, y - 5, hw * 2, 10, 3);
+      roundRect(ctx, cx - hw, y - GEO.chipH / 2, hw * 2, GEO.chipH, 3);
       ctx.fillStyle = color;
       ctx.fill();
       if (edge) {
@@ -2574,7 +3592,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       return y;
     };
     if (spot) {
-      ghostAt(spot.grace, 0.3, false, 12);
+      ghostAt(spot.grace, 0.3, false, GEO.graceHW);
       const y = ghostAt(spot.main, 0.46, true);
       ctx.globalAlpha = 0.85;
       ctx.font = '600 9px system-ui, sans-serif';
@@ -2678,8 +3696,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   });
   ctx.font = '600 8px "JetBrains Mono", ui-monospace, monospace';
   ctx.fillStyle = C.text;
-  ctx.fillText('BGM', ox + GEO.bgmX + GEO.bgmW / 2, GEO.head / 2 - 5);
-  ctx.fillText('SE', ox + GEO.bgmX + GEO.bgmW / 2, GEO.head / 2 + 5);
+  if (GEO.bgmW > 0) {
+    ctx.fillText('BGM', ox + GEO.bgmX + GEO.bgmW / 2, GEO.head / 2 - 5);
+    ctx.fillText('SE', ox + GEO.bgmX + GEO.bgmW / 2, GEO.head / 2 + 5);
+  }
   if (bgaVisible()) {
     ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
     ctx.fillStyle = '#4DD0C0';
@@ -2701,7 +3721,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.fillStyle = C.amber;
       ctx.fillText(badge, bx, 8);
     } else {
-      ctx.fillText(tr('原曲の打点 ⓘ', 'Hits ⓘ'), ox + GEO.hitsX + GEO.hitsW / 2, 8);
+      ctx.fillText(tabletGeo ? tr('打点 ⓘ', 'Hits ⓘ') : tr('原曲の打点 ⓘ', 'Hits ⓘ'), ox + GEO.hitsX + GEO.hitsW / 2, 8);
     }
     const dr = useDrums.getState();
     if (readyDrums()) {
@@ -2753,6 +3773,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   }
 
   drawMinimap(ctx, l, g, playBeat, a);
+
+  if (l.ring) drawPressRing(ctx, l.ring);
+  // 入力パッドのレーンを譜面のレーンの真下にそろえる
+  if (tabletGeo) publishLanes(ctx.canvas.getBoundingClientRect().left + ox + GEO.laneX, GEO.laneW);
 }
 
 let hatchPat: CanvasPattern | null = null;
@@ -2839,12 +3863,15 @@ function drawSongEnd(
 /** 再生を始める位置の印（小節番号の列の左） */
 function drawStartTag(ctx: CanvasRenderingContext2D, ox: number, y: number, alpha: number) {
   const x = ox + GEO.bpmX - 1;
+  // タブレット版は指で見つけやすいように大きく
+  const w = tabletGeo ? 13 : 9;
+  const h = tabletGeo ? 8 : 6;
   ctx.globalAlpha = alpha;
   ctx.fillStyle = C.accent;
   ctx.beginPath();
   ctx.moveTo(x, y);
-  ctx.lineTo(x - 9, y - 6);
-  ctx.lineTo(x - 9, y + 6);
+  ctx.lineTo(x - w, y - h);
+  ctx.lineTo(x - w, y + h);
   ctx.closePath();
   ctx.fill();
   ctx.globalAlpha = 1;
@@ -2861,6 +3888,18 @@ function drawLoop(ctx: CanvasRenderingContext2D, g: Geom, H: number, cw: number,
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const tab = (y: number, label: string, below: boolean, col: string) => {
+    if (tabletGeo) {
+      // タブレット版：線の上に丸いつまみ（指で掴みやすく）
+      if (y + 12 < GEO.head || y - 12 > H) return;
+      ctx.beginPath();
+      ctx.arc(ox + 10, y, 11, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.font = '700 11px "JetBrains Mono", ui-monospace, monospace';
+      ctx.fillStyle = '#1A1408';
+      ctx.fillText(label, ox + 10, y + 0.5);
+      return;
+    }
     const ty = below ? y : y - 13;
     if (ty + 13 < GEO.head || ty > H) return;
     roundRect(ctx, ox + 1, ty, GEO.loopW - 2, 13, 2);

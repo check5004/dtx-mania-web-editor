@@ -7,6 +7,7 @@ import { parseDtx } from '../dtx/parse';
 import { buildTempoMap } from '../dtx/timing';
 import { LEVEL_VERSION, migrateLevel } from '../check/level';
 import { defaultLabel, folderFromFileList, folderFromHandle, parseSetDef, type SongFolder } from '../fs/folder';
+import { folderOf, readZip } from '../fs/zip';
 import { chartFeatures, FEATURE_DEFS, featureDistance, featureSummary, type ChartFeatures, type FeatureKey } from '../gen/features';
 import { toast } from './editor';
 import { runAi } from './ai';
@@ -218,6 +219,17 @@ export async function pickAndScan(fallbackInput?: HTMLInputElement | null) {
 export async function scanFromFileList(list: FileList | null) {
   if (!list || list.length === 0) return;
   await scanCharts(folderFromFileList(list));
+}
+
+/** 曲フォルダの ZIP から集計する（フォルダを選べない iPad 用） */
+export async function scanFromZip(file: File) {
+  set({ scanning: { done: 0, total: 0, label: tr('ZIP を読んでいます…', 'Reading the ZIP…') } });
+  try {
+    await scanCharts(folderOf(await readZip(file), ''));
+  } catch (e) {
+    set({ scanning: null });
+    toast(tr(`読めませんでした: ${(e as Error).message}`, `Couldn't read it: ${(e as Error).message}`), 'error');
+  }
 }
 
 export async function setExcluded(id: string, excluded: boolean) {

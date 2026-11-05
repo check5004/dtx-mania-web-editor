@@ -10,6 +10,7 @@ import { fracToString } from '../dtx/fraction';
 import { CH, DRUM_LANES, drumChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
 import { fittingGrid, GRID_DIVS, onGrid, type Pos } from '../edit/ops';
 import { useInputSettings } from '../input/settings';
+import { useDevice } from '../store/device';
 import { setLoop, setLoopPoint, useAssist } from '../store/assist';
 import { chipMenuExtras, closeCtxMenu, dismissCtxMenu, laneMenuExtras, useCtxMenu, type CtxItem, type CtxMenu } from '../store/ctxMenu';
 import { chipViews, tempoOf, wavVel } from '../store/derived';
@@ -42,6 +43,9 @@ import { channelName, chipBpmLabel } from './format';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
 
+/** タブレットでは「ダブルタップ」、PC では「ダブルクリック」 */
+const dblHint = () => (useDevice.getState().tablet ? tr('ダブルタップ', 'Double-tap') : tr('ダブルクリック', 'Double-click'));
+
 /** 譜面の画面に1つだけ置く */
 export function ContextMenuHost() {
   const menu = useCtxMenu((s) => s.menu);
@@ -60,17 +64,20 @@ function Frame({ menu }: { menu: CtxMenu }) {
     if (!el) return;
     const place = () => {
       const r = el.getBoundingClientRect();
-      let left = menu.x + 2;
-      let top = menu.y + 2;
-      if (left + r.width > window.innerWidth - 8) left = Math.max(8, menu.x - r.width - 2);
+      // 指の長押し：指で隠れないように指の右（右端なら左）に出す。真下には出さない
+      const gap = menu.touch ? 36 : 2;
+      let left = menu.x + gap;
+      let top = menu.touch ? menu.y - 30 : menu.y + 2;
+      if (left + r.width > window.innerWidth - 8) left = Math.max(8, menu.x - r.width - gap);
       if (top + r.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - 8 - r.height);
+      if (top < 8) top = 8;
       setAt((cur) => (cur && cur.left === left && cur.top === top ? cur : { left, top }));
     };
     place();
     const ro = new ResizeObserver(place);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [menu.x, menu.y]);
+  }, [menu.x, menu.y, menu.touch]);
   useEffect(() => {
     // 外を押したら閉じる。閉じるための押下は譜面に効かせない（ChartCanvas が dismissedBy で見分ける）
     const away = (e: PointerEvent) => {
@@ -97,7 +104,7 @@ function Frame({ menu }: { menu: CtxMenu }) {
   return (
     <div
       ref={ref}
-      className={`ctx-menu ${menu.kind === 'chips' ? 'wide' : ''}`}
+      className={`ctx-menu ${menu.kind === 'chips' ? 'wide' : ''} ${menu.touch ? 'touch' : ''}`}
       role="menu"
       style={{ left: at?.left ?? menu.x, top: at?.top ?? menu.y, visibility: at ? 'visible' : 'hidden' }}
       onContextMenu={(e) => e.preventDefault()}
@@ -308,7 +315,7 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
           <Sep />
         </>
       )}
-      {isBpm && <Item label={tr('BPM を変える…', 'Change BPM…')} hint={tr('ダブルクリック', 'Double-click')} onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
+      {isBpm && <Item label={tr('BPM を変える…', 'Change BPM…')} hint={dblHint()} onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
       {extras.map((it, i) => (
         <ExtraItem key={i} it={it} />
       ))}
@@ -333,7 +340,7 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
         icon={Icon.trash(13)}
         danger
         label={chips.length > 1 ? tr(`${chips.length} 個を削除`, `Delete ${chips.length}`) : tr('削除', 'Delete')}
-        hint={isBpm ? 'Delete' : tr('ダブルクリック・Delete', 'Double-click / Delete')}
+        hint={isBpm ? 'Delete' : useDevice.getState().tablet ? tr('ダブルタップ', 'Double-tap') : tr('ダブルクリック・Delete', 'Double-click / Delete')}
         onClick={then(() => deleteChips(ids))}
       />
     </>
@@ -558,7 +565,7 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
         disabled={!inMeasure.length}
         onClick={then(() => useEditor.setState({ selection: inMeasure }))}
       />
-      {menu.col === 'bpm' && <Item label={tr('ここに BPM 変化を置く…', 'Place a BPM change here…')} hint={tr('ダブルクリック', 'Double-click')} onClick={then(() => void askBpm(menu.pos))} />}
+      {menu.col === 'bpm' && <Item label={tr('ここに BPM 変化を置く…', 'Place a BPM change here…')} hint={useDevice.getState().tablet ? tr('タップ', 'Tap') : dblHint()} onClick={then(() => void askBpm(menu.pos))} />}
     </>
   );
 }
@@ -592,7 +599,7 @@ function MeasureMenu({ m }: { m: number }) {
       <Item icon={Icon.play(11)} label={tr('この小節から再生', 'Play from this measure')} onClick={then(() => void playFrom(tempo.measureStart(m)))} />
       <Item icon={Icon.loop(12)} label={tr('この小節をループ', 'Loop this measure')} onClick={then(() => loopMeasure(m))} />
       <Item label={tr('この小節のチップを選ぶ', 'Select chips in this measure')} hint={ids.length ? String(ids.length) : undefined} disabled={!ids.length} onClick={then(() => useEditor.setState({ selection: ids }))} />
-      <Item label={tr('セクション名を付ける…', 'Name a section…')} hint={tr('ダブルクリック', 'Double-click')} onClick={then(() => openSectionEditor(m))} />
+      <Item label={tr('セクション名を付ける…', 'Name a section…')} hint={useDevice.getState().tablet ? undefined : dblHint()} onClick={then(() => openSectionEditor(m))} />
       <Sep />
       <Item
         label={tr('前の小節をこの小節に写す', 'Copy the previous measure here')}
@@ -651,7 +658,7 @@ function EndMenu() {
       </div>
       <Item
         label={auto ? tr('原曲の鳴り終わりに合わせる', 'Match where the original audio ends') : tr('自動（最後のチップのすぐ後）に戻す', 'Back to automatic (right after the last chip)')}
-        hint={tr('ダブルクリック', 'Double-click')}
+        hint={useDevice.getState().tablet ? undefined : tr('ダブルクリック', 'Double-click')}
         disabled={doc.endMeasure === undefined}
         onClick={then(resetSongEnd)}
       />

@@ -45,7 +45,7 @@ export function RightPanel() {
   );
 }
 
-function SelectionCard() {
+export function SelectionCard() {
   const doc = useEditor((s) => s.doc);
   const selection = useEditor((s) => s.selection);
   const ids = new Set(selection);
@@ -258,7 +258,7 @@ const METERS: [string, number][] = [
   ['5/8', 0.625],
 ];
 
-function MeasureCard() {
+export function MeasureCard() {
   const doc = useEditor((s) => s.doc);
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
@@ -438,7 +438,7 @@ function measureRange(from: number, to: number, tempo: ReturnType<typeof tempoOf
   return a === b ? toMeasure(a) : `${toMeasure(a)}–${toMeasure(b)}`;
 }
 
-function AssistCard() {
+export function AssistCard() {
   const doc = useEditor((s) => s.doc);
   useEditor((s) => s.view.scrollBeat);
   useEditor((s) => s.view.pxPerBeat);
@@ -608,7 +608,7 @@ const audioNote = (k: string): string =>
     none: tr('原曲が無いので、譜面だけで予測します。', 'No original audio, so predicting from the chart alone.'),
   })[k] ?? '';
 
-function CompleteCard() {
+export function CompleteCard() {
   const c = useComplete();
   const drumsReady = useDrums((d) => d.enabled && d.status === 'ready');
   return (
@@ -683,7 +683,7 @@ function CompleteCard() {
   );
 }
 
-function CheckCard() {
+export function CheckCard() {
   const doc = useEditor((s) => s.doc);
   const show = useCheck((s) => s.showIssues);
   const [open, setOpen] = useState(false);
@@ -843,7 +843,7 @@ function AiLevelRow({ mech }: { mech: number | null }) {
   );
 }
 
-function StatsCard() {
+export function StatsCard() {
   const doc = useEditor((s) => s.doc);
   const st = docStats(doc);
   return (
@@ -865,7 +865,7 @@ function StatsCard() {
   );
 }
 
-function NoticeCard() {
+export function NoticeCard() {
   const meta = useEditor((s) => s.meta);
   const missing = useEditor((s) => s.missingWavs);
   const doc = useEditor((s) => s.doc);

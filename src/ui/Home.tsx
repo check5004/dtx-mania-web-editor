@@ -1,13 +1,15 @@
 import { tr, pl, locale, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
-import { listRecent, newEmptySong, openDroppedFiles, openFolderPicker, openRecent } from '../app/fileActions';
+import { listRecent, newEmptySong, openFolderPicker, openPickedFiles, openRecent } from '../app/fileActions';
 import { supportsDirectWrite } from '../fs/folder';
 import { deleteRecent, type RecentEntry } from '../fs/recent';
+import { useDevice } from '../store/device';
 import { useEditor } from '../store/editor';
 import { FolderInput } from './Editor';
 import { formatLevel } from './format';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
+import { HomeTablet } from './tablet/HomeTablet';
 
 function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
@@ -29,6 +31,11 @@ function ago(t: number): string {
 }
 
 export function Home() {
+  const tablet = useDevice((s) => s.tablet);
+  return tablet ? <HomeTablet /> : <HomeDesktop />;
+}
+
+function HomeDesktop() {
   const folderInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
@@ -85,7 +92,7 @@ export function Home() {
             onDrop={(e) => {
               e.preventDefault();
               setOver(false);
-              void openDroppedFiles([...e.dataTransfer.files]);
+              void openPickedFiles([...e.dataTransfer.files]);
             }}
           >
             <span className="pill" style={{ alignSelf: 'flex-start', background: '#10202b', color: 'var(--accent)' }}>
@@ -106,10 +113,10 @@ export function Home() {
             <input
               ref={audioInput}
               type="file"
-              accept=".ogg,.wav,.mp3,.m4a,.flac,.opus,.dtx"
+              accept=".ogg,.wav,.mp3,.m4a,.flac,.opus,.dtx,.zip"
               hidden
               onChange={(e) => {
-                void openDroppedFiles([...(e.target.files ?? [])]);
+                void openPickedFiles([...(e.target.files ?? [])]);
                 e.target.value = '';
               }}
             />

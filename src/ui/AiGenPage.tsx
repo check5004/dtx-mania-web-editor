@@ -47,7 +47,9 @@ import {
 } from '../store/gen';
 import { useGuideline } from '../store/guideline';
 import { useSidecar } from '../store/sidecar';
+import { useDevice } from '../store/device';
 import { genViewport, GenCompare } from './GenCompare';
+import { setGenDetail, useTabletUi } from './tablet/shared';
 import { Icon } from './icons';
 import { MasterMixer, TrackMixStrip } from './MixPanel';
 import { OriginBadge, originTitle } from './OriginBadge';
@@ -220,10 +222,15 @@ export function AiGenPage() {
   const guide = useGuideline((s) => s.guide);
   const charts = useGuideline((s) => s.charts.length);
   const sections = useSidecar((s) => s.sections);
+  const tablet = useDevice((s) => s.tablet);
+  const detail = useTabletUi((s) => s.genDetail);
   useEffect(() => {
     initGen();
     window.addEventListener('keydown', onGenKey);
-    return () => window.removeEventListener('keydown', onGenKey);
+    return () => {
+      window.removeEventListener('keydown', onGenKey);
+      setGenDetail(false);
+    };
   }, []);
   const master = g.master;
   const ds = g.diffs[g.selected];
@@ -248,11 +255,14 @@ export function AiGenPage() {
         </button>
         <div className="vsep" />
         <span className="ai-spark">{Icon.sparkle(15)}</span>
-        <h1>{tr('AI難易度生成', 'AI difficulty generator')}</h1>
-        <span className="lbl ellipsis hide-narrow">
-          {master.fields['TITLE'] || tr('無題', 'Untitled')} · {tr('元譜面', 'Source')} {g.masterLabel} Lv {g.masterLevel.toFixed(2)} · {feat.notes.toLocaleString(locale())}
-          {tr('ノーツ', ' notes')}
-        </span>
+        {/* タブレットは題と説明を2段に */}
+        <div className={tablet ? 'tempo-title' : undefined} style={tablet ? undefined : { display: 'contents' }}>
+          <h1>{tr('AI難易度生成', 'AI difficulty generator')}</h1>
+          <span className={`lbl ellipsis ${tablet ? '' : 'hide-narrow'}`}>
+            {master.fields['TITLE'] || tr('無題', 'Untitled')} · {tr('元譜面', 'Source')} {g.masterLabel} Lv {g.masterLevel.toFixed(2)} · {feat.notes.toLocaleString(locale())}
+            {tr('ノーツ', ' notes')}
+          </span>
+        </div>
         <span className="grow" />
         <MasterMixer />
         <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? tr(`1難易度 約 ${formatUsd(costPer)}＋判定`, `About ${formatUsd(costPer)} per difficulty + level check`) : noKeyTitle()}>
@@ -263,8 +273,8 @@ export function AiGenPage() {
             {tr('この難易度を作り直す', 'Regenerate this difficulty')}
           </button>
         )}
-        <button className="btn small primary" onClick={() => void writeOut()} disabled={!anyResult || g.busy}>
-          {tr('採用してset.defに書き出す', 'Accept and write to set.def')}
+        <button className="btn small primary" onClick={() => void writeOut()} disabled={!anyResult || g.busy} title={tablet ? tr('採用してset.defに書き出す', 'Accept and write to set.def') : undefined}>
+          {tablet ? tr('採用して書き出す', 'Accept & write out') : tr('採用してset.defに書き出す', 'Accept and write to set.def')}
         </button>
       </header>
       <GenTransport />
@@ -396,7 +406,9 @@ export function AiGenPage() {
                   : anyResult
                   ? tr(`${ds.diff} はまだ作っていません。`, `${ds.diff} hasn't been generated yet. `)
                   : tr('左の「選んだ難易度を作る」で作ると、ここに並びます。', 'Use "Generate selected difficulties" on the left and the results line up here. ')}
-                {tr('Space で再生、列の見出しか ←→ で聴く譜面を切り替えます。', 'Space plays; click a column heading or use ←→ to switch the chart you hear.')}
+                {tablet
+                  ? tr('見出しをタップで聴く譜面を切り替え、もう一度タップで判定と方針。', 'Tap a heading to switch the chart you hear; tap it again for rating & plan.')
+                  : tr('Space で再生、列の見出しか ←→ で聴く譜面を切り替えます。', 'Space plays; click a column heading or use ←→ to switch the chart you hear.')}
               </span>
             )}
             <span
@@ -405,10 +417,24 @@ export function AiGenPage() {
             >
               <i className="kept" /> {tr('残した', 'Kept')} <i className="removed" /> {tr('削った', 'Removed')} <i className="moved" /> {tr('移した', 'Moved')}
             </span>
+            {tablet && below.length > 0 && (
+              <button className={`btn small ${detail ? 'on' : ''}`} onClick={() => setGenDetail((was) => !was)} aria-pressed={detail}>
+                {tr('判定と方針', 'Rating & plan')}
+              </button>
+            )}
           </div>
-          <TrackMixStrip />
+          {!tablet && <TrackMixStrip />}
         </main>
-        <aside className="gen-right scroll">
+        <aside className={`gen-right scroll ${tablet ? `t-gen-pop ${detail ? 'open' : ''}` : ''}`} aria-hidden={tablet && !detail ? true : undefined}>
+          {tablet && (
+            <div className="row t-gen-pop-head">
+              <b>{tr('判定と方針', 'Rating & plan')}</b>
+              <span className="grow" />
+              <button className="ib" onClick={() => setGenDetail(false)} aria-label={tr('閉じる', 'Close')}>
+                {Icon.close(16)}
+              </button>
+            </div>
+          )}
           {below.length === 0 ? null : selChart ? <ExistingInfo chart={selChart} /> : <JudgeCard ds={ds} />}
           {selMade && ds.plan && (
             <>
@@ -486,8 +512,14 @@ export function AiGenPage() {
               </button>
             </p>
           )}
+          {tablet && <p className="lbl t-gen-pop-hint">{tr('見出しをタップで聴く譜面を切り替え、もう一度タップでこの詳細。', 'Tap a heading to switch the chart you hear; tap it again for these details.')}</p>}
         </aside>
       </div>
+      {tablet && (
+        <div className="t-gen-mix">
+          <TrackMixStrip />
+        </div>
+      )}
     </div>
   );
 }

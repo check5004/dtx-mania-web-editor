@@ -65,11 +65,42 @@ function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, sou
     else placeChips([{ lane, alt, pos, vel }], { select: false });
     return;
   }
-  if (a.inputMode === 'rec' && engine.playing) {
+  if (a.inputMode === 'rec' && engine.playing) recordHit(lane, alt, vel, perfMs, useInputSettings.getState().latencyMs, source === 'midi' && velocity < 1);
+}
+
+/** 再生を始めた時刻（performance.now）と、その時の曲の位置（秒）。ループの何周目かを知るため */
+let playPerf = 0;
+let playSec = 0;
+onPlayback((e) => {
+  if (e.type !== 'play') return;
+  playPerf = performance.now();
+  playSec = engine.songSecAtPerf(playPerf) ?? 0;
+});
+
+/**
+ * ループで再生しているとき、叩いた時刻が最初の1周を越えているか（「ループ中は重ねて録る」をオフにしたとき、2周目からは置かない）
+ */
+export function pastFirstLoop(perfMs: number): boolean {
+  const s = useEditor.getState();
+  const loop = loopSec(s.doc, useAssist.getState().loop);
+  if (!loop) return false;
+  const elapsed = ((perfMs - playPerf) / 1000) * useAssist.getState().speed;
+  return playSec + elapsed > loop.to + 0.05;
+}
+
+/**
+ * 録音：叩いた時刻（perfMs）から latencyMs を引いた所を、グリッドに吸着して置く（ループ毎に重ね録り）。
+ * soft: 電子ドラムで叩いたベロシティ（フラムの1打目をその強さのままにする）
+ */
+export function recordHit(lane: number, alt: boolean, vel: number, perfMs: number, latencyMs: number, soft = false) {
+  const s = useEditor.getState();
+  const a = useAssist.getState();
+  if (!engine.playing) return;
+  {
     const tempo = tempoOf(s.doc);
     let sec = engine.songSecAtPerf(perfMs);
     if (sec === null) return;
-    sec -= useInputSettings.getState().latencyMs / 1000;
+    sec -= latencyMs / 1000;
     const loop = loopSec(s.doc, a.loop);
     if (loop) {
       // ループの頭に戻った直後は、補正で前の周回の終わりに入ることがある
@@ -90,7 +121,7 @@ function onHit(lane: number, alt: boolean, velocity: number, perfMs: number, sou
     if (recFlam(lane, alt, sec, pos, vel, take, `rec-${take}`, label)) return;
     const [id] = placeChips([{ lane, alt, pos, vel }], { label, group: `rec-${take}`, select: false });
     // 電子ドラムの強さで叩いたベロシティなら、フラムの1打目はその強さのまま（キーボードは設定の割合）
-    if (id !== undefined) recNoted(lane, alt, sec, id, pos, vel, take, source === 'midi' && velocity < 1);
+    if (id !== undefined) recNoted(lane, alt, sec, id, pos, vel, take, soft);
   }
 }
 

@@ -47,7 +47,9 @@ import { summon } from '../store/complete';
 import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
 import { MasterMixer } from './MixPanel';
-import { MenuBar, type MenuDef } from './MenuBar';
+import { MenuBar, type MenuDef, type MenuEntry } from './MenuBar';
+import { NO_FOLDER_PICK, openSheet, setTracksOpen, togglePanelT, useDevice, type PanelId } from '../store/device';
+import { openFilesPicker, openSaveSheet, tabletPanels } from './tablet/shared';
 import { useLang } from '../i18n/useLang';
 import { ORIGIN_KEY, originOf } from '../dtx/origin';
 import { OriginBadge, originTitle } from './OriginBadge';
@@ -91,42 +93,32 @@ async function bulkMeasures() {
   }
 }
 
-export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInputElement | null> }) {
-  const doc = useEditor((s) => s.doc);
-  const meta = useEditor((s) => s.meta);
-  const folder = useEditor((s) => s.folder);
+/**
+ * 上のメニュー（ファイル・編集・表示・再生・ツール）の中身。デスクトップの上のバーとタブレットの ☰ のメニューで共通。
+ * tablet: タブレット版（表示のパネルの項目をタブレットのパネルに、フォルダを選べない iPad では ZIP・ファイルを開く）
+ */
+export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | null>, tablet = false): MenuDef[] {
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
-  const dirty = useEditor(isDirty);
   const undoLabel = useEditor((s) => s.past[s.past.length - 1]?.label);
   const redoLabel = useEditor((s) => s.future[s.future.length - 1]?.label);
-  const art = usePreimage();
-  const previewMode = usePreview((st) => st.mode);
-  useSoundsVersion();
-  const barRef = useRef<HTMLElement>(null);
-  // 言語が変わると文字の幅が変わるので、畳む段を測り直す
-  const lang = useLang();
-  // 開いている譜面の出どころ（AI で作った譜面か。手で直すと「手直し」になる）。印の無い譜面は数えない
-  const mark = doc.fields[ORIGIN_KEY];
-  const chips = doc.chips;
-  const ownOrigin = useMemo(() => (mark === undefined ? 'human' : originOf({ chips, fields: { [ORIGIN_KEY]: mark } })), [mark, chips]);
-  const originsKey = meta.siblings.map((x) => x.origin ?? '').join('') + ownOrigin;
-  const fit = useTopbarFit(barRef, `${lang}|${meta.fileName}|${meta.siblings.length}|${originsKey}|${f0(doc.fields['TITLE'])}`);
-
-  const f = doc.fields;
-  const length = useSongLength(doc);
   const s = () => useEditor.getState();
-
   const menus: MenuDef[] = [
     {
       label: tr('ファイル', 'File'),
       items: () => [
-        { label: tr('曲フォルダを開く…', 'Open song folder…'), key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
+        NO_FOLDER_PICK
+          ? { label: tr('ZIP・ファイルを開く…', 'Open ZIP or files…'), run: () => openFilesPicker() }
+          : { label: tr('曲フォルダを開く…', 'Open song folder…'), key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
         { label: tr('新しい譜面…', 'New chart…'), run: () => void newEmptySong() },
         { label: bgmSource(s().doc) ? tr('原曲を差し替える…', 'Replace original audio…') : tr('原曲（音声ファイル）を読み込む…', 'Load original audio file…'), run: pickBgmFile },
         '-',
-        { label: tr('保存', 'Save'), key: 'Ctrl+S', run: () => void save() },
-        { label: tr('名前を付けて保存…', 'Save as…'), key: 'Ctrl+Shift+S', run: () => void save({ as: true }) },
+        ...(tablet
+          ? [{ label: tr('保存と書き出し…', 'Save and export…'), key: 'Ctrl+S', run: () => openSaveSheet() }]
+          : [
+              { label: tr('保存', 'Save'), key: 'Ctrl+S', run: () => void save() },
+              { label: tr('名前を付けて保存…', 'Save as…'), key: 'Ctrl+Shift+S', run: () => void save({ as: true }) },
+            ]),
         { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: downloadDtx },
         '-',
         { label: tr('ホームに戻る', 'Back to home'), run: goHome },
@@ -162,9 +154,13 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
     {
       label: tr('表示', 'View'),
       items: () => [
-        { label: tr('左のパネル（キット・WAV・曲情報）', 'Left panel (kit, WAV, song info)'), checked: useLayout.getState().leftOpen, run: () => togglePanel('left') },
-        { label: tr('右のパネル（原曲・耳コピアシスト・確かめる）', 'Right panel (original, transcription assist, checks)'), checked: useLayout.getState().rightOpen, run: () => togglePanel('right') },
-        { label: tr('下のトラック（原曲・ステム・譜面の音）', 'Bottom tracks (original, stems, chart sounds)'), checked: useLayout.getState().seekOpen, run: () => togglePanel('seek') },
+        ...(tablet
+          ? tabletPanelItems()
+          : [
+              { label: tr('左のパネル（キット・WAV・曲情報）', 'Left panel (kit, WAV, song info)'), checked: useLayout.getState().leftOpen, run: () => togglePanel('left') },
+              { label: tr('右のパネル（原曲・耳コピアシスト・確かめる）', 'Right panel (original, transcription assist, checks)'), checked: useLayout.getState().rightOpen, run: () => togglePanel('right') },
+              { label: tr('下のトラック（原曲・ステム・譜面の音）', 'Bottom tracks (original, stems, chart sounds)'), checked: useLayout.getState().seekOpen, run: () => togglePanel('seek') },
+            ]),
         '-',
         { label: tr('拡大', 'Zoom in'), key: tr('Ctrl+ホイール', 'Ctrl+Wheel'), run: () => zoom(1.25) },
         { label: tr('縮小', 'Zoom out'), run: () => zoom(0.8) },
@@ -174,7 +170,9 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) },
         { label: tr('BGA の列を広げてサムネイルを出す', 'Widen BGA columns to show thumbnails'), checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
         '-',
-        { label: tr('NX風プレビュー（右のパネル）', 'NX-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
+        tablet
+          ? { label: tr('NX風プレビュー（パネル）', 'NX-style preview (panel)'), checked: useDevice.getState().panel === 'prev', key: 'P', run: () => togglePanelT('prev') }
+          : { label: tr('NX風プレビュー（右のパネル）', 'NX-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
         { label: tr('NX風プレビュー（全画面）', 'NX-style preview (full screen)'), key: 'Shift+P', run: () => togglePreview('full') },
         '-',
         // 画面の言語。名前はその言語自身で書く（どちらの言語の画面でも見つけられるように）
@@ -213,6 +211,49 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       ],
     },
   ];
+  return menus;
+}
+
+/** タブレット：表示メニューのパネルの項目（横はレールのパネル、縦は下のシート） */
+function tabletPanelItems(): MenuEntry[] {
+  const d = useDevice.getState();
+  const isOn = (id: PanelId) => (d.portrait ? d.sheetSize !== 'tabs' && d.sheetTab === id : d.panel === id);
+  return [
+    ...tabletPanels().map((p) => ({ label: tr(`パネル：${p.label}`, `Panel: ${p.label}`), checked: isOn(p.id), run: () => togglePanelT(p.id) })),
+    {
+      label: tr('下のトラック（原曲・ステム・譜面の音）', 'Bottom tracks (original, stems, chart sounds)'),
+      checked: d.portrait ? d.sheetSize !== 'tabs' && d.sheetTab === 'trk' : d.tracksOpen,
+      run: () => (d.portrait ? openSheet('trk', true) : setTracksOpen(!d.tracksOpen)),
+    },
+  ];
+}
+
+export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInputElement | null> }) {
+  const doc = useEditor((s) => s.doc);
+  const meta = useEditor((s) => s.meta);
+  const folder = useEditor((s) => s.folder);
+  const canUndo = useEditor((s) => s.past.length > 0);
+  const canRedo = useEditor((s) => s.future.length > 0);
+  const dirty = useEditor(isDirty);
+  const undoLabel = useEditor((s) => s.past[s.past.length - 1]?.label);
+  const redoLabel = useEditor((s) => s.future[s.future.length - 1]?.label);
+  const art = usePreimage();
+  const previewMode = usePreview((st) => st.mode);
+  useSoundsVersion();
+  const barRef = useRef<HTMLElement>(null);
+  // 言語が変わると文字の幅が変わるので、畳む段を測り直す
+  const lang = useLang();
+  // 開いている譜面の出どころ（AI で作った譜面か。手で直すと「手直し」になる）。印の無い譜面は数えない
+  const mark = doc.fields[ORIGIN_KEY];
+  const chips = doc.chips;
+  const ownOrigin = useMemo(() => (mark === undefined ? 'human' : originOf({ chips, fields: { [ORIGIN_KEY]: mark } })), [mark, chips]);
+  const originsKey = meta.siblings.map((x) => x.origin ?? '').join('') + ownOrigin;
+  const fit = useTopbarFit(barRef, `${lang}|${meta.fileName}|${meta.siblings.length}|${originsKey}|${f0(doc.fields['TITLE'])}`);
+
+  const f = doc.fields;
+  const length = useSongLength(doc);
+
+  const menus = useEditorMenus(folderInput);
 
   return (
     <header ref={barRef} className={`topbar ${fit >= 1 ? 'fit-logo' : ''} ${fit >= 2 ? 'fit-diff' : ''} ${fit >= 3 ? 'fit-ai' : ''} ${fit >= 4 ? 'fit-art' : ''} ${fit >= 5 ? 'fit-title' : ''} ${fit >= 6 ? 'fit-song' : ''} ${fit >= 7 ? 'fit-tools' : ''}`}>
@@ -369,13 +410,13 @@ function useTopbarFit(bar: React.RefObject<HTMLElement | null>, contentKey: stri
 }
 
 /** 狭い画面での難易度の短い名前 */
-function abbrDiff(label: string): string {
+export function abbrDiff(label: string): string {
   const m: Record<string, string> = { NOVICE: 'NOV', REGULAR: 'REG', BASIC: 'BSC', ADVANCED: 'ADV', EXPERT: 'EXP', EXTREME: 'EXT', MASTER: 'MAS', ULTIMATE: 'ULT' };
   return m[label.toUpperCase()] ?? (label.length > 5 ? label.slice(0, 4) : label);
 }
 
 /** 曲フォルダの PREIMAGE を表示用の URL にする */
-function usePreimage(): string | null {
+export function usePreimage(): string | null {
   const folder = useEditor((s) => s.folder);
   const name = useEditor((s) => s.doc.fields['PREIMAGE']);
   const [url, setUrl] = useState<string | null>(null);

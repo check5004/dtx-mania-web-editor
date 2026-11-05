@@ -8,7 +8,8 @@ import { BGM_DIV, normalizeAnchors, type PlanResult } from '../assist/tempoPlan'
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { useAssist } from '../store/assist';
 import { bgmSource, wavPath } from '../store/derived';
-import { backToChart, useEditor } from '../store/editor';
+import { useDevice } from '../store/device';
+import { backToChart, toast, useEditor } from '../store/editor';
 import { useCanvas } from './hooks';
 import {
   applyTempo,
@@ -58,6 +59,7 @@ export function TempoPage() {
   const data = useAssist((s) => s.data);
   const srcName = useAssist((s) => s.src?.name);
   const ui = useTempo();
+  const tablet = useDevice((s) => s.tablet);
   const r = planResult();
   const bgm = bgmSource(doc);
   const anchors = normalizeAnchors(ui.plan.anchors);
@@ -114,13 +116,16 @@ export function TempoPage() {
           {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
-        <h1>{tr('テンポと開始位置', 'Tempo & start position')}</h1>
-        <span className="lbl ellipsis" style={{ minWidth: 0 }}>
-          {srcName ? `${srcName} · ${formatTime(duration, false)}` : tr('原曲なし', 'No original audio')}
-          {status === 'loading' && tr(` · 解析中 ${Math.round(progress * 100)}%`, ` · analyzing ${Math.round(progress * 100)}%`)}
-          {status === 'ready' && ui.beats.length > 0 && tr(' · 拍の位置を推定済み', ' · beat positions estimated')}
-          {ui.fromEstimate && tr(' · 推定から作った案です', ' · this plan comes from the estimate')}
-        </span>
+        {/* タブレットは題と説明を2段に（縦でもボタンが1行に収まるように） */}
+        <div className={tablet ? 'tempo-title' : undefined} style={tablet ? undefined : { display: 'contents' }}>
+          <h1>{tr('テンポと開始位置', 'Tempo & start position')}</h1>
+          <span className="lbl ellipsis" style={{ minWidth: 0 }}>
+            {srcName ? `${srcName} · ${formatTime(duration, false)}` : tr('原曲なし', 'No original audio')}
+            {status === 'loading' && tr(` · 解析中 ${Math.round(progress * 100)}%`, ` · analyzing ${Math.round(progress * 100)}%`)}
+            {status === 'ready' && ui.beats.length > 0 && tr(' · 拍の位置を推定済み', ' · beat positions estimated')}
+            {ui.fromEstimate && tr(' · 推定から作った案です', ' · this plan comes from the estimate')}
+          </span>
+        </div>
         <span className="grow" />
         <button
           className={`btn small ${ui.playing ? 'on-amber' : ''}`}
@@ -130,10 +135,12 @@ export function TempoPage() {
         >
           {ui.playing ? Icon.stop(14) : Icon.play(14)} {ui.playing ? tr('停止', 'Stop') : tr('確認再生', 'Check playback')}
         </button>
-        <button className="btn small" onClick={tap} title={tr('曲に合わせて T キーを4回以上たたく', 'Tap the T key 4 or more times along with the song')}>
-          {Icon.tap(14)} {tr('タップでBPMを測る（T）', 'Tap tempo (T)')}
-          {ui.tapBpm ? `: ${ui.tapBpm}` : ''}
-        </button>
+        {!tablet && (
+          <button className="btn small" onClick={tap} title={tr('曲に合わせて T キーを4回以上たたく', 'Tap the T key 4 or more times along with the song')}>
+            {Icon.tap(14)} {tr('タップでBPMを測る（T）', 'Tap tempo (T)')}
+            {ui.tapBpm ? `: ${ui.tapBpm}` : ''}
+          </button>
+        )}
         <button className="btn small" onClick={resetToEstimate} disabled={!data}>
           {tr('推定をやり直す', 'Re-estimate')}
         </button>
@@ -186,7 +193,7 @@ export function TempoPage() {
                 </span>
                 <span className="legend">
                   <i className="dia" style={{ border: `1.5px solid ${COL.cand}` }} />
-                  {tr('推定の候補（クリックで確定）', 'Suggested (click to set)')}
+                  {tablet ? tr('推定の候補（タップで確定）', 'Suggested (tap to set)') : tr('推定の候補（クリックで確定）', 'Suggested (click to set)')}
                 </span>
               </div>
               <Overview r={r} />
@@ -205,10 +212,15 @@ export function TempoPage() {
               <Zoom r={r} />
               <ZoomStats r={r} />
               <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7 }}>
-                {tr(
-                  '小節線をドラッグすると、その小節の頭を原曲に合わせます（アンカー）。アンカーが2つ以上あると、間のBPMを計算して小節の頭でBPMを変えます。右クリックでアンカーを外す。ホイールで拡大、Shift+ホイールか ← → で移動。',
-                  'Drag a bar line to line up the start of that measure with the original (an anchor). With 2 or more anchors, the BPM between them is calculated and changed at measure starts. Right-click to remove an anchor. Wheel to zoom; Shift+wheel or ← → to move.',
-                )}
+                {tablet
+                  ? tr(
+                      '小節線のつまみをドラッグして、その小節の頭を原曲に合わせます（アンカー）。アンカーが2つ以上あると、間のBPMを計算して小節の頭でBPMを変えます。ピンチで拡大、なぞるか2本指で左右に移動。アンカーは長押しで外せます。',
+                      'Drag a bar-line knob to line up the start of that measure with the original (an anchor). With 2 or more anchors, the BPM between them is calculated and changed at measure starts. Pinch to zoom; swipe or use two fingers to move sideways. Long-press an anchor to remove it.',
+                    )
+                  : tr(
+                      '小節線をドラッグすると、その小節の頭を原曲に合わせます（アンカー）。アンカーが2つ以上あると、間のBPMを計算して小節の頭でBPMを変えます。右クリックでアンカーを外す。ホイールで拡大、Shift+ホイールか ← → で移動。',
+                      'Drag a bar line to line up the start of that measure with the original (an anchor). With 2 or more anchors, the BPM between them is calculated and changed at measure starts. Right-click to remove an anchor. Wheel to zoom; Shift+wheel or ← → to move.',
+                    )}
               </p>
             </section>
           </main>
@@ -232,6 +244,11 @@ export function TempoPage() {
                   </button>
                 ))}
               </div>
+              {tablet && (
+                <div className="lbl" style={{ textAlign: 'center', fontSize: 12, marginTop: -4 }}>
+                  {tr('ボタンは ms 単位', 'Buttons move by ms')}
+                </div>
+              )}
               <div className="tempo-note">
                 {r.bgm ? (
                   <>
@@ -270,14 +287,23 @@ export function TempoPage() {
                     </button>
                   </>
                 ) : (
-                  tr('拡大した波形の上で、1小節目の頭をクリックしてください。', 'Click the start of measure 1 on the zoomed waveform.')
+                  tablet
+                    ? tr('拡大した波形の上で、1小節目の頭をタップしてください。', 'Tap the start of measure 1 on the zoomed waveform.')
+                    : tr('拡大した波形の上で、1小節目の頭をクリックしてください。', 'Click the start of measure 1 on the zoomed waveform.')
                 )}
               </div>
               <button className={`btn small ${ui.pickStart ? 'primary' : ''}`} style={{ justifyContent: 'center' }} onClick={() => useTempo.setState({ pickStart: !ui.pickStart })}>
-                {ui.pickStart ? tr('波形をクリック…（Escでやめる）', 'Click the waveform… (Esc to cancel)') : tr('波形上で1小節目の頭をクリックして指定', 'Click the start of measure 1 on the waveform')}
+                {tablet
+                  ? ui.pickStart
+                    ? tr('波形をタップ…（もう一度押すとやめる）', 'Tap the waveform… (press again to cancel)')
+                    : tr('波形の1小節目の頭をタップして指定', 'Tap the start of measure 1 on the waveform')
+                  : ui.pickStart
+                    ? tr('波形をクリック…（Escでやめる）', 'Click the waveform… (Esc to cancel)')
+                    : tr('波形上で1小節目の頭をクリックして指定', 'Click the start of measure 1 on the waveform')}
               </button>
             </section>
             <BpmCard />
+            {tablet && <TapCard />}
             <section className="card">
               <div className="section-title" style={{ marginBottom: 8 }}>
                 {tr('変化点とDTXへの書き出し', 'Changes and what is saved to DTX')}
@@ -317,10 +343,15 @@ export function TempoPage() {
                 )}
               </div>
               <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
-                {tr(
-                  '反映すると、今のBPM変化チップは置き直します（Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
-                  'Applying replaces the current BPM change chips (Ctrl+Z undoes it). Anchors are kept in the work file (.dtxe.json).',
-                )}
+                {tablet
+                  ? tr(
+                      '反映すると、今のBPM変化チップは置き直します（譜面で2本指タップすると戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
+                      'Applying replaces the current BPM change chips (a two-finger tap on the chart undoes it). Anchors are kept in the work file (.dtxe.json).',
+                    )
+                  : tr(
+                      '反映すると、今のBPM変化チップは置き直します（Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
+                      'Applying replaces the current BPM change chips (Ctrl+Z undoes it). Anchors are kept in the work file (.dtxe.json).',
+                    )}
               </p>
             </section>
           </aside>
@@ -399,6 +430,38 @@ function BpmCard() {
             ' With 2 or more anchors, the BPM calculated between anchors is used (the value chosen here is used for the beat-line overlay and suggestions).',
           )}
       </p>
+    </section>
+  );
+}
+
+/** タブレット: 大きな TAP（押した瞬間に数える） */
+function TapCard() {
+  const tapBpm = useTempo((s) => s.tapBpm);
+  const n = useTempo((s) => s.taps.length);
+  return (
+    <section className="card tap-card">
+      <div className="section-title" style={{ alignSelf: 'stretch' }}>
+        {tr('タップでBPMを測る', 'Tap tempo')}
+      </div>
+      <button
+        className="tap-big"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          tap();
+        }}
+        onClick={(e) => {
+          // キーボードで押したとき（指・マウスは押した瞬間に数えている）
+          if (e.detail === 0) tap();
+        }}
+        aria-label={tr('タップでBPMを測る', 'Tap tempo')}
+      >
+        <b>TAP</b>
+        <span className="mono">{tapBpm ? chipBpmLabel(tapBpm) : '—'}</span>
+        <span className="lbl">{tr(`${n}回`, `${n} taps`)}</span>
+      </button>
+      <div className="lbl" style={{ textAlign: 'center', fontSize: 12 }}>
+        {tr('曲を流しながら拍に合わせて4回以上叩きます', 'Play the song and tap along with the beat 4 or more times')}
+      </div>
     </section>
   );
 }
@@ -565,16 +628,18 @@ function Overview({ r }: { r: PlanResult }) {
   return (
     <canvas
       ref={ref}
-      style={{ width: '100%', height: H, display: 'block', cursor: 'pointer' }}
+      style={{ width: '100%', height: H, display: 'block', cursor: 'pointer', touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' }}
       onPointerDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const y = e.clientY - rect.top;
         const ay = OV.ruler + OV.bpm + OV.gap * 2;
-        if (y >= ay && y < ay + OV.anch) {
-          // 候補をクリックで確定
+        const touchLike = e.pointerType !== 'mouse';
+        if (y >= ay - (touchLike ? 6 : 0) && y < ay + OV.anch + (touchLike ? 6 : 0)) {
+          // 候補をクリックで確定（指は広めに）
           const W = rect.width - LABEL_W;
           const x = e.clientX - rect.left;
-          const hit = candidates(r, useTempo.getState().downbeats, 0, total, 8).find((c) => Math.abs(LABEL_W + (c.t / total) * W - x) < 7);
+          const tol = touchLike ? 14 : 7;
+          const hit = candidates(r, useTempo.getState().downbeats, 0, total, 8).find((c) => Math.abs(LABEL_W + (c.t / total) * W - x) < tol);
           if (hit) {
             putAnchor(hit.m, hit.t);
             return;
@@ -588,6 +653,9 @@ function Overview({ r }: { r: PlanResult }) {
       onPointerUp={() => {
         dragging.current = false;
       }}
+      onPointerCancel={() => {
+        dragging.current = false;
+      }}
       aria-label={tr('曲全体のテンポマップ', 'Tempo map of the whole song')}
     />
   );
@@ -595,17 +663,56 @@ function Overview({ r }: { r: PlanResult }) {
 
 // ---- 拡大 -----------------------------------------------------------------------
 
-const ZH = 220;
-const Z_TOP = 30;
+const ZH_DESK = 220;
+const Z_TOP_DESK = 30;
+/** タブレット: 背を高くして、上の段に小節線のつまみを並べる */
+const ZH_TAB = 300;
+const Z_TOP_TAB = 44;
+const KY = 20;
+const KNOB_R = 13;
 
-type ZDrag = { kind: 'anchor'; m: number; t: number; moved: boolean; x0: number } | { kind: 'pan'; x0: number; from: number; to: number } | null;
+type ZDrag =
+  | { kind: 'anchor'; m: number; t: number; moved: boolean; x0: number; touch: boolean }
+  | { kind: 'pan'; x0: number; from: number; to: number; pick: boolean; moved: boolean }
+  | null;
+
+/** 小節線のつまみ（タブレット） */
+function knob(ctx: CanvasRenderingContext2D, x: number, label: string, anchor: boolean, active: boolean) {
+  if (active) {
+    ctx.beginPath();
+    ctx.arc(x, KY, KNOB_R + 6, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(231,235,241,.6)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(x, KY, KNOB_R, 0, Math.PI * 2);
+  ctx.fillStyle = anchor ? COL.anchor : '#273140';
+  ctx.fill();
+  ctx.strokeStyle = anchor ? '#A8E1FF' : 'rgba(231,235,241,.35)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = anchor ? '#06121C' : '#E7EBF1';
+  ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x, KY + 0.5);
+}
 
 function Zoom({ r }: { r: PlanResult }) {
   const lang = useLang();
   const data = useAssist((s) => s.data);
   const ui = useTempo();
+  const tablet = useDevice((s) => s.tablet);
+  const ZH = tablet ? ZH_TAB : ZH_DESK;
+  const Z_TOP = tablet ? Z_TOP_TAB : Z_TOP_DESK;
   const drag = useRef<ZDrag>(null);
   const hover = useRef<{ x: number; m: number | null } | null>(null);
+  /** 触れている指（pointerId → x）と2本指の拡大・移動 */
+  const pts = useRef(new Map<number, number>());
+  const pinch = useRef<{ d0: number; c0: number; from: number; to: number } | null>(null);
+  const lpTimer = useRef(0);
+  const lastType = useRef('mouse');
   const odfRef = useRef<{ data: unknown; odf: Float32Array } | null>(null);
   if (data && odfRef.current?.data !== data) odfRef.current = { data, odf: combinedOdf(data.odf) };
 
@@ -695,8 +802,14 @@ function Zoom({ r }: { r: PlanResult }) {
         }
         ctx.setLineDash([]);
       }
+      // 推定の候補（強拍）。タブレットはつまみの段に置き、つまみを上に重ねる
+      if (tablet) {
+        for (const c of candidates(r, ui.downbeats, v.from, v.to, 1)) diamond(ctx, X(c.t), KY, 7, null, COL.cand);
+      }
       // 案の小節線と拍線
       const ms = measuresIn(v.from, v.to);
+      const d = drag.current;
+      const active = d?.kind === 'anchor' && d.touch ? d.m : null;
       ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
@@ -715,6 +828,14 @@ function Zoom({ r }: { r: PlanResult }) {
         const isAnchor = anchors.some((a) => a.m === m);
         const hov = hover.current?.m === m;
         ctx.fillStyle = isAnchor ? COL.anchor : hov ? '#FFFFFF' : COL.measure;
+        if (tablet) {
+          ctx.fillRect(x - 1, KY, 2, ZH - KY);
+          knob(ctx, x, toMeasure(m), isAnchor, active === m);
+          ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
+          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'left';
+          continue;
+        }
         ctx.fillRect(x - 1, Z_TOP, 2, ZH - Z_TOP);
         ctx.fillStyle = COL.text;
         ctx.fillText(toMeasure(m), x + 4, 10);
@@ -723,20 +844,30 @@ function Zoom({ r }: { r: PlanResult }) {
         }
       }
       // 推定の候補（強拍）
-      for (const c of candidates(r, ui.downbeats, v.from, v.to, 1)) {
-        const x = X(c.t);
-        diamond(ctx, x, Z_TOP + 2, 5, null, COL.cand);
+      if (!tablet) {
+        for (const c of candidates(r, ui.downbeats, v.from, v.to, 1)) {
+          const x = X(c.t);
+          diamond(ctx, x, Z_TOP + 2, 5, null, COL.cand);
+        }
       }
       // 区間のBPM
       ctx.textAlign = 'center';
+      const by = tablet ? Z_TOP + 10 : 22;
       r.segs.forEach((s, i) => {
         const a = i === 0 ? -Infinity : measureTime(s.m, r);
         const b = i + 1 < r.segs.length ? measureTime(r.segs[i + 1].m, r) : Infinity;
         const xa = Math.max(0, X(a));
         const xb = Math.min(W, X(b));
         if (xb - xa < 60) return;
+        const label = `BPM ${chipBpmLabel(s.bpm)}${s.src === 'anchor' ? tr('（アンカーから計算）', ' (from anchors)') : ''}`;
+        if (tablet) {
+          // 小節線をまたいでも読めるよう下地を敷く
+          const tw = ctx.measureText(label).width + 10;
+          ctx.fillStyle = 'rgba(11,14,19,.85)';
+          ctx.fillRect((xa + xb) / 2 - tw / 2, by - 8, tw, 16);
+        }
         ctx.fillStyle = s.src === 'anchor' && r.segs.length > 1 ? '#FFC768' : '#C9D1DC';
-        ctx.fillText(`BPM ${chipBpmLabel(s.bpm)}${s.src === 'anchor' ? tr('（アンカーから計算）', ' (from anchors)') : ''}`, (xa + xb) / 2, 22);
+        ctx.fillText(label, (xa + xb) / 2, by);
       });
       // 再生位置
       const p = playAudioSec();
@@ -750,14 +881,15 @@ function Zoom({ r }: { r: PlanResult }) {
         ctx.fillRect(hover.current.x - 1, 0, 2, ZH);
       }
     },
-    [r, ui, data, lang],
+    [r, ui, data, lang, tablet],
     ui.playing,
   );
 
-  const nearestMeasure = (x: number, w: number): number | null => {
+  /** x に近い小節線（tol px 以内） */
+  const nearestMeasure = (x: number, w: number, tol: number): number | null => {
     const { v, X } = geo(w);
     let best: number | null = null;
-    let bd = 7;
+    let bd = tol;
     for (const { m, t } of measuresIn(v.from, v.to)) {
       const d = Math.abs(X(t) - x);
       if (d < bd) {
@@ -767,6 +899,8 @@ function Zoom({ r }: { r: PlanResult }) {
     }
     return best;
   };
+  /** 小節線をつかめる幅: タブレットはつまみの段を広く */
+  const tolAt = (y: number) => (tablet ? (y < Z_TOP ? 20 : 12) : 7);
 
   /** 打点の山に吸いつける（±25ms） */
   const snapTime = (t: number, alt: boolean): number => {
@@ -787,11 +921,39 @@ function Zoom({ r }: { r: PlanResult }) {
   };
 
   const redraw = () => useTempo.setState({});
+  const clearLp = () => {
+    if (lpTimer.current) window.clearTimeout(lpTimer.current);
+    lpTimer.current = 0;
+  };
+  /** 長押しでアンカーを外す（元に戻せる） */
+  const holdToRemove = (m: number, t: number) => {
+    clearLp();
+    lpTimer.current = window.setTimeout(
+      () => {
+        lpTimer.current = 0;
+        const d = drag.current;
+        if (d?.kind !== 'anchor' || d.moved || d.m !== m) return;
+        drag.current = null;
+        const before = useTempo.getState().plan.anchors.length;
+        removeAnchor(m);
+        if (useTempo.getState().plan.anchors.length < before) {
+          toast(tr(`${toMeasure(m)}小節のアンカーを外しました`, `Removed the anchor at measure ${toMeasure(m)}`), 'info', 5000, {
+            label: tr('元に戻す', 'Undo'),
+            run: () => putAnchor(m, t),
+          });
+        } else {
+          toast(tr('最後のアンカーは外せません', "The last anchor can't be removed"), 'warn');
+          redraw();
+        }
+      },
+      Math.max(550, useDevice.getState().longPressMs + 200),
+    );
+  };
 
   return (
     <canvas
       ref={ref}
-      style={{ width: '100%', height: ZH, display: 'block', borderRadius: 8 }}
+      style={{ width: '100%', height: ZH, display: 'block', borderRadius: 8, touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
       onWheel={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const { v, T } = geo(rect.width);
@@ -807,68 +969,135 @@ function Zoom({ r }: { r: PlanResult }) {
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        // 指の長押しは pointer 側で扱う（ここで外すと二重になる）
+        if (lastType.current !== 'mouse') return;
         const rect = e.currentTarget.getBoundingClientRect();
-        const m = nearestMeasure(e.clientX - rect.left, rect.width);
+        const m = nearestMeasure(e.clientX - rect.left, rect.width, tolAt(e.clientY - rect.top));
         if (m !== null) removeAnchor(m);
       }}
       onPointerDown={(e) => {
-        if (e.button !== 0) return;
+        lastType.current = e.pointerType;
+        const touchLike = e.pointerType !== 'mouse';
+        if (!touchLike && e.button !== 0) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
         const { v, T, X } = geo(rect.width);
         e.currentTarget.setPointerCapture(e.pointerId);
+        if (touchLike) {
+          pts.current.set(e.pointerId, x);
+          if (pts.current.size >= 2) {
+            // 2本目の指: ピンチで拡大、2本指で左右に移動
+            clearLp();
+            drag.current = null;
+            if (pts.current.size === 2) {
+              const [a, b] = [...pts.current.values()];
+              pinch.current = { d0: Math.max(10, Math.abs(a - b)), c0: (a + b) / 2, from: v.from, to: v.to };
+            }
+            redraw();
+            return;
+          }
+        }
         if (useTempo.getState().pickStart) {
-          setStart(snapTime(T(x), e.altKey));
+          // 指は離したときに決める（2本指の拡大と分ける）
+          if (touchLike) drag.current = { kind: 'pan', x0: x, from: v.from, to: v.to, pick: true, moved: false };
+          else setStart(snapTime(T(x), e.altKey));
           return;
         }
         // 候補の強拍をクリックで確定
-        if (y < Z_TOP + 14) {
-          const hit = candidates(r, useTempo.getState().downbeats, v.from, v.to, 1).find((c) => Math.abs(X(c.t) - x) < 7);
-          if (hit) {
+        if (y < Z_TOP + (tablet ? 0 : 14)) {
+          const hit = candidates(r, useTempo.getState().downbeats, v.from, v.to, 1).find((c) => Math.abs(X(c.t) - x) < (tablet ? 14 : 7));
+          if (hit && !(tablet && nearestMeasure(x, rect.width, KNOB_R) !== null)) {
             putAnchor(hit.m, hit.t);
             return;
           }
         }
-        const m = nearestMeasure(x, rect.width);
+        const m = nearestMeasure(x, rect.width, tolAt(y));
         if (m !== null) {
-          drag.current = { kind: 'anchor', m, t: measureTime(m, r), moved: false, x0: x };
+          const t = measureTime(m, r);
+          drag.current = { kind: 'anchor', m, t, moved: false, x0: x, touch: touchLike };
+          if (touchLike) {
+            if (normalizeAnchors(useTempo.getState().plan.anchors).some((a) => a.m === m)) holdToRemove(m, t);
+            redraw();
+          }
           return;
         }
-        drag.current = { kind: 'pan', x0: x, from: v.from, to: v.to };
+        drag.current = { kind: 'pan', x0: x, from: v.from, to: v.to, pick: false, moved: false };
       }}
       onPointerMove={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
+        if (pts.current.has(e.pointerId)) pts.current.set(e.pointerId, x);
+        const pz = pinch.current;
+        if (pz) {
+          if (pts.current.size < 2) return;
+          const [a, b] = [...pts.current.values()];
+          const len0 = pz.to - pz.from;
+          const len = (len0 * pz.d0) / Math.max(10, Math.abs(a - b));
+          const at = pz.from + (pz.c0 / rect.width) * len0;
+          const from = at - ((a + b) / 2 / rect.width) * len;
+          setView({ from, to: from + len });
+          return;
+        }
         const d = drag.current;
         if (!d) {
-          const m = useTempo.getState().pickStart ? null : nearestMeasure(x, rect.width);
+          if (e.pointerType !== 'mouse') return;
+          const m = useTempo.getState().pickStart ? null : nearestMeasure(x, rect.width, tolAt(e.clientY - rect.top));
           hover.current = { x, m };
           e.currentTarget.style.cursor = useTempo.getState().pickStart ? 'crosshair' : m !== null ? 'ew-resize' : 'grab';
           redraw();
           return;
         }
         if (d.kind === 'pan') {
+          if (!d.moved && e.pointerType !== 'mouse' && Math.abs(x - d.x0) < 8) return;
+          d.moved = true;
           const dt = ((d.x0 - x) / rect.width) * (d.to - d.from);
           setView({ from: d.from + dt, to: d.to + dt });
           return;
         }
-        if (Math.abs(x - d.x0) > 2) d.moved = true;
+        if (!d.moved && Math.abs(x - d.x0) > (d.touch ? 6 : 2)) {
+          d.moved = true;
+          clearLp();
+        }
         if (!d.moved) return;
         const { T } = geo(rect.width);
-        putAnchor(d.m, snapTime(T(x), e.altKey));
+        // 指はつかんだ所からの動きだけ足す（指の太さで線が跳ねないように）
+        const t = d.touch ? d.t + (T(x) - T(d.x0)) : T(x);
+        putAnchor(d.m, snapTime(t, e.altKey));
       }}
       onPointerUp={(e) => {
+        clearLp();
+        pts.current.delete(e.pointerId);
+        if (pinch.current) {
+          if (pts.current.size < 2) pinch.current = null;
+          drag.current = null;
+          return;
+        }
         const d = drag.current;
         drag.current = null;
-        if (d?.kind === 'anchor' && !d.moved) {
-          // クリックだけなら今の位置でアンカーを確定
-          const rect = e.currentTarget.getBoundingClientRect();
-          const { T } = geo(rect.width);
-          putAnchor(d.m, snapTime(T(e.clientX - rect.left), e.altKey));
+        if (!d) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const { T } = geo(rect.width);
+        if (d.kind === 'pan') {
+          if (d.pick && !d.moved) setStart(snapTime(T(d.x0), false));
+          return;
         }
+        if (!d.moved) {
+          // クリックだけなら今の位置でアンカーを確定（指のタップは指の位置へずらさない）
+          if (d.touch) putAnchor(d.m, d.t);
+          else putAnchor(d.m, snapTime(T(e.clientX - rect.left), e.altKey));
+        }
+        if (d.touch) redraw();
       }}
-      onPointerLeave={() => {
+      onPointerCancel={(e) => {
+        clearLp();
+        pts.current.delete(e.pointerId);
+        if (pts.current.size < 2) pinch.current = null;
+        drag.current = null;
+        redraw();
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType !== 'mouse') return;
         hover.current = null;
         redraw();
       }}
@@ -879,6 +1108,7 @@ function Zoom({ r }: { r: PlanResult }) {
 
 function ZoomStats({ r }: { r: PlanResult }) {
   const ui = useTempo();
+  const tablet = useDevice((s) => s.tablet);
   const v = ui.view;
   const anchors = normalizeAnchors(ui.plan.anchors);
   // 案の拍と推定の拍の最大のずれ（見えている範囲）
@@ -933,10 +1163,12 @@ function ZoomStats({ r }: { r: PlanResult }) {
         {tr(' 個', '')}
       </span>
       <span className="grow" />
-      <span>
-        <kbd>Space</kbd> {tr('確認再生', 'check playback')} <kbd>T</kbd> {tr('タップ', 'tap')} <kbd>←</kbd>
-        <kbd>→</kbd> {tr('移動', 'move')}
-      </span>
+      {!tablet && (
+        <span>
+          <kbd>Space</kbd> {tr('確認再生', 'check playback')} <kbd>T</kbd> {tr('タップ', 'tap')} <kbd>←</kbd>
+          <kbd>→</kbd> {tr('移動', 'move')}
+        </span>
+      )}
     </div>
   );
 }

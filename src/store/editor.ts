@@ -67,6 +67,8 @@ export interface Toast {
   id: number;
   text: string;
   level: 'info' | 'ok' | 'warn' | 'error';
+  /** 押せるボタン（「元に戻す」など）。押したら消える */
+  action?: { label: string; run: () => void };
 }
 
 export interface ViewState {
@@ -153,10 +155,15 @@ export const isDirty = (s: EditorState) => s.doc !== s.savedDoc;
 // ---- 通知 ---------------------------------------------------------------------
 
 let toastId = 0;
-export function toast(text: string, level: Toast['level'] = 'info', ms = 4000) {
+export function toast(text: string, level: Toast['level'] = 'info', ms = 4000, action?: Toast['action']): number {
   const id = ++toastId;
-  set((s) => ({ toasts: [...s.toasts, { id, text, level }] }));
-  window.setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), ms);
+  set((s) => ({ toasts: [...s.toasts, { id, text, level, action }] }));
+  window.setTimeout(() => dismissToast(id), ms);
+  return id;
+}
+
+export function dismissToast(id: number) {
+  set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
 }
 
 // ---- 読み込み -----------------------------------------------------------------

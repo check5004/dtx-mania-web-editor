@@ -26,6 +26,8 @@ export type CtxMenu = CtxTarget & {
   y: number;
   /** 開いた回数（中身の状態を作り直す・Undo をまとめる名前に使う） */
   seq: number;
+  /** 指の長押しで開いた（指で隠れないように指の右に出し、行を大きく） */
+  touch?: boolean;
 };
 
 interface CtxState {
@@ -36,8 +38,8 @@ export const useCtxMenu = create<CtxState>(() => ({ menu: null }));
 
 let seq = 0;
 
-export function openCtxMenu(t: CtxTarget, x: number, y: number) {
-  useCtxMenu.setState({ menu: { ...t, x, y, seq: ++seq } });
+export function openCtxMenu(t: CtxTarget, x: number, y: number, touch = false) {
+  useCtxMenu.setState({ menu: { ...t, x, y, seq: ++seq, touch } });
 }
 
 /** 閉じる。開いていたら true */
@@ -106,8 +108,11 @@ export type LaneItemsProvider = (at: LaneSpot) => CtxItem[];
 const laneProviders: LaneItemsProvider[] = [];
 
 /** レーンの何もない所のメニューに項目を足す（読み込み時に1回呼ぶ）。グリッドのすぐ下に並ぶ */
-export function addLaneMenuItems(p: LaneItemsProvider) {
-  if (!laneProviders.includes(p)) laneProviders.push(p);
+/** first: ほかの項目より先に並べる（タブレットの「〇〇を置く」） */
+export function addLaneMenuItems(p: LaneItemsProvider, first = false) {
+  if (laneProviders.includes(p)) return;
+  if (first) laneProviders.unshift(p);
+  else laneProviders.push(p);
 }
 
 export function laneMenuExtras(at: LaneSpot): CtxItem[] {

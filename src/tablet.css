@@ -1,0 +1,2862 @@
+/* タブレット版（iPad 縦横・指だけ）。承認されたデザイン「タッチ操作の決まり」「部品（実寸）」に合わせる。
+   押せる所は 44×44 以上、行・メニューは 48〜64、入力欄の文字は 16px（Safari が勝手に拡大しないように）。
+   html.tablet のときだけ効く。t- で始まる部品はタブレット版の画面にしか出ない */
+
+html.tablet,
+html.tablet body {
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
+html.tablet body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html.tablet input,
+html.tablet textarea,
+html.tablet [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+html.tablet input:not([type='checkbox']):not([type='radio']):not([type='range']),
+html.tablet select,
+html.tablet textarea {
+  font-size: 16px;
+}
+
+html.tablet .app {
+  height: var(--app-h, 100%);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+html.tablet .chart-wrap canvas {
+  touch-action: none;
+}
+
+html.tablet .tracks canvas {
+  touch-action: none;
+}
+
+/* ---- 共通の部品 ---- */
+
+.t-ib {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text2);
+}
+
+.t-ib.boxed {
+  border-color: var(--line3);
+  background: var(--raise);
+}
+
+.t-ib.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.t-ib.danger {
+  color: #ff8a8f;
+}
+
+.t-ib:active:not(:disabled),
+.t-btn:active:not(:disabled),
+.t-tool:active,
+.t-rail-btn:active,
+.t-sheet-tab:active,
+.t-selbar-btn:active:not(:disabled),
+.t-menu-item:active:not(:disabled),
+.t-pop-item:active:not(:disabled) {
+  background: #24303e;
+}
+
+.t-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: none;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.t-btn.icon {
+  width: 44px;
+  padding: 0;
+}
+
+.t-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.t-btn.primary:active:not(:disabled) {
+  background: #6fd0ff;
+}
+
+.t-btn.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.seg.t-seg {
+  display: inline-flex;
+  height: 44px;
+  padding: 3px;
+  gap: 3px;
+  border-radius: 11px;
+  flex: none;
+}
+
+.seg.t-seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.t-vsep {
+  width: 1px;
+  height: 32px;
+  background: var(--line2);
+  flex: none;
+}
+
+.t-pop {
+  position: absolute;
+  z-index: 60;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--line3);
+  background: #151a22;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.t-pop-title {
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.t-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 15px;
+  text-align: left;
+}
+
+.t-pop-item.on {
+  color: var(--accent);
+}
+
+.t-pop-sub {
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.t-ck {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  color: var(--accent);
+}
+
+.t-chipbtn {
+  height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text2);
+  font-size: 14px;
+}
+
+.t-chipbtn.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.t-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.t-check input,
+.t-check-row input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.t-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mute);
+}
+
+/* ---- 枠 ---- */
+
+.t-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.t-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 0 10px 0 8px;
+  padding-top: env(safe-area-inset-top);
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.t-song {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 340px;
+  flex: 0 1 auto;
+  height: 48px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+}
+
+.t-art {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1d3448, #2a2140);
+  color: var(--text3);
+  font-size: 18px;
+}
+
+.t-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.t-song-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.t-song-title {
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.t-song-sub {
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.t-dirty {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.t-diff button {
+  min-width: 56px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.t-diff-menu {
+  position: relative;
+  flex: none;
+}
+
+.t-diff-menu .t-btn {
+  font-family: var(--mono);
+}
+
+.t-diff-pop {
+  top: calc(100% + 6px);
+  left: 0;
+  width: 320px;
+}
+
+.t-ai {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.t-save.icon {
+  width: 44px;
+  padding: 0;
+}
+
+.t-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 0 12px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.t-transport > * {
+  flex: none;
+}
+
+.t-transport > .grow {
+  flex: 1;
+}
+
+.t-transport .ib {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.t-transport .play-btn {
+  width: 64px;
+  height: 52px;
+  border-radius: 26px;
+}
+
+.t-transport .play-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.t-transport .pos-box {
+  min-width: 108px;
+  margin-left: 0;
+}
+
+.t-transport .pos-main {
+  font-size: 19px;
+}
+
+.t-ab {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 10px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: #c7a76c;
+  font: 700 14px var(--mono);
+}
+
+.t-ab.set {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.t-loop.icon {
+  width: 44px;
+  padding: 0;
+}
+
+.t-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.t-select.slow {
+  border-color: var(--amber-line);
+  color: var(--amber);
+}
+
+.t-select select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+}
+
+.t-tempo .dim {
+  color: var(--mute);
+  font-weight: 500;
+}
+
+.t-transport .master {
+  gap: 6px;
+  height: 52px;
+  padding: 0 4px;
+  border-radius: 12px;
+}
+
+.t-transport .master .ib {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+html.tablet .t-transport .master input.master-vol {
+  display: block;
+  width: 140px;
+  height: 44px;
+  margin: 0 2px;
+}
+
+.t-transport .mixer-open {
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+}
+
+.t-main {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+html.t-left .t-main {
+  flex-direction: row-reverse;
+}
+
+/* 左の道具（68） */
+.t-palette {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  width: 68px;
+  padding: 8px 6px;
+  background: var(--bar);
+  border-right: 1px solid var(--line);
+  overflow: visible;
+  z-index: 20;
+}
+
+html.t-left .t-palette {
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+
+.t-palette hr {
+  width: 40px;
+  height: 1px;
+  margin: 4px 0;
+  border: 0;
+  background: var(--line2);
+  flex: none;
+}
+
+.t-tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: none;
+  width: 58px;
+  min-height: 52px;
+  padding: 4px 2px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.t-tool b {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.t-tool.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.t-tool.t-vel {
+  min-height: 44px;
+}
+
+.t-tool-wrap {
+  position: relative;
+  flex: none;
+}
+
+/* ポップアップは道具の右へ（譜面の上に重ねる。パネルが左なら左へ） */
+.t-grid-pop,
+.t-strength-pop {
+  left: calc(100% + 10px);
+  top: 0;
+}
+
+html.t-left .t-grid-pop,
+html.t-left .t-strength-pop {
+  left: auto;
+  right: calc(100% + 10px);
+}
+
+.t-grid-pop {
+  width: 260px;
+}
+
+.t-grid-opts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 4px 4px;
+}
+
+/* 譜面 */
+.t-chart {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+/* 右のレール（76） */
+.t-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  width: 76px;
+  padding: 8px 6px;
+  background: var(--bar);
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+html.t-left .t-rail {
+  border-left: 0;
+  border-right: 1px solid var(--line);
+}
+
+.t-rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+  width: 64px;
+  height: 62px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text3);
+  font-size: 11px;
+}
+
+.t-rail-btn.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+/* パネル（360、1枚だけ） */
+.t-panel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 360px;
+  min-height: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+html.t-left .t-panel {
+  border-left: 0;
+  border-right: 1px solid var(--line);
+}
+
+.t-panel.overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 76px;
+  z-index: 30;
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.45);
+}
+
+html.t-left .t-panel.overlay {
+  right: auto;
+  left: 76px;
+  box-shadow: 18px 0 40px rgba(0, 0, 0, 0.45);
+}
+
+.t-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 56px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 16px;
+}
+
+.t-panel-head.inline {
+  height: auto;
+  padding: 0 0 8px;
+  border-bottom: 0;
+}
+
+.t-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.t-panel.vel .t-panel-body {
+  overflow-y: auto;
+}
+
+.t-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.t-cards {
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.t-pane-snd > * {
+  flex: 1;
+  min-height: 0;
+  width: 100% !important;
+  max-width: none !important;
+  border: 0 !important;
+}
+
+.t-pane-prev {
+  padding: 8px;
+}
+
+.t-pane-prev > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.t-pane-trk {
+  overflow: hidden;
+}
+
+/* パネル・シートの中の、デスクトップのカードを指で押せる大きさに */
+.t-pane .btn,
+.t-panel.vel .btn {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.t-pane .btn.small,
+.t-panel.vel .btn.small {
+  height: 36px;
+  font-size: 13px;
+}
+
+.t-pane .ib,
+.t-panel.vel .ib {
+  width: 40px;
+  height: 40px;
+}
+
+.t-pane .seg button,
+.t-panel.vel .seg button {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13.5px;
+}
+
+.t-pane .field {
+  height: 40px;
+  font-size: 16px;
+}
+
+.t-pane input[type='checkbox'],
+.t-panel.vel input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+}
+
+.t-pane input[type='range'],
+.t-panel.vel input[type='range'] {
+  height: 32px;
+}
+
+/* ---- 下のトラック（横） ---- */
+
+.t-tracks {
+  position: relative;
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--bar);
+}
+
+.t-tracks .tracks {
+  height: 100%;
+}
+
+.t-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  height: 20px;
+  z-index: 5;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.t-grip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 7px;
+  width: 44px;
+  height: 5px;
+  margin-left: -22px;
+  border-radius: 3px;
+  background: #3a4452;
+}
+
+.tracks.t-tracks {
+  border-top: 0;
+}
+
+.tracks.t-tracks .tracks-corner {
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.t-trk-toggle {
+  height: 40px;
+  padding: 0 12px;
+}
+
+.tracks.t-tracks .t-now {
+  font-size: 13px;
+}
+
+.tracks.t-tracks .link-btn {
+  min-height: 40px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.tracks.t-tracks .trk {
+  gap: 8px;
+  padding-left: 12px;
+}
+
+.tracks.t-tracks .trk-title b {
+  font-size: 14px;
+}
+
+.tracks.t-tracks .ms {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.tracks.t-tracks .trk-vol {
+  height: 36px;
+}
+
+.tracks.t-tracks .radio-btn.small {
+  width: 32px;
+  height: 32px;
+}
+
+.tracks.t-tracks .trk-spec input {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---- 下のシート（縦） ---- */
+
+.t-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  background: var(--panel);
+  border-top: 1px solid var(--line3);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.35);
+  transition: height 0.2s ease;
+  overflow: hidden;
+}
+
+.t-sheet.dragging {
+  transition: none;
+}
+
+.t-sheet-grip {
+  display: grid;
+  place-items: center;
+  flex: none;
+  height: 16px;
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.t-sheet-grip i {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: #3a4452;
+}
+
+.t-sheet-body {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.t-sheet-tabs {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  height: 64px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bar);
+}
+
+.t-sheet-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text3);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.t-sheet-tab.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.t-sheet-body .t-pane.t-cards {
+  padding: 4px 14px 14px;
+}
+
+/* ---- ☰ のメニュー ---- */
+
+.t-drawer-back {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.t-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 420px;
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--line3);
+  box-shadow: 18px 0 40px rgba(0, 0, 0, 0.5);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tablet-port .t-drawer {
+  width: 85%;
+}
+
+.t-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 60px;
+  padding: 0 8px 0 18px;
+  font-size: 15px;
+}
+
+.t-drawer-tabs {
+  margin: 0 14px 8px;
+  display: flex !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.t-drawer-tabs button {
+  flex: 1;
+}
+
+.t-drawer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+}
+
+.t-drawer-list hr {
+  margin: 6px 12px;
+  border: 0;
+  height: 1px;
+  background: var(--line2);
+}
+
+.t-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 15px;
+  text-align: left;
+}
+
+.t-menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.t-menu-key {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.t-drawer-foot {
+  flex: none;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* ---- 選択バー（譜面の上端） ---- */
+
+.t-selbar {
+  position: absolute;
+  top: 40px;
+  left: 8px;
+  right: 8px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  margin: 0 auto;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 14px;
+  border: 1px solid var(--line3);
+  background: rgba(21, 26, 34, 0.97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+
+.t-selbar-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  min-width: 40px;
+  padding: 0 6px;
+  line-height: 1.15;
+}
+
+.t-selbar-count b {
+  font-size: 18px;
+}
+
+.t-selbar-count span {
+  font-size: 11px;
+  color: var(--mute);
+}
+
+.t-selbar-sep {
+  flex: none;
+  width: 1px;
+  height: 32px;
+  margin: 0 4px;
+  background: var(--line3);
+}
+
+.t-selbar-grp {
+  display: flex;
+  gap: 2px;
+}
+
+.t-selbar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: none;
+  min-width: 52px;
+  height: 52px;
+  padding: 0 4px;
+  border-radius: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.t-selbar-btn.icon {
+  min-width: 44px;
+  width: 44px;
+}
+
+.t-selbar-btn.danger {
+  color: #ff8a8f;
+}
+
+.t-selbar-more {
+  position: relative;
+  flex: none;
+}
+
+.t-selbar-pop {
+  top: calc(100% + 10px);
+  right: 0;
+  width: 280px;
+}
+
+/* TAB補完のバーも譜面の上端に浮かせる（手で隠れない）。選択バーがあればその下 */
+html.tablet .t-chart .tab-ghost {
+  top: 40px !important;
+  bottom: auto !important;
+  left: 50% !important;
+  transform: translateX(-50%);
+  max-width: calc(100% - 16px) !important;
+  z-index: 24;
+  border-radius: 14px;
+  padding: 8px 10px;
+}
+
+html.tablet .t-chart:has(.t-selbar) .tab-ghost {
+  top: 104px !important;
+}
+
+html.tablet .tab-ghost button {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+html.tablet .t-chart .rec-badge {
+  top: auto;
+  bottom: 12px;
+}
+
+/* ---- 入力パッド ---- */
+
+.t-pads {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.t-pads.where-panel {
+  flex: 1;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.t-pads.where-panel .t-layout-seg,
+.t-pads.where-panel .t-mode-seg {
+  display: flex;
+  width: 100%;
+}
+
+.t-pads.where-panel .t-layout-seg button,
+.t-pads.where-panel .t-mode-seg button {
+  flex: 1;
+}
+
+.t-mode-seg button.rec.on {
+  background: #3a1a1f;
+  color: #ff9aa0;
+}
+
+.t-pads.where-sheet {
+  flex: 1;
+  gap: 8px;
+  padding: 2px 12px 10px;
+}
+
+.t-pads-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+}
+
+.t-pads-row .t-step {
+  flex: 1;
+  min-width: 0;
+}
+
+.t-pads-body {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.t-pads-body .t-kit {
+  flex: 1;
+  min-width: 0;
+}
+
+.t-kit {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(84px, 1fr);
+  gap: 8px;
+}
+
+.t-pad {
+  --pad: var(--accent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 84px;
+  padding: 10px 10px 8px;
+  border-radius: 13px;
+  border: 1px solid var(--line3);
+  background: #141922;
+  color: var(--text);
+  text-align: left;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.t-pad.hit {
+  border-color: var(--pad);
+  background: color-mix(in srgb, var(--pad) 24%, #141922);
+  box-shadow: inset 0 0 0 1px var(--pad);
+}
+
+.t-pad-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 700 15px var(--mono);
+  color: var(--pad);
+}
+
+.t-pad-key i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.t-pad-name {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--mute);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.t-pad-sub {
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+
+.t-pad.half {
+  min-height: 0;
+  flex: 1;
+  padding: 6px 8px;
+}
+
+.t-lanegrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.t-lanegrid-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 132px;
+}
+
+.t-lanegrid-col .t-pad:not(.half) {
+  flex: 1;
+}
+
+.t-lanestrip {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.t-lanestrip-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.t-lanestrip-col .t-pad {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 4px 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.t-lanestrip-col .t-pad-key {
+  font-size: 13px;
+}
+
+.t-lanestrip-col .t-pad-key i {
+  display: none;
+}
+
+.t-lanestrip-note {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 84px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.t-lanestrip-note.right {
+  width: auto;
+  max-width: 120px;
+}
+
+.t-modebox {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 13px;
+  border: 1px solid var(--line2);
+  background: var(--card);
+}
+
+.t-modebox.side {
+  flex: none;
+  width: 250px;
+  overflow-y: auto;
+}
+
+.t-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.t-step-pos {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.t-step-tri {
+  color: var(--accent);
+}
+
+.t-rec-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 52px;
+  border-radius: 12px;
+  border: 1px solid #6b2c30;
+  background: #2a1418;
+  color: #ff9aa0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.t-rec-btn.on {
+  background: #ff5a61;
+  border-color: #ff5a61;
+  color: #1a0507;
+}
+
+.t-rec-btn.on .rec-dot {
+  background: #1a0507;
+  animation: none;
+}
+
+.t-rec-btn.mini {
+  width: auto;
+  height: 44px;
+  padding: 0 14px;
+  flex: none;
+}
+
+/* ---- 保存と書き出し ---- */
+
+.t-modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.t-save.card,
+.t-save.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line3);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  overflow-y: auto;
+}
+
+.t-save.card {
+  width: 540px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  padding: 18px;
+  border-radius: 18px;
+}
+
+.t-save.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 88%;
+  padding: 8px 18px calc(18px + env(safe-area-inset-bottom));
+  border-radius: 18px 18px 0 0;
+}
+
+.t-sheet-handle {
+  align-self: center;
+  flex: none;
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: #3a4452;
+}
+
+.t-save-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+
+.t-save-auto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ok);
+}
+
+.t-save-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.t-save-opt {
+  border-radius: 12px;
+  border: 1px solid #232a34;
+  background: #12161d;
+}
+
+.t-save-opt.on {
+  border-color: #2b4b60;
+  background: #122030;
+}
+
+.t-save-opt-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.t-radio {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #3a4554;
+}
+
+.t-save-opt.on .t-radio {
+  border-color: var(--accent);
+}
+
+.t-radio i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.t-save-opt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.t-save-opt-text b {
+  font-size: 15px;
+}
+
+.t-save-diffs {
+  display: flex;
+  flex-direction: column;
+  padding: 0 14px 8px 50px;
+}
+
+.t-check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.t-check-row .lbl {
+  margin-left: auto;
+}
+
+.t-save-enc {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.t-save-warn {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--amber);
+}
+
+.t-save .note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mute);
+}
+
+.t-save-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---- 知らせ（下の中央）・押せるボタン ---- */
+
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+.toast-action {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+html.tablet .toasts {
+  left: 50%;
+  right: auto;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  align-items: center;
+  width: max-content;
+  max-width: calc(100% - 32px);
+}
+
+html.tablet .toast {
+  max-width: 560px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+/* 長押しのメニューを開いている間は、知らせをメニューの下へ（項目を隠さない） */
+html.tablet body:has(.ctx-menu) .toasts {
+  z-index: 80;
+}
+
+html.tablet .toast-action {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+/* ---- 長押しのメニュー（指の右に出す・行は 48） ---- */
+
+.ctx-menu.touch {
+  width: 300px;
+  padding: 6px;
+  border-radius: 14px;
+  font-size: 14px;
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+}
+
+.ctx-menu.touch.wide {
+  width: 340px;
+}
+
+.ctx-menu.touch .ctx-head {
+  padding: 8px 10px 10px;
+}
+
+.ctx-menu.touch .ctx-head b {
+  font-size: 15px;
+}
+
+.ctx-menu.touch .ctx-head-sub {
+  font-size: 12px;
+}
+
+.ctx-menu.touch .ctx-item {
+  height: auto;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  gap: 12px;
+}
+
+.ctx-menu.touch .ctx-item .ctx-ic {
+  width: 18px;
+}
+
+.ctx-menu.touch .ctx-sec {
+  padding: 6px 10px 8px;
+}
+
+.ctx-menu.touch .ctx-sec-title {
+  font-size: 12.5px;
+  min-height: 24px;
+}
+
+.ctx-menu.touch .ctx-tri button,
+.ctx-menu.touch .ctx-pair button,
+.ctx-menu.touch .ctx-grid-btn {
+  height: 44px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.ctx-menu.touch .ctx-tri {
+  gap: 6px;
+}
+
+.ctx-menu.touch .ctx-slider {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ctx-menu.touch .ctx-step {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.ctx-menu.touch .ctx-slider input[type='range'] {
+  height: 32px;
+}
+
+.ctx-menu.touch .ctx-row-label {
+  width: 40px;
+  font-size: 12.5px;
+}
+
+.ctx-menu.touch .ctx-lanes {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ctx-menu.touch .ctx-lane {
+  height: 44px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.ctx-menu.touch .ctx-grid-row {
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.ctx-menu.touch .ctx-grid-btn {
+  min-width: 44px;
+}
+
+.ctx-menu.touch .ctx-grid-row .rl {
+  width: 44px;
+  font-size: 12px;
+}
+
+/* ---- 文字とボタンの大きさ「大きめ」 ---- */
+
+html.t-large .t-pane,
+html.t-large .t-pads,
+html.t-large .t-save,
+html.t-large .t-drawer-list {
+  zoom: 1.1;
+}
+
+/* ---- 縦（幅 1024 未満） ---- */
+
+.tablet-port .t-song {
+  max-width: 300px;
+}
+
+.tablet-port .t-transport {
+  gap: 6px;
+  padding: 0 8px;
+}
+
+html.tablet-port .t-transport .master input.master-vol {
+  width: 110px;
+}
+
+/* 狭い横（iPad mini の横など）：操作のバーを詰める */
+@media (max-width: 1180px) {
+  html.tablet-land .t-transport .master input.master-vol {
+    width: 110px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .tablet-land .t-transport .pos-sub {
+    display: none;
+  }
+}
+
+/* ---- 設定：タッチ操作・入力パッド（行は左に名前と説明、右に操作。デスクトップでも使う） ---- */
+
+.set-touch {
+  gap: 0;
+}
+
+.set-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.set-block h3 {
+  margin: 18px 0 6px;
+  font-size: 12.5px;
+  color: var(--mute);
+  font-weight: 600;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line2);
+}
+
+.set-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.set-row-text b {
+  font-weight: 600;
+}
+
+.set-row-text .lbl {
+  line-height: 1.5;
+}
+
+.set-row-ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.set-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+}
+
+.set-slider input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.set-slider .mono {
+  width: 52px;
+  text-align: right;
+}
+
+.set-switch {
+  position: relative;
+  width: 46px;
+  height: 28px;
+  flex: none;
+  border-radius: 14px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  padding: 0;
+  transition: background 0.15s;
+}
+
+.set-switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--mute);
+  transition: left 0.15s, background 0.15s;
+}
+
+.set-switch.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.set-switch.on i {
+  left: 21px;
+  background: #0b1a24;
+}
+
+.set-kit {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line2);
+  flex-wrap: wrap;
+}
+
+.set-kit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 64px);
+  gap: 6px;
+}
+
+.set-kit-pad {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #2a3341;
+  background: #151b24;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.set-kit-pad.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(76, 194, 255, 0.35);
+  background: #122030;
+}
+
+.set-kit-note {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.6;
+}
+
+.set-measure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.set-tap {
+  width: 120px;
+  height: 120px;
+  border-radius: 60px;
+  border: 2px solid #2b4b60;
+  background: radial-gradient(circle at 50% 40%, #183247, #0f1a24);
+  color: #8ad8ff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.set-tap b {
+  font-size: 20px;
+  letter-spacing: 0.08em;
+}
+
+.ok-text {
+  color: var(--ok);
+}
+
+.set-warn {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+}
+
+.set-warn-icon {
+  color: var(--amber);
+  flex: none;
+  padding-top: 1px;
+}
+
+.set-warn-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.6;
+}
+
+.set-warn-text b {
+  color: var(--amber);
+}
+
+.settings-nav button .set-nav-warn {
+  margin-left: auto;
+  color: var(--amber);
+  display: inline-flex;
+}
+
+.settings-nav button:has(.set-nav-warn) {
+  display: flex;
+  align-items: center;
+}
+
+/* タブレット：設定の画面（項目は 52、行は 64、操作は 44） */
+
+html.tablet .settings-body {
+  grid-template-columns: 236px minmax(0, 1fr);
+}
+
+html.tablet .settings-nav {
+  padding: 10px 8px;
+  gap: 4px;
+}
+
+html.tablet .settings-nav button {
+  min-height: 52px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+html.tablet .settings-nav button.sub {
+  min-height: 44px;
+  padding-left: 28px;
+  font-size: 13.5px;
+}
+
+html.tablet .settings-main {
+  padding: 8px 22px 32px;
+}
+
+html.tablet .set-row {
+  min-height: 64px;
+}
+
+html.tablet .set-row-text b {
+  font-size: 15px;
+}
+
+html.tablet .set-row-text .lbl {
+  font-size: 13px;
+}
+
+html.tablet .set-seg {
+  padding: 3px;
+  border-radius: 12px;
+}
+
+html.tablet .set-seg button {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 9px;
+  font-size: 14.5px;
+}
+
+html.tablet .set-switch {
+  width: 52px;
+  height: 32px;
+  border-radius: 16px;
+}
+
+html.tablet .set-switch i {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+}
+
+html.tablet .set-switch.on i {
+  left: 23px;
+}
+
+html.tablet .set-slider {
+  width: 240px;
+}
+
+html.tablet .set-slider input[type='range'] {
+  height: 32px;
+}
+
+html.tablet .settings-main .btn,
+html.tablet .settings-main .btn.small {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+html.tablet .settings-main .field {
+  height: 44px;
+  font-size: 15px;
+  border-radius: 10px;
+}
+
+html.tablet .settings-main .seg:not(.set-seg) button {
+  height: 40px;
+  padding: 0 14px;
+}
+
+html.tablet .tempo-head {
+  min-height: 60px;
+}
+
+html.tablet .tempo-head .btn.small {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+html.tablet .tempo-head h1 {
+  font-size: 17px;
+}
+
+@media (max-width: 860px) {
+  html.tablet .settings-body {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  html.tablet .set-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- ホーム（タブレット） ---- */
+
+.th-home {
+  height: var(--app-h, 100%);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.th-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: 60px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  padding-top: env(safe-area-inset-top);
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+}
+
+.th-top .logo {
+  font-size: 16px;
+  gap: 10px;
+}
+
+.th-top .logo-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.th-top .lang-switch {
+  padding: 3px;
+  border-radius: 12px;
+}
+
+.th-top .lang-switch button {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.th-main {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 24px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.th-main h1 {
+  font-size: 24px;
+  margin: 0 0 6px;
+}
+
+.th-main h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.th-main .lbl {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.th-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 18px;
+  border-radius: 14px;
+  border: 1px solid #234156;
+  background: #0f1c26;
+}
+
+.th-tips-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+}
+
+.th-tips-i {
+  color: #8ad8ff;
+  display: inline-flex;
+}
+
+.th-tips-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.th-tips-cols > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.th-tips-cols b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.th-start {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.th-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line2);
+  background: var(--card);
+}
+
+.th-card.primary {
+  border-style: dashed;
+  border-color: #2b4b60;
+}
+
+.th-card.row {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+}
+
+.th-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 17px;
+}
+
+.th-card-icon {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.th-card-icon.blue {
+  background: #13324a;
+  color: #8ad8ff;
+}
+
+.th-card-icon.violet {
+  background: #2a2340;
+  color: #cbb8ff;
+}
+
+.th-pill {
+  margin-left: auto;
+  height: 24px;
+  background: #13324a;
+  color: #8ad8ff;
+  font-size: 12px;
+}
+
+.th-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.th-plus {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mute);
+}
+
+.th-card-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 15px;
+}
+
+.th-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.th-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.th-recent {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.th-recent-item {
+  position: relative;
+}
+
+.th-recent-open {
+  width: 100%;
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+  padding-right: 48px;
+  border-radius: 14px;
+  border: 1px solid var(--line2);
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+}
+
+.th-recent-open:active {
+  background: #18202a;
+}
+
+.th-recent-art {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 10px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 8px;
+  color: rgba(231, 235, 241, 0.7);
+}
+
+.th-recent-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.th-recent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.th-recent-row b {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+
+.th-recent-ago {
+  flex: none;
+}
+
+.th-recent-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.th-recent-pills .pill {
+  height: 24px;
+  font-size: 11.5px;
+}
+
+.th-recent-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: var(--mute);
+}
+
+.th-basics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.th-basics > div {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line2);
+  background: var(--card);
+}
+
+.th-basics > div > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.th-basics b {
+  font-size: 15px;
+  color: #8ad8ff;
+}
+
+.th-basics-i {
+  color: #8ad8ff;
+  flex: none;
+  padding-top: 1px;
+}
+
+@media (max-width: 760px) {
+  .th-tips-cols,
+  .th-start,
+  .th-recent,
+  .th-basics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 参照映像のずれ（タブレット：0.1 秒・0.01 秒のボタン） */
+.t-yt-offset {
+  gap: 6px;
+  font-size: 14px;
+}
+
+.t-yt-offset .t-ib.boxed {
+  width: 48px;
+  font-size: 13px;
+}
+
+/* ステムに分解：iPad ではメモリが足りないかもしれないモデルに印 */
+.badge-warn {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ---- ほかの画面（曲情報・ライブラリ・ステム・テンポ・AI難易度生成・ガイドライン・設定）：指で押せる大きさに ---- */
+
+html.tablet {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.tablet body {
+  touch-action: manipulation;
+}
+
+/* iPad の Safari は 16px より小さい入力欄に触れると画面を拡大してしまうので、16px にそろえる */
+html.tablet input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+html.tablet select,
+html.tablet textarea {
+  font-size: max(16px, 1em);
+}
+
+html.tablet button {
+  -webkit-touch-callout: none;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) .btn {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) .btn.small {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13.5px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) .ib {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 10px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) .seg button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) .field {
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page, .t-pane) input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) input[type='range'] {
+  min-height: 32px;
+}
+
+html.tablet :is(.tempo-page, .info-page, .gen-page, .guide-page, .lib-page, .stems-page) .link-btn {
+  min-height: 40px;
+}
+
+html.tablet .mode-card {
+  min-height: 56px;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+
+/* 曲情報：縦は1列（調べる・サムネイルを上に2つ並べ、項目は左に名前） */
+html.tablet .info-grid {
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 10px 14px;
+}
+
+html.tablet .info-label {
+  padding-top: 12px;
+  font-size: 14px;
+  color: var(--text2);
+}
+
+html.tablet .info-hint {
+  font-size: 11.5px;
+}
+
+html.tablet.tablet-port .info-body {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+html.tablet.tablet-port .info-main {
+  overflow: visible;
+  flex: none;
+  padding: 0 14px 32px;
+}
+
+html.tablet.tablet-port .info-side {
+  order: -1;
+  overflow: visible;
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+  padding: 14px;
+  border: 0;
+  background: none;
+}
+
+/* ライブラリ：行を高く、試聴のボタンを大きく */
+html.tablet .lib-search {
+  height: 44px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+html.tablet .lib-side-row {
+  height: 44px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+html.tablet .lib-tags {
+  gap: 6px;
+}
+
+html.tablet .lib-tags button {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  font-size: 13px;
+}
+
+html.tablet .lib-tr {
+  min-height: 56px;
+}
+
+html.tablet .lib-page .play-mini {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+}
+
+/* ステム：縦は1列（書き出しは下へ）、トラックの名前の列を細く */
+html.tablet.tablet-port .stems-body {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+html.tablet.tablet-port .stems-main {
+  overflow: visible;
+  flex: none;
+}
+
+html.tablet.tablet-port .stems-export {
+  flex: none;
+  border-left: 0;
+  border-top: 1px solid var(--line);
+  overflow: visible;
+}
+
+html.tablet.tablet-port .stems-grid {
+  grid-template-columns: 236px minmax(0, 1fr);
+}
+
+/* AI難易度生成・ガイドライン：左の列の項目を押しやすく */
+html.tablet .gen-page .gen-diff,
+html.tablet .guide-page .guide-band {
+  min-height: 56px;
+}
+
+/* ステム・AI難易度生成の操作のバー：はみ出す分は横にスクロール。ミュート・ソロは 40 */
+html.tablet :is(.stems-page, .gen-page) > .transport {
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-height: 60px;
+}
+
+html.tablet :is(.stems-page, .gen-page) > .transport::-webkit-scrollbar {
+  display: none;
+}
+
+html.tablet :is(.stems-page, .gen-page) > .transport .play-btn {
+  width: 52px;
+  height: 44px;
+  border-radius: 22px;
+}
+
+html.tablet :is(.stems-page, .gen-page, .t-pane) button.ms {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+/* ---- テンポ（タブレット）: 大きな TAP ---- */
+
+.tap-card {
+  align-items: center;
+}
+
+.tap-big {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  border: 2px solid rgba(76, 194, 255, 0.35);
+  background: radial-gradient(circle at 50% 38%, #173349, #0d1620 72%);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.06s, border-color 0.06s;
+}
+
+.tap-big b {
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.tap-big .mono {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tap-big:active {
+  transform: scale(0.97);
+  border-color: var(--accent);
+}
+
+html.tablet .tempo-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+html.tablet .tempo-title .lbl {
+  font-size: 12px;
+}
+
+/* 縦: 左右の列を縦に積み、画面全体を1本でスクロール */
+html.tablet-port .tempo-body {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.tablet-port .tempo-body > .tempo-main,
+html.tablet-port .tempo-body > .tempo-side {
+  flex: none;
+  overflow: visible;
+  min-height: auto;
+}
+
+html.tablet-port .tempo-body > .tempo-side {
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* ---- AI難易度生成（タブレット）: 判定・方針は小窓、音量は下の帯 ---- */
+
+html.tablet .gen-body {
+  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  position: relative;
+}
+
+html.tablet-port .gen-body {
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+
+/* 左の列の項目を縮ませない（中身がカードからはみ出さないように） */
+html.tablet .gen-left > * {
+  flex-shrink: 0;
+}
+
+/* 列の見出しは隠さない（見出しで聴く譜面を切り替えられるように） */
+html.tablet .gen-right.t-gen-pop {
+  position: absolute;
+  top: 70px;
+  right: 12px;
+  width: min(400px, calc(100% - 24px));
+  max-height: calc(100% - 82px);
+  border: 1px solid var(--line3);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  z-index: 30;
+  display: none;
+}
+
+html.tablet .gen-right.t-gen-pop.open {
+  display: flex;
+}
+
+.t-gen-pop-head {
+  gap: 8px;
+  margin: -4px 0 2px;
+}
+
+.t-gen-pop-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+html.tablet .gen-foot {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.t-gen-mix {
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--bar);
+  padding: 8px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.t-gen-mix::-webkit-scrollbar {
+  display: none;
+}
+
+.t-gen-mix .mix-strip {
+  flex-wrap: nowrap;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.t-gen-mix .mix-chip {
+  flex: 1 1 0;
+  min-width: 250px;
+  height: 52px;
+  gap: 6px;
+  padding: 0 10px 0 12px;
+  border-radius: 10px;
+}
+
+.t-gen-mix .mix-chip b {
+  flex: none;
+  font-size: 14px;
+}
+
+/* 縦: 音量は2段に折り返す（名前が潰れないように）。キーの有無の札は左の列の説明に任せる */
+html.tablet-port .t-gen-mix .mix-strip {
+  flex-wrap: wrap;
+}
+
+html.tablet-port .t-gen-mix .mix-chip {
+  min-width: 280px;
+}
+
+html.tablet-port .t-gen-mix .mix-chip-sub,
+html.tablet-port .gen-page .tempo-head > .pill {
+  display: none;
+}
+
+.t-gen-mix .mix-chip input.trk-vol {
+  flex: 1;
+  width: auto;
+  min-width: 80px;
+  height: 32px;
+}
+
+/* 見出しの行は1行に（題と説明は2段にしたので、縦でも説明を縮めて収まる） */
+html.tablet .gen-page .tempo-head {
+  flex-wrap: nowrap;
+}
+
+html.tablet .gen-page .tempo-title {
+  flex: 0 1 auto;
+}

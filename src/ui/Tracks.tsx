@@ -37,12 +37,15 @@ import { openSeparation, separating, useSeparate } from '../store/separate';
 
 /** トラックの見出しの幅 */
 export const HEAD_W = 344;
-const RULER_H = SEEK_CLOSED_H;
-const LOOP_H = 12;
-const SEC_H = 14;
-const SEC_TOP = LOOP_H + 2;
-const ROW_MIN = 24;
-const ROW_MAX = 64;
+
+/** トラックの寸法：見出しの幅・上の帯の高さ（ループの帯・セクションの段）・1本の高さ。タブレット版は指で触れるように大きく */
+const TD = { headW: HEAD_W, ruler: SEEK_CLOSED_H, loopH: 12, secH: 14, secTop: 14, rowMin: 24, rowMax: 64, grab: 6, tablet: false };
+const DESK_TD = { ...TD };
+const TABLET_TD = { headW: 300, ruler: 52, loopH: 20, secH: 20, secTop: 26, rowMin: 52, rowMax: 72, grab: 14, tablet: true };
+
+function applyTrackDims(tablet: boolean) {
+  Object.assign(TD, tablet ? TABLET_TD : DESK_TD);
+}
 
 const ORIG_COLOR = '#8FA3BC';
 const CHART_COLOR = '#4CC2FF';
@@ -254,11 +257,11 @@ function useSeekPointer(span: number, ruler: boolean) {
     if (end <= 0) return false;
     const xe = (end / seekLength(span)) * w;
     if (ruler) {
-      if (y < LOOP_H + 1) return false;
+      if (y < TD.loopH + 1) return false;
       const tx = endTabX(xe, w);
-      if (y >= SEC_TOP && y <= SEC_TOP + SEC_H && x >= tx - 1 && x <= tx + END_TAB_W + 1) return true;
+      if (y >= TD.secTop && y <= TD.secTop + TD.secH && x >= tx - 1 && x <= tx + END_TAB_W + 1) return true;
     }
-    return Math.abs(x - xe) <= 5;
+    return Math.abs(x - xe) <= TD.grab - 1;
   };
   /** A・B の線の近く（どの段でも掴める）。上の帯では線の外に出ている印（A は左、B は右）も */
   const nearHandle = (x: number, w: number): boolean => {
@@ -267,16 +270,16 @@ function useSeekPointer(span: number, ruler: boolean) {
     const len = seekLength(span);
     const xOf = (b: number) => (tempo.beatToSec(b) / len) * w;
     const near = (xl: number, side: 'a' | 'b') =>
-      Math.abs(x - xl) <= 6 || (ruler && (side === 'a' ? x >= xl - 12 && x < xl : x > xl && x <= xl + 12));
+      Math.abs(x - xl) <= TD.grab || (ruler && (side === 'a' ? x >= xl - 12 && x < xl : x > xl && x <= xl + 12));
     if (l && l.b > l.a) return near(xOf(l.a), 'a') || near(xOf(l.b), 'b');
     return !!mk && near(xOf(mk.beat), mk.side);
   };
   const beatTol = (w: number) => {
     const tempo = tempoOf(useEditor.getState().doc);
     const secPerPx = seekLength(span) / Math.max(1, w);
-    return tempo.secToBeat(secPerPx * 8) - tempo.secToBeat(0);
+    return tempo.secToBeat(secPerPx * (TD.grab + 2)) - tempo.secToBeat(0);
   };
-  const inBand = (y: number) => ruler && y < LOOP_H + 1;
+  const inBand = (y: number) => ruler && y < TD.loopH + 1;
   const seek = (c: HTMLCanvasElement, clientX: number, commit: boolean) => {
     const { beat: b } = geomAt(c, clientX, 0);
     setCursorBeat(b);
@@ -403,14 +406,14 @@ function drawOverlay(
     if (opts.tabs) {
       const tx = endTabX(xe, W);
       ctx.beginPath();
-      ctx.roundRect(tx, SEC_TOP, END_TAB_W, SEC_H, 2);
+      ctx.roundRect(tx, TD.secTop, END_TAB_W, TD.secH, 2);
       ctx.fillStyle = '#E7EBF1';
       ctx.fill();
       ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#0B0E13';
-      ctx.fillText('END', tx + END_TAB_W / 2, SEC_TOP + SEC_H / 2 + 0.5);
+      ctx.fillText('END', tx + END_TAB_W / 2, TD.secTop + TD.secH / 2 + 0.5);
       ctx.textAlign = 'left';
     }
   }
@@ -422,10 +425,10 @@ function drawOverlay(
     ctx.textBaseline = 'middle';
     ctx.fillStyle = col;
     ctx.beginPath();
-    ctx.roundRect(x, 0, 12, LOOP_H, 2);
+    ctx.roundRect(x, 0, 12, TD.loopH, 2);
     ctx.fill();
     ctx.fillStyle = '#1A1408';
-    ctx.fillText(label, x + 6, LOOP_H / 2 + 0.5);
+    ctx.fillText(label, x + 6, TD.loopH / 2 + 0.5);
     ctx.textAlign = 'left';
   };
   if (loop && loop.b > loop.a) {
@@ -437,7 +440,7 @@ function drawOverlay(
     const col = on ? '#FFC768' : 'rgba(255,199,104,.55)';
     if (opts.tabs) {
       ctx.fillStyle = on ? 'rgba(255,199,104,.45)' : 'rgba(255,199,104,.16)';
-      ctx.fillRect(xa, 0, Math.max(2, xb - xa), LOOP_H);
+      ctx.fillRect(xa, 0, Math.max(2, xb - xa), TD.loopH);
     }
     ctx.fillStyle = col;
     ctx.fillRect(Math.round(xa), 0, 1, H);
@@ -492,9 +495,14 @@ export function releaseFocus(e: React.PointerEvent<HTMLElement>) {
   if (a && a !== document.body && e.currentTarget.contains(a) && a.tagName !== 'SELECT') a.blur();
 }
 
-/** length: 曲の長さ（曲の終わり END。秒）、span: 横幅に入れる長さ（END と原曲の鳴り終わりの遅い方） */
-export function TrackPanel({ length, span }: { length: number; span: number }) {
-  const open = useLayout((s) => s.seekOpen);
+/**
+ * length: 曲の長さ（曲の終わり END。秒）、span: 横幅に入れる長さ（END と原曲の鳴り終わりの遅い方）。
+ * tablet: タブレット版（開閉と高さはタブレット版の画面が持つ。寸法を指で触れる大きさに）
+ */
+export function TrackPanel({ length, span, tablet }: { length: number; span: number; tablet?: { open: boolean; height: number; onToggle: () => void } }) {
+  applyTrackDims(!!tablet);
+  const deskOpen = useLayout((s) => s.seekOpen);
+  const open = tablet ? tablet.open : deskOpen;
   const tracksH = useLayout((s) => s.tracksH);
   const [winH, setWinH] = useState(() => window.innerHeight);
   useEffect(() => {
@@ -503,19 +511,19 @@ export function TrackPanel({ length, span }: { length: number; span: number }) {
     return () => window.removeEventListener('resize', h);
   }, []);
   void winH;
-  const height = open ? Math.min(tracksH, maxTracksH()) : RULER_H;
+  const height = tablet ? tablet.height : open ? Math.min(tracksH, maxTracksH()) : TD.ruler;
   const rows = useTrackRows();
-  const bodyH = Math.max(0, height - RULER_H - 1);
-  const rowH = Math.max(ROW_MIN, Math.min(ROW_MAX, Math.floor(bodyH / Math.max(1, rows.length))));
+  const bodyH = Math.max(0, height - TD.ruler - 1);
+  const rowH = Math.max(TD.rowMin, Math.min(TD.rowMax, Math.floor(bodyH / Math.max(1, rows.length))));
   return (
-    <div className="tracks" style={{ height }} onPointerUp={releaseFocus}>
-      <div className="tracks-top" style={{ height: RULER_H }}>
-        <Corner length={length} open={open} />
+    <div className={`tracks ${tablet ? 't-tracks' : ''}`} style={{ height }} onPointerUp={releaseFocus}>
+      <div className="tracks-top" style={{ height: TD.ruler }}>
+        <Corner length={length} open={open} onToggle={tablet?.onToggle} />
         <Ruler length={length} span={span} />
       </div>
       {open && (
         <div className="tracks-body scroll" style={{ height: bodyH }}>
-          <div className="tracks-grid" style={{ gridTemplateColumns: `${HEAD_W}px minmax(0, 1fr)`, minHeight: '100%' }}>
+          <div className="tracks-grid" style={{ gridTemplateColumns: `${TD.headW}px minmax(0, 1fr)`, minHeight: '100%' }}>
             <div className="tracks-heads">
               {rows.map((r) => (
                 <TrackHead key={r.id} row={r} h={rowH} />
@@ -529,7 +537,7 @@ export function TrackPanel({ length, span }: { length: number; span: number }) {
   );
 }
 
-function Corner({ length, open }: { length: number; open: boolean }) {
+function Corner({ length, open, onToggle }: { length: number; open: boolean; onToggle?: () => void }) {
   const doc = useEditor((s) => s.doc);
   const beat = usePlayBeat();
   const stems = useSidecar((s) => s.stems);
@@ -539,14 +547,22 @@ function Corner({ length, open }: { length: number; open: boolean }) {
   const file = useRef<HTMLInputElement>(null);
   const sepBusy = separating();
   return (
-    <div className="tracks-corner" style={{ width: HEAD_W }}>
-      <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? tr('トラックを閉じる（上の境目をドラッグで高さを変えられます）', 'Close the tracks (drag the edge above to change their height)') : tr('トラックを開く', 'Open the tracks')} aria-expanded={open}>
-        {open ? Icon.chevronDown(14) : Icon.chevronUp(14)}
-      </button>
+    <div className="tracks-corner" style={{ width: TD.headW }}>
+      {onToggle ? (
+        // タブレット版：押しやすい「^ トラック」（上の縁をドラッグで高さ）
+        <button className="t-btn t-trk-toggle" onClick={onToggle} aria-expanded={open}>
+          {open ? Icon.chevronDown(16) : Icon.chevronUp(16)}
+          <span>{tr('トラック', 'Tracks')}</span>
+        </button>
+      ) : (
+        <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? tr('トラックを閉じる（上の境目をドラッグで高さを変えられます）', 'Close the tracks (drag the edge above to change their height)') : tr('トラックを開く', 'Open the tracks')} aria-expanded={open}>
+          {open ? Icon.chevronDown(14) : Icon.chevronUp(14)}
+        </button>
+      )}
       <span className="mono t-now">{formatTime(tempoOf(doc).beatToSec(Math.max(0, beat)))}</span>
       <span className="mono lbl">/ {formatTime(length)}</span>
       <span className="grow" />
-      {busy ? (
+      {onToggle && !open ? null : busy ? (
         <span className="lbl ellipsis" title={busy}>
           {busy}
         </span>
@@ -615,21 +631,25 @@ function Ruler({ length, span }: { length: number; span: number }) {
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, W, H);
         c.fillStyle = '#0A0D11';
-        c.fillRect(0, 0, W, LOOP_H);
+        c.fillRect(0, 0, W, TD.loopH);
         c.font = '10px system-ui, sans-serif';
         c.textBaseline = 'middle';
         c.fillStyle = '#4E4532';
-        c.fillText(tr('A–B ループ: ここをドラッグ', 'A–B loop: drag here'), 6, LOOP_H / 2 + 1);
+        c.fillText(TD.tablet ? tr('A–B ループ: ここをなぞる', 'A–B loop: drag here') : tr('A–B ループ: ここをドラッグ', 'A–B loop: drag here'), 6, TD.loopH / 2 + 1);
         if (sections.length === 0) {
           c.fillStyle = '#151A21';
-          c.fillRect(0, SEC_TOP, W, SEC_H);
+          c.fillRect(0, TD.secTop, W, TD.secH);
           c.fillStyle = '#5F6978';
-          c.fillText(tr('セクション: 小節番号をダブルクリックで付けられます', 'Sections: double-click a measure number to add one'), 6, SEC_TOP + SEC_H / 2 + 1);
+          c.fillText(
+            TD.tablet ? tr('セクション: 小節番号のメニューで付けられます', 'Sections: add one from the measure-number menu') : tr('セクション: 小節番号をダブルクリックで付けられます', 'Sections: double-click a measure number to add one'),
+            6,
+            TD.secTop + TD.secH / 2 + 1,
+          );
         } else {
           const firstX = (tempo.beatToSec(tempo.measureStart(sections[0].m)) / len) * W;
           if (firstX > 2) {
             c.fillStyle = '#151A21';
-            c.fillRect(0, SEC_TOP, firstX - 2, SEC_H);
+            c.fillRect(0, TD.secTop, firstX - 2, TD.secH);
           }
           sections.forEach((sc, i) => {
             const x0 = (tempo.beatToSec(tempo.measureStart(sc.m)) / len) * W;
@@ -637,16 +657,16 @@ function Ruler({ length, span }: { length: number; span: number }) {
             const col = sectionColor(sc.name, colors);
             c.fillStyle = col + '55';
             c.beginPath();
-            c.roundRect(x0, SEC_TOP, Math.max(2, x1 - x0 - 2), SEC_H, 3);
+            c.roundRect(x0, TD.secTop, Math.max(2, x1 - x0 - 2), TD.secH, 3);
             c.fill();
             c.fillStyle = col;
-            c.fillRect(x0, SEC_TOP, 2, SEC_H);
+            c.fillRect(x0, TD.secTop, 2, TD.secH);
             c.save();
             c.beginPath();
-            c.rect(x0, SEC_TOP, Math.max(0, x1 - x0 - 4), SEC_H);
+            c.rect(x0, TD.secTop, Math.max(0, x1 - x0 - 4), TD.secH);
             c.clip();
             c.fillStyle = '#E7EBF1';
-            c.fillText(sc.name, x0 + 5, SEC_TOP + SEC_H / 2 + 1);
+            c.fillText(sc.name, x0 + 5, TD.secTop + TD.secH / 2 + 1);
             c.restore();
           });
         }
@@ -657,7 +677,7 @@ function Ruler({ length, span }: { length: number; span: number }) {
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
       ctx.drawImage(cache.current.canvas, 0, 0);
       ctx.restore();
-      drawOverlay(ctx, W, H, span, SEC_TOP, { tabs: true, cursor, beat, playing, end: length });
+      drawOverlay(ctx, W, H, span, TD.secTop, { tabs: true, cursor, beat, playing, end: length });
     },
     [doc, length, span, beat, cursor, playing, loop, loopMark, sections, colors, lang],
   );

@@ -19,6 +19,8 @@ import { tempoOf } from '../store/derived';
 import { useSidecar } from '../store/sidecar';
 import { playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
 import { columnKind, compareColumns, isPassing, selectDiff, setGenView, setListen, shownLevel, toggleChip, useGen, type DiffState, type GenState } from '../store/gen';
+import { useDevice } from '../store/device';
+import { setGenDetail } from './tablet/shared';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
 import { OriginBadge } from './OriginBadge';
@@ -491,7 +493,14 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
   return (
     <button
       className={`gen-colhead ${on ? 'on' : ''} ${sel ? 'sel' : ''} ${playable ? '' : 'empty'} ${kind ?? ''}`}
-      onClick={() => pickColumn(col)}
+      onClick={() => {
+        // タブレット: 聴いている列の見出しをもう一度タップすると、判定・方針の小窓を開け閉めする
+        if (useDevice.getState().tablet && on && kind !== 'source') {
+          setGenDetail((was) => !was);
+          return;
+        }
+        pickColumn(col);
+      }}
       aria-pressed={on}
       title={
         playable

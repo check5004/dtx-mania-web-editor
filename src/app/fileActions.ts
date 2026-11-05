@@ -11,6 +11,7 @@ import { hasOriginLine, originOf, type ChartOrigin } from '../dtx/origin';
 import { parseDtx } from '../dtx/parse';
 import { serializeDtx } from '../dtx/serialize';
 import {
+  AUDIO_EXT,
   audioFiles,
   downloadBytes,
   dtxFiles,
@@ -37,6 +38,7 @@ import { CH } from '../dtx/model';
 import { frac } from '../dtx/fraction';
 import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
+import { readZip, songFoldersOf } from '../fs/zip';
 
 const get = useEditor.getState;
 
@@ -603,11 +605,15 @@ export function downloadDtx() {
 let autosaveTimer = 0;
 let lastAutosaved: DtxDoc | null = null;
 
+/** 最後にこのブラウザへ自動保存した時刻（タブレットの「保存と書き出し」に出す） */
+export let lastAutosaveAt = 0;
+
 export async function autosaveNow(saved = false) {
   const s = get();
   if (s.screen !== 'editor') return;
   if (!saved && s.doc === lastAutosaved) return;
   lastAutosaved = s.doc;
+  lastAutosaveAt = Date.now();
   const f = s.doc.fields;
   const entry: RecentEntry = {
     id: s.meta.recentId ?? recentIdFor(s.folder, s.meta.fileName),
@@ -674,4 +680,140 @@ export async function openRecent(e: RecentEntry) {
   openDocument(parsed.doc, { ...newMeta(e.fileName, null), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, null, { dirty: !e.saved });
   await loadSidecarFor(null, e.fileName, e.sidecar);
   toast(tr('自動保存した譜面だけを開きました。音を鳴らすには曲フォルダを開いてください', 'Opened only the autosaved chart. Open the song folder to hear the sounds'), 'info', 6000);
+}
+
+// ---- ZIP（iPad：フォルダを選べない・書けない） ------------------------------------------
+
+/** ZIP にまとめた曲フォルダを開く（ファイル App の「圧縮」や PC で作った ZIP）。中身はメモリに持つ */
+export async function openZipFile(file: File) {
+  useEditor.setState({ loading: tr('ZIP を開いています…', 'Opening the ZIP…') });
+  let z: Awaited<ReturnType<typeof readZip>>;
+  try {
+    z = await readZip(file);
+  } catch (e) {
+    toast(tr(`ZIP を開けませんでした: ${(e as Error).message}`, `Couldn't open the ZIP: ${(e as Error).message}`), 'error', 7000);
+    return;
+  } finally {
+    useEditor.setState({ loading: null });
+  }
+  const folders = songFoldersOf(z);
+  if (folders.length === 0) {
+    // DTX が無い：音声があれば、それで新しい譜面を作る
+    const audio = [...z.files].filter(([p]) => AUDIO_EXT.test(p)).map(([p, d]) => new File([d as Uint8Array<ArrayBuffer>], p.split('/').pop()!));
+    if (audio.length) {
+      await openDroppedFiles(audio);
+      return;
+    }
+    toast(tr('ZIP の中に DTX も音声ファイルもありませんでした', 'The ZIP has no DTX or audio files'), 'warn', 6000);
+    return;
+  }
+  if (!(await confirmDiscard())) return;
+  let folder = folders[0];
+  if (folders.length > 1) {
+    const picked = await chooseDialog({
+      title: tr('どの曲を開きますか？', 'Which song do you want to open?'),
+      body: tr(`${file.name} には曲が ${folders.length} 個あります。`, `${file.name} has ${folders.length} songs.`),
+      options: folders.map((f) => ({ label: f.name, sub: tr(`譜面 ${dtxFiles(f).length} 個`, `${dtxFiles(f).length} ${pl(dtxFiles(f).length, 'chart')}`), value: f })),
+    });
+    if (!picked) return;
+    folder = picked;
+  }
+  await openFolder(folder);
+}
+
+/** 選んだファイルを開く：ZIP なら曲フォルダとして、DTX・音声ならそれから */
+export async function openPickedFiles(files: File[]) {
+  const zip = files.find((f) => /\.zip$/i.test(f.name));
+  if (zip) {
+    await openZipFile(zip);
+    return;
+  }
+  await openDroppedFiles(files);
+}
+
+export type ExportWhat = 'folder' | 'dtx' | 'diffs';
+
+export interface ExportFile {
+  name: string;
+  bytes: Uint8Array;
+  type: string;
+}
+
+/**
+ * 書き出すファイルを作る（タブレットの「保存と書き出し」）。
+ * folder: 曲フォルダの ZIP（DTX・音・画像・キットの音・作業ファイル）、dtx: 開いている難易度の DTX だけ、
+ * diffs: 選んだ難易度の DTX（開いている難易度は今の中身、ほかはフォルダの中身）を ZIP に
+ */
+export async function buildExport(
+  what: ExportWhat,
+  opts: { encoding?: 'shift_jis' | 'utf-8-bom'; diffs?: string[]; ask?: boolean } = {},
+): Promise<{ file: ExportFile; lost: string[] } | null> {
+  const s = get();
+  const doc = s.doc;
+  const enc = opts.encoding ?? 'shift_jis';
+  const { bytes, lost } = encodeDtx(serializeDtx(withSongEnd(doc)), enc);
+  // ask: false なら確かめずに作り、表せない文字は返す（「保存と書き出し」は前もって作っておき、画面に出す）
+  if (lost.length > 0 && opts.ask !== false) {
+    const ok = await confirmDialog({
+      title: tr('Shift_JISで表せない文字があります', "Some characters can't be written in Shift_JIS"),
+      body: tr(
+        `${lost.join(' ')}\n\nNXは譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるか、UTF-8 で書き出してください。このまま書き出しますか？`,
+        `${lost.join(' ')}\n\nNX reads charts as Shift_JIS, so these characters become "?". Replace them in Song info or export as UTF-8. Export anyway?`,
+      ),
+      ok: tr('このまま書き出す', 'Export anyway'),
+    });
+    if (!ok) return null;
+  }
+  const fileName = s.meta.fileName;
+  const folder = s.folder;
+  // 開いている譜面は、メモリの曲フォルダにも置いておく（難易度を切り替えて戻ったとき・次の ZIP に入れる）
+  if (folder && !folder.dir) await putFile(folder, fileName, bytes);
+  if (what === 'dtx') return { file: { name: fileName, bytes, type: 'application/octet-stream' }, lost };
+  const files: Record<string, Uint8Array> = {};
+  const title = (doc.fields['TITLE'] || folder?.name || 'song').replace(/[\\/:*?"<>|]/g, '_');
+  if (what === 'diffs') {
+    const want = new Set((opts.diffs ?? [fileName]).map((f) => f.toLowerCase()));
+    if (folder) {
+      for (const f of dtxFiles(folder)) {
+        if (!want.has(f.name.toLowerCase()) || f.name.toLowerCase() === fileName.toLowerCase()) continue;
+        files[f.path] = new Uint8Array(await (await f.getFile()).arrayBuffer());
+      }
+    }
+    files[fileName] = bytes;
+    return { file: { name: `${title}-dtx.zip`, bytes: zipSync(files, { level: 0 }), type: 'application/zip' }, lost };
+  }
+  if (folder) {
+    for (const f of folder.files.values()) files[f.path] = new Uint8Array(await (await f.getFile()).arrayBuffer());
+  }
+  for (const k of await kitFilesNeeded(doc, folder)) files[k.path] = k.bytes;
+  files[fileName] = bytes;
+  const side = sidecarBytes(folder, fileName);
+  if (side) files[sidecarName(fileName)] = side;
+  return { file: { name: `${title}.zip`, bytes: zipSync(files, { level: 0 }), type: 'application/zip' }, lost };
+}
+
+/** 書き出したファイルを渡す：共有（AirDrop・ファイル App・ほかのアプリ）か、ダウンロード（ファイルに保存） */
+export async function deliverExport(f: ExportFile, how: 'share' | 'download'): Promise<boolean> {
+  if (how === 'share') {
+    const file = new File([f.bytes as Uint8Array<ArrayBuffer>], f.name, { type: f.type });
+    const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+    if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
+      try {
+        await nav.share({ files: [file], title: f.name });
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return false;
+        toast(tr(`共有できませんでした: ${(e as Error).message}`, `Couldn't share: ${(e as Error).message}`), 'error', 7000);
+        return false;
+      }
+    } else {
+      downloadBytes(f.name, f.bytes, f.type);
+      toast(tr('このブラウザは共有できないので、ダウンロードしました', "This browser can't share files, so it was downloaded"), 'info', 6000);
+    }
+  } else {
+    downloadBytes(f.name, f.bytes, f.type);
+  }
+  markSidecarSaved();
+  markSaved(get().doc);
+  toast(tr(`${f.name} を書き出しました`, `Exported ${f.name}`), 'ok');
+  return true;
 }

@@ -26,6 +26,7 @@ import {
 import { useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
 import { fileExists, useStems } from '../store/stems';
+import { IS_IOS } from '../store/device';
 import { confirmDialog } from './dialogs';
 import { Icon } from './icons';
 
@@ -177,7 +178,14 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
                   <span className={`radio-dot ${s.model === id ? 'on' : ''}`} />
                   <span>
                     <b>{m.name}</b>
-                    {id === 'bs_roformer_sw' && <span className="badge-ok">{tr('おすすめ', 'Recommended')}</span>}
+                    {IS_IOS ? (
+                      <>
+                        {id === 'scnet_small' && <span className="badge-ok">{tr('iPad におすすめ', 'Best on iPad')}</span>}
+                        {id === 'bs_roformer_sw' && <span className="badge-warn">{tr('メモリ不足の恐れ', 'May run out of memory')}</span>}
+                      </>
+                    ) : (
+                      id === 'bs_roformer_sw' && <span className="badge-ok">{tr('おすすめ', 'Recommended')}</span>
+                    )}
                     <span className="d">
                       {isJa()
                         ? `${m.summary}・初回だけ ${mb(f.bytes)} を読み込み${m.webgpuOnly ? '・GPU が必要' : '・CPU でも動く'}・ドラムの分離 ${m.drumsSdr.toFixed(1)} dB`
@@ -188,6 +196,11 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
               );
             })}
           </div>
+          {IS_IOS && (
+            <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
+              {tr('iPad は使えるメモリが少ないので、軽いモデルから試してください。分解中も譜面の編集はできます。', 'iPad has less memory to work with, so try the light model first. You can keep editing the chart while it runs.')}
+            </div>
+          )}
           <div className="lbl" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.6 }}>
             {tr(
               'ドラムの分離＝正解付きの曲（MUSDB18 の30曲）で測った SDR。大きいほど良く、3 dB 上がると残る誤差がおよそ半分です。',

@@ -8,6 +8,7 @@ import { freeWavNumber, setField } from '../edit/ops';
 import { INSTS, instInfo } from '../library/analyze';
 import type { Inst, LibraryKit } from '../library/db';
 import { playAudition, useStopAuditionOnClose } from '../store/audition';
+import { NO_FOLDER_PICK } from '../store/device';
 import { backToChart, edit, openPage, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
 import { kitFile, setKit, useKit } from '../store/kit';
 import {
@@ -19,6 +20,7 @@ import {
   filteredItems,
   grantFolders,
   importFromFileList,
+  importSongZip,
   importZip,
   kitCount,
   loadBuiltinItems,
@@ -100,6 +102,7 @@ export function LibraryPage() {
   const st = useLibrary();
   const fileInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
+  const songZipInput = useRef<HTMLInputElement>(null);
   const [showAll, setShowAll] = useState(false);
   useStopAuditionOnClose('lib:');
   useEffect(() => {
@@ -159,9 +162,27 @@ export function LibraryPage() {
         <button className="btn small" onClick={() => void exportZip()} disabled={st.samples.length === 0} title={tr('ライブラリ全体を ZIP に書き出します', 'Export the whole library as a ZIP')}>
           {tr('ZIPでバックアップ', 'Back up as ZIP')}
         </button>
-        <button className="btn small primary" onClick={() => void startImport()} disabled={!!st.importing}>
-          {Icon.plus(14)} {tr('曲フォルダから取り込む', 'Import from song folders')}
-        </button>
+        {NO_FOLDER_PICK ? (
+          // iPad：フォルダを選べないので、曲フォルダの ZIP から取り込む
+          <button className="btn small primary" onClick={() => songZipInput.current?.click()} disabled={!!st.importing}>
+            {Icon.zip(14)} {tr('曲のZIPから取り込む', 'Import from a song ZIP')}
+          </button>
+        ) : (
+          <button className="btn small primary" onClick={() => void startImport()} disabled={!!st.importing}>
+            {Icon.plus(14)} {tr('曲フォルダから取り込む', 'Import from song folders')}
+          </button>
+        )}
+        <input
+          ref={songZipInput}
+          type="file"
+          accept=".zip,application/zip"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) void importSongZip(f);
+          }}
+        />
         <FolderInput inputRef={fileInput} onFiles={(l) => void importFromFileList(l)} />
         <input
           ref={zipInput}

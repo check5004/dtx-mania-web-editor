@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useLang } from './i18n/useLang';
 import { startAutosave } from './app/fileActions';
-import { useEditor } from './store/editor';
+import { dismissToast, useEditor } from './store/editor';
+import './store/device';
 import './store/stems';
 import './store/kit';
 import { loadLibrary } from './store/library';
@@ -14,8 +15,19 @@ function Toasts() {
   return (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.level}`}>
-          {t.text}
+        <div key={t.id} className={`toast ${t.level} ${t.action ? 'has-action' : ''}`}>
+          <span>{t.text}</span>
+          {t.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                dismissToast(t.id);
+                t.action?.run();
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

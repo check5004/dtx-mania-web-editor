@@ -5,6 +5,7 @@ import { formatUsd, modelLabel } from '../ai/tasks';
 import { downloadBytes } from '../fs/folder';
 import { FEATURE_DEFS } from '../gen/features';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { NO_FOLDER_PICK } from '../store/device';
 import { goBack, openSettings, toast, useEditor } from '../store/editor';
 import {
   addRow,
@@ -20,6 +21,7 @@ import {
   removeRow,
   representatives,
   scanFromFileList,
+  scanFromZip,
   setExcluded,
   setRow,
   useGuideline,
@@ -35,6 +37,7 @@ export function GuidelinePage() {
   const cost = useAi(() => taskCostEstimate('guideline'));
   const folderInput = useRef<HTMLInputElement>(null);
   const jsonInput = useRef<HTMLInputElement>(null);
+  const zipInput = useRef<HTMLInputElement>(null);
   const from = useEditor((s) => s.returnPage);
   useEffect(() => {
     void loadGuideline();
@@ -91,9 +94,27 @@ export function GuidelinePage() {
         <button className="btn small" onClick={exportJson}>
           {tr('書き出し（.json）', 'Export (.json)')}
         </button>
-        <button className="btn small primary" onClick={() => void pickAndScan(folderInput.current)} disabled={!!st.scanning}>
-          {Icon.plus(14)} {tr('曲を取り込んで再集計', 'Import songs and recompute')}
-        </button>
+        {NO_FOLDER_PICK ? (
+          // iPad：フォルダを選べないので、曲フォルダの ZIP から
+          <button className="btn small primary" onClick={() => zipInput.current?.click()} disabled={!!st.scanning}>
+            {Icon.zip(14)} {tr('曲のZIPを取り込んで再集計', 'Import a song ZIP and recompute')}
+          </button>
+        ) : (
+          <button className="btn small primary" onClick={() => void pickAndScan(folderInput.current)} disabled={!!st.scanning}>
+            {Icon.plus(14)} {tr('曲を取り込んで再集計', 'Import songs and recompute')}
+          </button>
+        )}
+        <input
+          ref={zipInput}
+          type="file"
+          accept=".zip,application/zip"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) void scanFromZip(f);
+          }}
+        />
         <input
           ref={jsonInput}
           type="file"

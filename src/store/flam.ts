@@ -22,6 +22,7 @@ import {
 import { opDelete, type Pos } from '../edit/ops';
 import { useInputSettings } from '../input/settings';
 import { addChipMenuItems, addLaneMenuItems, type CtxItem } from './ctxMenu';
+import { useDevice } from './device';
 import { tempoOf } from './derived';
 import { chipAt, deleteChips, edit, placeChips, prepareSounds, previewWav, toast, useEditor } from './editor';
 import { placeVel } from './velocity';
@@ -345,7 +346,7 @@ addChipMenuItems((ids) => {
 addLaneMenuItems((at) => [
   {
     label: tr('ここにフラムを置く', 'Place a flam here'),
-    hint: useFlam.getState().mode ? tr('クリック', 'Click') : `${FLAM_MOD_LABEL}+${tr('クリック', 'Click')}`,
+    hint: useDevice.getState().tablet ? undefined : useFlam.getState().mode ? tr('クリック', 'Click') : `${FLAM_MOD_LABEL}+${tr('クリック', 'Click')}`,
     run: () => {
       placeFlam(at.lane, at.alt, at.pos);
     },

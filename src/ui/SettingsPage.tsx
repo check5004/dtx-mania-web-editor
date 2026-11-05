@@ -19,13 +19,15 @@ import {
   useInputSettings,
   type LaneTarget,
 } from '../input/settings';
+import { NO_MIDI, useDevice } from '../store/device';
 import { goBack, openPage, useEditor } from '../store/editor';
 import { velPresetNames } from '../store/velocity';
 import { AiSettings } from './AiSettings';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
+import { MidiUnavailableNote, PadSettings, TouchSettings } from './tablet/TouchSettings';
 
-type Section = 'lang' | 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai';
+type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai';
 
 /** MIDI の割り当て先（名前は今の言語で） */
 const targets = (): { t: LaneTarget; key: string; name: string; color: string }[] =>
@@ -36,7 +38,8 @@ const targets = (): { t: LaneTarget; key: string; name: string; color: string }[
   });
 
 export function SettingsPage() {
-  const [sec, setSec] = useState<Section>(() => (useEditor.getState().settingsSection as Section | undefined) ?? 'midi');
+  const tablet = useDevice((s) => s.tablet);
+  const [sec, setSec] = useState<Section>(() => (useEditor.getState().settingsSection as Section | undefined) ?? (useDevice.getState().tablet ? 'touch' : 'midi'));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !document.querySelector('.capturing')) goBack();
@@ -59,20 +62,10 @@ export function SettingsPage() {
       </header>
       <div className="settings-body">
         <nav className="settings-nav">
-          {(
-            [
-              // 言語はどちらの言語の画面でも見つけられるように、両方の名前を出す i18n-ignore
-              ['lang', tr('言語（Language）', 'Language (言語)')],
-              ['midi', tr('電子ドラム（MIDI）', 'Electronic drums (MIDI)')],
-              ['keys', tr('キーボード', 'Keyboard')],
-              ['lanes', tr('レーンの並び', 'Lane order')],
-              ['latency', tr('入力の遅れの補正', 'Input latency')],
-              ['velocity', tr('ベロシティ', 'Velocity')],
-              ['ai', tr('AI（OpenRouter）', 'AI (OpenRouter)')],
-            ] as const
-          ).map(([k, label]) => (
+          {navItems(tablet).map(([k, label]) => (
             <button key={k} className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>
               {label}
+              {k === 'midi' && NO_MIDI && <span className="set-nav-warn">{Icon.info(16)}</span>}
             </button>
           ))}
           <button className="sub" onClick={() => openPage('guideline')} title={tr('手元の曲から作る、レベルの基準', 'Level guidelines built from your local songs')}>
@@ -81,6 +74,8 @@ export function SettingsPage() {
         </nav>
         <main className="settings-main scroll">
           {sec === 'lang' && <LanguageSettings />}
+          {sec === 'touch' && <TouchSettings />}
+          {sec === 'pads' && <PadSettings />}
           {sec === 'midi' && <MidiSettings />}
           {sec === 'keys' && <KeySettings />}
           {sec === 'lanes' && <LaneOrderSettings />}
@@ -91,6 +86,26 @@ export function SettingsPage() {
       </div>
     </div>
   );
+}
+
+/** 左の項目。タブレットではタッチ操作・入力パッドを上に（デスクトップではタッチ操作を下に。入力パッドはタブレットの画面だけ） */
+function navItems(tablet: boolean): [Section, string][] {
+  // 言語はどちらの言語の画面でも見つけられるように、両方の名前を出す i18n-ignore
+  const lang: [Section, string] = ['lang', tr('言語（Language）', 'Language (言語)')];
+  const touch: [Section, string] = ['touch', tr('タッチ操作', 'Touch')];
+  const rest: [Section, string][] = [
+    ['midi', tr('電子ドラム（MIDI）', 'Electronic drums (MIDI)')],
+    ['keys', tr('キーボード', 'Keyboard')],
+    ['lanes', tr('レーンの並び', 'Lane order')],
+    ['latency', tr('入力の遅れの補正', 'Input latency')],
+    ['velocity', tr('ベロシティ', 'Velocity')],
+  ];
+  const ai: [Section, string] = ['ai', tr('AI（OpenRouter）', 'AI (OpenRouter)')];
+  if (tablet) {
+    const [midi, keys, ...others] = rest;
+    return [lang, touch, ['pads', tr('入力パッド', 'Pads')], keys, midi, ...others, ai];
+  }
+  return [lang, ...rest, touch, ai];
 }
 
 function LanguageSettings() {
@@ -124,6 +139,7 @@ function MidiSettings() {
   return (
     <div className="settings-col">
       <h2>{tr('電子ドラム（MIDI）', 'Electronic drums (MIDI)')}</h2>
+      {NO_MIDI && <MidiUnavailableNote />}
       <div className="card row" style={{ flexWrap: 'wrap' }}>
         {Icon.midi(16)}
         <span className="grow">
