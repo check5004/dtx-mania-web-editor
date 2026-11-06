@@ -1,11 +1,17 @@
 // 画面の配置：左右のパネルの幅と開閉、下のトラック（原曲・ステム・譜面の音）の高さと開閉。ブラウザに覚える。
 import { create } from 'zustand';
+import { DESK_TRACK_ROW, deskStopHeight, isOpenDeskTrackStop, type OpenDeskTrackStop } from './sheetSnap';
 
 export interface Layout {
   leftW: number;
   rightW: number;
   /** 下のトラックのパネルの高さ（上の帯を含む） */
   tracksH: number;
+  /**
+   * 止まる高さ（1本・細く・標準・ゆったり）で止めたときはその名前。トラックの数が変わってもその並べ方の高さにする。
+   * 自由な高さ（止まる高さから離した・Alt でドラッグした）なら無し（tracksH の px のまま）
+   */
+  tracksStop?: OpenDeskTrackStop;
   leftOpen: boolean;
   rightOpen: boolean;
   seekOpen: boolean;
@@ -13,16 +19,17 @@ export interface Layout {
   prefer?: 'left' | 'right';
 }
 
-export const LAYOUT_LIMITS = {
-  left: [200, 560] as const,
-  right: [260, 640] as const,
-  seek: [60, 560] as const,
-};
-
 /** 閉じたパネルの細い帯の幅 */
 export const RAIL_W = 26;
 /** トラックを閉じたときの高さ（ループの帯とセクションだけ）。開いたときの上の帯も同じ高さ */
 export const SEEK_CLOSED_H = 28;
+
+export const LAYOUT_LIMITS = {
+  left: [200, 560] as const,
+  right: [260, 640] as const,
+  /** 下のトラック：いちばん低いのは上の帯＋細いトラック 1 本 */
+  seek: [SEEK_CLOSED_H + 1 + DESK_TRACK_ROW.min, 560] as const,
+};
 
 const KEY = 'dtxe.layout.v1';
 
@@ -45,6 +52,7 @@ function load(): Layout {
     rightW: clamp(Number(l.rightW) || DEFAULT.rightW, LAYOUT_LIMITS.right),
     // 前の「下の波形」の高さ（seekH）はトラックには低すぎるので引き継がない
     tracksH: clamp(Number(l.tracksH) || DEFAULT.tracksH, LAYOUT_LIMITS.seek),
+    tracksStop: isOpenDeskTrackStop(l.tracksStop) ? l.tracksStop : undefined,
     leftOpen: l.leftOpen !== false,
     rightOpen: l.rightOpen !== false,
     seekOpen: l.seekOpen !== false,
@@ -61,6 +69,8 @@ export function setLayout(p: Partial<Layout>) {
     leftW: clamp(p.leftW ?? cur.leftW, LAYOUT_LIMITS.left),
     rightW: clamp(p.rightW ?? cur.rightW, LAYOUT_LIMITS.right),
     tracksH: clamp(p.tracksH ?? cur.tracksH, LAYOUT_LIMITS.seek),
+    // 高さを px で変えたら、止まる高さの名前は外す（名前も一緒に渡したときはそれ）
+    tracksStop: 'tracksStop' in p ? p.tracksStop : p.tracksH !== undefined ? undefined : cur.tracksStop,
   };
   useLayout.setState(next);
   try {
@@ -81,6 +91,17 @@ export function togglePanel(which: 'left' | 'right' | 'seek', open?: boolean) {
 export function maxTracksH(): number {
   const h = typeof window !== 'undefined' ? window.innerHeight : 900;
   return Math.max(LAYOUT_LIMITS.seek[0], Math.min(LAYOUT_LIMITS.seek[1], h - 360));
+}
+
+/**
+ * 下のトラックの今の高さ（rows: トラックの数）。止まる高さの名前があればその並べ方の高さ、無ければ覚えている px。
+ * どちらも画面の上限まで、また全部をゆったり並べた高さより高くはしない（下に空きを作らない）
+ */
+export function deskTracksHeight(l: Pick<Layout, 'seekOpen' | 'tracksH' | 'tracksStop'>, rows: number, maxH = maxTracksH()): number {
+  if (!l.seekOpen) return SEEK_CLOSED_H;
+  const full = deskStopHeight('roomy', rows, SEEK_CLOSED_H);
+  const want = l.tracksStop ? deskStopHeight(l.tracksStop, rows, SEEK_CLOSED_H) : l.tracksH;
+  return Math.max(LAYOUT_LIMITS.seek[0], Math.min(maxH, full, want));
 }
 
 /** 譜面の列に最低限残したい幅 */

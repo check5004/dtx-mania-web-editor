@@ -1,4 +1,4 @@
-// 右クリックのメニュー（譜面・下の帯）。何を右クリックしたかだけを持ち、中身は ui/ContextMenu が描く。
+// 右クリックのメニュー（譜面・下の帯・下のトラックの高さ）。何を右クリックしたかだけを持ち、中身は ui/ContextMenu が描く。
 import { create } from 'zustand';
 import type { Pos } from '../edit/ops';
 
@@ -18,7 +18,9 @@ export type CtxTarget =
   /** ループの帯（譜面の左端・全体図・下の帯） */
   | { kind: 'loop'; beat: number }
   /** 曲の終わり（END） */
-  | { kind: 'end' };
+  | { kind: 'end' }
+  /** PC の下のトラックの高さ（上の境目・角）。rows: トラックの数 */
+  | { kind: 'tracks'; rows: number };
 
 export type CtxMenu = CtxTarget & {
   /** 画面の座標（出す位置） */

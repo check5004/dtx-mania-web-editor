@@ -6,7 +6,7 @@ import { isDirty, useEditor } from '../store/editor';
 import { formatTime } from './format';
 import { stemsActive, useStems } from '../store/stems';
 import { songEndM, useSongLength, useSongSpan, useSoundsVersion } from './hooks';
-import { TrackPanel } from './Tracks';
+import { TrackPanel, useTrackRows } from './Tracks';
 
 /** 下のトラック（原曲・ステム・譜面の音。上の帯はループとセクション）と状態の表示 */
 export function Footer() {
@@ -24,6 +24,8 @@ export function Footer() {
   const stats = docStats(doc);
   const length = useSongLength(doc);
   const span = useSongSpan(doc);
+  // 上の境目の止まる高さ（細く・標準・ゆったり）はトラックの数で決まる
+  const rows = useTrackRows().length;
 
   const where = folder?.dir
     ? tr(`${folder.name}/${meta.fileName}（曲フォルダに直接保存）`, `${folder.name}/${meta.fileName} (saved directly to the song folder)`)
@@ -33,7 +35,7 @@ export function Footer() {
 
   return (
     <footer className="footer">
-      <HSplitter />
+      <HSplitter rows={rows} />
       <TrackPanel length={length} span={span} />
       <div className="status">
         <span>

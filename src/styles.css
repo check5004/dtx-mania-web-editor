@@ -731,9 +731,46 @@ body.resizing-x .vsplit-hit:active {
 }
 
 .hsplit:hover,
+.hsplit.dragging,
 body.resizing-y .hsplit:active {
   background: linear-gradient(180deg, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
   opacity: 0.6;
+}
+
+/* ↑↓ キーで高さを変えるとき */
+.hsplit:focus-visible {
+  outline: none;
+  background: linear-gradient(180deg, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
+}
+
+/* ドラッグ中の札：どの止まる高さに吸い付いたか */
+.hsplit-hint {
+  position: absolute;
+  bottom: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(18, 22, 29, 0.97);
+  border: 1px solid var(--line3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 11.5px;
+  color: var(--text3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.hsplit-hint b {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.hsplit-hint .k {
+  margin-left: 4px;
+  font-size: 10.5px;
+  color: var(--mute);
 }
 
 body.resizing-x,
@@ -982,6 +1019,13 @@ body.resizing-y * {
   padding: 2px 5px;
 }
 
+/* 角が狭いときは、曲の長さ → 「分解」→「ステム」の文字の順に畳む（ui/Tracks の Corner） */
+.tracks-corner.fold-1 .t-fold-1,
+.tracks-corner.fold-2 :is(.t-fold-1, .t-fold-2),
+.tracks-corner.fold-3 :is(.t-fold-1, .t-fold-2, .t-fold-3) {
+  display: none;
+}
+
 .tracks-ruler {
   flex: 1;
   min-width: 0;
@@ -993,6 +1037,8 @@ body.resizing-y * {
 .tracks-body {
   flex: none;
   overflow-x: hidden;
+  /* スクロールしてもトラックが半端に切れないように、1本ずつで止める */
+  scroll-snap-type: y mandatory;
 }
 
 .tracks-grid {
@@ -1024,6 +1070,7 @@ body.resizing-y * {
   border-bottom: 1px solid #161b22;
   font-size: 12px;
   min-width: 0;
+  scroll-snap-align: start;
 }
 
 .trk:nth-child(even) {
@@ -1156,6 +1203,63 @@ body.resizing-y * {
 .trk-spec:has(input:disabled) {
   opacity: 0.4;
   cursor: default;
+}
+
+.t-spec-ic {
+  display: inline-flex;
+}
+
+/* 幅の狭い PC の画面：見出しを詰める（音量の数字は隠し、スペクトルは図だけの切り替えに） */
+.tracks.narrow .trk-v {
+  display: none;
+}
+
+.tracks.narrow .trk-spec {
+  position: relative;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  margin-left: 2px;
+  border-radius: 5px;
+  border: 1px solid var(--line3);
+  background: var(--card);
+  color: var(--mute);
+}
+
+.tracks.narrow .trk-spec input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tracks.narrow .trk-spec.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.tracks.narrow .trk-spec:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tracks.narrow .trk-spec.pad {
+  border: 0;
+  background: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .trk .btn.small {
@@ -6370,6 +6474,32 @@ button.gen-plan {
   height: 1px;
   margin: 4px 6px;
   background: var(--line2);
+}
+
+/* 下のトラックの高さ：今の高さに ✓、右に中身の説明 */
+.ctx-item.ctx-stop.on {
+  color: var(--text);
+}
+
+.ctx-item.ctx-stop.on .ctx-ic {
+  color: var(--accent);
+}
+
+.ctx-stop-note {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.ctx-note {
+  margin: 4px 2px 0;
+  padding: 7px 8px 3px;
+  border-top: 1px solid var(--line2);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--dim);
 }
 
 /* ---- 原曲をステムに分解（ステムとミックスの画面） ---- */

@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { fitRowHeight, padDensity, SHEET_GRIP, SHEET_H, SHEET_TABS, snapHeight, snapSheet, stepSheet, trackStops } from './sheetSnap';
+import { deskTracksHeight } from './layout';
+import {
+  deskStopHeight,
+  deskTrackStops,
+  fitRowHeight,
+  magnetHeight,
+  padDensity,
+  SHEET_GRIP,
+  SHEET_H,
+  SHEET_TABS,
+  snapHeight,
+  snapSheet,
+  stepDeskStop,
+  stepSheet,
+  trackStops,
+} from './sheetSnap';
 
 describe('縦のシートの止まる高さ', () => {
   const maxH = 800;
@@ -80,5 +95,59 @@ describe('シートの高さごとのパッドの並べ方', () => {
   it('レーン：細いときだけ上下に割らない', () => {
     expect(padDensity('lane', 796, body('slim'))).toBe('row');
     expect(padDensity('lane', 796, body('low'))).toBe('roomy');
+  });
+});
+
+describe('PC の下のトラックの止まる高さ', () => {
+  // 上の帯 28＋線 1＋トラック
+  it('閉じる・1本・細く（24）・標準（42）・ゆったり（64）', () => {
+    expect(deskTrackStops(3, 28, 560)).toEqual([
+      { stop: 'closed', h: 28 },
+      { stop: 'one', h: 53 },
+      { stop: 'slim', h: 101 },
+      { stop: 'std', h: 155 },
+      { stop: 'roomy', h: 221 },
+    ]);
+  });
+
+  it('画面に入らない段は入れない。1本しかなければ「1本」と「細く」は同じなので1つ', () => {
+    expect(deskTrackStops(8, 28, 400).map((s) => s.stop)).toEqual(['closed', 'one', 'slim', 'std']);
+    expect(deskTrackStops(1, 28, 560).map((s) => s.stop)).toEqual(['closed', 'one', 'std', 'roomy']);
+  });
+
+  it('ドラッグ中は 10px 以内なら止まる高さに吸い付き、離れていればそのまま', () => {
+    const stops = deskTrackStops(3, 28, 560);
+    expect(magnetHeight(108, stops)).toEqual({ h: 101, stop: 'slim' });
+    expect(magnetHeight(150, stops)).toEqual({ h: 155, stop: 'std' });
+    expect(magnetHeight(128, stops)).toEqual({ h: 128 });
+  });
+
+  it('矢印キーで 1 段ずつ（止まる高さの間からは、その向きの次へ）', () => {
+    const stops = deskTrackStops(3, 28, 560);
+    expect(stepDeskStop(28, 1, stops)?.stop).toBe('one');
+    expect(stepDeskStop(128, 1, stops)?.stop).toBe('std');
+    expect(stepDeskStop(128, -1, stops)?.stop).toBe('slim');
+    expect(stepDeskStop(221, 1, stops)).toBeNull();
+    expect(stepDeskStop(28, -1, stops)).toBeNull();
+  });
+
+  it('止まる高さはトラックの数に合わせて伸びる', () => {
+    expect(deskStopHeight('std', 3, 28)).toBe(155);
+    expect(deskStopHeight('std', 5, 28)).toBe(239);
+    expect(deskStopHeight('one', 5, 28)).toBe(53);
+  });
+
+  it('今の高さ：名前で止めていればトラックの数で決め、px でもゆったり並べた高さ・画面の上限より高くしない', () => {
+    expect(deskTracksHeight({ seekOpen: true, tracksH: 101, tracksStop: 'slim' }, 5, 560)).toBe(149);
+    expect(deskTracksHeight({ seekOpen: true, tracksH: 400 }, 3, 560)).toBe(221);
+    expect(deskTracksHeight({ seekOpen: true, tracksH: 400, tracksStop: 'roomy' }, 8, 300)).toBe(300);
+    expect(deskTracksHeight({ seekOpen: false, tracksH: 400 }, 3, 560)).toBe(28);
+  });
+
+  it('PC のトラック 1 本の高さも半端に切れない（細く 24〜ゆったり 64）', () => {
+    // 53px の帯：1本だけ（24）
+    expect(fitRowHeight(24, 5, 24, 64)).toBe(24);
+    // 標準の高さなら 42 ずつ
+    expect(fitRowHeight(155 - 29, 3, 24, 64)).toBe(42);
   });
 });

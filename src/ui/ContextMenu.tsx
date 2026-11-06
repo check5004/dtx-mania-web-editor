@@ -2,6 +2,7 @@
 // - チップ：ベロシティ（強・中・弱、±、スライダー、ホイール）・HHオープン/クローズ・レーン・種類・コピー・削除
 // - 何もない所：グリッドの切り替え（ボタン1回）・ここから再生・ループ・貼り付け
 // - 小節番号・✨ の列：小節の操作。ループの帯：ループの操作。END：曲の終わりの決め方
+// - 下のトラックの上の境目・角（PC）：止まる高さ（閉じる・1本・細く・標準・ゆったり）
 // 一度で済む操作（強・中・弱、レーン、グリッド、コマンド）は押すと閉じる。±・スライダー・ホイールは開いたまま微調整できる。
 import { tr, pl } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -11,6 +12,8 @@ import { CH, DRUM_LANES, drumChannel, type Chip, type ChipKind, type DtxDoc } fr
 import { fittingGrid, GRID_DIVS, onGrid, type Pos } from '../edit/ops';
 import { useInputSettings } from '../input/settings';
 import { useDevice } from '../store/device';
+import { maxTracksH, SEEK_CLOSED_H, useLayout } from '../store/layout';
+import { DESK_TRACK_STOPS, deskStopHeight } from '../store/sheetSnap';
 import { setLoop, setLoopPoint, useAssist } from '../store/assist';
 import { chipMenuExtras, closeCtxMenu, dismissCtxMenu, laneMenuExtras, useCtxMenu, type CtxItem, type CtxMenu } from '../store/ctxMenu';
 import { chipViews, tempoOf, wavVel } from '../store/derived';
@@ -42,6 +45,7 @@ import { promptDialog } from './dialogs';
 import { channelName, chipBpmLabel } from './format';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
+import { currentTrackStop, setTrackStop, trackStopLabel, trackStopNote } from './Splitter';
 
 /** タブレットでは「ダブルタップ」、PC では「ダブルクリック」 */
 const dblHint = () => (useDevice.getState().tablet ? tr('ダブルタップ', 'Double-tap') : tr('ダブルクリック', 'Double-click'));
@@ -104,7 +108,7 @@ function Frame({ menu }: { menu: CtxMenu }) {
   return (
     <div
       ref={ref}
-      className={`ctx-menu ${menu.kind === 'chips' ? 'wide' : ''} ${menu.touch ? 'touch' : ''}`}
+      className={`ctx-menu ${menu.kind === 'chips' || menu.kind === 'tracks' ? 'wide' : ''} ${menu.touch ? 'touch' : ''}`}
       role="menu"
       style={{ left: at?.left ?? menu.x, top: at?.top ?? menu.y, visibility: at ? 'visible' : 'hidden' }}
       onContextMenu={(e) => e.preventDefault()}
@@ -117,6 +121,8 @@ function Frame({ menu }: { menu: CtxMenu }) {
         <MeasureMenu m={menu.m} />
       ) : menu.kind === 'loop' ? (
         <LoopMenu beat={menu.beat} />
+      ) : menu.kind === 'tracks' ? (
+        <TracksMenu rows={menu.rows} />
       ) : (
         <EndMenu />
       )}
@@ -664,6 +670,35 @@ function EndMenu() {
       />
       <Item label={tr('最後のチップのすぐ後にする', 'Right after the last chip')} onClick={then(songEndAtLastChip)} />
       <Item label={tr('▶ の所にする', 'At ▶')} onClick={then(songEndAtCursor)} />
+    </>
+  );
+}
+
+// ---- 下のトラックの高さ（PC） --------------------------------------------------------
+
+function TracksMenu({ rows }: { rows: number }) {
+  const l = useLayout();
+  const maxH = maxTracksH();
+  const cur = currentTrackStop(l, rows, maxH);
+  return (
+    <>
+      <div className="ctx-head">
+        <b>{tr('下のトラックの高さ', 'Height of the bottom tracks')}</b>
+      </div>
+      {DESK_TRACK_STOPS.map((s) => {
+        // 画面に入らない高さも選べる（入るところまで。窓を高くすればその高さに）
+        const fits = s === 'closed' || deskStopHeight(s, rows, SEEK_CLOSED_H) <= maxH;
+        return (
+          <button key={s} className={`ctx-item ctx-stop ${cur === s ? 'on' : ''}`} role="menuitemradio" aria-checked={cur === s} onClick={then(() => setTrackStop(s, rows))}>
+            <span className="ctx-ic">{cur === s ? Icon.check(12) : null}</span>
+            <span className="ctx-label">{trackStopLabel(s)}</span>
+            <span className="ctx-stop-note">{fits ? trackStopNote(s) : tr('画面に入るところまで', 'As tall as fits')}</span>
+          </button>
+        );
+      })}
+      <div className="ctx-note">
+        {tr('上の境目をドラッグしても、この高さで止まります（Alt を押しながらなら自由な高さ。境目を選んで ↑↓ キーでも）', 'Dragging the edge above also stops at these heights (hold Alt for any height, or focus the edge and use ↑↓)')}
+      </div>
     </>
   );
 }

@@ -10,7 +10,7 @@ import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setSpecSource, setWaveM
 import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
 import { bgmSource, tempoOf, wavPath } from '../store/derived';
 import { dragSongEnd, openPage, playFrom, resetSongEnd, setCursorBeat, setView, useEditor } from '../store/editor';
-import { maxTracksH, SEEK_CLOSED_H, togglePanel, useLayout } from '../store/layout';
+import { deskTracksHeight, SEEK_CLOSED_H, togglePanel, useLayout } from '../store/layout';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
   anySolo,
@@ -29,8 +29,8 @@ import {
   useStems,
 } from '../store/stems';
 import { formatTime } from './format';
-import { songLength, useFold, usePlayBeat, useSoundsVersion } from './hooks';
-import { fitRowHeight } from '../store/sheetSnap';
+import { songLength, useBoxSize, useFold, usePlayBeat, useSoundsVersion } from './hooks';
+import { DESK_TRACK_ROW, fitRowHeight } from '../store/sheetSnap';
 import { Icon } from './icons';
 import { useLang } from '../i18n/useLang';
 import { StemTrackPopover } from './StemTrackPopover';
@@ -45,9 +45,15 @@ export const HEAD_W = 344;
  */
 export const TABLET_TRACK_ROW = { ruler: 52, min: 48, stop: 56, max: 72 } as const;
 
+/** 幅がこれより狭い PC の画面では、トラックの見出しを詰める（音量の数字を隠し、スペクトルは図だけに） */
+const DESK_NARROW_W = 1000;
+/** 詰めたときの見出しの幅 */
+const NARROW_HEAD_W = 272;
+
 /** トラックの寸法：見出しの幅・上の帯の高さ（ループの帯・セクションの段）・1本の高さ。タブレット版は指で触れるように大きく */
-const TD = { headW: HEAD_W, ruler: SEEK_CLOSED_H, loopH: 12, secH: 14, secTop: 14, rowMin: 24, rowMax: 64, grab: 6, tablet: false };
+const TD = { headW: HEAD_W, ruler: SEEK_CLOSED_H, loopH: 12, secH: 14, secTop: 14, rowMin: DESK_TRACK_ROW.min, rowMax: DESK_TRACK_ROW.max, grab: 6, tablet: false, narrow: false };
 const DESK_TD = { ...TD };
+const DESK_NARROW_TD = { ...TD, headW: NARROW_HEAD_W, narrow: true };
 const TABLET_TD = {
   headW: 340,
   ruler: TABLET_TRACK_ROW.ruler,
@@ -58,10 +64,11 @@ const TABLET_TD = {
   rowMax: TABLET_TRACK_ROW.max,
   grab: 14,
   tablet: true,
+  narrow: false,
 };
 
-function applyTrackDims(tablet: boolean) {
-  Object.assign(TD, tablet ? TABLET_TD : DESK_TD);
+function applyTrackDims(tablet: boolean, narrow = false) {
+  Object.assign(TD, tablet ? TABLET_TD : narrow ? DESK_NARROW_TD : DESK_TD);
 }
 
 const ORIG_COLOR = '#8FA3BC';
@@ -526,10 +533,15 @@ export function TrackPanel({
   span: number;
   tablet?: { open: boolean; height: number; onToggle?: () => void; inSheet?: boolean };
 }) {
-  applyTrackDims(!!tablet);
+  const box = useRef<HTMLDivElement>(null);
+  const boxW = useBoxSize(box).w;
+  // PC の狭い画面では見出しを詰める
+  const narrow = !tablet && boxW > 0 && boxW < DESK_NARROW_W;
+  applyTrackDims(!!tablet, narrow);
   const deskOpen = useLayout((s) => s.seekOpen);
   const open = tablet ? tablet.open : deskOpen;
   const tracksH = useLayout((s) => s.tracksH);
+  const tracksStop = useLayout((s) => s.tracksStop);
   const [winH, setWinH] = useState(() => window.innerHeight);
   useEffect(() => {
     const h = () => setWinH(window.innerHeight);
@@ -537,19 +549,22 @@ export function TrackPanel({
     return () => window.removeEventListener('resize', h);
   }, []);
   void winH;
-  const height = tablet ? tablet.height : open ? Math.min(tracksH, maxTracksH()) : TD.ruler;
   const rows = useTrackRows();
+  // PC：止まる高さ（1本・細く・標準・ゆったり）ならトラックの数に合わせた高さ。全部をゆったり並べた高さより高くしない
+  const height = tablet ? tablet.height : deskTracksHeight({ seekOpen: deskOpen, tracksH, tracksStop }, rows.length);
   const bodyH = Math.max(0, height - TD.ruler - 1);
-  // タブレット版は、入りきらないときに半端な高さで切れないよう、入る本数で割る
-  const rowH = tablet ? fitRowHeight(bodyH, rows.length, TD.rowMin, TD.rowMax) : Math.max(TD.rowMin, Math.min(TD.rowMax, Math.floor(bodyH / Math.max(1, rows.length))));
+  // 入りきらないときは、半端な高さで切れないよう入る本数で割る
+  const rowH = fitRowHeight(bodyH, rows.length, TD.rowMin, TD.rowMax);
+  const body = useRef<HTMLDivElement>(null);
+  useRowWheel(body, rowH, open);
   return (
-    <div className={`tracks ${tablet ? 't-tracks' : ''} ${tablet?.inSheet ? 'in-sheet' : ''}`} style={{ height }} onPointerUp={releaseFocus}>
+    <div ref={box} className={`tracks ${tablet ? 't-tracks' : ''} ${tablet?.inSheet ? 'in-sheet' : ''} ${narrow ? 'narrow' : ''}`} style={{ height }} onPointerUp={releaseFocus}>
       <div className="tracks-top" style={{ height: TD.ruler }}>
-        <Corner length={length} open={open} onToggle={tablet?.inSheet ? undefined : tablet?.onToggle} />
+        <Corner length={length} open={open} rows={rows.length} onToggle={tablet?.inSheet ? undefined : tablet?.onToggle} />
         <Ruler length={length} span={span} />
       </div>
       {open && (
-        <div className="tracks-body scroll" style={{ height: bodyH }}>
+        <div ref={body} className="tracks-body scroll" style={{ height: bodyH }}>
           <div className="tracks-grid" style={{ gridTemplateColumns: `${TD.headW}px minmax(0, 1fr)`, minHeight: '100%' }}>
             <div className="tracks-heads">
               {rows.map((r) => (
@@ -564,10 +579,42 @@ export function TrackPanel({
   );
 }
 
-/** タブレット版の角が狭いときに畳む段：1 曲の長さ、2 「分解」、3 「ステム」の文字（＋だけに）、4 「トラック」の文字 */
+/**
+ * 下のトラックがスクロールするとき、ホイールで 1 本ずつ送る（1本の高さでも、間を飛ばさずに次のトラックへ）。
+ * トラックパッドの細かい動きは 40px ためて 1 本
+ */
+function useRowWheel(ref: React.RefObject<HTMLDivElement | null>, rowH: number, open: boolean) {
+  const step = useRef(rowH);
+  step.current = rowH;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let acc = 0;
+    let last = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (el.scrollHeight <= el.clientHeight + 1) return;
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * el.clientHeight : e.deltaY;
+      if (e.timeStamp - last > 1000 || Math.sign(dy) !== Math.sign(acc)) acc = 0;
+      last = e.timeStamp;
+      acc += dy;
+      if (Math.abs(acc) < 40) return;
+      const dir = Math.sign(acc);
+      acc = 0;
+      const row = Math.max(1, step.current);
+      const max = el.scrollHeight - el.clientHeight;
+      el.scrollTop = Math.max(0, Math.min(max, (Math.round(el.scrollTop / row) + dir) * row));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [ref, open]);
+}
+
+/** 角が狭いときに畳む段：1 曲の長さ、2 「分解」、3 「ステム」の文字（＋だけに）、4 「トラック」の文字（タブレット版だけ） */
 const CORNER_FOLDS = 4;
 
-function Corner({ length, open, onToggle }: { length: number; open: boolean; onToggle?: () => void }) {
+function Corner({ length, open, rows, onToggle }: { length: number; open: boolean; rows: number; onToggle?: () => void }) {
   const doc = useEditor((s) => s.doc);
   const beat = usePlayBeat();
   const stems = useSidecar((s) => s.stems);
@@ -579,10 +626,23 @@ function Corner({ length, open, onToggle }: { length: number; open: boolean; onT
   const lang = useLang();
   const sepBusy = separating();
   const tablet = TD.tablet;
-  // タブレット版：入りきらなければ、曲の長さ → 文字の順に畳む（デスクトップは畳まない）
-  const fold = useFold(box, tablet ? CORNER_FOLDS : 0, `${lang}|${open}|${!!onToggle}|${stems.length}|${!!busy}|${sepBusy}|${TD.headW}`);
+  // 入りきらなければ、曲の長さ → 「分解」→ 文字の順に畳む
+  const fold = useFold(box, tablet ? CORNER_FOLDS : CORNER_FOLDS - 1, `${lang}|${open}|${!!onToggle}|${stems.length}|${!!busy}|${sepBusy}|${TD.headW}`);
   return (
-    <div ref={box} className={`tracks-corner ${tablet && fold > 0 ? `fold-${fold}` : ''}`} style={{ width: TD.headW }}>
+    <div
+      ref={box}
+      className={`tracks-corner ${fold > 0 ? `fold-${fold}` : ''}`}
+      style={{ width: TD.headW }}
+      // PC：右クリックで下のトラックの高さを選ぶ
+      onContextMenu={
+        tablet
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              openCtxMenu({ kind: 'tracks', rows }, e.clientX, e.clientY);
+            }
+      }
+    >
       {tablet ? (
         onToggle ? (
           // タブレット版：押しやすい「^ トラック」（上の縁をドラッグで高さ）
@@ -592,7 +652,16 @@ function Corner({ length, open, onToggle }: { length: number; open: boolean; onT
           </button>
         ) : null
       ) : (
-        <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? tr('トラックを閉じる（上の境目をドラッグで高さを変えられます）', 'Close the tracks (drag the edge above to change their height)') : tr('トラックを開く', 'Open the tracks')} aria-expanded={open}>
+        <button
+          className="ib tiny"
+          onClick={() => togglePanel('seek')}
+          title={
+            open
+              ? tr('トラックを閉じる（上の境目をドラッグで高さを変えられます。右クリックで高さを選ぶ）', 'Close the tracks (drag the edge above to change their height; right-click to pick a height)')
+              : tr('トラックを開く（右クリックで高さを選ぶ）', 'Open the tracks (right-click to pick a height)')
+          }
+          aria-expanded={open}
+        >
           {open ? Icon.chevronDown(14) : Icon.chevronUp(14)}
         </button>
       )}
@@ -613,9 +682,9 @@ function Corner({ length, open, onToggle }: { length: number; open: boolean; onT
             className="link-btn"
             onClick={() => file.current?.click()}
             title={tr('ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする', 'Load stems (audio split into drums, bass, vocals, etc.) as tracks')}
-            aria-label={tablet ? tr('ステムを読み込む', 'Load stems') : undefined}
+            aria-label={tr('ステムを読み込む', 'Load stems')}
           >
-            {Icon.plus(tablet ? 14 : 12)} {tablet ? <span className="t-fold-3">{tr('ステム', 'Stems')}</span> : tr('ステム', 'Stems')}
+            {Icon.plus(tablet ? 14 : 12)} <span className="t-fold-3">{tr('ステム', 'Stems')}</span>
           </button>
           {stems.length === 0 && bgmSource(doc) && (
             <button className="link-btn t-fold-2" onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする', 'Split the original in the browser into drums and no-drums (or per instrument) and add them as stem tracks')}>
@@ -988,7 +1057,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
         onChange={(e) => set({ gain: Number(e.target.value) })}
         onDoubleClick={() => set({ gain: defGain })}
         aria-label={tr(`${row.name}の音量`, `${row.name} volume`)}
-        title={tr(`${row.name}の音量（ダブルクリックで ${pct(defGain)} に戻す）`, `${row.name} volume (double-click to reset to ${pct(defGain)})`)}
+        title={tr(`${row.name}の音量 ${pct(gain)}（ダブルクリックで ${pct(defGain)} に戻す）`, `${row.name} volume ${pct(gain)} (double-click to reset to ${pct(defGain)})`)}
       />
       <span className="mono trk-v">{pct(gain)}</span>
       {row.type === 'orig' || row.type === 'stem' ? (
@@ -1007,10 +1076,10 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
               }
             }}
           />
-          {TD.tablet ? (
+          {TD.tablet || TD.narrow ? (
             <>
               <span className="t-spec-ic" aria-hidden="true">
-                {Icon.spectrum(18)}
+                {Icon.spectrum(TD.tablet ? 18 : 14)}
               </span>
               <span className="sr-only">{tr('スペクトル', 'Spectrum')}</span>
             </>

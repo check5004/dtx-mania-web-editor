@@ -1,5 +1,6 @@
-// タブレット版の下から出すシート（縦）・トラックの帯（横）の「止まる高さ」と、その高さでの中身の並べ方（React に依らない）。
-// 指を離したら近い高さで止め、はじいたらその向きの次の高さへ、強くはじいたら動きを先へ延ばした所へ（iOS のシートと同じ考え方）
+// 下から出すパネルの「止まる高さ」と、その高さでの中身の並べ方（React に依らない）。
+// タブレット版の縦のシート・横のトラックの帯：指を離したら近い高さで止め、はじいたらその向きの次の高さへ、強くはじいたら動きを先へ延ばした所へ（iOS のシートと同じ考え方）。
+// PC の下のトラック：境目のドラッグ中に止まる高さへ吸い付く（Alt で自由な高さ）
 
 /** 縦のシートの高さ：タブだけ・細い・低い・半分・大 */
 export type SheetSize = 'tabs' | 'slim' | 'low' | 'half' | 'full';
@@ -115,4 +116,60 @@ export function padDensity(layout: 'kit' | 'lane', w: number, h: number): PadDen
   if (area >= 3 * 72 + 2 * 8 && w >= 640) return 'roomy';
   if (area >= 3 * 44 + 2 * 6) return 'compact';
   return 'row';
+}
+
+// ---- PC の下のトラック ----------------------------------------------------------------
+
+/**
+ * PC の下のトラックの止まる高さ：閉じる（上の帯だけ）・1本・細く（全部を1行で）・標準（名前の下にファイル名）・ゆったり（波形を大きく）。
+ * 1本より上は「トラックの数×1本の高さ」なので、ステムを足すとそれに合わせて伸びる
+ */
+export type DeskTrackStop = 'closed' | 'one' | 'slim' | 'std' | 'roomy';
+/** 開いているときの止まる高さ（閉じるを除く） */
+export type OpenDeskTrackStop = Exclude<DeskTrackStop, 'closed'>;
+
+export const DESK_TRACK_STOPS: readonly DeskTrackStop[] = ['closed', 'one', 'slim', 'std', 'roomy'];
+
+/** PC のトラック 1 本の高さ：細く 24（いちばん低い）・標準 42（ファイル名の行が出る）・ゆったり 64（いちばん高い） */
+export const DESK_TRACK_ROW = { min: 24, std: 42, max: 64 } as const;
+
+/** ドラッグ中に止まる高さへ吸い付く距離（px） */
+export const DESK_SNAP_PX = 10;
+
+export function isOpenDeskTrackStop(v: unknown): v is OpenDeskTrackStop {
+  return v === 'one' || v === 'slim' || v === 'std' || v === 'roomy';
+}
+
+/** 止まる高さの px（ruler: 上の帯の高さ。帯の下の線 1px を足す） */
+export function deskStopHeight(stop: DeskTrackStop, rows: number, ruler: number): number {
+  const n = Math.max(1, rows);
+  if (stop === 'closed') return ruler;
+  const row = stop === 'one' || stop === 'slim' ? DESK_TRACK_ROW.min : stop === 'std' ? DESK_TRACK_ROW.std : DESK_TRACK_ROW.max;
+  return ruler + 1 + (stop === 'one' ? 1 : n) * row;
+}
+
+/** 画面に入る（maxH 以下の）止まる高さ。同じ高さになるものは小さい方の名前だけ（閉じるは必ず入れる） */
+export function deskTrackStops(rows: number, ruler: number, maxH: number): { stop: DeskTrackStop; h: number }[] {
+  const out: { stop: DeskTrackStop; h: number }[] = [];
+  for (const stop of DESK_TRACK_STOPS) {
+    const h = deskStopHeight(stop, rows, ruler);
+    if (stop !== 'closed' && h > maxH) continue;
+    if (out.some((s) => s.h === h)) continue;
+    out.push({ stop, h });
+  }
+  return out;
+}
+
+/** ドラッグ中の高さを、近い（radius 以内の）止まる高さに吸い付ける。遠ければそのまま（stop なし） */
+export function magnetHeight(h: number, stops: readonly { stop: DeskTrackStop; h: number }[], radius = DESK_SNAP_PX): { h: number; stop?: DeskTrackStop } {
+  let best: { stop: DeskTrackStop; h: number } | null = null;
+  for (const s of stops) if (Math.abs(s.h - h) <= radius && (!best || Math.abs(s.h - h) < Math.abs(best.h - h))) best = s;
+  return best ? { h: best.h, stop: best.stop } : { h };
+}
+
+/** 矢印キーで 1 段ずつ（今の高さ h から dir の向きの次の止まる高さ。端ならそのまま） */
+export function stepDeskStop(h: number, dir: 1 | -1, stops: readonly { stop: DeskTrackStop; h: number }[]): { stop: DeskTrackStop; h: number } | null {
+  const sorted = [...stops].sort((a, b) => a.h - b.h);
+  if (dir > 0) return sorted.find((s) => s.h > h + 1) ?? null;
+  return [...sorted].reverse().find((s) => s.h < h - 1) ?? null;
 }
