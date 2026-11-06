@@ -29,7 +29,8 @@ import {
   useStems,
 } from '../store/stems';
 import { formatTime } from './format';
-import { songLength, usePlayBeat, useSoundsVersion } from './hooks';
+import { songLength, useFold, usePlayBeat, useSoundsVersion } from './hooks';
+import { fitRowHeight } from '../store/sheetSnap';
 import { Icon } from './icons';
 import { useLang } from '../i18n/useLang';
 import { StemTrackPopover } from './StemTrackPopover';
@@ -38,10 +39,26 @@ import { openSeparation, separating, useSeparate } from '../store/separate';
 /** トラックの見出しの幅 */
 export const HEAD_W = 344;
 
+/**
+ * タブレット版のトラックの寸法：上の帯の高さ、1本の高さ（指で押せる最小・帯を止める高さ・最大）。
+ * 横の帯は「上の帯＋1本ずつ（stop）」の高さで止まる
+ */
+export const TABLET_TRACK_ROW = { ruler: 52, min: 48, stop: 56, max: 72 } as const;
+
 /** トラックの寸法：見出しの幅・上の帯の高さ（ループの帯・セクションの段）・1本の高さ。タブレット版は指で触れるように大きく */
 const TD = { headW: HEAD_W, ruler: SEEK_CLOSED_H, loopH: 12, secH: 14, secTop: 14, rowMin: 24, rowMax: 64, grab: 6, tablet: false };
 const DESK_TD = { ...TD };
-const TABLET_TD = { headW: 300, ruler: 52, loopH: 20, secH: 20, secTop: 26, rowMin: 52, rowMax: 72, grab: 14, tablet: true };
+const TABLET_TD = {
+  headW: 340,
+  ruler: TABLET_TRACK_ROW.ruler,
+  loopH: 20,
+  secH: 20,
+  secTop: 26,
+  rowMin: TABLET_TRACK_ROW.min,
+  rowMax: TABLET_TRACK_ROW.max,
+  grab: 14,
+  tablet: true,
+};
 
 function applyTrackDims(tablet: boolean) {
   Object.assign(TD, tablet ? TABLET_TD : DESK_TD);
@@ -497,9 +514,18 @@ export function releaseFocus(e: React.PointerEvent<HTMLElement>) {
 
 /**
  * length: 曲の長さ（曲の終わり END。秒）、span: 横幅に入れる長さ（END と原曲の鳴り終わりの遅い方）。
- * tablet: タブレット版（開閉と高さはタブレット版の画面が持つ。寸法を指で触れる大きさに）
+ * tablet: タブレット版（開閉と高さはタブレット版の画面が持つ。寸法を指で触れる大きさに）。
+ * inSheet: 縦のシートの中（開け閉めはシートのタブとつまみでするので、角の「トラック」ボタンは出さない）
  */
-export function TrackPanel({ length, span, tablet }: { length: number; span: number; tablet?: { open: boolean; height: number; onToggle: () => void } }) {
+export function TrackPanel({
+  length,
+  span,
+  tablet,
+}: {
+  length: number;
+  span: number;
+  tablet?: { open: boolean; height: number; onToggle?: () => void; inSheet?: boolean };
+}) {
   applyTrackDims(!!tablet);
   const deskOpen = useLayout((s) => s.seekOpen);
   const open = tablet ? tablet.open : deskOpen;
@@ -514,11 +540,12 @@ export function TrackPanel({ length, span, tablet }: { length: number; span: num
   const height = tablet ? tablet.height : open ? Math.min(tracksH, maxTracksH()) : TD.ruler;
   const rows = useTrackRows();
   const bodyH = Math.max(0, height - TD.ruler - 1);
-  const rowH = Math.max(TD.rowMin, Math.min(TD.rowMax, Math.floor(bodyH / Math.max(1, rows.length))));
+  // タブレット版は、入りきらないときに半端な高さで切れないよう、入る本数で割る
+  const rowH = tablet ? fitRowHeight(bodyH, rows.length, TD.rowMin, TD.rowMax) : Math.max(TD.rowMin, Math.min(TD.rowMax, Math.floor(bodyH / Math.max(1, rows.length))));
   return (
-    <div className={`tracks ${tablet ? 't-tracks' : ''}`} style={{ height }} onPointerUp={releaseFocus}>
+    <div className={`tracks ${tablet ? 't-tracks' : ''} ${tablet?.inSheet ? 'in-sheet' : ''}`} style={{ height }} onPointerUp={releaseFocus}>
       <div className="tracks-top" style={{ height: TD.ruler }}>
-        <Corner length={length} open={open} onToggle={tablet?.onToggle} />
+        <Corner length={length} open={open} onToggle={tablet?.inSheet ? undefined : tablet?.onToggle} />
         <Ruler length={length} span={span} />
       </div>
       {open && (
@@ -537,6 +564,9 @@ export function TrackPanel({ length, span, tablet }: { length: number; span: num
   );
 }
 
+/** タブレット版の角が狭いときに畳む段：1 曲の長さ、2 「分解」、3 「ステム」の文字（＋だけに）、4 「トラック」の文字 */
+const CORNER_FOLDS = 4;
+
 function Corner({ length, open, onToggle }: { length: number; open: boolean; onToggle?: () => void }) {
   const doc = useEditor((s) => s.doc);
   const beat = usePlayBeat();
@@ -545,22 +575,29 @@ function Corner({ length, open, onToggle }: { length: number; open: boolean; onT
   const sepPhase = useSeparate((s) => s.phase);
   const sepProgress = useSeparate((s) => s.progress);
   const file = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const lang = useLang();
   const sepBusy = separating();
+  const tablet = TD.tablet;
+  // タブレット版：入りきらなければ、曲の長さ → 文字の順に畳む（デスクトップは畳まない）
+  const fold = useFold(box, tablet ? CORNER_FOLDS : 0, `${lang}|${open}|${!!onToggle}|${stems.length}|${!!busy}|${sepBusy}|${TD.headW}`);
   return (
-    <div className="tracks-corner" style={{ width: TD.headW }}>
-      {onToggle ? (
-        // タブレット版：押しやすい「^ トラック」（上の縁をドラッグで高さ）
-        <button className="t-btn t-trk-toggle" onClick={onToggle} aria-expanded={open}>
-          {open ? Icon.chevronDown(16) : Icon.chevronUp(16)}
-          <span>{tr('トラック', 'Tracks')}</span>
-        </button>
+    <div ref={box} className={`tracks-corner ${tablet && fold > 0 ? `fold-${fold}` : ''}`} style={{ width: TD.headW }}>
+      {tablet ? (
+        onToggle ? (
+          // タブレット版：押しやすい「^ トラック」（上の縁をドラッグで高さ）
+          <button className="t-btn t-trk-toggle" onClick={onToggle} aria-expanded={open} aria-label={open ? tr('トラックを閉じる', 'Close the tracks') : tr('トラックを開く', 'Open the tracks')}>
+            {open ? Icon.chevronDown(16) : Icon.chevronUp(16)}
+            <span className="t-fold-4">{tr('トラック', 'Tracks')}</span>
+          </button>
+        ) : null
       ) : (
         <button className="ib tiny" onClick={() => togglePanel('seek')} title={open ? tr('トラックを閉じる（上の境目をドラッグで高さを変えられます）', 'Close the tracks (drag the edge above to change their height)') : tr('トラックを開く', 'Open the tracks')} aria-expanded={open}>
           {open ? Icon.chevronDown(14) : Icon.chevronUp(14)}
         </button>
       )}
       <span className="mono t-now">{formatTime(tempoOf(doc).beatToSec(Math.max(0, beat)))}</span>
-      <span className="mono lbl">/ {formatTime(length)}</span>
+      <span className="mono lbl t-fold-1">/ {formatTime(length)}</span>
       <span className="grow" />
       {onToggle && !open ? null : busy ? (
         <span className="lbl ellipsis" title={busy}>
@@ -572,11 +609,16 @@ function Corner({ length, open, onToggle }: { length: number; open: boolean; onT
         </button>
       ) : (
         <>
-          <button className="link-btn" onClick={() => file.current?.click()} title={tr('ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする', 'Load stems (audio split into drums, bass, vocals, etc.) as tracks')}>
-            {Icon.plus(12)} {tr('ステム', 'Stems')}
+          <button
+            className="link-btn"
+            onClick={() => file.current?.click()}
+            title={tr('ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする', 'Load stems (audio split into drums, bass, vocals, etc.) as tracks')}
+            aria-label={tablet ? tr('ステムを読み込む', 'Load stems') : undefined}
+          >
+            {Icon.plus(tablet ? 14 : 12)} {tablet ? <span className="t-fold-3">{tr('ステム', 'Stems')}</span> : tr('ステム', 'Stems')}
           </button>
           {stems.length === 0 && bgmSource(doc) && (
-            <button className="link-btn" onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする', 'Split the original in the browser into drums and no-drums (or per instrument) and add them as stem tracks')}>
+            <button className="link-btn t-fold-2" onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする', 'Split the original in the browser into drums and no-drums (or per instrument) and add them as stem tracks')}>
               {tr('分解', 'Split')}
             </button>
           )}
@@ -965,7 +1007,16 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
               }
             }}
           />
-          {tr('スペクトル', 'Spectrum')}
+          {TD.tablet ? (
+            <>
+              <span className="t-spec-ic" aria-hidden="true">
+                {Icon.spectrum(18)}
+              </span>
+              <span className="sr-only">{tr('スペクトル', 'Spectrum')}</span>
+            </>
+          ) : (
+            tr('スペクトル', 'Spectrum')
+          )}
         </label>
       ) : (
         <span className="trk-spec pad" />

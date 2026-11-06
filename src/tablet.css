@@ -787,6 +787,11 @@ html.t-left .t-panel.overlay {
   flex: none;
   border-top: 1px solid var(--line);
   background: var(--bar);
+  transition: height 0.2s ease;
+}
+
+.t-tracks.dragging {
+  transition: none;
 }
 
 .t-tracks .tracks {
@@ -823,6 +828,26 @@ html.t-left .t-panel.overlay {
 .tracks.t-tracks .tracks-corner {
   gap: 8px;
   padding: 0 8px;
+  overflow: hidden;
+}
+
+/* 角が狭いときは、曲の長さ → 「分解」 → 「ステム」の文字 → 「トラック」の文字の順に畳む */
+.tracks.t-tracks .tracks-corner.fold-1 .t-fold-1,
+.tracks.t-tracks .tracks-corner.fold-2 :is(.t-fold-1, .t-fold-2),
+.tracks.t-tracks .tracks-corner.fold-3 :is(.t-fold-1, .t-fold-2, .t-fold-3),
+.tracks.t-tracks .tracks-corner.fold-4 :is(.t-fold-1, .t-fold-2, .t-fold-3, .t-fold-4) {
+  display: none;
+}
+
+.tracks.t-tracks .tracks-corner .link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.tracks.t-tracks.in-sheet .tracks-corner {
+  padding-left: 14px;
 }
 
 .t-trk-toggle {
@@ -840,9 +865,88 @@ html.t-left .t-panel.overlay {
   font-size: 13px;
 }
 
+/* 見出し：名前・解析元・M・S・音量・スペクトル（数値は出さない。名前はいつも見えるように） */
 .tracks.t-tracks .trk {
-  gap: 8px;
-  padding-left: 12px;
+  gap: 6px;
+  padding: 0 8px 0 10px;
+}
+
+.tracks.t-tracks .trk-name {
+  flex: 1 1 84px;
+  min-width: 60px;
+}
+
+.tracks.t-tracks .trk-v {
+  display: none;
+}
+
+.tracks.t-tracks .trk input.trk-vol {
+  flex: 1 1 72px;
+  width: 72px;
+  min-width: 52px;
+  margin: 0;
+}
+
+.tracks.t-tracks .radio-pad {
+  width: 32px;
+}
+
+.tracks.t-tracks .trk-spec {
+  position: relative;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: 0;
+  border-radius: 9px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text3);
+}
+
+/* 見た目は 36、押せる所は 44 */
+.tracks.t-tracks .trk-spec::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+.tracks.t-tracks .trk-spec input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tracks.t-tracks .trk-spec.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.tracks.t-tracks .trk-spec.pad {
+  border: 0;
+  background: none;
+}
+
+.tracks.t-tracks .trk-spec.pad::before {
+  content: none;
+}
+
+.t-spec-ic {
+  display: inline-flex;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tracks.t-tracks .trk-title b {
@@ -865,10 +969,7 @@ html.t-left .t-panel.overlay {
   height: 32px;
 }
 
-.tracks.t-tracks .trk-spec input {
-  width: 20px;
-  height: 20px;
-}
+
 
 /* ---- 下のシート（縦） ---- */
 
@@ -1211,8 +1312,123 @@ html.tablet .t-chart .rec-badge {
 }
 
 .t-pads-row .t-step {
+  flex: 1 1 auto;
+  min-width: max-content;
+}
+
+/* 見出しの行が入りきらないとき：並びの文字を消してアイコンだけ → ▶ の位置を消す */
+.t-pads.where-sheet .t-pads-row {
+  overflow: hidden;
+}
+
+.t-pads-row.fold-1 .t-layout-seg .t-seg-label,
+.t-pads-row.fold-2 .t-layout-seg .t-seg-label {
+  display: none;
+}
+
+.t-pads-row.fold-1 .t-layout-seg button,
+.t-pads-row.fold-2 .t-layout-seg button {
+  padding: 0 11px;
+}
+
+.t-pads-row.fold-2 .t-step-pos {
+  display: none;
+}
+
+/* ---- 縦のシートのパッド：シートの高さで並べ方を変える ----
+   d-roomy（半分・大）：キット 4×3 と右に入れ方の説明／d-compact（低い）：4×3 を詰めて 1 行の名前／d-row（細い）：横 1 列に 12 個 */
+
+.t-pads.where-sheet {
+  overflow: hidden;
+}
+
+.t-pads.where-sheet > .t-kit {
   flex: 1;
+  min-height: 0;
+}
+
+.t-pads.where-sheet.d-compact .t-kit {
+  grid-auto-rows: minmax(44px, 1fr);
+  gap: 6px;
+}
+
+.t-pads.where-sheet.d-compact .t-pad {
+  min-height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 11px;
+}
+
+.t-pads.where-sheet.d-compact .t-pad-key {
+  flex: none;
+}
+
+.t-pads.where-sheet.d-compact .t-pad-name {
   min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.t-pads.d-row .t-kit {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: minmax(40px, 1fr);
+  gap: 4px;
+}
+
+/* 横のパネルが低いとき（下のトラックを開いたなど）：パッドを低くして、スクロールしないで済むように */
+.t-pads.where-panel.d-compact {
+  gap: 10px;
+}
+
+.t-pads.where-panel.d-compact .t-kit {
+  grid-auto-rows: minmax(52px, 1fr);
+  gap: 6px;
+}
+
+.t-pads.where-panel.d-compact .t-pad {
+  min-height: 52px;
+  padding: 6px 8px;
+  gap: 2px;
+  justify-content: center;
+}
+
+.t-pads.where-panel.d-compact .t-pad-name {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.t-pads.where-panel.d-compact .t-lanegrid-col {
+  min-height: 96px;
+}
+
+/* キットの段（上・中・下）の切れ目を少しあける */
+.t-pads.d-row .t-kit .t-pad:nth-child(4n + 1):not(:first-child) {
+  margin-left: 6px;
+}
+
+.t-pads.d-row .t-pad {
+  min-height: 40px;
+  padding: 0 2px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.t-pads.d-row .t-pad-name {
+  display: none;
+}
+
+.t-pads.d-row .t-pad-key {
+  gap: 0;
+  font-size: 13px;
+}
+
+.t-pads.d-row .t-pad-key i {
+  display: none;
 }
 
 .t-pads-body {
@@ -1343,6 +1559,13 @@ html.tablet .t-chart .rec-badge {
   display: none;
 }
 
+/* 細いシート：レーンのパッドは上下に割らず、HHオープン・左バスドラムは空いた所に並べる */
+.t-lanestrip.slim .t-lanestrip-col .t-pad {
+  padding: 4px 2px;
+  justify-content: center;
+  gap: 2px;
+}
+
 .t-lanestrip-note {
   position: absolute;
   left: 0;
@@ -1378,6 +1601,16 @@ html.tablet .t-chart .rec-badge {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 右の説明の箱（幅 250）の中：▶ の位置を上の行、戻る・休み・消すを下の行に */
+.t-step.compact {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.t-step.compact .t-step-pos {
+  flex: 1 0 100%;
 }
 
 .t-step-pos {

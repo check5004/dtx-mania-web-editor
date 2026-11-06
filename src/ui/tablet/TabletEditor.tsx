@@ -1,8 +1,8 @@
 // タブレット版のエディタ（譜面の画面）。承認されたデザイン（タッチ操作の決まり・部品の実寸）に合わせる。
-// 横（幅 1024 以上）：上のバー 56・操作のバー 60・左に道具 68・譜面・パネル 360（1枚だけ）・右にレール 76・下にトラックの帯 52（開くと 274）
-// 縦（幅 1024 未満）：パネルは下のシート（タブだけ 64・半分 420・大 600）。上のバーは難易度を ▼ にまとめる
+// 横（幅 1024 以上）：上のバー 56・操作のバー 60・左に道具 68・譜面・パネル 360（1枚だけ）・右にレール 76・下にトラックの帯 52（開くと 274、トラック1本ずつの高さで止まる）
+// 縦（幅 1024 未満）：パネルは下のシート（タブだけ 80・細い 196・低い 304・半分 420・大 600、タブごとに高さを覚える）。上のバーは難易度を ▼ にまとめる
 // 押せる所は 44×44 以上。ホバー・右クリックの代わりに、文字付きのボタンと長押し
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { tr } from '../../i18n';
 import { useLang } from '../../i18n/useLang';
 import { switchDifficulty } from '../../app/fileActions';
@@ -21,9 +21,9 @@ import {
   useDevice,
   openSheet,
   type PanelId,
-  type SheetSize,
   type SheetTab,
 } from '../../store/device';
+import { SHEET_GRIP, SHEET_H, SHEET_TABS, snapHeight, snapSheet, stepSheet, trackStops } from '../../store/sheetSnap';
 import { currentBeat, isDirty, openPage, openTempo, playFrom, redo, setView, undo, useEditor } from '../../store/editor';
 import { toggleFlamMode, useFlam } from '../../store/flam';
 import { useFind } from '../../store/find';
@@ -36,14 +36,14 @@ import { ContextMenuHost } from '../ContextMenu';
 import { promptDialog } from '../dialogs';
 import { FindPanel } from '../FindPanel';
 import { chipBpmLabel, formatLevel, formatTime, meterLabel } from '../format';
-import { useSongLength, useSongSpan, useSoundsVersion, usePlayBeat } from '../hooks';
+import { useFold, useSongLength, useSongSpan, useSoundsVersion, usePlayBeat } from '../hooks';
 import { Icon } from '../icons';
 import { MasterMixer } from '../MixPanel';
 import { NxPreview } from '../NxPreview';
 import { OriginBadge, originTitle } from '../OriginBadge';
 import { PhrasePanel } from '../PhrasePanel';
 import { abbrDiff, useEditorMenus, usePreimage } from '../TopBar';
-import { TrackPanel } from '../Tracks';
+import { TABLET_TRACK_ROW, TrackPanel, useTrackRows } from '../Tracks';
 import { PlayControls } from '../Transport';
 import { VelocityPanel } from '../VelocityPanel';
 import { PanelContent, panelIcon } from './Panels';
@@ -55,39 +55,6 @@ const TOP_H = 56;
 const TRANSPORT_H = 60;
 /** 横のトラックの帯（閉じたとき） */
 const STRIP_H = 52;
-/** 縦のシート：つまみ 16＋タブ 64。タブだけ・半分 420・大 600 */
-const SHEET_GRIP = 16;
-const SHEET_TABS = 64;
-const SHEET_H: Record<SheetSize, number> = { tabs: SHEET_GRIP + SHEET_TABS, half: 420, full: 600 };
-
-/**
- * 幅が足りないときに畳む段（デスクトップの上のバーと同じ仕組み）。はみ出していれば1段ずつ畳み、幅や中身が変わったら測り直す
- */
-function useFold(ref: React.RefObject<HTMLElement | null>, max: number, key: string): number {
-  const [lv, setLv] = useState(0);
-  const [w, setW] = useState(0);
-  const lastKey = useRef('');
-  useLayoutEffect(() => {
-    const k = `${key}|${w}`;
-    if (lastKey.current !== k) {
-      lastKey.current = k;
-      if (lv !== 0) {
-        setLv(0);
-        return;
-      }
-    }
-    const el = ref.current;
-    if (el && lv < max && el.scrollWidth > el.clientWidth + 1) setLv(lv + 1);
-  });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setW(el.clientWidth));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return lv;
-}
 
 /** 外を押したら閉じる小窓 */
 function useOutside(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
@@ -515,28 +482,60 @@ function PanelHost({ overlay }: { overlay: boolean }) {
 
 // ---- 下のトラック（横） -----------------------------------------------------------------
 
-function useDragHeight(get: () => number, set: (h: number) => void, dir: 1 | -1, onEnd?: (h: number) => void) {
+/**
+ * つまみのドラッグ：指に付いて高さを変え（set）、離したら onEnd(高さ, 離す直前の速さ px/ms。+ で高くする向き)。
+ * ほとんど動かさずに短く離したら onTap（開け閉め）
+ */
+function useDragHeight(get: () => number, set: (h: number) => void, onEnd: (h: number, v: number) => void, onTap?: () => void) {
   return (e: React.PointerEvent<HTMLElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     const el = e.currentTarget;
     el.setPointerCapture(e.pointerId);
+    const id = e.pointerId;
     const y0 = e.clientY;
+    const t0 = e.timeStamp;
     const h0 = get();
     let last = h0;
+    let moved = false;
+    const samples: { t: number; h: number }[] = [];
     const move = (ev: PointerEvent) => {
-      last = h0 + dir * (y0 - ev.clientY);
-      set(last);
+      if (ev.pointerId !== id) return;
+      const h = h0 + (y0 - ev.clientY);
+      if (!moved && Math.abs(h - h0) < 6) return;
+      moved = true;
+      last = h;
+      samples.push({ t: ev.timeStamp, h });
+      if (samples.length > 12) samples.shift();
+      set(h);
     };
-    const up = () => {
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return;
+      // 触ったあとに矢印キー・Space が譜面に効くように、つまみにフォーカスを残さない
+      if (document.activeElement === el) el.blur();
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
-      onEnd?.(last);
+      // 動かさずに離した：短ければタップ（開け閉め）、長押しだけなら何もしない
+      if (!moved) {
+        if (ev.type === 'pointerup' && ev.timeStamp - t0 < 500) onTap?.();
+        return;
+      }
+      // 離す直前 0.1 秒の速さ（止めてから離したら 0 に近い）
+      const recent = samples.filter((p) => ev.timeStamp - p.t <= 100);
+      const v = recent.length >= 2 ? (recent[recent.length - 1].h - recent[0].h) / Math.max(16, ev.timeStamp - recent[0].t) : 0;
+      onEnd(last, v);
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   };
+}
+
+/** トラックの帯の止まる高さ：閉じた帯・上の帯＋1本ずつ・全部をゆったり */
+function useTrackStops(maxH: number): number[] {
+  const n = useTrackRows().length;
+  return trackStops(n, { closed: STRIP_H, ruler: TABLET_TRACK_ROW.ruler, row: TABLET_TRACK_ROW.stop, roomy: TABLET_TRACK_ROW.max, maxH });
 }
 
 function TracksT() {
@@ -546,18 +545,31 @@ function TracksT() {
   const vh = useDevice((s) => s.vh);
   const length = useSongLength(doc);
   const span = useSongSpan(doc);
+  const [drag, setDrag] = useState<number | null>(null);
   const maxH = Math.max(160, vh - TOP_H - TRANSPORT_H - 220);
-  const height = open ? Math.min(tracksH, maxH) : STRIP_H;
+  const stops = useTrackStops(maxH);
+  const target = open ? Math.max(stops[1] ?? STRIP_H, Math.min(tracksH, maxH)) : STRIP_H;
+  const height = drag ?? target;
   const grip = useDragHeight(
-    () => height,
-    (h) => setTracksH(Math.min(maxH, h)),
-    1,
-    (h) => h < 120 && setTracksOpen(false),
+    () => target,
+    (h) => setDrag(Math.max(STRIP_H, Math.min(maxH, h))),
+    (h, v) => {
+      setDrag(null);
+      // 1本ずつの高さで止める（いちばん下まで下げたら閉じる）
+      const to = snapHeight(h, v, stops);
+      if (to <= STRIP_H) setTracksOpen(false);
+      else {
+        setTracksH(to);
+        setTracksOpen(true);
+      }
+    },
+    () => setTracksOpen(!open),
   );
+  // 開いた帯が譜面の高さを取る（はじいた後はなめらかに止まる）
   return (
-    <div className={`t-tracks ${open ? 'open' : ''}`} style={{ height }}>
-      {open && <div className="t-grip" onPointerDown={grip} aria-label={tr('トラックの高さ', 'Tracks height')} />}
-      <TrackPanel length={length} span={span} tablet={{ open, height, onToggle: () => setTracksOpen(!open) }} />
+    <div className={`t-tracks ${open || drag !== null ? 'open' : ''} ${drag !== null ? 'dragging' : ''}`} style={{ height }}>
+      <div className="t-grip" onPointerDown={grip} role="separator" aria-orientation="horizontal" aria-label={tr('トラックの高さ（はじくと 1 本ずつ止まります）', 'Tracks height (flick to stop one track at a time)')} />
+      <TrackPanel length={length} span={span} tablet={{ open: open || (drag !== null && drag > STRIP_H + 4), height, onToggle: () => setTracksOpen(!open) }} />
     </div>
   );
 }
@@ -576,17 +588,16 @@ function SheetT() {
   const maxH = Math.max(SHEET_H.tabs, vh - TOP_H - TRANSPORT_H - 160);
   const target = Math.min(maxH, SHEET_H[size]);
   const height = drag ?? target;
+  const toggle = () => (size === 'tabs' ? openSheet(tab) : setSheetSize('tabs'));
   const grip = useDragHeight(
     () => target,
     (h) => setDrag(Math.max(SHEET_H.tabs, Math.min(maxH, h))),
-    1,
-    (h) => {
+    (h, v) => {
       setDrag(null);
-      // いちばん近い高さで止める（タブだけ・半分・大）
-      const sizes: SheetSize[] = ['tabs', 'half', 'full'];
-      const best = sizes.reduce((a, b) => (Math.abs(Math.min(maxH, SHEET_H[b]) - h) < Math.abs(Math.min(maxH, SHEET_H[a]) - h) ? b : a));
-      setSheetSize(best);
+      // 止まる高さ（タブだけ・細い・低い・半分・大）のいちばん近い所。はじいたらその向きの次の高さ
+      setSheetSize(snapSheet(h, v, maxH));
     },
+    toggle,
   );
   const tabs: { id: SheetTab; label: string }[] = [
     { id: 'pad', label: tr('パッド', 'Pads') },
@@ -599,7 +610,27 @@ function SheetT() {
   const showBody = bodyH > 40;
   return (
     <div className={`t-sheet ${drag !== null ? 'dragging' : ''}`} style={{ height }}>
-      <div className="t-sheet-grip" onPointerDown={grip} role="separator" aria-label={tr('シートの高さ', 'Sheet height')}>
+      <div
+        className="t-sheet-grip"
+        onPointerDown={grip}
+        role="separator"
+        aria-orientation="horizontal"
+        tabIndex={0}
+        aria-valuemin={SHEET_H.tabs}
+        aria-valuemax={maxH}
+        aria-valuenow={Math.round(height)}
+        aria-label={tr('シートの高さ（ドラッグ・はじく・タップで開け閉め）', 'Sheet height (drag, flick, or tap to open and close)')}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            e.stopPropagation();
+            setSheetSize(stepSheet(size, e.key === 'ArrowUp' ? 1 : -1, maxH));
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+      >
         <i />
       </div>
       {showBody && (
@@ -617,7 +648,7 @@ function SheetT() {
             </div>
           ) : tab === 'trk' ? (
             <div className="t-pane t-pane-trk">
-              <TrackPanel length={length} span={span} tablet={{ open: true, height: bodyH, onToggle: () => setSheetSize('tabs') }} />
+              <TrackPanel length={length} span={span} tablet={{ open: true, height: bodyH, inSheet: true }} />
             </div>
           ) : (
             <PanelContent id={tab as PanelId} where="sheet" />

@@ -1,5 +1,6 @@
 // タブレットの入力パッド（キット 4×3・レーン）。押した瞬間に鳴らす。指が滑っても隣のパッドは鳴らさない（押した所だけ）
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLang } from '../../i18n/useLang';
 import { tr } from '../../i18n';
 import { DRUM_LANES } from '../../dtx/model';
 import { useInputSettings } from '../../input/settings';
@@ -10,6 +11,8 @@ import { openSettings, useEditor } from '../../store/editor';
 import { clearAtCursor, padDown, padModeOf, padUp, setPadMode, stepBack, stepRest, toggleRecording, type PadMode } from '../../store/pads';
 import { useChartLanes } from '../ChartCanvas';
 import { formatPosition } from '../format';
+import { useBoxSize, useFold } from '../hooks';
+import { padDensity } from '../../store/sheetSnap';
 import { Icon } from '../icons';
 
 /** キットの並びの1つ（"レーン:0|1"）を [レーン, Shift で置く物か] に */
@@ -107,9 +110,9 @@ function LayoutSeg() {
   return (
     <div className="seg t-seg t-layout-seg" role="radiogroup" aria-label={tr('パッドの並び', 'Pad layout')}>
       {items.map(([k, label, icon]) => (
-        <button key={k} role="radio" aria-checked={layout === k} className={layout === k ? 'on' : ''} onClick={() => setTouchPrefs({ padLayout: k })}>
+        <button key={k} role="radio" aria-checked={layout === k} aria-label={label} className={layout === k ? 'on' : ''} onClick={() => setTouchPrefs({ padLayout: k })}>
           {icon}
-          {label}
+          <span className="t-seg-label">{label}</span>
         </button>
       ))}
     </div>
@@ -217,8 +220,11 @@ function LaneGrid() {
   );
 }
 
-/** 縦のシート：譜面のレーンの真下に、同じ幅で並べる */
-function LaneStrip() {
+/**
+ * 縦のシート：譜面のレーンの真下に、同じ幅で並べる。
+ * slim（シートが低い）：HH・LP を上下に割ると押せないほど小さくなるので、HHオープン・左バスドラムはレーンの右（入らなければ左）の空きに並べる
+ */
+function LaneStrip({ slim = false }: { slim?: boolean }) {
   const order = useInputSettings((s) => s.laneOrder);
   const keys = useKeyLabels();
   const geo = useChartLanes();
@@ -240,29 +246,48 @@ function LaneStrip() {
   }, []);
   const laneW = geo ? geo.laneW : Math.floor(w / 10);
   const x0 = geo ? geo.left - left0 : 0;
+  const right0 = x0 + order.length * laneW;
+  // 細いとき：上下に割らずに、Shift で置く音（HHオープン・左バスドラム）を空いた所へ
+  const alts = order.filter((lane) => DRUM_LANES[lane].alt !== undefined);
+  const ALT_GAP = 6;
+  const altW = (room: number) => Math.min(76, Math.floor((room - 8 - ALT_GAP * (alts.length - 1)) / Math.max(1, alts.length)));
+  const roomR = w - right0;
+  const roomL = x0;
+  const side: 'right' | 'left' | null = !slim || alts.length === 0 ? null : altW(roomR) >= 44 ? 'right' : altW(roomL) >= 44 ? 'left' : null;
+  const aw = side === 'right' ? altW(roomR) : side === 'left' ? altW(roomL) : 0;
+  const altLeft = (i: number) => (side === 'right' ? right0 + 8 + i * (aw + ALT_GAP) : 8 + i * (aw + ALT_GAP));
+  const split = (lane: number) => DRUM_LANES[lane].alt !== undefined && side === null;
   return (
-    <div className="t-lanestrip" ref={ref}>
-      {!geo || x0 > 90 ? (
+    <div className={`t-lanestrip ${slim ? 'slim' : ''}`} ref={ref}>
+      {(!geo || x0 > 90) && side !== 'left' ? (
         <span className="t-lanestrip-note">{tr('レーンのパッド', 'Lane pads')}</span>
       ) : null}
       {order.map((lane, slot) => {
-        const d = DRUM_LANES[lane];
         const style = { left: x0 + slot * laneW + 2, width: laneW - 4 };
         return (
           <div key={lane} className="t-lanestrip-col" style={style}>
-            {d.alt !== undefined && <Pad lane={lane} alt className="half" sub="Shift" />}
-            <Pad lane={lane} alt={false} className={d.alt !== undefined ? 'half' : ''} sub={keys.get(lane) ?? ''} />
+            {split(lane) && <Pad lane={lane} alt className="half" sub="Shift" />}
+            <Pad lane={lane} alt={false} className={split(lane) ? 'half' : ''} sub={keys.get(lane) ?? ''} />
           </div>
         );
       })}
-      {geo && w - (x0 + 10 * laneW) > 70 ? (
-        <span className="t-lanestrip-note right" style={{ left: x0 + 10 * laneW + 8 }}>
+      {side &&
+        alts.map((lane, i) => (
+          <div key={`alt-${lane}`} className="t-lanestrip-col alt" style={{ left: altLeft(i), width: aw }}>
+            <Pad lane={lane} alt sub="Shift" />
+          </div>
+        ))}
+      {geo && side !== 'right' && w - right0 > 70 ? (
+        <span className="t-lanestrip-note right" style={{ left: right0 + 8 }}>
           {tr('叩くと ▶ に置く', 'Tap to place at ▶')}
         </span>
       ) : null}
     </div>
   );
 }
+
+/** 横のパネル：これより低ければパッドを低くする（キット 4×3 の 84 の段と説明がそのまま入る高さ） */
+const PANEL_ROOMY_H = 500;
 
 /** パッドのパネル。where: 横のパネル（360）か縦のシート */
 /** パッドを初めて開いたか（設定の「パッドを叩いたとき（はじめ）」の入れ方にするのは、開いた最初の1回だけ） */
@@ -271,6 +296,10 @@ let padsOpened = false;
 export function PadPanel({ where }: { where: 'panel' | 'sheet' }) {
   const layout = useDevice((s) => s.padLayout);
   const mode = padModeOf(useAssist((s) => s.inputMode));
+  const box = useRef<HTMLDivElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  const { w, h } = useBoxSize(box);
+  const lang = useLang();
   useEffect(() => {
     if (padsOpened) return;
     padsOpened = true;
@@ -281,9 +310,14 @@ export function PadPanel({ where }: { where: 'panel' | 'sheet' }) {
     const a = document.activeElement as HTMLElement | null;
     if (a && a !== document.body && a.closest('.t-pads')) a.blur();
   }, [layout]);
+  const density = padDensity(layout, w, h);
+  // 見出しの行が入りきらなければ、並びの文字 → ▶ の位置の順に畳む
+  const fold = useFold(row, where === 'sheet' ? 2 : 0, `${lang}|${mode}|${layout}|${density}`);
   if (where === 'panel') {
+    // 横のパネルが低いとき（下のトラックを開いたなど）はパッドを低く
+    const short = h > 0 && h < PANEL_ROOMY_H;
     return (
-      <div className="t-pads where-panel scroll">
+      <div className={`t-pads where-panel scroll ${short ? 'd-compact' : 'd-roomy'}`} ref={box}>
         <LayoutSeg />
         <ModeSeg />
         {layout === 'kit' ? <KitGrid /> : <LaneGrid />}
@@ -291,33 +325,31 @@ export function PadPanel({ where }: { where: 'panel' | 'sheet' }) {
       </div>
     );
   }
-  if (layout === 'lane') {
-    return (
-      <div className="t-pads where-sheet lane">
-        <div className="t-pads-row">
-          <ModeSeg />
-          {mode === 'step' ? <StepControls /> : <span className="grow" />}
-          {mode === 'rec' && <RecMini />}
-          <LayoutSeg />
+  // 入れ方の操作（ステップの位置・録音）は、右の説明の箱が無いときは見出しの行に
+  const inRow = layout === 'lane' || density !== 'roomy';
+  return (
+    <div className={`t-pads where-sheet ${layout} d-${density}`} ref={box}>
+      <div className={`t-pads-row ${fold > 0 ? `fold-${fold}` : ''}`} ref={row}>
+        <ModeSeg />
+        {inRow && mode === 'step' ? <StepControls /> : <span className="grow" />}
+        {inRow && mode === 'rec' && <RecMini />}
+        <LayoutSeg />
+        {layout === 'lane' && (
           <button className="t-ib" onClick={() => setSheetSize('tabs')} title={tr('シートを閉じる', 'Close the sheet')} aria-label={tr('シートを閉じる', 'Close the sheet')}>
             {Icon.close(18)}
           </button>
+        )}
+      </div>
+      {layout === 'lane' ? (
+        <LaneStrip slim={density === 'row'} />
+      ) : density === 'roomy' ? (
+        <div className="t-pads-body">
+          <KitGrid />
+          <ModeBox layout="side" />
         </div>
-        <LaneStrip />
-      </div>
-    );
-  }
-  return (
-    <div className="t-pads where-sheet kit">
-      <div className="t-pads-row">
-        <ModeSeg />
-        <span className="grow" />
-        <LayoutSeg />
-      </div>
-      <div className="t-pads-body">
+      ) : (
         <KitGrid />
-        <ModeBox layout="side" />
-      </div>
+      )}
     </div>
   );
 }

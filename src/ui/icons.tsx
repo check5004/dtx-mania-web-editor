@@ -190,6 +190,13 @@ export const Icon = {
       <path d="M2 8h1.5M4.5 5v6M7 3v10M9.5 6v4M12 4.5v7M14 8h.5" />
     </Svg>
   ),
+  /** スペクトル（縦が音の高さ、横が時間の濃淡の帯） */
+  spectrum: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2" y="2.5" width="12" height="11" rx="2" />
+      <path d="M4.5 5.5h2.5M9 5.5h2.5M4.5 8h1.5M7.5 8h4M4.5 10.5h5M11 10.5h.5" strokeWidth="1.6" />
+    </Svg>
+  ),
   library: (s?: number) => (
     <Svg size={s}>
       <path d="M3 2.8v10.4M6 2.8v10.4" />

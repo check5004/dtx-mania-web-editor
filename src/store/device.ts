@@ -4,14 +4,15 @@
 // - 高さは visualViewport で測り直す（Safari のバー・ホーム画面に追加したときの全画面）
 import { create } from 'zustand';
 import { setView, useEditor } from './editor';
+import { isOpenSheetSize, type OpenSheetSize, type SheetSize } from './sheetSnap';
+
+export type { OpenSheetSize, SheetSize } from './sheetSnap';
 
 export type UiMode = 'auto' | 'tablet' | 'desktop';
 /** 横の右のレールから開くパネル（縦は下のシートのタブ） */
 export type PanelId = 'pad' | 'snd' | 'src' | 'asst' | 'chk' | 'prev';
 /** 縦のシートのタブ（パネル＋トラック） */
 export type SheetTab = PanelId | 'trk';
-/** 縦のシートの高さ：タブだけ 64・半分 420・大 600 */
-export type SheetSize = 'tabs' | 'half' | 'full';
 /** 譜面の道具：置く・選ぶ */
 export type Tool = 'place' | 'select';
 /** 入力パッドの並び：キット（4×3）・レーン（譜面の下にレーンと同じ幅） */
@@ -53,6 +54,8 @@ export interface TouchPrefs {
   recOverdub: boolean;
   /** 横のトラックを開いたときの高さ */
   tracksH: number;
+  /** 縦のシート：タブごとに、最後に開いていた高さ（無ければ「半分」） */
+  sheetSizes: Partial<Record<SheetTab, OpenSheetSize>>;
 }
 
 /** キットの並びの初め：上段シンバル、中段は手、下段は足とフロアタム */
@@ -126,7 +129,20 @@ const PREF_DEFAULT: TouchPrefs = {
   countIn: true,
   recOverdub: true,
   tracksH: 274,
+  sheetSizes: {},
 };
+
+const SHEET_TABS: readonly SheetTab[] = ['pad', 'trk', 'snd', 'src', 'asst', 'chk', 'prev'];
+
+function validSheetSizes(v: unknown): Partial<Record<SheetTab, OpenSheetSize>> {
+  const out: Partial<Record<SheetTab, OpenSheetSize>> = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const t of SHEET_TABS) {
+    const x = (v as Record<string, unknown>)[t];
+    if (isOpenSheetSize(x)) out[t] = x;
+  }
+  return out;
+}
 
 function loadPrefs(): TouchPrefs {
   let saved: Partial<TouchPrefs> = {};
@@ -153,7 +169,8 @@ function loadPrefs(): TouchPrefs {
     stepChord: p.stepChord !== false,
     countIn: p.countIn !== false,
     recOverdub: p.recOverdub !== false,
-    tracksH: Math.max(120, Math.min(600, Number(p.tracksH) || PREF_DEFAULT.tracksH)),
+    tracksH: Math.max(80, Math.min(600, Number(p.tracksH) || PREF_DEFAULT.tracksH)),
+    sheetSizes: validSheetSizes(p.sheetSizes),
   };
 }
 
@@ -207,6 +224,7 @@ function savePrefs() {
     countIn: s.countIn,
     recOverdub: s.recOverdub,
     tracksH: s.tracksH,
+    sheetSizes: s.sheetSizes,
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(p));
@@ -245,18 +263,32 @@ export function openPanelT(id: PanelId) {
   else useDevice.setState({ panel: id });
 }
 
-/** 縦のシートのタブを開く（タブだけのときは半分まで上げる。開いているタブをもう一度押すとタブだけに） */
+/** タブを開くときの高さ：そのタブで最後に開いていた高さ（初めては「半分」） */
+export function sheetSizeOf(tab: SheetTab): OpenSheetSize {
+  return useDevice.getState().sheetSizes[tab] ?? 'half';
+}
+
+/**
+ * 縦のシートのタブを開く（そのタブで最後に開いていた高さで。開いているタブをもう一度押すとタブだけに）
+ */
 export function openSheet(tab: SheetTab, toggle = false) {
   const s = useDevice.getState();
   if (toggle && s.sheetTab === tab && s.sheetSize !== 'tabs') {
     useDevice.setState({ sheetSize: 'tabs' });
     return;
   }
-  useDevice.setState({ sheetTab: tab, sheetSize: s.sheetSize === 'tabs' ? 'half' : s.sheetSize });
+  useDevice.setState({ sheetTab: tab, sheetSize: sheetSizeOf(tab) });
 }
 
+/** シートの高さを変える。開いた高さは今のタブの高さとして覚える（次にそのタブを開くとこの高さ） */
 export function setSheetSize(sheetSize: SheetSize) {
-  useDevice.setState({ sheetSize });
+  const s = useDevice.getState();
+  if (sheetSize === 'tabs' || s.sheetSizes[s.sheetTab] === sheetSize) {
+    useDevice.setState({ sheetSize });
+    return;
+  }
+  useDevice.setState({ sheetSize, sheetSizes: { ...s.sheetSizes, [s.sheetTab]: sheetSize } });
+  savePrefs();
 }
 
 export function setTracksOpen(open: boolean) {
@@ -264,7 +296,7 @@ export function setTracksOpen(open: boolean) {
 }
 
 export function setTracksH(h: number) {
-  useDevice.setState({ tracksH: Math.max(120, Math.min(600, Math.round(h))) });
+  useDevice.setState({ tracksH: Math.max(80, Math.min(600, Math.round(h))) });
   savePrefs();
 }
 

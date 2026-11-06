@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DtxDoc } from '../dtx/model';
 import { useAssist } from '../store/assist';
 import { contentEndSec, currentBeat, songEndMeasure, songEndSec, useEditor } from '../store/editor';
@@ -123,4 +123,53 @@ export function useCanvas(draw: (ctx: CanvasRenderingContext2D, w: number, h: nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return ref;
+}
+
+/**
+ * 幅が足りないときに畳む段（デスクトップの上のバーと同じ仕組み）。はみ出していれば1段ずつ畳み、幅や中身が変わったら測り直す。
+ * max: 畳む段の数、key: 中身が変わったら測り直すための印
+ */
+export function useFold(ref: React.RefObject<HTMLElement | null>, max: number, key: string): number {
+  const [lv, setLv] = useState(0);
+  const [w, setW] = useState(0);
+  const lastKey = useRef('');
+  useLayoutEffect(() => {
+    const k = `${key}|${w}`;
+    if (lastKey.current !== k) {
+      lastKey.current = k;
+      if (lv !== 0) {
+        setLv(0);
+        return;
+      }
+    }
+    const el = ref.current;
+    if (el && lv < max && el.scrollWidth > el.clientWidth + 1) setLv(lv + 1);
+  });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return lv;
+}
+
+/** 要素の中身の大きさ（ResizeObserver で測り直す）。測るまでは 0 */
+export function useBoxSize(ref: React.RefObject<HTMLElement | null>): { w: number; h: number } {
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return size;
 }
