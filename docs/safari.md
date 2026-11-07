@@ -59,6 +59,12 @@ Safari（WebKit）のときだけ動きます。PC の Chrome・Edge の動き�
 
 JavaScript の機能は `tsconfig.json` の `lib`（ES2023 = Safari 16.4 以降で動く範囲）までにする。上げない（`Object.groupBy`・`Promise.withResolvers` は Safari 17.4、Iterator helpers は 18.4 から）。
 
+### 画面（iPad）
+
+- 入力欄の文字は 16px 以上（小さいと iPad の Safari が画面を拡大する）。タブレットの画面では `src/tablet.css` で 16px にしている。
+- 画面の高さは `--app-h`（`src/store/device.ts` が表示域から入れる）。`100vh` はアドレスバーの出し入れで変わるので、全画面の高さには使わない。
+- ホバーに頼らない（指では出ない）。長押し・右クリックのメニューで代わりを用意する。
+
 ## 4. ブラウザの判定
 
 `src/platform.ts` に集めています。UA を見る判定はここ以外に書かない。
