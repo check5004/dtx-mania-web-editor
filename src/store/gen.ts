@@ -25,11 +25,12 @@ import { lastMeasure } from '../gen/features';
 import { projectCharts } from '../gen/project';
 import { DEFAULT_KEEP, DEFAULT_RUNG, DIFFICULTIES, generateToTarget, levelOfDoc, MAX_EASE, MAX_RUNG, simplify, type Difficulty, type Generated, type MustKeep } from '../gen/simplify';
 import { aimOf, isAbove, SLOTS, slotOf, slotRank, targetBands, type Slot, type TargetBand } from '../gen/targets';
-import { confirmDialog } from '../ui/dialogs';
+import { chooseDialog, confirmDialog } from '../ui/dialogs';
+import { sortByDifficulty } from '../gen/diffTabs';
 import { hasAiKey, runAi } from './ai';
 import { judgeDoc, type JudgeResult } from './aiLevel';
 import { levelOf } from './check';
-import { addPlayDocTransform, addSoundDocs, prepareSounds, refreshPlayback, songEndMeasure, stop, toast, useEditor } from './editor';
+import { addPlayDocTransform, addSoundDocs, goBack, prepareSounds, refreshPlayback, songEndMeasure, stop, toast, useEditor } from './editor';
 import { bandOf, guidelineText, levelOfField, loadGuideline, useGuideline } from './guideline';
 import { useSidecar } from './sidecar';
 
@@ -79,6 +80,8 @@ export interface DiffState {
   cost: number;
   /** 作った元（result のチップの id はこの譜面のもの） */
   src: SourceRef | null;
+  /** エディタに反映したとき（書いたファイルと、そのときの譜面）。result.doc が変わったら「反映のあとに変えた」 */
+  applied: { file: string; doc: DtxDoc } | null;
 }
 
 /** 再生で鳴らす譜面（並べている列）：元の譜面・既存の譜面・作った難易度 */
@@ -153,6 +156,7 @@ const emptyDiff = (diff: Difficulty, enabled = true): DiffState => ({
   issues: 0,
   cost: 0,
   src: null,
+  applied: null,
 });
 
 /** 開いている譜面より下の難易度だけ作る */
@@ -709,7 +713,60 @@ export function genShow(beat: number) {
   setGenView({ scrollBeat: Math.max(-0.5, beat - 2) });
 }
 
-// ---- 書き出し ---------------------------------------------------------------------------
+// ---- エディタへの反映（書き出し） ------------------------------------------------------------
+// 作った難易度は、この画面の中だけにある。「エディタに反映」で曲フォルダに譜面を書き、set.def に載せると、
+// エディタの難易度タブに加わって開けるようになる。反映しないまま戻ろうとしたら聞く（leaveGen）。
+
+/**
+ * 作った難易度がエディタに入っているか。none: 作っていない（作らない）、pending: 作ったがまだ反映していない、
+ * applied: 反映した、changed: 反映のあとに作り直した・手直しした
+ */
+export type ReflectState = 'none' | 'pending' | 'applied' | 'changed';
+
+export function reflectState(ds: DiffState): ReflectState {
+  if (!ds.enabled || !ds.result) return 'none';
+  if (!ds.applied) return 'pending';
+  return ds.applied.doc === ds.result.doc ? 'applied' : 'changed';
+}
+
+/** 作ったのに、まだエディタに反映していない難易度（反映のあとに変えたものも） */
+export function unreflected(s: Pick<GenState, 'sourceSlot' | 'diffs'> = get()): Difficulty[] {
+  return belowSource(s).filter((d) => {
+    const r = reflectState(s.diffs[d]);
+    return r === 'pending' || r === 'changed';
+  });
+}
+
+/**
+ * この画面を離れる（エディタに戻る・Esc）。作ってまだ反映していない難易度があれば、反映するか聞く
+ * （黙って戻ると、作った難易度がエディタのどこにも出てこない）
+ */
+export async function leaveGen(): Promise<boolean> {
+  const pending = unreflected();
+  if (pending.length) {
+    const names = pending.join(tr('・', ', '));
+    const choice = await chooseDialog<'apply' | 'leave'>({
+      title: tr('作った難易度をエディタに反映しますか？', 'Add the new difficulties to the editor?'),
+      body: tr(`${names} はまだエディタに入っていません。`, `${names} ${pending.length === 1 ? "isn't" : "aren't"} in the editor yet.`),
+      options: [
+        {
+          label: tr('反映して戻る', 'Add and go back'),
+          sub: tr('難易度タブに加わり、エディタで開いて直せます（曲フォルダに譜面を書き、set.def に載せます）', 'They join the difficulty tabs so you can open and edit them (the charts are written to the song folder and listed in set.def)'),
+          value: 'apply',
+        },
+        {
+          label: tr('反映せずに戻る', 'Go back without adding'),
+          sub: tr('作った結果はこの画面に残ります（エディタで譜面を変えると消えます）', 'The results stay on this page (they are cleared if you change the chart in the editor)'),
+          value: 'leave',
+        },
+      ],
+    });
+    if (choice === null) return false;
+    if (choice === 'apply' && !(await writeOut())) return false;
+  }
+  goBack();
+  return true;
+}
 
 const SLOT_INDEX: Record<Slot, number> = { BASIC: 1, ADVANCED: 2, EXTREME: 3, MASTER: 4 };
 const DIFF_TOKEN = /^(?:(.*?)([_\-\s.]))?(mstr|master|mas|ext|extreme|adv|advanced|bsc|bas|basic)$/i;
@@ -857,15 +914,20 @@ export function replacedInSetDef(existing: string | null, sourceFile: string, ma
     .map((l) => ({ label: l.label, file: l.file }));
 }
 
-/** 作った難易度を曲フォルダに書き出し、set.def を更新する */
+/**
+ * エディタに反映する：作った難易度（まだ反映していないもの）を曲フォルダに書き、set.def に載せ、
+ * エディタの難易度タブに加える
+ */
 export async function writeOut(): Promise<boolean> {
   const g = get();
   const s = useEditor.getState();
   const folder = s.folder;
   if (!g.master) return false;
-  const made = belowSource(g).filter((d) => g.diffs[d].enabled && g.diffs[d].result);
+  // 反映したままの難易度は書き直さない（set.def にはもう載っている）
+  const made = unreflected(g);
   if (made.length === 0) {
-    toast(tr('まだ難易度を作っていません', "You haven't made any difficulties yet"), 'warn');
+    const done = belowSource(g).some((d) => reflectState(g.diffs[d]) === 'applied');
+    toast(done ? tr('作った難易度は、もうエディタに反映しています', 'The new difficulties are already in the editor') : tr('まだ難易度を作っていません', "You haven't made any difficulties yet"), done ? 'info' : 'warn');
     return false;
   }
   if (!folder) {
@@ -874,10 +936,17 @@ export async function writeOut(): Promise<boolean> {
   }
   // 残す既存の譜面（set.def に残す・上書きしない）
   const kept = SLOTS.filter((x) => keepsExisting(g, x)).map((x) => ({ slot: x, label: g.charts[x]!.label, file: g.charts[x]!.file }));
-  // 作り直す譜面が、このアプリで作ってから手を入れていない譜面なら、そのファイルに上書きする
+  // 反映したままの難易度のファイルも上書きしない
+  const appliedFiles = belowSource(g)
+    .filter((d) => !made.includes(d) && g.diffs[d].applied)
+    .map((d) => g.diffs[d].applied!.file);
+  // 作り直す譜面が、このアプリで作ってから手を入れていない譜面なら、そのファイルに上書きする（反映したことがあればそのファイル）
   const prefer: Partial<Record<Difficulty, string>> = {};
-  for (const d of made) if (g.charts[d]?.origin === 'ai') prefer[d] = g.charts[d]!.file;
-  const files = await chooseOutFiles(folder, g.masterFile, made, kept.map((k) => k.file), undefined, prefer);
+  for (const d of made) {
+    const own = g.diffs[d].applied?.file ?? (g.charts[d]?.origin === 'ai' ? g.charts[d]!.file : undefined);
+    if (own) prefer[d] = own;
+  }
+  const files = await chooseOutFiles(folder, g.masterFile, made, [...kept.map((k) => k.file), ...appliedFiles], undefined, prefer);
   let existing: string | null = null;
   const sd = findFile(folder, 'set.def');
   if (sd) {
@@ -887,7 +956,8 @@ export async function writeOut(): Promise<boolean> {
       existing = null;
     }
   }
-  const exists = files.filter((f) => f.overwrite);
+  // 上書きを聞くのは、この画面で反映したファイル（作り直した・手直しした難易度）以外
+  const exists = files.filter((f) => f.overwrite && !sameFile(f.file, g.diffs[f.diff].applied?.file ?? ''));
   const replaced = replacedInSetDef(existing, g.masterFile, files);
   if (exists.length || replaced.length) {
     const sep = tr('、', ', ');
@@ -931,7 +1001,9 @@ export async function writeOut(): Promise<boolean> {
   }
   const text = buildSetDef(existing, g.master.fields['TITLE'] || g.masterFile, g.masterFile, g.masterLabel, files, { sourceSlot: g.sourceSlot, kept });
   if ((await putFile(folder, 'set.def', encodeDtx(text, 'shift_jis').bytes)) === 'memory') memory = true;
-  // 難易度の切り替えタブを更新する（作った譜面には AI の印）
+  // 反映した印（このあと作り直す・手直しすると「反映のあとに変えた」になる）
+  for (const { diff, file } of files) patchDiff(diff, { applied: { file, doc: g.diffs[diff].result!.doc } });
+  // 難易度の切り替えタブを更新する（易しい順。作った譜面には AI の印）
   const labels = new Map<string, string>();
   for (const b of parseSetDef(text)) for (const l of b.levels) labels.set(l.file.toLowerCase(), l.label);
   const written = new Set(files.map((f) => f.file.toLowerCase()));
@@ -940,21 +1012,26 @@ export async function writeOut(): Promise<boolean> {
     return {
       meta: {
         ...st.meta,
-        siblings: dtxFiles(folder).map((f) => ({
-          file: f.name,
-          label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, ''),
-          origin: written.has(f.name.toLowerCase()) ? ('ai' as const) : prevOrigin.get(f.name.toLowerCase()),
-        })),
+        siblings: sortByDifficulty(
+          dtxFiles(folder).map((f) => ({
+            file: f.name,
+            label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, ''),
+            origin: written.has(f.name.toLowerCase()) ? ('ai' as const) : prevOrigin.get(f.name.toLowerCase()),
+          })),
+          [...labels.keys()],
+        ),
       },
     };
   });
+  const names = files.map((f) => f.diff).join(tr('・', ', '));
+  const list = files.map((f) => f.file).join(tr('・', ', '));
   toast(
     tr(
-      `${files.map((f) => `${f.diff}（${f.file}）`).join('、')} と set.def を${memory ? '作りました。保存（Ctrl+S）で曲フォルダに書き出します' : '曲フォルダに書き出しました'}`,
-      `${memory ? 'Made' : 'Wrote'} ${files.map((f) => `${f.diff} (${f.file})`).join(', ')} and set.def${memory ? '. Save (Ctrl+S) to write them to the song folder' : ' to the song folder'}`,
+      `${names} をエディタに反映しました。難易度の切り替えから開けます（${memory ? `${list} と set.def は、保存（Ctrl+S）で曲フォルダに書き出します` : `曲フォルダに ${list} と set.def を書きました`}）`,
+      `Added ${names} to the editor. Open ${files.length === 1 ? 'it' : 'them'} from the difficulty switcher (${memory ? `${list} and set.def are written to the song folder when you save (Ctrl+S)` : `wrote ${list} and set.def to the song folder`})`,
     ),
     'ok',
-    8000,
+    9000,
   );
   return true;
 }

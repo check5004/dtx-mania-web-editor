@@ -59,6 +59,7 @@ import { frac } from '../dtx/fraction';
 import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
+import { sortByDifficulty } from '../gen/diffTabs';
 import { syncedPath } from '../drive/sync';
 
 const get = useEditor.getState;
@@ -89,8 +90,12 @@ async function readSetDefLabels(folder: SongFolder): Promise<Map<string, string>
   return labels;
 }
 
+/** 難易度タブの一覧（易しい順。labels は set.def の L1〜L5 の順に入っている） */
 function siblingsOf(folder: SongFolder, labels: Map<string, string>) {
-  return dtxFiles(folder).map((f) => ({ file: f.name, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, '') }));
+  return sortByDifficulty(
+    dtxFiles(folder).map((f) => ({ file: f.name, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, '') })),
+    [...labels.keys()],
+  );
 }
 
 /**

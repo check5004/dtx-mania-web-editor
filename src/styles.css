@@ -5440,6 +5440,39 @@ button.ms.s.on {
   color: var(--amber);
 }
 
+/* 作った難易度がエディタに入っているか（未反映・反映済み・反映のあとに変えた） */
+.gen-reflect {
+  flex: none;
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line3);
+  white-space: nowrap;
+}
+
+.gen-reflect.pending,
+.gen-reflect.changed {
+  color: var(--amber);
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+}
+
+.gen-reflect.ok {
+  color: var(--ok);
+  border-color: #24563f;
+}
+
+/* 右上の「エディタに反映」を、全部反映したあとは済みの印にする */
+.btn.gen-applied,
+.btn.gen-applied:disabled {
+  color: var(--ok);
+  border-color: #24563f;
+  background: transparent;
+  opacity: 1;
+  cursor: default;
+}
+
 /* 曲の難易度の並び：元の譜面・曲に既にある譜面（チェックボックスの代わりの余白で、作る難易度と頭をそろえる） */
 .gen-slot-pad {
   width: 14px;

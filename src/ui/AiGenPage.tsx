@@ -1,5 +1,5 @@
 // AI難易度生成の画面：曲の難易度（元の譜面・曲に既にある譜面・作る難易度）と目標の幅、難易度ごとの生成、
-// 曲全体で並べて聴き比べる（押して手直し）、AI のレベル判定と方針、set.def への書き出し。
+// 曲全体で並べて聴き比べる（押して手直し）、AI のレベル判定と方針、エディタへの反映（曲フォルダに譜面を書き set.def に載せる）。
 // 再生の操作はエディタと同じ（Space・Shift+Space・▶・ループ・速さ）。
 import { tr, pl, locale } from '../i18n';
 import { useEffect, useMemo } from 'react';
@@ -15,7 +15,7 @@ import { originOf } from '../dtx/origin';
 import { setLoopPoint, toggleLoop } from '../store/assist';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { tempoOf } from '../store/derived';
-import { goBack, goToStart, openPage, openSettings, playFrom, setCursorBeat, togglePause, togglePlay, useEditor } from '../store/editor';
+import { goToStart, openPage, openSettings, playFrom, setCursorBeat, togglePause, togglePlay, useEditor } from '../store/editor';
 import {
   belowSource,
   calcLevel,
@@ -26,7 +26,9 @@ import {
   initGen,
   isPassing,
   knownLevels,
+  leaveGen,
   listenChoices,
+  reflectState,
   selectDiff,
   setEnabled,
   setGenView,
@@ -38,6 +40,7 @@ import {
   slotLabel,
   sourceFor,
   stepListen,
+  unreflected,
   useGen,
   writeOut,
   type DiffState,
@@ -80,8 +83,9 @@ function onGenKey(e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey) return;
   const k = e.key;
   if (k === 'Escape') {
-    // ミックスの小窓が開いているときは、小窓を閉じるだけ（エディタには戻らない）
-    if (!document.querySelector('.mix-pop')) goBack();
+    // ミックスの小窓が開いているときは、小窓を閉じるだけ（エディタには戻らない）。
+    // 作った難易度をまだ反映していなければ、反映するか聞いてから戻る
+    if (!document.querySelector('.mix-pop')) void leaveGen();
     return;
   }
   if (k === ' ') {
@@ -240,6 +244,9 @@ export function AiGenPage() {
   const below = belowSource(g);
   const makes = below.filter((d) => g.diffs[d].enabled);
   const anyResult = makes.some((d) => g.diffs[d].result);
+  // エディタにまだ反映していない難易度（作った・反映のあとに変えた）
+  const pending = unreflected(g);
+  const allApplied = anyResult && pending.length === 0;
   const selKind = columnKind(g, g.selected);
   // 右・下に出すもの：作る難易度（作った・まだ）か、残す既存の譜面か
   const selChart = selKind === 'existing' ? g.charts[g.selected] : undefined;
@@ -250,7 +257,7 @@ export function AiGenPage() {
   return (
     <div className="gen-page">
       <header className="tempo-head">
-        <button className="btn small ghost" onClick={goBack}>
+        <button className="btn small ghost" onClick={() => void leaveGen()}>
           {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
@@ -273,8 +280,20 @@ export function AiGenPage() {
             {tr('この難易度を作り直す', 'Regenerate this difficulty')}
           </button>
         )}
-        <button className="btn small primary" onClick={() => void writeOut()} disabled={!anyResult || g.busy} title={tablet ? tr('採用してset.defに書き出す', 'Accept and write to set.def') : undefined}>
-          {tablet ? tr('採用して書き出す', 'Accept & write out') : tr('採用してset.defに書き出す', 'Accept and write to set.def')}
+        <button
+          className={`btn small ${allApplied ? 'gen-applied' : 'primary'}`}
+          onClick={() => void writeOut()}
+          disabled={pending.length === 0 || g.busy}
+          title={
+            allApplied
+              ? tr('作った難易度はエディタに入っています（エディタの難易度の切り替えから開けます）', 'The new difficulties are in the editor (open them from the difficulty switcher)')
+              : tr(
+                  '作った難易度を曲に加え、エディタの難易度の切り替えから開けるようにします（曲フォルダに譜面を書き、set.def に載せます）',
+                  'Add the new difficulties to the song so you can open them from the difficulty switcher in the editor (the charts are written to the song folder and listed in set.def)',
+                )
+          }
+        >
+          {allApplied ? tr('✓ エディタに反映済み', '✓ In the editor') : tr('エディタに反映', 'Add to editor')}
         </button>
       </header>
       <GenTransport />
@@ -614,7 +633,7 @@ function ExistingCard({ chart, on, canRemake }: { chart: ExistingChart; on: bool
               e.stopPropagation();
               remake(chart.slot as Difficulty);
             }}
-            title={tr('この難易度も作り直す（書き出すまで、曲フォルダの譜面は変わりません）', 'Make this difficulty again too (the chart in the song folder stays as it is until you write out)')}
+            title={tr('この難易度も作り直す（エディタに反映するまで、曲フォルダの譜面は変わりません）', 'Make this difficulty again too (the chart in the song folder stays as it is until you add it to the editor)')}
           >
             {tr('作り直す', 'Remake')}
           </button>
@@ -763,7 +782,7 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
                 : tr('作っています…', 'Generating…')}
           </span>
         ) : !ds.enabled ? (
-          <span>{tr('作らない（書き出しません）', 'Not made (not written out)')}</span>
+          <span>{tr('作らない（エディタに反映しません）', 'Not made (not added to the editor)')}</span>
         ) : ds.result ? (
           pass ? (
             <span style={{ color: 'var(--ok)' }}>{tr('✓ 検証OK', '✓ Checks passed')}</span>
@@ -777,6 +796,8 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
         ) : (
           <span>{tr('まだ作っていません', 'Not generated yet')}</span>
         )}
+        {!busy && <span className="grow" />}
+        {!busy && <ReflectBadge ds={ds} />}
       </div>
       {srcChanged && ds.enabled && (
         <div className="lbl gen-diff-line gen-diff-note" style={{ color: 'var(--amber)' }}>
@@ -784,6 +805,29 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 作った難易度がエディタに入っているか（カードの右下） */
+function ReflectBadge({ ds }: { ds: DiffState }) {
+  const r = reflectState(ds);
+  if (r === 'none') return null;
+  if (r === 'applied')
+    return (
+      <span className="gen-reflect ok" title={tr(`エディタに入っています（${ds.applied!.file}）。難易度の切り替えから開けます`, `In the editor (${ds.applied!.file}). Open it from the difficulty switcher`)}>
+        {tr('✓ 反映済み', '✓ In editor')}
+      </span>
+    );
+  if (r === 'changed')
+    return (
+      <span className="gen-reflect changed" title={tr('エディタに反映したあとに作り直した・手直ししました。右上の「エディタに反映」でエディタの譜面も変わります', 'Regenerated or edited after it was added. Press “Add to editor” at the top right to update the editor’s chart too')}>
+        {tr('反映後に変更', 'Changed')}
+      </span>
+    );
+  return (
+    <span className="gen-reflect pending" title={tr('まだエディタに入っていません。右上の「エディタに反映」で難易度の切り替えに加わります', 'Not in the editor yet. Press “Add to editor” at the top right to add it to the difficulty switcher')}>
+      {tr('未反映', 'Not added')}
+    </span>
   );
 }
 
@@ -889,7 +933,7 @@ function JudgeCard({ ds }: { ds: DiffState }) {
       </ul>
       {ds.judgeStale && (
         <div className="lbl" style={{ color: 'var(--amber)' }}>
-          {tr('判定のあとに手直ししました。書き出しのレベルは計算の値を使います。', 'You edited it after the check. The exported level uses the calculated value.')}
+          {tr('判定のあとに手直ししました。エディタに反映するレベルは計算の値を使います。', 'You edited it after the check. The level added to the editor uses the calculated value.')}
         </div>
       )}
       <div className="lbl">
@@ -927,8 +971,8 @@ function Verdict({ ds }: { ds: DiffState }) {
         (r.rung >= MAX_RUNG && shownLevel(ds) > ds.target.max ? (
           <div className="lbl">
             {tr(
-              'いちばん簡単な段でも目標より高く出ました。人が作る BASIC でもこのくらいの曲はあります。このままでよければ書き出し、もっと下げたいときは中央の譜面のチップを押して削ってください。',
-              "Even the easiest step came out above the target. Hand-made BASIC charts can be this hard for some songs too. Export it if that's fine, or click chips in the middle charts to remove more.",
+              'いちばん簡単な段でも目標より高く出ました。人が作る BASIC でもこのくらいの曲はあります。このままでよければエディタに反映し、もっと下げたいときは中央の譜面のチップを押して削ってください。',
+              "Even the easiest step came out above the target. Hand-made BASIC charts can be this hard for some songs too. Add it to the editor if that's fine, or click chips in the middle charts to remove more.",
             )}
           </div>
         ) : (
