@@ -2295,6 +2295,66 @@ select.field.speed-slow {
   white-space: nowrap;
 }
 
+/* 題と「未反映」の印を1つに（タブレットの2段の見出しでも同じ行に） */
+.tempo-h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 幅が狭いときだけ短い言葉にする */
+.label-short {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .label-long {
+    display: none;
+  }
+
+  .label-short {
+    display: inline;
+  }
+}
+
+/* 譜面（ゲーム）に入るか、エディタだけか */
+.scope-tag {
+  flex: none;
+  font-size: 10.5px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px dashed #3a4554;
+  color: #c9d1dc;
+  white-space: nowrap;
+}
+
+.scope-tag.chart {
+  border-style: solid;
+  border-color: #23506b;
+  background: #0f2230;
+  color: #8fd6ff;
+}
+
+/* テンポ：エディタの譜面と案のちがい（左がエディタ、右が案） */
+.tempo-diff {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: 10px;
+  row-gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line2);
+}
+
+.tempo-diff > .mono {
+  text-align: right;
+  white-space: nowrap;
+}
+
 .btn.on-amber {
   background: var(--amber-bg);
   border-color: var(--amber-line);
@@ -5440,8 +5500,9 @@ button.ms.s.on {
   color: var(--amber);
 }
 
-/* 作った難易度がエディタに入っているか（未反映・反映済み・反映のあとに変えた） */
-.gen-reflect {
+/* 作った難易度・案がエディタに入っているか（未反映・反映済み・反映のあとに変えた） */
+.gen-reflect,
+.reflect-chip {
   flex: none;
   font-size: 10.5px;
   line-height: 16px;
@@ -5452,13 +5513,16 @@ button.ms.s.on {
 }
 
 .gen-reflect.pending,
-.gen-reflect.changed {
+.gen-reflect.changed,
+.reflect-chip.pending,
+.reflect-chip.changed {
   color: var(--amber);
   border-color: var(--amber-line);
   background: var(--amber-bg);
 }
 
-.gen-reflect.ok {
+.gen-reflect.ok,
+.reflect-chip.ok {
   color: var(--ok);
   border-color: #24563f;
 }
@@ -5503,7 +5567,9 @@ button.ms.s.on {
 
 /* 右上の「エディタに反映」を、全部反映したあとは済みの印にする */
 .btn.gen-applied,
-.btn.gen-applied:disabled {
+.btn.gen-applied:disabled,
+.btn.reflected,
+.btn.reflected:disabled {
   color: var(--ok);
   border-color: #24563f;
   background: transparent;

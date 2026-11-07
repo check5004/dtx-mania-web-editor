@@ -9,12 +9,15 @@ import { toBase36x2, toMeasure } from '../dtx/base36';
 import { useAssist } from '../store/assist';
 import { bgmSource, wavPath } from '../store/derived';
 import { useDevice } from '../store/device';
-import { backToChart, toast, useEditor } from '../store/editor';
+import { toast, useEditor } from '../store/editor';
 import { useCanvas } from './hooks';
 import {
   applyTempo,
+  bpmText,
+  canApplyTempo,
   chooseBgm,
   initTempo,
+  leaveTempo,
   measureTime,
   nudgeFirst,
   planBgmSec,
@@ -30,6 +33,8 @@ import {
   shiftAnchors,
   stopPlan,
   tap,
+  tempoDiff,
+  tempoReflect,
   useTempo,
 } from '../store/tempoUi';
 import { chipBpmLabel, formatTime } from './format';
@@ -64,6 +69,8 @@ export function TempoPage() {
   const bgm = bgmSource(doc);
   const anchors = normalizeAnchors(ui.plan.anchors);
   const first = anchors[0];
+  // 案がエディタ（譜面）に入っているか（未反映・反映済み）
+  const reflect = tempoReflect();
 
   useEffect(() => {
     initTempo();
@@ -93,7 +100,9 @@ export function TempoPage() {
         const c = (v.from + v.to) / 2;
         setView({ from: c - (len * f) / 2, to: c + (len * f) / 2 });
       } else if (e.key === 'Escape') {
+        // 1小節目の頭を選んでいるときは、それをやめるだけ。反映していない案があれば、反映するか聞いてから戻る
         if (useTempo.getState().pickStart) useTempo.setState({ pickStart: false });
+        else if (!document.querySelector('.modal-back')) void leaveTempo();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -112,13 +121,20 @@ export function TempoPage() {
   return (
     <div className="tempo-page">
       <header className="tempo-head">
-        <button className="btn small ghost" onClick={backToChart}>
+        <button className="btn small ghost" onClick={() => void leaveTempo()}>
           {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
         {/* タブレットは題と説明を2段に（縦でもボタンが1行に収まるように） */}
         <div className={tablet ? 'tempo-title' : undefined} style={tablet ? undefined : { display: 'contents' }}>
-          <h1>{tr('テンポと開始位置', 'Tempo & start position')}</h1>
+          <span className="tempo-h1">
+            <h1>{tr('テンポと開始位置', 'Tempo & start position')}</h1>
+            {reflect === 'pending' && (
+              <span className="reflect-chip pending" title={tr('この案は、まだエディタの譜面に入っていません。右上の「エディタに反映」で入ります', 'This plan is not in the editor’s chart yet. Press “Apply to editor” at the top right')}>
+                {tr('未反映', 'Not applied')}
+              </span>
+            )}
+          </span>
           <span className="lbl ellipsis" style={{ minWidth: 0 }}>
             {srcName ? `${srcName} · ${formatTime(duration, false)}` : tr('原曲なし', 'No original audio')}
             {status === 'loading' && tr(` · 解析中 ${Math.round(progress * 100)}%`, ` · analyzing ${Math.round(progress * 100)}%`)}
@@ -144,14 +160,26 @@ export function TempoPage() {
         <button className="btn small" onClick={resetToEstimate} disabled={!data}>
           {tr('推定をやり直す', 'Re-estimate')}
         </button>
+        {/* まとめて入れる画面の右上の端は「エディタに反映」。反映すると「✓ エディタに反映済み」になる（画面はそのまま） */}
         <button
-          className="btn small primary"
-          onClick={() => {
-            if (applyTempo()) backToChart();
-          }}
-          disabled={!bgm || anchors.length === 0}
+          className={`btn small ${reflect === 'applied' ? 'reflected' : reflect === 'pending' ? 'primary' : ''}`}
+          onClick={() => applyTempo()}
+          disabled={!canApplyTempo() || reflect === 'applied'}
+          title={
+            reflect === 'applied'
+              ? tr('この案はエディタの譜面に入っています', 'This plan is in the editor’s chart')
+              : tr('案の BPM と原曲（BGM）の開始位置を、エディタの譜面に入れます（元に戻すで戻せます）', 'Puts the plan’s BPM and the start of the original (BGM) into the editor’s chart (you can undo it)')
+          }
         >
-          {tr('譜面に反映', 'Apply to chart')}
+          {reflect === 'applied' ? (
+            <>
+              {/* 幅が狭い（タブレットの縦）ときは短く */}
+              <span className="label-long">{tr('✓ エディタに反映済み', '✓ In the editor')}</span>
+              <span className="label-short">{tr('✓ 反映済み', '✓ Applied')}</span>
+            </>
+          ) : (
+            tr('エディタに反映', 'Apply to editor')
+          )}
         </button>
       </header>
 
@@ -305,9 +333,13 @@ export function TempoPage() {
             <BpmCard />
             {tablet && <TapCard />}
             <section className="card">
-              <div className="section-title" style={{ marginBottom: 8 }}>
-                {tr('変化点とDTXへの書き出し', 'Changes and what is saved to DTX')}
+              <div className="row" style={{ marginBottom: 8 }}>
+                <div className="section-title grow">{tr('変化点とDTXへの書き出し', 'Changes and what is saved to DTX')}</div>
+                <span className="scope-tag chart" title={tr('反映すると譜面（DTX）が変わり、ゲームでもこのテンポになります', 'Applying changes the chart (DTX), so the game uses this tempo too')}>
+                  {tr('譜面', 'Chart')}
+                </span>
               </div>
+              <TempoDiffRows r={r} pending={reflect === 'pending'} />
               <div className="map-table">
                 {r.segs.map((s, i) => (
                   <div key={s.m} className="map-row">
@@ -345,17 +377,56 @@ export function TempoPage() {
               <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
                 {tablet
                   ? tr(
-                      '反映すると、今のBPM変化チップは置き直します（譜面で2本指タップすると戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
-                      'Applying replaces the current BPM change chips (a two-finger tap on the chart undoes it). Anchors are kept in the work file (.dtxe.json).',
+                      '「エディタに反映」で、譜面の BPM と BGM の位置が変わります（BPM変化チップは置き直します。譜面で2本指タップすると戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
+                      '“Apply to editor” changes the BPM and the BGM position in the chart (BPM change chips are placed again; a two-finger tap on the chart undoes it). Anchors are kept in the work file (.dtxe.json).',
                     )
                   : tr(
-                      '反映すると、今のBPM変化チップは置き直します（Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
-                      'Applying replaces the current BPM change chips (Ctrl+Z undoes it). Anchors are kept in the work file (.dtxe.json).',
+                      '「エディタに反映」で、譜面の BPM と BGM の位置が変わります（BPM変化チップは置き直します。Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
+                      '“Apply to editor” changes the BPM and the BGM position in the chart (BPM change chips are placed again; Ctrl+Z undoes it). Anchors are kept in the work file (.dtxe.json).',
                     )}
               </p>
             </section>
           </aside>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** エディタの譜面と案のちがい（左がエディタの譜面、右が案）。この画面で作った案が譜面とちがう所に「未反映」 */
+function TempoDiffRows({ r, pending }: { r: PlanResult; pending: boolean }) {
+  const doc = useEditor((s) => s.doc);
+  const d = tempoDiff(doc, r);
+  const mark = (on: boolean) => (on && pending ? <span className="reflect-chip pending">{tr('未反映', 'Not applied')}</span> : <span />);
+  const count = (n: number) => (n > 0 ? tr(`${n} か所`, String(n)) : tr('なし', 'None'));
+  const arrow = (cur: string, next: string) => (
+    <>
+      <span className="lbl">{cur}</span> → <b>{next}</b>
+    </>
+  );
+  const sec = (t: number) => tr(`${t.toFixed(3)} 秒`, `${t.toFixed(3)} s`);
+  return (
+    <div className="tempo-diff" title={tr('左がエディタの譜面、右がこの案です', 'Left: the editor’s chart. Right: this plan')}>
+      <span className="lbl">{tr('曲頭の BPM', 'BPM at the start')}</span>
+      <span className="mono">{d.bpm.changed ? arrow(bpmText(d.bpm.cur), bpmText(d.bpm.next)) : bpmText(d.bpm.cur)}</span>
+      {mark(d.bpm.changed)}
+      <span className="lbl">{tr('途中の BPM の変化', 'Later BPM changes')}</span>
+      <span className="mono">
+        {!d.changes.changed ? (
+          count(d.changes.cur)
+        ) : d.changes.cur !== d.changes.next ? (
+          arrow(count(d.changes.cur), count(d.changes.next))
+        ) : (
+          <b>{tr(`${count(d.changes.next)}（位置か値が変わる）`, `${count(d.changes.next)} (moved or changed)`)}</b>
+        )}
+      </span>
+      {mark(d.changes.changed)}
+      {d.bgm && (
+        <>
+          <span className="lbl">{tr('原曲の開始位置', 'Start of the original')}</span>
+          <span className="mono">{d.bgm.changed && d.bgm.next !== null ? arrow(sec(d.bgm.cur), sec(d.bgm.next)) : sec(d.bgm.cur)}</span>
+          {mark(d.bgm.changed)}
+        </>
       )}
     </div>
   );

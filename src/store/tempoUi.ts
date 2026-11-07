@@ -1,4 +1,5 @@
-// テンポ合わせ画面の状態（譜面に反映するまでは「案」として持つ）。
+// テンポ合わせ画面の状態（エディタに反映するまでは「案」として持つ）。
+// 案が譜面とちがうか（未反映・反映済み）を見せ、反映しないまま戻ろうとしたら聞く（leaveTempo）。
 import { tr, pl } from '../i18n';
 import { produce } from 'immer';
 import { create } from 'zustand';
@@ -7,9 +8,11 @@ import { engine } from '../audio/engine';
 import { fitTaps } from '../assist/tapTempo';
 import { anchorsFromDoc, applyPlan, evaluatePlan, normalizeAnchors, type PlanResult, type TempoAnchor, type TempoPlan } from '../assist/tempoPlan';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
+import type { TempoMap } from '../dtx/timing';
+import { chooseDialog } from '../ui/dialogs';
 import { useAssist } from './assist';
 import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
-import { contentEndSec, edit, OPEN_END_SEC, stop as stopChart, toast, useEditor } from './editor';
+import { backToChart, contentEndSec, edit, OPEN_END_SEC, stop as stopChart, toast, useEditor } from './editor';
 import { setAnchors, useSidecar } from './sidecar';
 
 export interface TempoUiState {
@@ -17,6 +20,8 @@ export interface TempoUiState {
   /** 推定から作った案のまま（触っていない） */
   fromEstimate: boolean;
   touched: boolean;
+  /** この画面でエディタに反映した（案を作り直すまで） */
+  applied: boolean;
   plan: TempoPlan;
   /** 拡大表示の範囲（原曲の秒） */
   view: { from: number; to: number };
@@ -35,6 +40,7 @@ export const useTempo = create<TempoUiState>(() => ({
   initialized: false,
   fromEstimate: false,
   touched: false,
+  applied: false,
   plan: { bpm: 120, anchors: [] },
   view: { from: 0, to: 10 },
   ghostGrid: true,
@@ -98,7 +104,8 @@ export function initTempo() {
   const saved = useSidecar.getState().anchors;
   let anchors: TempoAnchor[];
   let fromEstimate = false;
-  let bpm = tempo.initialBpm;
+  // 曲頭の BPM（000小節の頭の BPM チップは #BPM より先に効く）
+  let bpm = tempo.events[0]?.bpm ?? tempo.initialBpm;
   if (saved.length) {
     anchors = normalizeAnchors(saved);
   } else if (bgm) {
@@ -120,6 +127,7 @@ export function initTempo() {
     initialized: true,
     fromEstimate,
     touched: false,
+    applied: false,
     plan: { bpm, anchors },
     view: viewAround(first ? first.t : 0, bpm),
   });
@@ -313,7 +321,89 @@ export function playAudioSec(): number | null {
 }
 
 // ---- 反映 ------------------------------------------------------------------------
+// 案は「エディタに反映」を押すまで譜面に入らない。譜面とどこがちがうか（未反映）を見せ、
+// 反映しないまま戻ろうとしたら聞く。ちがいは書き方ではなく中身（BPM の流れと原曲の開始位置）で比べる
+// （反映は BPM のチップを置き直すので、同じ案でも書き方は変わることがある）。
 
+/** BPM の表示（0.001 まで。整数ならそのまま） */
+export function bpmText(bpm: number): string {
+  return String(Math.round(bpm * 1000) / 1000);
+}
+
+/** 案とエディタの譜面のちがい。cur はエディタの譜面、next は案 */
+export interface TempoDiff {
+  /** 曲頭の BPM */
+  bpm: { cur: number; next: number; changed: boolean };
+  /** 途中で BPM が変わる所の数。changed: 数・位置・値のどれかが変わる */
+  changes: { cur: number; next: number; changed: boolean };
+  /** 原曲（BGM チップ）を鳴らし始める譜面の秒。BGM チップが無ければ null。案で置けなければ next は null */
+  bgm: { cur: number; next: number | null; changed: boolean } | null;
+  /** どこかが変わる（反映すると譜面が変わる） */
+  any: boolean;
+}
+
+/** BPM の流れ（同じ BPM が続く所はまとめる） */
+function bpmSteps(t: TempoMap): { beat: number; bpm: number }[] {
+  const out: { beat: number; bpm: number }[] = [];
+  for (const e of t.events) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(last.bpm - e.bpm) < 0.0005) continue;
+    out.push({ beat: e.beat, bpm: e.bpm });
+  }
+  return out;
+}
+
+let diffMemo: { doc: DtxDoc; r: PlanResult; d: TempoDiff } | null = null;
+
+export function tempoDiff(doc: DtxDoc = useEditor.getState().doc, r: PlanResult = planResult()): TempoDiff {
+  if (diffMemo && diffMemo.doc === doc && diffMemo.r === r) return diffMemo.d;
+  const cur = bpmSteps(tempoOf(doc));
+  const next = bpmSteps(r.tempo);
+  const bpm = { cur: cur[0].bpm, next: next[0].bpm, changed: Math.abs(cur[0].bpm - next[0].bpm) >= 0.0005 };
+  const moved = cur.length !== next.length || cur.some((e, i) => i > 0 && (Math.abs(e.beat - next[i].beat) > 1e-6 || Math.abs(e.bpm - next[i].bpm) >= 0.0005));
+  const changes = { cur: cur.length - 1, next: next.length - 1, changed: moved };
+  const src = bgmSource(doc);
+  const bgm = src ? { cur: src.sec, next: r.bgm?.sec ?? null, changed: !!r.bgm && Math.abs(src.sec - r.bgm.sec) > 0.0005 } : null;
+  const d = { bpm, changes, bgm, any: bpm.changed || moved || !!bgm?.changed };
+  diffMemo = { doc, r, d };
+  return d;
+}
+
+/** 反映できる（原曲があり、小節の頭を1つ以上決めている） */
+export function canApplyTempo(): boolean {
+  const doc = useEditor.getState().doc;
+  return !!bgmSource(doc) && normalizeAnchors(get().plan.anchors).length > 0;
+}
+
+/**
+ * 案がエディタ（譜面）に入っているか。
+ * pending: この画面で作った案（触った・推定から作った・反映のあとに変えた）が譜面とちがう、
+ * applied: この画面で反映して、案が譜面と同じ、same: それ以外（開いたときの譜面から作った案のまま・譜面と同じ）
+ */
+export type TempoReflect = 'same' | 'pending' | 'applied';
+
+export function tempoReflect(): TempoReflect {
+  const s = get();
+  if (!s.initialized || !canApplyTempo()) return 'same';
+  if (tempoDiff().any) return s.touched || s.fromEstimate || s.applied ? 'pending' : 'same';
+  return s.applied ? 'applied' : 'same';
+}
+
+/** 変わる所の短い説明（トースト・離れるときの確認） */
+function diffParts(d: TempoDiff): string[] {
+  const out: string[] = [];
+  if (d.bpm.changed) out.push(`BPM ${bpmText(d.bpm.cur)} → ${bpmText(d.bpm.next)}`);
+  if (d.changes.changed)
+    out.push(
+      d.changes.next > 0
+        ? tr(`BPM の変化 ${d.changes.next} か所`, `${d.changes.next} BPM ${pl(d.changes.next, 'change')}`)
+        : tr('BPM の変化をなくす', 'remove the BPM changes'),
+    );
+  if (d.bgm?.changed) out.push(tr('原曲の開始位置', 'start of the original'));
+  return out;
+}
+
+/** 案をエディタ（譜面）に反映する。反映できなければ false（譜面がもう案のとおりなら何も変えずに true） */
 export function applyTempo(): boolean {
   const s = get();
   const doc = useEditor.getState().doc;
@@ -330,21 +420,47 @@ export function applyTempo(): boolean {
     );
     return false;
   }
-  const hadBgm = doc.chips.some((c) => c.ch === CH.BGM);
-  const ok = edit(tr('テンポ合わせを反映', 'Apply tempo map'), (d) => applyPlan(d, r, null));
+  const d = tempoDiff(doc, r);
+  const ok = d.any && edit(tr('テンポ合わせを反映', 'Apply tempo map'), (dd) => applyPlan(dd, r, null));
   setAnchors(anchors);
-  set({ touched: false, fromEstimate: false });
-  const changes = r.segs.length - 1;
+  set({ touched: false, fromEstimate: false, applied: true });
   toast(
     ok
-      ? tr(
-          `譜面に反映しました（${changes > 0 ? `BPM変化 ${changes} か所` : `BPM ${r.segs[0].bpm}`}${hadBgm ? '・BGMの位置' : ''}）`,
-          `Applied to the chart (${changes > 0 ? `${changes} BPM ${pl(changes, 'change')}` : `BPM ${r.segs[0].bpm}`}${hadBgm ? ', BGM position' : ''})`,
-        )
-      : tr('譜面は今のままで合っています', 'The chart already matches'),
+      ? tr(`エディタに反映しました（${diffParts(d).join('・')}）`, `Applied to the editor (${diffParts(d).join(', ')})`)
+      : tr('エディタの譜面は、もうこの案のとおりです', 'The editor’s chart already matches this plan'),
     'ok',
   );
-  return ok;
+  return true;
+}
+
+/**
+ * テンポの画面を離れる（エディタに戻る・Esc）。案をまだ反映していなければ、反映するか聞く
+ * （黙って戻ると、合わせた BPM と開始位置が譜面に入っていないことに気づきにくい）
+ */
+export async function leaveTempo(): Promise<boolean> {
+  if (tempoReflect() === 'pending') {
+    const parts = diffParts(tempoDiff());
+    const choice = await chooseDialog<'apply' | 'leave'>({
+      title: tr('テンポの変更をエディタに反映しますか？', 'Apply the tempo changes to the editor?'),
+      body: tr(`まだ譜面に入っていない変更: ${parts.join('・')}`, `Not in the chart yet: ${parts.join(', ')}`),
+      options: [
+        {
+          label: tr('反映して戻る', 'Apply and go back'),
+          sub: tr('BPM と原曲（BGM）の開始位置が譜面に入ります（元に戻すで戻せます）', 'The BPM and the start of the original (BGM) go into the chart (you can undo it)'),
+          value: 'apply',
+        },
+        {
+          label: tr('反映せずに戻る', 'Go back without applying'),
+          sub: tr('案はこの画面に残ります（別の曲を開くか、ほかの方法でテンポを直すと消えます）', 'The plan stays on this page (it is cleared if you open another song or fix the tempo another way)'),
+          value: 'leave',
+        },
+      ],
+    });
+    if (choice === null) return false;
+    if (choice === 'apply' && !applyTempo()) return false;
+  }
+  backToChart();
+  return true;
 }
 
 /** 原曲（BGMチップ）が無い譜面に、WAV を原曲として置く */
