@@ -10,6 +10,7 @@ import { drumChannel, type DtxDoc } from '../dtx/model';
 import { gridStep, snapToGrid } from '../edit/ops';
 import { chartFeatures, FEATURE_DEFS, lastMeasure } from '../gen/features';
 import { DEFAULT_RUNG, describePolicy, FILL_STYLES, MAX_RUNG, policyFor, type Difficulty } from '../gen/simplify';
+import { measureList, STEP_GAP } from '../gen/stairs';
 import { SLOTS, type Slot } from '../gen/targets';
 import { originOf } from '../dtx/origin';
 import { setLoopPoint, toggleLoop } from '../store/assist';
@@ -39,6 +40,7 @@ import {
   shownLevel,
   slotLabel,
   sourceFor,
+  stairIssues,
   stepListen,
   unreflected,
   useGen,
@@ -47,6 +49,7 @@ import {
   type ExistingChart,
   type GenFit,
   type GenState,
+  type StairIssues,
 } from '../store/gen';
 import { useGuideline } from '../store/guideline';
 import { useSidecar } from '../store/sidecar';
@@ -500,17 +503,23 @@ export function AiGenPage() {
                     </div>
                     <div>
                       {s.comment ||
-                        [
-                          s.shift
-                            ? s.shift > 0
-                              ? tr(`全体より${s.shift}段やさしく`, `${s.shift} ${pl(s.shift, 'step')} easier than overall`)
-                              : tr(`全体より${-s.shift}段元に近く`, `${-s.shift} ${pl(-s.shift, 'step')} closer to the original than overall`)
-                            : '',
-                          s.fill ? FILL_STYLES[s.fill].label : '',
-                        ]
+                        [s.shift ? shiftText(s.shift) : '', s.fill ? FILL_STYLES[s.fill].label : '']
                           .filter(Boolean)
                           .join(tr('。', '. '))}
                     </div>
+                    {s.alignedTo && s.shift > 0 && (
+                      <div className="lbl gen-aligned">
+                        {s.ownShift !== undefined &&
+                          tr(
+                            `${ds.planSource === 'ai' ? 'AIの方針' : '方針'}は「${shiftText(s.ownShift)}」でしたが、`,
+                            `${ds.planSource === 'ai' ? "The AI's plan" : 'The plan'} said “${shiftText(s.ownShift)}”, but `,
+                          )}
+                        {tr(
+                          `${s.alignedTo} がここを全体より${s.shift}段やさしくしているので、こちらも同じだけやさしくしました（難しさの段階をそろえるため）`,
+                          `${s.alignedTo} makes this section ${s.shift} ${pl(s.shift, 'step')} easier than overall, so this one is too (to keep the difficulties in step)`,
+                        )}
+                      </div>
+                    )}
                   </button>
                 ))}
             </>
@@ -690,13 +699,46 @@ function bandTitle(g: GenState, ds: DiffState): string {
   return parts.join('\n');
 }
 
+/** 方針の shift をことばに（+ でやさしく、− で元に近く） */
+function shiftText(n: number): string {
+  if (n > 0) return tr(`全体より${n}段やさしく`, `${n} ${pl(n, 'step')} easier than overall`);
+  if (n < 0) return tr(`全体より${-n}段元に近く`, `${-n} ${pl(-n, 'step')} closer to the original than overall`);
+  return tr('全体と同じ', 'same as overall');
+}
+
+/** 「要確認」のわけ：叩けない所・目標の幅から外れ・段階の逆転（上の譜面より濃い・下の譜面より薄い小節） */
+function reviewWhy(ds: DiffState, stairN: number): string {
+  const out: string[] = [];
+  if (ds.issues) out.push(tr(`叩けない所 ${ds.issues}`, `${ds.issues} unplayable`));
+  if (ds.result && !inRange(shownLevel(ds), ds.target)) out.push(tr('目標の幅から外れ', 'outside the target range'));
+  if (stairN) out.push(tr(`段階の逆転 ${stairN}小節`, `${stairN} ${pl(stairN, 'measure')} out of step`));
+  return out.join(tr('・', ', '));
+}
+
+/** 段階の名前：作った難易度はその名前、元の譜面・残す既存の譜面は譜面の名前 */
+function stairName(g: GenState, slot: Slot): string {
+  return columnKind(g, slot) === 'made' ? slot : slotLabel(g, slot);
+}
+
+/** 段階が逆転している小節（カードの「要確認」に重ねる説明） */
+function stairTitle(g: GenState, st: StairIssues): string {
+  const fmt = (m: number) => toMeasure(m);
+  const parts: string[] = [];
+  if (st.upper && st.denser.length) parts.push(tr(`${stairName(g, st.upper)} よりノーツの多い小節: ${measureList(st.denser, fmt)}`, `Measures with more notes than ${stairName(g, st.upper)}: ${measureList(st.denser, fmt)}`));
+  if (st.lower && st.thinner.length) parts.push(tr(`${stairName(g, st.lower)} よりノーツの少ない小節: ${measureList(st.thinner, fmt)}`, `Measures with fewer notes than ${stairName(g, st.lower)}: ${measureList(st.thinner, fmt)}`));
+  return parts.join('\n');
+}
+
 /** 作る難易度（曲に既にある譜面を作り直すときも） */
 function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
   const g = useGen();
   const chart = g.charts[ds.diff];
   const src = sourceFor(g, ds.diff);
   const busy = ds.status === 'planning' || ds.status === 'building' || ds.status === 'judging';
-  const pass = isPassing(ds);
+  // 段階：上の譜面より濃い小節・下の譜面より薄い小節が無いか
+  const stair = stairIssues(g, ds.diff);
+  const stairN = stair.denser.length + stair.thinner.length;
+  const pass = isPassing(ds) && stairN === 0;
   const lv = ds.result ? shownLevel(ds) : null;
   const t = ds.target;
   // 作ったあとで作る元が変わった（上の既存の譜面を作り直す・残すに変えた）
@@ -787,8 +829,8 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
           pass ? (
             <span style={{ color: 'var(--ok)' }}>{tr('✓ 検証OK', '✓ Checks passed')}</span>
           ) : (
-            <span style={{ color: 'var(--amber)' }}>
-              {tr(`! 要確認（${ds.issues ? `叩けない所 ${ds.issues}` : '目標の幅から外れ'}）`, `! Needs review (${ds.issues ? `${ds.issues} unplayable` : 'outside the target range'})`)}
+            <span style={{ color: 'var(--amber)' }} title={stairN ? stairTitle(g, stair) : undefined}>
+              {tr(`! 要確認（${reviewWhy(ds, stairN)}）`, `! Needs review (${reviewWhy(ds, stairN)})`)}
             </span>
           )
         ) : ds.status === 'error' ? (
@@ -944,9 +986,12 @@ function JudgeCard({ ds }: { ds: DiffState }) {
 }
 
 function Verdict({ ds }: { ds: DiffState }) {
+  const g = useGen();
   const r = ds.result;
   if (!r) return null;
   const ok = inRange(shownLevel(ds), ds.target);
+  const stair = stairIssues(g, ds.diff);
+  const stairN = stair.denser.length + stair.thinner.length;
   const msgs: string[] = [];
   msgs.push(
     tr(
@@ -962,7 +1007,12 @@ function Verdict({ ds }: { ds: DiffState }) {
       ),
     );
   else msgs.push(tr('手足で叩けない組み合わせ、同じレーンの詰まりすぎはありません', 'No combinations that hands and feet can\'t play, and no lanes that are too crowded'));
-  const pass = ok && ds.issues === 0;
+  const up = stair.upper ? stairName(g, stair.upper) : null;
+  const down = stair.lower ? stairName(g, stair.lower) : null;
+  if (!stairN && up && down) msgs.push(tr(`どの小節も ${up} よりノーツが多くなく、${down} より少なくありません`, `No measure has more notes than ${up} or fewer than ${down}`));
+  else if (!stairN && up) msgs.push(tr(`どの小節も ${up} よりノーツが多くありません`, `No measure has more notes than ${up}`));
+  else if (!stairN && down) msgs.push(tr(`どの小節も ${down} よりノーツが少なくありません`, `No measure has fewer notes than ${down}`));
+  const pass = ok && ds.issues === 0 && stairN === 0;
   return (
     <div className={`card gen-verdict ${pass ? 'ok' : 'warn'}`}>
       <b>{pass ? tr('✓ 検証を通過', '✓ Passed the checks') : tr('! 確認してください', '! Please review')}</b>
@@ -978,6 +1028,43 @@ function Verdict({ ds }: { ds: DiffState }) {
         ) : (
           <div className="lbl">{tr('目標の幅から外れています。「易しく／難しく」で段を動かすか、めやすを変えて作り直してください。', 'This is outside the target range. Change the step with "Easier/Harder", or change the aim and regenerate.')}</div>
         ))}
+      {stairN > 0 && <StairWarn st={stair} up={up} down={down} />}
+      {ds.step?.clipped && (
+        <div className="lbl">
+          {tr(
+            `隣の難易度とレベルが近づきすぎないように（${STEP_GAP} 以上あける）、狙うレベルを目標の幅の中で寄せて作りました。`,
+            `To keep the level at least ${STEP_GAP} away from the neighboring difficulties, the aim was moved within the target range.`,
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 段階が逆転している小節（押すとその小節へ ▶ を移す） */
+function StairWarn({ st, up, down }: { st: StairIssues; up: string | null; down: string | null }) {
+  const row = (ms: number[], text: string) =>
+    ms.length > 0 && (
+      <div className="gen-stair">
+        <span>{text}</span>
+        {ms.slice(0, 8).map((m) => (
+          <button key={m} className="link-btn mono" onClick={() => jumpToMeasure(m)} title={tr('この小節に ▶ を置く', 'Put ▶ at this measure')}>
+            {toMeasure(m)}
+          </button>
+        ))}
+        {ms.length > 8 && <span className="lbl">{tr(`ほか${ms.length - 8}`, `and ${ms.length - 8} more`)}</span>}
+      </div>
+    );
+  return (
+    <div className="gen-stairs">
+      {up && row(st.denser, tr(`${up} よりノーツの多い小節:`, `More notes than ${up}:`))}
+      {down && row(st.thinner, tr(`${down} よりノーツの少ない小節:`, `Fewer notes than ${down}:`))}
+      <div className="lbl">
+        {tr(
+          'その小節のチップを押して手直しするか、作り直してください（作り直すと、上の難易度に無い音は置かず、下の難易度にある音は残します）。',
+          'Click chips in those measures to fix them by hand, or regenerate (regenerating never adds a note the harder chart lacks and keeps every note the easier chart has).',
+        )}
+      </div>
     </div>
   );
 }

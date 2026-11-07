@@ -23,7 +23,8 @@ import { dtxFiles, findFile, parseSetDef, putFile, type FolderFile, type SongFol
 import { stepIn } from '../gen/compareView';
 import { lastMeasure } from '../gen/features';
 import { projectCharts } from '../gen/project';
-import { DEFAULT_KEEP, DEFAULT_RUNG, DIFFICULTIES, generateToTarget, levelOfDoc, MAX_EASE, MAX_RUNG, simplify, type Difficulty, type Generated, type MustKeep } from '../gen/simplify';
+import { DEFAULT_KEEP, DEFAULT_RUNG, DIFFICULTIES, generateToTarget, levelOfDoc, MAX_EASE, MAX_RUNG, simplify, type Difficulty, type Generated, type MustKeep, type SectionPlan } from '../gen/simplify';
+import { alignPlan, chartProfile, clampRange, keptIds, matchIds, profileLine, stairCheck, stepRange, type StairCheck } from '../gen/stairs';
 import { aimOf, isAbove, SLOTS, slotOf, slotRank, targetBands, type Slot, type TargetBand } from '../gen/targets';
 import { chooseDialog, confirmDialog } from '../ui/dialogs';
 import { sortByDifficulty } from '../gen/diffTabs';
@@ -82,6 +83,16 @@ export interface DiffState {
   src: SourceRef | null;
   /** エディタに反映したとき（書いたファイルと、そのときの譜面）。result.doc が変わったら「反映のあとに変えた」 */
   applied: { file: string; doc: DtxDoc } | null;
+  /** 作ったときの段階の決まり（上の難易度に残した音・下の難易度に残した音。gen/stairs） */
+  stairs: StairSets | null;
+  /** 作ったときの隣の難易度（レベルの範囲をそれに合わせて狭めたか） */
+  step: { upper: Slot | null; lower: Slot | null; clipped: boolean } | null;
+}
+
+/** 段階の決まり：within は上の難易度に残した音（これ以外は置かない。null は決まりなし）、atLeast は残す音 */
+export interface StairSets {
+  within: Set<number> | null;
+  atLeast: Set<number>;
 }
 
 /** 再生で鳴らす譜面（並べている列）：元の譜面・既存の譜面・作った難易度 */
@@ -157,6 +168,8 @@ const emptyDiff = (diff: Difficulty, enabled = true): DiffState => ({
   cost: 0,
   src: null,
   applied: null,
+  stairs: null,
+  step: null,
 });
 
 /** 開いている譜面より下の難易度だけ作る */
@@ -224,6 +237,98 @@ export function sourceFor(s: GenState, d: Difficulty): SourceRef | null {
     if (c && keepsExisting(s, slot)) return { slot, file: c.file, doc: c.doc, calib: c.calib, level: c.level };
   }
   return open;
+}
+
+// ---- 難易度の段階 ---------------------------------------------------------------------------
+// どの小節も、下の難易度は上の難易度より濃くしない（gen/stairs）。同じ元の譜面から作った難易度どうしはチップの id で、
+// 曲に既にある譜面は同じ時刻・同じ楽器の音で合わせる。
+
+/** この画面で作って書き出す難易度か（作り直す既存の譜面も） */
+function isMade(s: Pick<GenState, 'sourceSlot' | 'charts' | 'diffs'>, slot: Slot): slot is Difficulty {
+  return slot !== 'MASTER' && isAbove(s.sourceSlot, slot) && s.diffs[slot].enabled && !keepsExisting(s, slot);
+}
+
+/** 上・下の隣の譜面：レベル（計算。既存の譜面は登録）、AI の判定があればそれ、方針 */
+export interface StairNeighbors {
+  upper: { slot: Slot; level: number; shown: number; plan: DifficultyPlan | null } | null;
+  lower: { slot: Slot; level: number; shown: number } | null;
+}
+
+const matchCache = new WeakMap<DtxDoc, WeakMap<DtxDoc, Set<number>>>();
+function matchedIds(root: DtxDoc, chart: DtxDoc): Set<number> {
+  let m = matchCache.get(root);
+  if (!m) matchCache.set(root, (m = new WeakMap()));
+  let ids = m.get(chart);
+  if (!ids) m.set(chart, (ids = matchIds(root, chart)));
+  return ids;
+}
+
+/**
+ * 難易度 d を、作る元の譜面 root から作るときの段階の決まりと隣の譜面。
+ * - within: 上の難易度（root から作った、いちばん近い上の作った難易度）に残した音。無ければ null（root がいちばん上）
+ * - atLeast: 下の難易度に残した音（作った難易度は id で、既存の譜面は同じ時刻・同じ楽器の root の音）
+ * pending はこれから作り直す難易度（まとめて作るとき）。前の結果は下の譜面として使わない（手で「残す」にした音だけは残す）
+ */
+export function stairsFor(s: GenState, d: Difficulty, root: SourceRef, pending: ReadonlySet<Difficulty> = new Set()): StairSets & StairNeighbors {
+  const out: StairSets & StairNeighbors = { within: null, atLeast: new Set(), upper: null, lower: null };
+  const r = slotRank(d);
+  for (const slot of SLOTS.slice(0, r).reverse()) {
+    if (slot === root.slot) {
+      out.upper = { slot, level: root.level, shown: root.level, plan: null };
+      break;
+    }
+    if (!isMade(s, slot) || pending.has(slot)) continue;
+    const u = s.diffs[slot];
+    if (!u.result || u.src?.doc !== root.doc) continue;
+    out.within = keptIds(u.result.fate);
+    out.upper = { slot, level: calcLevel(u), shown: shownLevel(u), plan: u.plan };
+    break;
+  }
+  for (const slot of SLOTS.slice(r + 1)) {
+    if (keepsExisting(s, slot)) {
+      for (const id of matchedIds(root.doc, s.charts[slot]!.doc)) out.atLeast.add(id);
+      out.lower ??= { slot, level: s.charts[slot]!.level, shown: s.charts[slot]!.level };
+      break;
+    }
+    if (!isMade(s, slot)) continue;
+    const l = s.diffs[slot];
+    if (!l.result || l.src?.doc !== root.doc) continue;
+    if (pending.has(slot)) {
+      for (const [id, v] of l.overrides) if (v === 'keep') out.atLeast.add(id);
+      continue;
+    }
+    for (const id of keptIds(l.result.fate)) out.atLeast.add(id);
+    out.lower ??= { slot, level: calcLevel(l), shown: shownLevel(l) };
+  }
+  return out;
+}
+
+/** 並べている列のうち、書き出す譜面（元の譜面・残す既存の譜面・作る難易度の結果） */
+function stairDoc(s: GenState, slot: Slot): DtxDoc | null {
+  const k = columnKind(s, slot);
+  if (k === 'made') return isMade(s, slot) ? (s.diffs[slot as Difficulty].result?.doc ?? null) : null;
+  return columnDoc(s, slot);
+}
+
+export interface StairIssues extends StairCheck {
+  upper: Slot | null;
+  lower: Slot | null;
+}
+
+/** 作った難易度の段階の確かめ：隣の上の譜面よりノーツの多い小節・隣の下の譜面より少ない小節 */
+export function stairIssues(s: GenState, d: Difficulty): StairIssues {
+  const doc = isMade(s, d) ? s.diffs[d].result?.doc : null;
+  if (!doc) return { denser: [], thinner: [], upper: null, lower: null };
+  const r = slotRank(d);
+  const upper = SLOTS.slice(0, r).reverse().find((x) => stairDoc(s, x)) ?? null;
+  const lower = SLOTS.slice(r + 1).find((x) => stairDoc(s, x)) ?? null;
+  return { ...stairCheck(doc, upper && stairDoc(s, upper), lower && stairDoc(s, lower)), upper, lower };
+}
+
+/** 段階が逆転している小節の数（見出しの再描画用に数だけ） */
+export function stairCount(s: GenState, d: Difficulty): number {
+  const x = stairIssues(s, d);
+  return x.denser.length + x.thinner.length;
 }
 
 /** いちばん易しい段まで間引いたときのレベル（BASIC を作る元で。目標の底上げに使う） */
@@ -446,12 +551,44 @@ function othersForPlan(s: GenState, d: Difficulty, src: Slot): string[] {
   return out;
 }
 
-/** 1つの難易度を作る（AI の方針 → ルールで配置 → めやすに入るまで段を調整 → AI 判定 → 幅から外れたら1回だけ直す） */
-export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {}) {
+/**
+ * AI に渡す：ほかの難易度の作り方（区間ごとに作る元の譜面の音をどれだけ残しているか・フィルの前後・この画面で作った譜面なら方針）。
+ * 作る元の譜面は別の行で渡すので除く。pending（これから作り直す難易度）の前の結果は渡さない
+ */
+function neighborsForPlan(s: GenState, d: Difficulty, src: SourceRef, pending: ReadonlySet<Difficulty>): { above: string[]; below: string[] } {
+  const out = { above: [] as string[], below: [] as string[] };
+  for (const slot of SLOTS) {
+    // 作る元の譜面は別の行で渡す。それより上の譜面（作る元が既存の EXTREME のときの MASTER など）は隣ではない
+    if (slot === d || slot === src.slot || isAbove(slot, src.slot)) continue;
+    let pick: { doc: DtxDoc; who: string; level: number; plan?: SectionPlan[] | null; rung?: number } | null = null;
+    // i18n-ignore-start（AI へのプロンプト）
+    if (slot === s.sourceSlot && s.master) pick = { doc: s.master, who: '開いている譜面', level: s.masterLevel };
+    else if (keepsExisting(s, slot)) {
+      const c = s.charts[slot]!;
+      pick = { doc: c.doc, who: c.origin === 'human' ? '既存・作者の譜面' : '既存・このアプリで作った譜面', level: c.level };
+    } else if (isMade(s, slot) && !pending.has(slot) && s.diffs[slot].result) {
+      const x = s.diffs[slot];
+      pick = { doc: x.result!.doc, who: x.planSource === 'ai' ? '作りたて・AI の方針' : '作りたて・標準の方針', level: shownLevel(x), plan: x.plan?.sections, rung: x.result!.rung };
+    }
+    // i18n-ignore-end
+    if (!pick) continue;
+    const line = profileLine({ label: slotLabel(s, slot), who: pick.who, level: pick.level, profile: chartProfile(src.doc, pick.doc, s.spans), plan: pick.plan, rung: pick.rung });
+    (isAbove(slot, d) ? out.above : out.below).push(line);
+  }
+  return out;
+}
+
+/**
+ * 1つの難易度を作る（AI の方針 → 上の難易度の方針に合わせる → ルールで配置 → めやすに入るまで段を調整 → AI 判定 → 幅から外れたら1回だけ直す）。
+ * 上・下の難易度（作りたての譜面・既存の譜面）を見て、どの小節もそのあいだに収める（gen/stairs）。
+ * pending はこのあと作り直す難易度（まとめて作るとき。上から順に作り、下の難易度の前の結果は見ない）
+ */
+export async function generate(diff: Difficulty, opts: { useAi?: boolean; pending?: ReadonlySet<Difficulty> } = {}) {
   const g = get();
   if (!g.master || !belowSource(g).includes(diff)) return;
   const src = sourceFor(g, diff)!;
   const ds = g.diffs[diff];
+  const pending = opts.pending ?? new Set<Difficulty>();
   const hadResult = !!ds.result;
   const useAi = (opts.useAi ?? true) && hasAiKey();
   const title = g.master.fields['TITLE'] || g.masterFile;
@@ -476,6 +613,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
           sourceLabel: src.slot,
           masterLevel: src.level,
           others: othersForPlan(g, diff, src.slot),
+          neighbors: neighborsForPlan(g, diff, src, pending),
           rung: DEFAULT_RUNG[diff],
           sections: g.spans,
           guide,
@@ -494,15 +632,23 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
       planSource = 'ai';
     }
     patchDiff(diff, { status: 'building', plan, planSource, cost });
-    // 2. 配置と再調整（機械的な推定で、めやすの近くを狙う。幅の中なら合格）
-    let base = { doc: src.doc, sections: plan.sections, keep: get().keep, overrides };
+    // 2. 段階：上・下の難易度（AI を待つあいだに手直しなどで変わることがあるので、ここで読み直す）。
+    //    上の難易度が薄くした区間は、こちらも同じだけ薄くする（考え方をそろえる）
+    const st = stairsFor(get(), diff, src, pending);
+    if (st.upper?.plan) plan = { ...plan, sections: alignPlan(plan.sections, st.upper.plan.sections, st.upper.slot) };
+    // 3. 配置と再調整（機械的な推定で、めやすの近くを狙う。幅の中なら合格）。上の難易度に無い音は置かず、下の難易度にある音は残す
+    let base = { doc: src.doc, sections: plan.sections, keep: get().keep, overrides, within: st.within ?? undefined, atLeast: st.atLeast };
     const calib = src.calib;
     const t = ds.target;
-    const aim = aimOf(t);
+    // 隣の難易度とのあいだ（上より 0.3 下、下より 0.3 上）にも収める（作りたての上の難易度が目標より易しく出たときなど）
+    const step = stepRange(st.upper?.level ?? null, st.lower?.level ?? null);
+    const aim0 = aimOf(t);
+    const aim = clampRange(aim0, step);
+    const clipped = aim.min !== aim0.min || aim.max !== aim0.max;
     const rawAim = { min: aim.min / calib, max: aim.max / calib };
     let result = generateToTarget(base, DEFAULT_RUNG[diff], rawAim);
     // AI の方針（元に近く・フィルを残す）が強すぎて、いちばん簡単な段でも幅に入らないときは、それを外して作り直す
-    if (result.level * calib > t.max + 1e-9) {
+    if (result.level * calib > Math.min(t.max, step.max) + 1e-9) {
       const relaxed = relaxPlan(plan);
       if (relaxed) {
         const base2 = { ...base, sections: relaxed.sections };
@@ -514,23 +660,28 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
         }
       }
     }
-    // 3. AI 判定。幅から外れたら、AI と計算のずれのぶん狙いを動かして1回だけ作り直す（段のあいだの細かい調整も使う）。
+    // 4. AI 判定。幅から外れたら、AI と計算のずれのぶん狙いを動かして1回だけ作り直す（段のあいだの細かい調整も使う）。
     //    AI の判定は 0.1〜0.2 ほどぶれるので、作り直しはめやすを狙い、2つのうち幅に近い方を採る。
+    //    幅は隣の難易度とのあいだ（判定の目盛り）に狭め、作り直しの狙いも隣の難易度とのあいだに収める
+    //    （上の難易度のすぐ下まで濃くして、難しさの段階がほとんど無くならないように）
     let judge: JudgeResult | null = null;
+    const stairs: StairSets = { within: st.within, atLeast: st.atLeast };
     if (useAi) {
-      patchDiff(diff, { status: 'judging', result, issues: issueCount(result.doc), src });
+      patchDiff(diff, { status: 'judging', result, issues: issueCount(result.doc), src, stairs });
       const sections = useSidecar.getState().sections;
       judge = await judgeDoc(result.doc, { title, label: diff, sections, mech: result.level * calib, quiet: true });
       if (judge) {
         cost += judge.cost;
-        if (!inTarget(judge.level, t)) {
-          const center = t.center - (judge.level - result.level * calib);
+        const want = clampRange(t, stepRange(st.upper?.shown ?? null, st.lower?.shown ?? null));
+        if (!inTarget(judge.level, want)) {
+          const wantCenter = Math.max(want.min, Math.min(want.max, t.center));
+          const center = Math.max(step.min, Math.min(step.max, wantCenter - (judge.level - result.level * calib)));
           const r2 = generateToTarget(base, result.rung, { min: (center - 0.1) / calib, max: (center + 0.1) / calib });
           if (r2.rung !== result.rung || r2.ease !== result.ease) {
             const j2 = await judgeDoc(r2.doc, { title, label: diff, sections, mech: r2.level * calib, quiet: true });
             if (j2) {
               cost += j2.cost;
-              if (targetGap(j2.level, t) <= targetGap(judge.level, t)) {
+              if (targetGap(j2.level, want) <= targetGap(judge.level, want)) {
                 result = { ...r2, tries: [...result.tries, ...r2.tries] };
                 judge = j2;
               }
@@ -539,7 +690,17 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean } = {})
         }
       }
     }
-    patchDiff(diff, { status: 'done', plan, result, judge, issues: issueCount(result.doc), cost, src });
+    patchDiff(diff, {
+      status: 'done',
+      plan,
+      result,
+      judge,
+      issues: issueCount(result.doc),
+      cost,
+      src,
+      stairs,
+      step: { upper: st.upper?.slot ?? null, lower: st.lower?.slot ?? null, clipped },
+    });
     // 初めて作れたら、選んでいる難易度を聴く（元の譜面を聴いていたときだけ）
     if (!hadResult && get().selected === diff && get().listen === get().sourceSlot) set({ listen: diff });
   } catch (e) {
@@ -551,23 +712,44 @@ export async function generateAll() {
   if (get().busy) return;
   set({ busy: true });
   try {
-    for (const d of belowSource()) if (get().diffs[d].enabled) await generate(d);
+    // 上の難易度から順に作る。下の難易度は作りたての上の難易度を見て作る（まだ作り直していない難易度の前の結果は見ない）
+    const todo = belowSource().filter((d) => get().diffs[d].enabled);
+    for (let i = 0; i < todo.length; i++) await generate(todo[i], { pending: new Set(todo.slice(i + 1)) });
   } finally {
     set({ busy: false });
   }
 }
 
-/** 方針はそのままで作り直す（手直し・必ず残すものの変更のあと） */
-export function rebuild(diff: Difficulty) {
+/**
+ * 方針はそのままで作り直す（手直し・必ず残すものの変更のあと）。段階の決まり（上・下の難易度に残した音）は、
+ * 渡さなければいまの上・下の譜面から決める。pending はまだ作り直していない難易度（下の譜面として見ない）
+ */
+export function rebuild(diff: Difficulty, o: { stairs?: StairSets; pending?: ReadonlySet<Difficulty> } = {}) {
   const g = get();
   const ds = g.diffs[diff];
   if (!ds.src || !ds.result || !ds.plan) return;
-  const r = simplify({ doc: ds.src.doc, rung: ds.result.rung, ease: ds.result.ease, sections: ds.plan.sections, keep: g.keep, overrides: ds.overrides });
+  const st = o.stairs ?? stairsFor(g, diff, ds.src, o.pending);
+  const r = simplify({
+    doc: ds.src.doc,
+    rung: ds.result.rung,
+    ease: ds.result.ease,
+    sections: ds.plan.sections,
+    keep: g.keep,
+    overrides: ds.overrides,
+    within: st.within ?? undefined,
+    atLeast: st.atLeast,
+  });
   const level = levelOfDoc(r.doc);
-  patchDiff(diff, { result: { ...ds.result, ...r, level }, issues: issueCount(r.doc), judgeStale: !!ds.judge });
+  patchDiff(diff, { result: { ...ds.result, ...r, level }, issues: issueCount(r.doc), judgeStale: !!ds.judge, stairs: { within: st.within, atLeast: st.atLeast } });
 }
 
-/** 簡略化の段を手で上げ下げする */
+/** 作った難易度をすべて作り直す。上から順に（下の難易度は作り直した上の難易度に合わせる） */
+function rebuildAll() {
+  const made = DIFFICULTIES.filter((d) => get().diffs[d].result);
+  made.forEach((d, i) => rebuild(d, { pending: new Set(made.slice(i + 1)) }));
+}
+
+/** 簡略化の段を手で上げ下げする（上・下の難易度は越えない：上の難易度に無い音は置かず、下の難易度にある音は残す） */
 export function shiftRung(diff: Difficulty, d: 1 | -1) {
   const ds = get().diffs[diff];
   if (!ds.result) return;
@@ -582,23 +764,101 @@ export function shiftRung(diff: Difficulty, d: 1 | -1) {
   rebuild(diff);
 }
 
-/** 比較の譜面のチップを押したとき：消えたものは戻し、残ったものは消す */
+const keptIn = (ds: DiffState, id: number) => {
+  const f = ds.result?.fate.get(id);
+  return !!f && f.kind !== 'removed';
+};
+
+/**
+ * 比較の譜面のチップを押したとき：消えたものは戻し、残ったものは消す。
+ * 段階を保つため、同じ元から作ったほかの難易度にもその音だけ伝える：残したら上の難易度にも残し、削ったら下の難易度からも削る
+ * （押し直して戻すと、伝えた分も戻る）。食い違う手直し（上の「削る」・下の「残す」）は、あとから押したほうを通す
+ */
 export function toggleChip(diff: Difficulty, id: number) {
-  const ds = get().diffs[diff];
-  if (!ds.result) return;
-  const fate = ds.result.fate.get(id);
-  if (!fate) return;
-  const ov = new Map(ds.overrides);
-  const cur = ov.get(id);
-  if (cur) ov.delete(id);
-  else ov.set(id, fate.kind === 'removed' ? 'keep' : 'drop');
-  patchDiff(diff, { overrides: ov });
-  rebuild(diff);
+  const ds0 = get().diffs[diff];
+  if (!ds0.result || !ds0.src || !ds0.result.fate.has(id)) return;
+  const was = keptIn(ds0, id);
+  // 作ったときの決まりのまま作り直す（押した音のほかは変えない）
+  const stairs = ds0.stairs ?? undefined;
+  if (ds0.overrides.has(id)) {
+    const ov = new Map(ds0.overrides);
+    ov.delete(id);
+    patchDiff(diff, { overrides: ov });
+    rebuild(diff, { stairs });
+  }
+  // 手直しを外しても逆にならなければ（はじめての手直し・決まりで残っている音）、手直しを入れる
+  if (keptIn(get().diffs[diff], id) === was) {
+    const ov = new Map(get().diffs[diff].overrides);
+    ov.set(id, was ? 'drop' : 'keep');
+    patchDiff(diff, { overrides: ov });
+    rebuild(diff, { stairs });
+  }
+  const before = new Map(DIFFICULTIES.map((d) => [d, keptIn(get().diffs[d], id)] as const));
+  propagateChip(diff, id);
+  // ほかの難易度も変わったら知らせる
+  const sep = tr('・', ', ');
+  const gained = DIFFICULTIES.filter((d) => d !== diff && !before.get(d) && keptIn(get().diffs[d], id));
+  const lost = DIFFICULTIES.filter((d) => d !== diff && before.get(d) && !keptIn(get().diffs[d], id));
+  if (gained.length)
+    toast(
+      tr(`${gained.join(sep)} にも残しました（下の難易度にある音は、上の難易度にも置きます）`, `Also kept in ${gained.join(sep)} (a note in an easier chart stays in the harder ones)`),
+      'ok',
+      5000,
+    );
+  if (lost.length)
+    toast(
+      tr(`${lost.join(sep)} からも削りました（上の難易度に無い音は、下の難易度にも置きません）`, `Also removed from ${lost.join(sep)} (an easier chart never has a note the harder one lacks)`),
+      'ok',
+      5000,
+    );
+}
+
+/**
+ * 1つの音の手直しを、同じ元から作ったほかの難易度へ伝える。下の難易度（近い順）は「上の難易度に残っているか」、
+ * そのあと上の難易度は「下の難易度に残っているか」を、作ったときの決まりのその音だけ入れ替えて作り直す。
+ * 上の難易度の順：音を足したときは上から（いちばん上が足してから、その下が上に合わせて足す）、
+ * 削ったときは近い順（近い難易度が削ってから、その上が「下にあるから残す」を外す）
+ */
+function propagateChip(diff: Difficulty, id: number) {
+  const root = get().diffs[diff].src?.doc;
+  if (!root) return;
+  const same = (d: Difficulty) => {
+    const s = get();
+    return d !== diff && isMade(s, d) && !!s.diffs[d].result && s.diffs[d].src?.doc === root;
+  };
+  const r = slotRank(diff);
+  const lowers = DIFFICULTIES.filter((d) => slotRank(d) > r && same(d));
+  const uppers = DIFFICULTIES.filter((d) => slotRank(d) < r && same(d));
+  if (!keptIn(get().diffs[diff], id)) uppers.reverse();
+  for (const d of [...lowers, ...uppers]) {
+    const s = get();
+    const x = s.diffs[d];
+    const now = stairsFor(s, d, x.src!);
+    const old: StairSets = x.stairs ?? { within: now.within, atLeast: now.atLeast };
+    const within = old.within || now.within ? new Set(old.within ?? now.within!) : null;
+    if (within) {
+      if (!now.within || now.within.has(id)) within.add(id);
+      else within.delete(id);
+    }
+    const atLeast = new Set(old.atLeast);
+    if (now.atLeast.has(id)) atLeast.add(id);
+    else atLeast.delete(id);
+    // あとから押したほうを通す：上の難易度に無くなった音の「残す」、下の難易度に残っている音の「削る」は外す
+    const ov = x.overrides.get(id);
+    const clash = (ov === 'keep' && within && !within.has(id)) || (ov === 'drop' && atLeast.has(id));
+    if (clash) {
+      const m = new Map(x.overrides);
+      m.delete(id);
+      patchDiff(d, { overrides: m });
+    }
+    const moved = (within?.has(id) ?? true) !== (old.within?.has(id) ?? true) || atLeast.has(id) !== old.atLeast.has(id);
+    if (clash || moved || !x.stairs) rebuild(d, { stairs: { within, atLeast } });
+  }
 }
 
 export function setKeep(patch: Partial<MustKeep>) {
   set((s) => ({ keep: { ...s.keep, ...patch } }));
-  for (const d of DIFFICULTIES) rebuild(d);
+  rebuildAll();
   // いちばん易しい段のレベル（目標の底上げ）が変わる
   recomputeTargets();
 }

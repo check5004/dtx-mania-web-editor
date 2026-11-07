@@ -235,6 +235,11 @@ export function planPrompt(o: {
   masterLevel: number;
   /** 曲にあるほかの難易度（「EXTREME（既存・作者の譜面）Lv6.20」など） */
   others?: string[];
+  /**
+   * ほかの難易度の作り方（gen/stairs profileLine）：区間ごとに元の譜面の音をどれだけ残しているか、フィルの前後の扱い、
+   * このアプリで作った譜面なら方針。上の難易度・下の難易度の考え方に合わせるのに使う
+   */
+  neighbors?: { above: string[]; below: string[] };
   rung: number;
   sections: SectionSpan[];
   guide: string;
@@ -251,6 +256,9 @@ export function planPrompt(o: {
     '音楽性を壊さないこと: 曲の山場（サビ）らしさ、キメ、ノリは残し、静かな所はより簡単にしてよい。同じ形のセクションには同じ方針を。',
     '目標のレベル（幅）に入ることが最優先です。めやすの近くを狙ってください。shift の -（元の譜面に近く）は山場の一部だけにし、そのぶん静かな所を + にして釣り合わせてください。',
     '曲にほかの難易度があるときは、そのあいだに収まり、隣の難易度と難しさがはっきり違うようにしてください。',
+    '難易度の段階は曲全体だけでなく、区間・小節ごとにも守ります。どの区間も上の難易度より濃くせず、下の難易度より薄くしないでください（ルールエンジンも、上の難易度に無い音は置かず、下の難易度にある音は残します）。',
+    'ほかの難易度の譜面が渡されたときは、その作り方を読み取って合わせてください。特に「どこを薄くし、どこを残すか」の考え方（フィルを目立たせるためにその手前を薄くする、静かな区間を薄くする、サビを濃く残す、など）は難易度どうしで同じ向きにします。考え方が食い違うと、その所だけ難しさが逆転して感じられます。',
+    '上の難易度が全体より薄くした区間（shift が +）は、こちらも同じだけ以上 + にします（ルールエンジンもそうします）。そのうえで、どの区間も上の難易度より一段ずつ易しくなるように、全体の釣り合いを取ってください。',
     `フィルの扱い: ${Object.entries(FILL_STYLES)
       .map(([k, v]) => `${k}=${v.label}`)
       .join('、')}`,
@@ -265,6 +273,13 @@ export function planPrompt(o: {
     `作る難易度: ${o.diff}（目標 Lv${o.target.min.toFixed(2)}〜${o.target.max.toFixed(2)}${o.target.center !== undefined ? `、めやす Lv${o.target.center.toFixed(2)}` : ''}）`,
   );
   if (o.others?.length) lines.push(`曲にある難易度: ${o.others.join('、')}`);
+  if (o.neighbors && (o.neighbors.above.length || o.neighbors.below.length)) {
+    lines.push('');
+    lines.push('ほかの難易度の作り方（区間ごとに、元の譜面の同じ区間の音を何%残しているか。（）は方針の shift・フィル）:');
+    for (const l of o.neighbors.above) lines.push(`- 上: ${l}`);
+    for (const l of o.neighbors.below) lines.push(`- 下: ${l}`);
+    lines.push('区間ごとの割合が、上の難易度以下・下の難易度以上になり、薄い区間・濃い区間の並び（考え方）が上の難易度と同じ向きになるように決めてください。');
+  }
   lines.push(`全体の簡略化の段: ${o.rung}（0〜${LADDER.length - 1}。${describePolicy(LADDER[o.rung])}）`);
   lines.push(`必ず残すもの: ${keepList(o.keep) || '指定なし'}`);
   if (o.instruction.trim()) lines.push(`作者の指示: ${o.instruction.trim()}`);

@@ -18,7 +18,7 @@ import { useAssist } from '../store/assist';
 import { tempoOf } from '../store/derived';
 import { useSidecar } from '../store/sidecar';
 import { playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
-import { columnKind, compareColumns, isPassing, selectDiff, setGenView, setListen, shownLevel, toggleChip, useGen, type DiffState, type GenState } from '../store/gen';
+import { columnKind, compareColumns, isPassing, selectDiff, setGenView, setListen, shownLevel, stairCount, stairIssues, toggleChip, useGen, type DiffState, type GenState } from '../store/gen';
 import { useDevice } from '../store/device';
 import { setGenDetail } from './tablet/shared';
 import { songEndM } from './hooks';
@@ -39,6 +39,8 @@ const C = {
   section: 'rgba(76,194,255,.32)',
   removed: 'rgba(200,210,225,.38)',
   moved: '#FFB547',
+  stair: 'rgba(255,181,71,.12)',
+  stairEdge: 'rgba(255,181,71,.7)',
 };
 
 /** いま見えている拍の範囲（キーで ▶ を動かしたとき、見えなくなったら表示を動かすため） */
@@ -168,6 +170,23 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     for (let k = 1; k < 10; k++) {
       ctx.fillStyle = C.laneSep;
       ctx.fillRect(Math.round(box.x + k * box.laneW), 0, 1, H);
+    }
+  });
+
+  // 段階が逆転している小節（作った難易度が、上の譜面よりノーツが多い・下の譜面より少ない）を琥珀色に
+  l.cols.forEach((col, i) => {
+    if (col === 'MASTER') return;
+    const st = stairIssues(g, col);
+    if (!st.denser.length && !st.thinner.length) return;
+    const box = lay.cols[i];
+    for (const m of [...st.denser, ...st.thinner]) {
+      const y0 = geo.beatToY(tempo.measureStart(m + 1));
+      const y1 = geo.beatToY(tempo.measureStart(m));
+      if (y1 < 0 || y0 > H) continue;
+      ctx.fillStyle = C.stair;
+      ctx.fillRect(box.x, y0, box.w, y1 - y0);
+      ctx.fillStyle = C.stairEdge;
+      ctx.fillRect(box.x, y0, 3, y1 - y0);
     }
   });
 
@@ -450,6 +469,7 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
   const masterLevel = useGen((s) => s.masterLevel);
   const chart = useGen((s) => s.charts[col]);
   const ds = useGen((s) => (col === 'MASTER' ? null : s.diffs[col]));
+  const stairN = useGen((s) => (col === 'MASTER' ? 0 : stairCount(s, col)));
   const doc = kind === 'source' ? master : kind === 'existing' ? (chart?.doc ?? null) : (ds?.result?.doc ?? null);
   const est = useMemo(() => (doc ? estimateLevel(doc, buildTempoMap(doc)) : null), [doc]);
   const masterNotes = useMemo(() => (master ? (estimateLevel(master, buildTempoMap(master))?.notes ?? 0) : 0), [master]);
@@ -528,12 +548,21 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
           <>
             {roomy && <span className="lbl">{made.judge && !made.judgeStale ? tr('AI判定', 'AI') : tr('計算', 'Calc')}</span>}
             <span className="mono gen-colhead-lv">{shownLevel(made).toFixed(2)}</span>
-            {isPassing(made) ? (
-              <span className="gen-ok" title={tr('検証OK（目標の幅の中）', 'Checks passed (inside the target range)')}>
+            {isPassing(made) && stairN === 0 ? (
+              <span className="gen-ok" title={tr('検証OK（目標の幅の中・どの小節も上の難易度より濃くない）', 'Checks passed (inside the target range, and no measure is denser than the harder chart)')}>
                 ✓
               </span>
             ) : (
-              <span className="gen-warn" title={made.issues ? tr(`叩けない所 ${made.issues}`, `${made.issues} unplayable ${pl(made.issues, 'spot')}`) : tr('目標の幅から外れ', 'Outside the target range')}>
+              <span
+                className="gen-warn"
+                title={
+                  made.issues
+                    ? tr(`叩けない所 ${made.issues}`, `${made.issues} unplayable ${pl(made.issues, 'spot')}`)
+                    : !isPassing(made)
+                      ? tr('目標の幅から外れ', 'Outside the target range')
+                      : tr(`段階の逆転 ${stairN}小節（琥珀色の小節）`, `${stairN} ${pl(stairN, 'measure')} out of step (shown in amber)`)
+                }
+              >
                 !
               </span>
             )}

@@ -83,6 +83,10 @@ export interface SectionPlan {
   shift: number;
   fill?: 'keep' | 'thin' | 'short' | 'last';
   comment?: string;
+  /** 上の難易度の方針に合わせて shift を上げた（その難易度の名前。gen/stairs alignPlan） */
+  alignedTo?: string;
+  /** 合わせる前の、この難易度の方針の shift（画面で「AIの方針は…でしたが」と出す） */
+  ownShift?: number;
 }
 
 export interface SimplifyInput {
@@ -94,6 +98,13 @@ export interface SimplifyInput {
   overrides?: ReadonlyMap<number, 'keep' | 'drop'>;
   /** 段のあいだの細かい調整：4小節のうち何小節を1段やさしくするか（0〜3） */
   ease?: number;
+  /**
+   * 難易度の段階（gen/stairs）：上の難易度に残した音。これに無い音は置かない（どの小節も上の難易度より濃くしない）。
+   * 手直しで「残す」にした音は別
+   */
+  within?: ReadonlySet<number>;
+  /** 下の難易度に残した音。これは残す（どの小節も下の難易度より薄くしない）。within に無い音は置かない（上を優先） */
+  atLeast?: ReadonlySet<number>;
 }
 
 /** 細かい調整でやさしくする小節の順（4小節の中の位置。頭の小節は最後） */
@@ -317,6 +328,9 @@ export function simplify(input: SimplifyInput): SimplifyResult {
       }
     }
     if (keep.openHH && n.lane === 1 && n.alt && onGrid(n.inBeat, 0.5)) ok = true;
+    // 難易度の段階：下の難易度にある音は残し、上の難易度に無い音は置かない（食い違うときは上に合わせる）
+    if (input.atLeast?.has(n.id)) (ok = true), (protect = true);
+    if (input.within && !input.within.has(n.id)) (ok = false), (protect = false);
     const ov = input.overrides?.get(n.id);
     if (ov === 'keep') (ok = true), (protect = true);
     if (ov === 'drop') (ok = false), (protect = false);

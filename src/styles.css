@@ -5872,6 +5872,26 @@ button.gen-plan {
   color: var(--amber);
 }
 
+/* 上の難易度に合わせて薄くした区間（方針のカードの下） */
+.gen-aligned {
+  color: var(--accent);
+}
+
+/* 段階が逆転している小節（押すとその小節へ ▶ を移す） */
+.gen-stairs {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gen-stair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+}
+
 @media (max-width: 1500px) {
   .gen-body {
     grid-template-columns: 260px minmax(0, 1fr) 290px;
