@@ -201,6 +201,11 @@ html.tablet .pwa-card h3 {
   font-size: 16px;
 }
 
+/* ほかの設定の説明（.set-row-text .lbl）と同じ大きさ */
+html.tablet .pwa-card .lbl {
+  font-size: 13px;
+}
+
 html.tablet .pwa-note,
 html.tablet .pwa-steps li {
   font-size: 14px;

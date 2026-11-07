@@ -1,6 +1,6 @@
 // 設定画面: 言語、電子ドラム（MIDI）、キーボード、入力の遅れの補正、AI、アプリ（追加・オフライン・更新）。ブラウザに保存する。
 import { tr, pl, isJa } from '../i18n';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
 import { DRUM_LANES } from '../dtx/model';
 import { enableMidi, startLearn, useMidi } from '../input/midi';
@@ -64,14 +64,19 @@ export function SettingsPage() {
       <div className="settings-body">
         <nav className="settings-nav">
           {navItems(tablet).map(([k, label]) => (
-            <button key={k} className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>
-              {label}
-              {k === 'midi' && NO_MIDI && <span className="set-nav-warn">{Icon.info(16)}</span>}
-            </button>
+            <Fragment key={k}>
+              <button className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>
+                {label}
+                {k === 'midi' && NO_MIDI && <span className="set-nav-warn">{Icon.info(16)}</span>}
+              </button>
+              {/* AI の下に付ける（難易度生成のレベルの基準） */}
+              {k === 'ai' && (
+                <button className="sub" onClick={() => openPage('guideline')} title={tr('手元の曲から作る、レベルの基準', 'Level guidelines built from your local songs')}>
+                  {tr('難易度ガイドライン', 'Difficulty guidelines')}
+                </button>
+              )}
+            </Fragment>
           ))}
-          <button className="sub" onClick={() => openPage('guideline')} title={tr('手元の曲から作る、レベルの基準', 'Level guidelines built from your local songs')}>
-            {tr('難易度ガイドライン', 'Difficulty guidelines')}
-          </button>
         </nav>
         <main className="settings-main scroll">
           {sec === 'lang' && <LanguageSettings />}
