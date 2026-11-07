@@ -1,6 +1,8 @@
 // 曲フォルダの読み書き。Chrome/Edge は File System Access API でフォルダに直接保存する。
-// 使えないブラウザはフォルダを読み込みだけ行い、保存はダウンロードにする。
+// フォルダを選んでいない曲（iPad・ZIP・落としたファイル・新しい曲）は本体（このブラウザの保存領域、src/fs/local.ts）に置き、
+// 同じように直接書く。どちらも使えないときはメモリに持ち、保存はダウンロードにする。
 import { tr } from '../i18n';
+import { isQuotaError, writeSongFile } from './opfs';
 
 declare global {
   interface Window {
@@ -26,7 +28,10 @@ export interface FolderFile {
 
 export interface SongFolder {
   name: string;
+  /** 直接書けるフォルダ（PC で選んだ曲フォルダ、または本体の曲のフォルダ） */
   dir?: FileSystemDirectoryHandle;
+  /** 本体（このブラウザの保存領域）に置いた曲の id（src/fs/local.ts）。dir はそのフォルダ */
+  local?: string;
   /** 正規化したパス（小文字・'/' 区切り）→ ファイル */
   files: Map<string, FolderFile>;
 }
@@ -49,6 +54,16 @@ export function joinPath(base: string, p: string): string {
 
 export function supportsDirectWrite(): boolean {
   return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
+}
+
+/** 本体（このブラウザの保存領域）に置いた曲か */
+export function isLocalFolder(folder: SongFolder | null | undefined): folder is SongFolder & { local: string; dir: FileSystemDirectoryHandle } {
+  return !!folder?.local && !!folder.dir;
+}
+
+/** PC で選んだ曲フォルダ（ディスクのフォルダ）か */
+export function isDiskFolder(folder: SongFolder | null | undefined): folder is SongFolder & { dir: FileSystemDirectoryHandle } {
+  return !!folder?.dir && !folder.local;
 }
 
 const MAX_FILES = 8000;
@@ -141,37 +156,53 @@ export async function ensureWritable(folder: SongFolder): Promise<boolean> {
   return true;
 }
 
+/** 本体に書けなかったとき（容量が足りないなど）に知らせる先。画面の側で決める */
+let onWriteError: ((e: unknown, folder: SongFolder, path: string) => void) | null = null;
+export function setWriteErrorHandler(fn: typeof onWriteError) {
+  onWriteError = fn;
+}
+
 /** フォルダにファイルを書く（サブフォルダは作る） */
-export async function writeFile(folder: SongFolder, path: string, bytes: Uint8Array): Promise<void> {
+export async function writeFile(folder: SongFolder, path: string, data: Uint8Array | Blob): Promise<void> {
   if (!folder.dir) throw new Error(tr('このフォルダには直接保存できません', "Can't save directly to this folder"));
-  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  let rel = path.replace(/\\/g, '/').split('/').filter(Boolean).join('/');
+  const size = data instanceof Blob ? data.size : data.length;
+  if (folder.local) {
+    // 本体は大文字・小文字を区別するので、同じファイル（NX は区別しない）があればその綴りに書く
+    rel = folder.files.get(normPath(rel))?.path ?? rel;
+    const name = rel.split('/').pop()!;
+    const fh = await writeSongFile(folder.local, rel, data);
+    folder.files.set(normPath(rel), { path: rel, name, size, getFile: () => fh.getFile(), ver: ++fileVer });
+    return;
+  }
+  const parts = rel.split('/');
   const name = parts.pop()!;
   let dir = folder.dir;
   for (const p of parts) dir = await dir.getDirectoryHandle(p, { create: true });
   const fh = await dir.getFileHandle(name, { create: true });
   const w = await fh.createWritable();
-  await w.write(bytes as Uint8Array<ArrayBuffer>);
+  await w.write(data as Blob);
   await w.close();
-  const rel = [...parts, name].join('/');
-  folder.files.set(normPath(rel), { path: rel, name, size: bytes.length, getFile: () => fh.getFile(), ver: ++fileVer });
+  folder.files.set(normPath(rel), { path: rel, name, size, getFile: () => fh.getFile(), ver: ++fileVer });
 }
 
 let fileVer = 0;
 
 /**
- * 曲フォルダにファイルを置く。直接書けるフォルダなら書き、書けなければメモリに持っておき、
- * 保存（フォルダを選ぶ・ZIPでダウンロード）のときに一緒に書き出す。
+ * 曲フォルダにファイルを置く。直接書けるフォルダ（PC の曲フォルダ・本体）なら書き、書けなければメモリに持っておき、
+ * 保存（フォルダを選ぶ・本体に入れる・ZIPでダウンロード）のときに一緒に書き出す。
  */
 export async function putFile(folder: SongFolder, path: string, data: Uint8Array | File): Promise<'written' | 'memory'> {
   const rel = path.replace(/\\/g, '/').replace(/^\/+/, '');
   if (folder.dir) {
     try {
       if (await ensureWritable(folder)) {
-        await writeFile(folder, rel, data instanceof File ? new Uint8Array(await data.arrayBuffer()) : data);
+        await writeFile(folder, rel, data);
         return 'written';
       }
-    } catch {
-      // 書けなければメモリに持つ
+    } catch (e) {
+      // 書けなければメモリに持つ（本体の容量が足りないときは知らせる）
+      if (folder.local) onWriteError?.(e, folder, rel);
     }
   }
   const name = rel.split('/').pop()!;
@@ -179,6 +210,8 @@ export async function putFile(folder: SongFolder, path: string, data: Uint8Array
   folder.files.set(normPath(rel), { path: rel, name, size: file.size, getFile: async () => file, ver: ++fileVer, pending: true });
   return 'memory';
 }
+
+export { isQuotaError };
 
 /** まだフォルダに書けていないファイル */
 export function pendingFiles(folder: SongFolder | null): FolderFile[] {

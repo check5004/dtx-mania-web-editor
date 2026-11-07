@@ -6551,3 +6551,121 @@ button.gen-plan {
 .sep-foot .btn.primary {
   flex: none;
 }
+
+/* ---- 本体（このブラウザの保存領域）に保存している曲 ---- */
+
+.local-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line2);
+  background: var(--card);
+}
+
+.local-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.local-i {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #12273a;
+  color: #8ad8ff;
+}
+
+.local-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.local-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.local-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.local-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ok);
+}
+
+.local-warn {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-line);
+  color: #f3dcb0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.pill.local {
+  background: #12273a;
+  color: #8ad8ff;
+}
+
+.local-chip {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 121;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 8px 12px 9px;
+  border-radius: 10px;
+  border: 1px solid #23435a;
+  background: #0f1c26;
+  color: #b9dcf2;
+  font-size: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.local-chip-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  border-radius: 2px;
+  background: #1b2f3d;
+  overflow: hidden;
+}
+
+.local-chip-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+
+.pill.mini {
+  height: 16px;
+  padding: 0 6px;
+  margin-right: 6px;
+  font-size: 10.5px;
+  vertical-align: 1px;
+}

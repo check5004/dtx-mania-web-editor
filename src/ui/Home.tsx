@@ -1,10 +1,12 @@
 import { tr, pl, locale, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
-import { listRecent, newEmptySong, openFolderPicker, openPickedFiles, openRecent } from '../app/fileActions';
+import { listRecent, newEmptySong, openFolderPicker, openPickedFiles, openRecent, removeRecentEntry } from '../app/fileActions';
 import { supportsDirectWrite } from '../fs/folder';
-import { deleteRecent, type RecentEntry } from '../fs/recent';
+import type { RecentEntry } from '../fs/recent';
 import { useDevice } from '../store/device';
 import { useEditor } from '../store/editor';
+import { localBadge, localPlace, useLocalSongs } from '../store/localSongs';
+import { LocalStorageCard } from './LocalStorage';
 import { FolderInput } from './Editor';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -43,10 +45,13 @@ function HomeDesktop() {
   const [over, setOver] = useState(false);
   const hasDoc = useEditor((s) => s.doc.header.length > 0 || s.doc.chips.length > 0);
   const direct = supportsDirectWrite();
+  const local = useLocalSongs((s) => s.ready);
+  // 本体の曲が増えた・消えたら一覧を読み直す
+  const localVer = useLocalSongs((s) => s.ver);
 
   useEffect(() => {
     void listRecent().then(setRecent);
-  }, []);
+  }, [localVer]);
 
   return (
     <div className="home">
@@ -76,10 +81,15 @@ function HomeDesktop() {
           <div className="notice">
             <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>
             <span>
-              {tr(
-                'このブラウザは曲フォルダへの直接保存に対応していないため、保存はダウンロードになります。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
-                "This browser can't save directly into the song folder, so saving downloads the files instead. In Chrome or Edge, saving overwrites the files in the song folder.",
-              )}
+              {local
+                ? tr(
+                    'このブラウザは曲フォルダへ直接保存できないため、曲は音ごとこのブラウザの中に保存します。NX へ渡すときは「ファイル › 曲フォルダを ZIP でダウンロード」を使ってください。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
+                    "This browser can't save into the song folder, so songs are kept inside this browser with their audio. To move one to NX, use File › Download song folder as ZIP. In Chrome or Edge, saving overwrites the files in the song folder.",
+                  )
+                : tr(
+                    'このブラウザは曲フォルダへの直接保存に対応していないため、保存はダウンロードになります。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
+                    "This browser can't save directly into the song folder, so saving downloads the files instead. In Chrome or Edge, saving overwrites the files in the song folder.",
+                  )}
             </span>
           </div>
         )}
@@ -127,7 +137,11 @@ function HomeDesktop() {
             <h3>{tr('曲フォルダを開く', 'Open a song folder')}</h3>
             <p>
               {tr('既存のDTXと音をまとめて読み込みます。', 'Loads an existing DTX together with its sounds. ')}
-              {direct ? tr('保存するとそのフォルダに上書きされます。', 'Saving overwrites the files in that folder. ') : tr('保存はダウンロードになります。', 'Saving downloads the files. ')}
+              {direct
+                ? tr('保存するとそのフォルダに上書きされます。', 'Saving overwrites the files in that folder. ')
+                : local
+                  ? tr(`曲は音ごと${localPlace()}の中に保存します。`, `The song is kept in ${localPlace()} with its audio. `)
+                  : tr('保存はダウンロードになります。', 'Saving downloads the files. ')}
               {tr('DTXが無いフォルダなら新しい譜面を作ります。', 'If the folder has no DTX, a new chart is created.')}
             </p>
             <div className="actions">
@@ -175,6 +189,11 @@ function HomeDesktop() {
                         {[r.artist || tr('アーティスト未設定', 'No artist'), r.bpm && `${r.bpm} BPM`, `Lv ${formatLevel(r.level)}`].filter(Boolean).join(' · ')}
                       </span>
                       <span className="lbl ellipsis" style={{ display: 'block' }}>
+                        {r.local && (
+                          <span className="pill local mini" title={tr(`音ごと${localPlace()}に保存しています`, `Kept in ${localPlace()} with its audio`)}>
+                            {localBadge()}
+                          </span>
+                        )}
                         {r.folderName ? `${r.folderName}/` : ''}
                         {r.fileName} · {ago(r.updatedAt)}
                       </span>
@@ -184,10 +203,13 @@ function HomeDesktop() {
                   <button
                     className="ib"
                     style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24 }}
-                    title={tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')}
+                    title={
+                      r.local
+                        ? tr(`一覧から消す（この曲の最後の1つなら、${localPlace()}に保存した音も消します）`, `Remove from the list (for the last one of this song, the audio kept in ${localPlace()} is removed too)`)
+                        : tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')
+                    }
                     onClick={async () => {
-                      await deleteRecent(r.id);
-                      setRecent(await listRecent());
+                      if (await removeRecentEntry(r)) setRecent(await listRecent());
                     }}
                   >
                     ✕
@@ -197,6 +219,8 @@ function HomeDesktop() {
             </div>
           )}
         </section>
+
+        <LocalStorageCard />
 
         <section>
           <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>{tr('操作のきほん', 'Basics')}</h3>

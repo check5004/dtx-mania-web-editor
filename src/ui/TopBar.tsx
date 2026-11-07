@@ -1,6 +1,8 @@
 import { tr, pl, getLang, setLang, LANG_NAMES } from '../i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { downloadDtx, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
+import { downloadDtx, exportSongZip, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
+import { isDiskFolder, isLocalFolder, supportsDirectWrite } from '../fs/folder';
+import { localPlace, useLocalSongs } from '../store/localSongs';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
 import {
@@ -114,10 +116,18 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         { label: bgmSource(s().doc) ? tr('原曲を差し替える…', 'Replace original audio…') : tr('原曲（音声ファイル）を読み込む…', 'Load original audio file…'), run: pickBgmFile },
         '-',
         ...(tablet
-          ? [{ label: tr('保存と書き出し…', 'Save and export…'), key: 'Ctrl+S', run: () => openSaveSheet() }]
+          ? useLocalSongs.getState().ready || isDiskFolder(s().folder)
+            ? [
+                { label: isDiskFolder(s().folder) ? tr('保存', 'Save') : tr(`保存（${localPlace()}に）`, `Save (in ${localPlace()})`), key: 'Ctrl+S', run: () => void save() },
+                { label: tr('書き出し・共有…', 'Export and share…'), run: () => openSaveSheet() },
+              ]
+            : [{ label: tr('保存と書き出し…', 'Save and export…'), key: 'Ctrl+S', run: () => openSaveSheet() }]
           : [
               { label: tr('保存', 'Save'), key: 'Ctrl+S', run: () => void save() },
               { label: tr('名前を付けて保存…', 'Save as…'), key: 'Ctrl+Shift+S', run: () => void save({ as: true }) },
+              // 本体に置いた曲：NX の曲フォルダへ移す・ZIP にする
+              ...(isLocalFolder(s().folder) && supportsDirectWrite() ? [{ label: tr('曲フォルダに書き出す…', 'Export to a song folder…'), run: () => void save({ toFolder: true }) }] : []),
+              ...(s().folder && !isDiskFolder(s().folder) ? [{ label: tr('曲フォルダを ZIP でダウンロード', 'Download song folder as ZIP'), run: () => void exportSongZip() }] : []),
             ]),
         { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: downloadDtx },
         '-',
@@ -323,7 +333,17 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       <button className="ib" onClick={() => openSettings()} title={tr('設定（電子ドラム・キーボード・遅延補正）', 'Settings (e-drums, keyboard, latency)')}>
         {Icon.gear()}
       </button>
-      <button className="btn primary" onClick={() => void save()} title={folder?.dir ? tr(`${folder.name}/${meta.fileName} に保存（Ctrl+S）`, `Save to ${folder.name}/${meta.fileName} (Ctrl+S)`) : tr('保存（Ctrl+S）', 'Save (Ctrl+S)')}>
+      <button
+        className="btn primary"
+        onClick={() => void save()}
+        title={
+          isDiskFolder(folder)
+            ? tr(`${folder.name}/${meta.fileName} に保存（Ctrl+S）`, `Save to ${folder.name}/${meta.fileName} (Ctrl+S)`)
+            : isLocalFolder(folder)
+              ? tr(`${localPlace()}の ${folder.name}/${meta.fileName} に保存（Ctrl+S）`, `Save to ${folder.name}/${meta.fileName} in ${localPlace()} (Ctrl+S)`)
+              : tr('保存（Ctrl+S）', 'Save (Ctrl+S)')
+        }
+      >
         {Icon.save(15)}
         {tr('保存', 'Save')}
       </button>

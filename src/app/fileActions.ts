@@ -6,7 +6,7 @@ import { virtualSound } from '../audio/sounds';
 import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
 import { decodeDtx, encodeDtx } from '../dtx/encoding';
-import type { DtxDoc } from '../dtx/model';
+import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { hasOriginLine, originOf, type ChartOrigin } from '../dtx/origin';
 import { parseDtx } from '../dtx/parse';
 import { serializeDtx } from '../dtx/serialize';
@@ -20,21 +20,41 @@ import {
   folderFromFileList,
   folderFromFiles,
   folderFromHandle,
+  isDiskFolder,
+  isLocalFolder,
+  isQuotaError,
   parseSetDef,
   pendingFiles,
   pickFolder,
   putFile,
+  setWriteErrorHandler,
   supportsDirectWrite,
   writeFile,
   type FolderFile,
   type SongFolder,
 } from '../fs/folder';
-import { listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
-import { createDoc, edit, isDirty, openDocument, prepareSounds, switchDocument, toast, useEditor, withSongEnd, type DocMeta } from '../store/editor';
+import {
+  checkLocal,
+  createLocalSong,
+  deleteLocalSong,
+  findLocalByName,
+  finishLocalSong,
+  freeLocalName,
+  getLocalSong,
+  localReady,
+  openLocalSong,
+  requestPersist,
+  updateLocalSong,
+  type LocalSong,
+} from '../fs/local';
+import { songDir, writeSongFile } from '../fs/opfs';
+import { deleteRecent, listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
+import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
+import { useDevice } from '../store/device';
+import { createDoc, edit, isDirty, openDocument, prepareSounds, switchDocument, toast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
 import { bgmSource } from '../store/derived';
 import { freeWavNumber, setField } from '../edit/ops';
 import { toBase36x2 } from '../dtx/base36';
-import { CH } from '../dtx/model';
 import { frac } from '../dtx/fraction';
 import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
@@ -157,8 +177,260 @@ async function openDtxFile(
 }
 
 function recentIdFor(folder: SongFolder | null, fileName: string) {
+  if (folder?.local) return `local:${folder.local}/${fileName}`.toLowerCase();
   return `${folder?.name ?? 'new'}/${fileName}`.toLowerCase();
 }
+
+// ---- 本体（このブラウザの保存領域）に曲を置く ----------------------------------------------
+
+const promotions = new WeakMap<SongFolder, Promise<boolean>>();
+/** 入れ終わったら消す、同じ名前の古い本体の曲（「この中身で入れ直す」を選んだとき） */
+const replaceAfter = new WeakMap<SongFolder, string>();
+
+const FIRST_LOCAL_KEY = 'dtxe.local.told';
+
+function mbText(bytes: number): string {
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : mb >= 1 ? `${mb.toFixed(mb >= 100 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * メモリにだけある曲フォルダ（ZIP・落としたファイル・新しい曲・フォルダに書けないブラウザで開いたフォルダ）を、
+ * 本体に曲フォルダごと入れる。入れ終わったら、そのフォルダは本体のフォルダとして直接読み書きする
+ * （PC で曲フォルダを選んだときと同じ。ステム・ドラム抜き・保存もそこへ書く）。同じフォルダを2回入れない
+ */
+export function promoteToLocal(folder: SongFolder): Promise<boolean> {
+  if (folder.local) return Promise.resolve(true);
+  if (folder.dir || !localReady()) return Promise.resolve(false);
+  let p = promotions.get(folder);
+  if (!p) {
+    p = doPromote(folder).finally(() => promotions.delete(folder));
+    promotions.set(folder, p);
+  }
+  return p;
+}
+
+async function doPromote(folder: SongFolder): Promise<boolean> {
+  const snapshot = [...folder.files.values()];
+  const totalBytes = snapshot.reduce((a, f) => a + f.size, 0);
+  const progress = { name: folder.name, done: 0, total: snapshot.length, bytes: 0, totalBytes };
+  setCopying(progress);
+  let rec: LocalSong | null = null;
+  try {
+    rec = await createLocalSong(folder.name);
+    const id = rec.id;
+    const written = new Map<FolderFile, FileSystemFileHandle>();
+    for (const [i, f] of snapshot.entries()) {
+      written.set(f, await writeSongFile(id, f.path, await f.getFile()));
+      progress.done = i + 1;
+      progress.bytes += f.size;
+      setCopying({ ...progress });
+      // 入れている途中の印を新しくしておく（10分動かない途中の曲は、次に開いたときに片付ける）
+      if (i % 8 === 7) await updateLocalSong(id, { updatedAt: Date.now() });
+    }
+    // 入れている間に置かれたファイル（原曲・ステムなど）も書く
+    for (let round = 0; round < 5; round++) {
+      const extra = [...folder.files.values()].filter((f) => !written.has(f));
+      if (!extra.length) break;
+      for (const f of extra) written.set(f, await writeSongFile(id, f.path, await f.getFile()));
+    }
+    const dir = await songDir(id);
+    await finishLocalSong(id, folder);
+    // ここから本体のフォルダ（読み込み済みの音を読み直さないように、版の番号はそのまま）
+    folder.dir = dir;
+    folder.local = id;
+    for (const [key, f] of [...folder.files]) {
+      const fh = written.get(f);
+      if (fh) folder.files.set(key, { path: f.path, name: f.name, size: f.size, ver: f.ver, getFile: () => fh.getFile() });
+      else folder.files.set(key, { ...f, pending: true });
+    }
+    // 最後の await の間に置かれた物は、そのまま書く
+    for (const f of pendingFiles(folder)) await putFile(folder, f.path, await f.getFile());
+    await afterPromote(folder, id);
+    return true;
+  } catch (e) {
+    folder.dir = undefined;
+    folder.local = undefined;
+    if (rec) {
+      try {
+        await deleteLocalSong(rec.id);
+      } catch {
+        // 片付けは次に開いたとき
+      }
+    }
+    toast(
+      isQuotaError(e)
+        ? tr(
+            `${localPlace()}の空きが足りないため、曲を本体に保存できませんでした。曲を消して空けるか、保存のときに書き出してください`,
+            `There isn't enough space in ${localPlace()} to keep the song. Free some space by removing songs, or export it when you save`,
+          )
+        : tr(`曲を${localPlace()}に保存できませんでした: ${(e as Error).message}`, `Couldn't keep the song in ${localPlace()}: ${(e as Error).message}`),
+      'warn',
+      9000,
+    );
+    return false;
+  } finally {
+    setCopying(null);
+  }
+}
+
+/** 本体に入れ終わったあと：自動保存をこの曲に付け替え、消えないように頼み、初めてなら知らせる */
+async function afterPromote(folder: SongFolder, id: string) {
+  const old = replaceAfter.get(folder);
+  if (old) {
+    replaceAfter.delete(folder);
+    await deleteLocalSong(old);
+  }
+  const s = get();
+  if (s.folder === folder) {
+    const newId = recentIdFor(folder, s.meta.fileName);
+    const oldId = s.meta.recentId;
+    useEditor.setState({ meta: { ...s.meta, recentId: newId } });
+    if (oldId && oldId !== newId) await deleteRecent(oldId);
+    await putRecent(autosaveEntry(get()));
+    await trimRecent();
+  } else {
+    // もう別の曲を開いた：「最近の曲」から開けるように控えを作る
+    const first = dtxFiles(folder)[0];
+    await putRecent({
+      id: recentIdFor(folder, first?.name ?? 'mstr.dtx'),
+      title: folder.name,
+      artist: '',
+      bpm: '',
+      level: '',
+      fileName: first?.name ?? 'mstr.dtx',
+      folderName: folder.name,
+      local: id,
+      text: '',
+      saved: true,
+      updatedAt: Date.now(),
+    });
+  }
+  bumpLocal();
+  void refreshLocalSongs();
+  const persisted = await requestPersist();
+  let told = false;
+  try {
+    told = localStorage.getItem(FIRST_LOCAL_KEY) === '1';
+    localStorage.setItem(FIRST_LOCAL_KEY, '1');
+  } catch {
+    // 覚えられなくても続ける
+  }
+  if (!told)
+    toast(
+      tr(
+        `曲を音ごと${localPlace()}に保存しました。リロードしても「最近の曲」から続きを開けます${persisted ? '' : '（ブラウザの空きが少なくなると消されることがあるので、ときどき書き出しておくと安心です）'}`,
+        `The song and its audio are now kept in ${localPlace()}. After a reload, continue from "Recent songs"${persisted ? '' : ' (the browser may clear it when space runs low, so export it now and then)'}`,
+      ),
+      'ok',
+      9000,
+    );
+}
+
+/** 本体に同じ名前の曲があるか見て、どうするかを聞く。'opened' は本体の曲を開いた、null はやめた */
+async function checkLocalDuplicate(folder: SongFolder): Promise<'opened' | 'go' | null> {
+  if (!localReady()) return 'go';
+  const same = await findLocalByName(folder.name);
+  if (!same) return 'go';
+  const when = new Date(same.updatedAt).toLocaleString(isJa() ? 'ja-JP' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const choice = await chooseDialog<'open' | 'replace' | 'new'>({
+    title: tr(`${localPlace()}に「${same.name}」があります`, `"${same.name}" is already in ${localPlace()}`),
+    body: tr('前に開いた同じ名前の曲が、音ごと保存されています。', 'A song with the same name was opened before and is kept with its audio.'),
+    options: [
+      { label: tr(`${localPlace()}の曲を開く（前回の続き）`, `Open the one in ${localPlace()} (continue)`), sub: tr(`最後の保存 ${when} · ${mbText(same.bytes)}`, `Last saved ${when} · ${mbText(same.bytes)}`), value: 'open' },
+      {
+        label: tr('この中身で入れ直す', 'Replace it with this one'),
+        sub: tr(`${localPlace()}の曲を消して置き換えます。保存していない変更も消えます`, `Removes the song in ${localPlace()}, including unsaved changes`),
+        value: 'replace',
+      },
+      { label: tr('別の曲として入れる', 'Keep both'), sub: tr('名前の後ろに番号を付けて、もう1つ入れます', 'Adds this one with a number after the name'), value: 'new' },
+    ],
+  });
+  if (!choice) return null;
+  if (choice === 'open') {
+    await openLocalById(same.id);
+    return 'opened';
+  }
+  if (choice === 'replace') replaceAfter.set(folder, same.id);
+  else folder.name = await freeLocalName(folder.name);
+  return 'go';
+}
+
+/** 本体の曲を開く（最後に自動保存した難易度から。無ければ曲フォルダとして） */
+async function openLocalById(id: string) {
+  const entries = (await listRecent()).filter((e) => e.local === id);
+  if (entries.length) {
+    await openRecentEntry(entries[0]);
+    return;
+  }
+  const folder = await openLocalSong(id);
+  if (!folder) {
+    toast(tr(`${localPlace()}にこの曲が見つかりませんでした`, `Couldn't find this song in ${localPlace()}`), 'error', 6000);
+    return;
+  }
+  await openFolder(folder);
+}
+
+/** 本体の曲が消えていたとき（Safari が使っていないサイトのデータを消した・容量が足りなくて消された） */
+function toastLocalMissing() {
+  toast(
+    tr(
+      `${localPlace()}に保存した曲のファイルが見つかりませんでした（ブラウザがデータを消した可能性があります）。自動保存した譜面だけを開きます`,
+      `The song files kept in ${localPlace()} are gone (the browser may have cleared them). Opening only the autosaved chart`,
+    ),
+    'warn',
+    9000,
+  );
+}
+
+/**
+ * 「最近の曲」の ✕。本体の曲は、その曲の最後の1つを消すときに本体のファイルも消す（確かめてから）
+ */
+export async function removeRecentEntry(e: RecentEntry): Promise<boolean> {
+  if (!e.local) {
+    await deleteRecent(e.id);
+    return true;
+  }
+  const others = (await listRecent()).filter((x) => x.local === e.local && x.id !== e.id);
+  if (others.length) {
+    await deleteRecent(e.id);
+    return true;
+  }
+  const rec = await getLocalSong(e.local);
+  const ok = await confirmDialog({
+    title: tr(`「${rec?.name ?? e.title}」を${localPlace()}から消しますか？`, `Remove "${rec?.name ?? e.title}" from ${localPlace()}?`),
+    body: tr(
+      `${localPlace()}に保存した曲のファイル（譜面・原曲・ステムなど${rec ? ` ${rec.files} 個・${mbText(rec.bytes)}` : ''}）をすべて消します。元に戻せません。PC の曲フォルダや書き出した ZIP は消えません。`,
+      `All song files kept in ${localPlace()} (charts, original audio, stems${rec ? `: ${rec.files} files, ${mbText(rec.bytes)}` : ''}) are removed. This can't be undone. Song folders on your PC and exported ZIPs are not affected.`,
+    ),
+    ok: tr('消す', 'Remove'),
+    danger: true,
+  });
+  if (!ok) return false;
+  if (get().folder?.local === e.local) closeDocument();
+  await deleteLocalSong(e.local);
+  bumpLocal();
+  void refreshLocalSongs();
+  return true;
+}
+
+/** 開いている譜面を閉じる（本体から消した曲を開いていたとき） */
+function closeDocument() {
+  const doc = emptyDoc();
+  useEditor.setState({ screen: 'home', page: 'chart', doc, savedDoc: doc, folder: null, past: [], future: [], selection: [], meta: { fileName: 'new.dtx', encoding: 'shift_jis', warnings: [], hasRandom: false, siblings: [] } });
+}
+
+setWriteErrorHandler((e) => {
+  if (!isQuotaError(e)) return;
+  toast(
+    tr(
+      `${localPlace()}の空きが足りず、ファイルを本体に書けませんでした。いったんメモリに持ち、保存・書き出しのときに一緒に書き出します`,
+      `Not enough space in ${localPlace()} to write the file. It is kept in memory and written out when you save or export`,
+    ),
+    'warn',
+    9000,
+  );
+});
 
 /** 曲フォルダを開いた後：DTX を選ぶ、無ければ新規作成 */
 export async function openFolder(folder: SongFolder) {
@@ -219,10 +491,12 @@ export async function openFolderPicker(fallbackInput?: HTMLInputElement | null) 
   fallbackInput?.click();
 }
 
-/** <input webkitdirectory> から */
+/** <input webkitdirectory> から（フォルダに書けないブラウザ。開いたら曲フォルダごと本体に入れる） */
 export async function openFolderFromInput(list: FileList | null) {
   if (!list || list.length === 0) return;
-  await openFolder(folderFromFileList(list));
+  const folder = folderFromFileList(list);
+  if ((await checkLocalDuplicate(folder)) !== 'go') return;
+  await openFolder(folder);
 }
 
 let switchSeq = 0;
@@ -463,12 +737,89 @@ function sidecarBytes(folder: SongFolder | null, fileName: string): Uint8Array |
   return new TextEncoder().encode(serializeSidecar(d));
 }
 
-function markSaved(doc: DtxDoc, patch: Partial<ReturnType<typeof get>> = {}) {
+function markSaved(doc: DtxDoc, patch: Partial<EditorState> = {}) {
+  const oldId = get().meta.recentId;
   useEditor.setState((s) => ({ ...patch, savedDoc: doc, savedAt: Date.now(), meta: { ...s.meta, ...(patch.meta ?? {}), encoding: 'shift_jis', encodingNote: undefined } }));
-  void autosaveNow(true);
+  const newId = get().meta.recentId;
+  // 保存先が決まって自動保存の名前が変わったら、前の名前の控えは消す（同じ曲が2つ並ばないように）
+  if (oldId && newId && oldId !== newId) void deleteRecent(oldId).then(() => autosaveNow(true));
+  else void autosaveNow(true);
 }
 
-export async function save(opts: { as?: boolean } = {}) {
+type KitFile = { path: string; bytes: Uint8Array; origin: string; library: boolean };
+
+/** 本体の曲フォルダにする（メモリの曲フォルダは本体に入れ、曲フォルダが無ければ作る）。できなければ null */
+async function ensureLocalFolder(folder: SongFolder | null): Promise<SongFolder | null> {
+  if (folder?.local) return folder;
+  if (folder?.dir || !(await checkLocal())) return null;
+  let f = folder;
+  if (!f) {
+    f = folderFromFiles([], get().doc.fields['TITLE'] || tr('新しい曲', 'New song'));
+    useEditor.setState({ folder: f });
+  }
+  return (await promoteToLocal(f)) ? f : null;
+}
+
+/** 難易度タブの一覧を作り直す（AI の印は分かっている物を引き継ぎ、新しい譜面があれば読み直す） */
+async function refreshSiblings(folder: SongFolder) {
+  const labels = await readSetDefLabels(folder);
+  const known = new Map(get().meta.siblings.map((x) => [x.file.toLowerCase(), x.origin]));
+  const siblings = siblingsOf(folder, labels).map((x) => ({ ...x, origin: known.get(x.file.toLowerCase()) }));
+  return { siblings, fresh: siblings.some((x) => !known.has(x.file.toLowerCase())) };
+}
+
+/** 本体の曲フォルダに保存する（キットの音・まだ書けていない音・譜面・作業ファイル） */
+async function saveIntoLocal(folder: SongFolder, fileName: string, bytes: Uint8Array, kit: KitFile[], doc: DtxDoc, quiet = false): Promise<boolean> {
+  const local = folder.local!;
+  if (findFile(folder, fileName) && fileName.toLowerCase() !== get().meta.fileName.toLowerCase()) {
+    const ok = await confirmDialog({
+      title: tr(`${fileName} を上書きしますか？`, `Overwrite ${fileName}?`),
+      body: tr('同じ名前の譜面が曲フォルダにあります。', 'A chart with the same name is already in the song folder.'),
+      ok: tr('上書き', 'Overwrite'),
+      danger: true,
+    });
+    if (!ok) return false;
+  }
+  for (const k of kit) await writeFile(folder, k.path, k.bytes);
+  for (const f of pendingFiles(folder)) await writeFile(folder, f.path, await f.getFile());
+  await writeFile(folder, fileName, bytes);
+  const side = sidecarBytes(folder, fileName);
+  if (side) await writeFile(folder, sidecarName(fileName), side);
+  markSidecarSaved();
+  const { siblings, fresh } = await refreshSiblings(folder);
+  markSaved(doc, { meta: { ...get().meta, fileName, siblings, recentId: recentIdFor(folder, fileName) } });
+  if (fresh) void scanSiblingOrigins(folder);
+  await finishLocalSong(local, folder);
+  useLocalSongs.setState({ savedAt: Date.now() });
+  void refreshLocalSongs();
+  if (!quiet) {
+    const tablet = useDevice.getState().tablet;
+    const action = tablet
+      ? { label: tr('書き出す…', 'Export…'), run: () => void import('../ui/tablet/shared').then((m) => m.openSaveSheet()) }
+      : supportsDirectWrite()
+        ? { label: tr('曲フォルダへ…', 'To a folder…'), run: () => void save({ toFolder: true }) }
+        : { label: tr('ZIP で保存', 'Save as ZIP'), run: () => void exportSongZip() };
+    const kitNote = kit.length ? tr(`（キットの音 ${kit.length} 個も保存）`, ` (also saved ${kit.length} kit ${pl(kit.length, 'sound')})`) : '';
+    toast(tr(`${localPlace()}に保存しました: `, `Saved in ${localPlace()}: `) + `${folder.name}/${fileName}${kitNote}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 5000, action);
+  }
+  return true;
+}
+
+/**
+ * 本体の曲を曲フォルダ（PC で選んだフォルダ）へ移したあと：自動保存の控えをそのフォルダに付け替え、本体のファイルを消す
+ */
+async function moveLocalToFolder(localId: string, target: SongFolder) {
+  for (const e of await listRecent()) {
+    if (e.local !== localId) continue;
+    await deleteRecent(e.id);
+    await putRecent({ ...e, id: recentIdFor(target, e.fileName), local: undefined, dir: target.dir, folderName: target.name });
+  }
+  await deleteLocalSong(localId);
+  bumpLocal();
+  void refreshLocalSongs();
+}
+
+export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
   const s = get();
   if (s.screen !== 'editor') return;
   const doc = s.doc;
@@ -491,9 +842,11 @@ export async function save(opts: { as?: boolean } = {}) {
     fileName = /\.dtx$/i.test(name) ? name : `${name}.dtx`;
   }
   let folder = s.folder;
+  // 本体に入れている途中なら、入れ終わってから保存する
+  if (folder && !folder.dir) await promotions.get(folder);
   const kit = await kitFilesNeeded(doc, folder);
   try {
-    if (folder?.dir) {
+    if (isDiskFolder(folder)) {
       if (!(await ensureWritable(folder))) {
         toast(tr('フォルダへの書き込みが許可されませんでした', 'Writing to the folder was not allowed'), 'error');
         return;
@@ -509,7 +862,7 @@ export async function save(opts: { as?: boolean } = {}) {
       }
       for (const k of kit) await writeFile(folder, k.path, k.bytes);
       // ステムや書き出した音で、まだフォルダに書けていなかったもの
-      for (const f of pendingFiles(folder)) await writeFile(folder, f.path, new Uint8Array(await (await f.getFile()).arrayBuffer()));
+      for (const f of pendingFiles(folder)) await writeFile(folder, f.path, await f.getFile());
       await writeFile(folder, fileName, bytes);
       const side = sidecarBytes(folder, fileName);
       if (side) await writeFile(folder, sidecarName(fileName), side);
@@ -520,16 +873,58 @@ export async function save(opts: { as?: boolean } = {}) {
       return;
     }
     if (supportsDirectWrite()) {
-      // まだ保存先のフォルダが無い（新しい曲）。フォルダを選んでもらい、原曲もそこにコピーする
-      const ok = await confirmDialog({
-        title: tr('曲フォルダを選んで保存します', 'Choose a song folder to save to'),
-        body: tr(
-          'NXの曲フォルダ（DTXFiles の中など）に、この曲用の空のフォルダを作って選んでください。譜面・原曲・内蔵キットの音をまとめて保存します。',
-          "Create an empty folder for this song in NX's song folder (inside DTXFiles, for example) and choose it. The chart, the original, and the built-in kit sounds are saved together.",
-        ),
-        ok: tr('フォルダを選ぶ', 'Choose folder'),
-      });
-      if (!ok) return;
+      // PC（フォルダに直接保存できるブラウザ）。まだ曲フォルダが無い・本体に置いた曲は、NX の曲フォルダを選んで保存する。
+      // 本体に置いたまま保存することもできる（選んだら、その曲は次から聞かずに本体へ）
+      let where: 'folder' | 'local' = 'folder';
+      if (!opts.toFolder) {
+        const keep = folder?.local ? (await getLocalSong(folder.local))?.keepInBrowser : false;
+        if (keep) where = 'local';
+        else if (await checkLocal()) {
+          const c = await chooseDialog<'folder' | 'local'>({
+            title: tr('どこに保存しますか？', 'Where do you want to save?'),
+            body: tr('NX で遊ぶには、NX の曲フォルダ（DTXFiles の中など）に保存します。', 'To play it in NX, save it into an NX song folder (inside DTXFiles, for example).'),
+            options: [
+              {
+                label: tr('曲フォルダを選んで保存（おすすめ）', 'Choose a song folder (recommended)'),
+                sub: tr(
+                  'この曲用の空のフォルダを作って選んでください。譜面・原曲・ステム・キットの音をまとめて書き、次からはそのフォルダに上書きします',
+                  'Create an empty folder for this song and choose it. The chart, original audio, stems and kit sounds are written together, and later saves overwrite that folder',
+                ),
+                value: 'folder',
+              },
+              {
+                label: tr('このブラウザの中に保存', 'Save inside this browser'),
+                sub: tr(
+                  '音も一緒にブラウザの中に残し、リロードしても続きを開けます。NX の曲フォルダへは、あとで「ファイル › 曲フォルダに書き出す」で移せます',
+                  'Keeps the audio too, so you can continue after a reload. Move it to an NX song folder later with File › Export to a song folder',
+                ),
+                value: 'local',
+              },
+            ],
+          });
+          if (!c) return;
+          where = c;
+        } else {
+          const ok = await confirmDialog({
+            title: tr('曲フォルダを選んで保存します', 'Choose a song folder to save to'),
+            body: tr(
+              'NXの曲フォルダ（DTXFiles の中など）に、この曲用の空のフォルダを作って選んでください。譜面・原曲・内蔵キットの音をまとめて保存します。',
+              "Create an empty folder for this song in NX's song folder (inside DTXFiles, for example) and choose it. The chart, the original, and the built-in kit sounds are saved together.",
+            ),
+            ok: tr('フォルダを選ぶ', 'Choose folder'),
+          });
+          if (!ok) return;
+        }
+      }
+      if (where === 'local') {
+        const lf = await ensureLocalFolder(folder);
+        if (lf?.local) {
+          await updateLocalSong(lf.local, { keepInBrowser: true });
+          await saveIntoLocal(lf, fileName, bytes, kit, doc);
+          return;
+        }
+        toast(tr(`${localPlace()}に保存できないので、曲フォルダを選んでください`, `Can't save in ${localPlace()}, so choose a song folder`), 'warn', 6000);
+      }
       const dir = await window.showDirectoryPicker!({ id: 'dtx-song', mode: 'readwrite' });
       const target = await folderFromHandle(dir);
       if (findFile(target, fileName)) {
@@ -544,7 +939,7 @@ export async function save(opts: { as?: boolean } = {}) {
       if (folder) {
         for (const f of folder.files.values()) {
           if (findFile(target, f.path)) continue;
-          await writeFile(target, f.path, new Uint8Array(await (await f.getFile()).arrayBuffer()));
+          await writeFile(target, f.path, await f.getFile());
         }
       }
       for (const k of kit) await writeFile(target, k.path, k.bytes);
@@ -552,14 +947,23 @@ export async function save(opts: { as?: boolean } = {}) {
       const side = sidecarBytes(null, fileName);
       if (side) await writeFile(target, sidecarName(fileName), side);
       markSidecarSaved();
+      const moved = folder?.local;
       folder = target;
       const labels = await readSetDefLabels(folder);
       markSaved(doc, { folder, meta: { ...get().meta, fileName, siblings: siblingsOf(folder, labels), recentId: recentIdFor(folder, fileName) } });
       void scanSiblingOrigins(folder);
+      // 本体に置いていた曲は、曲フォルダへ移ったので本体からは消す（自動保存の控えはフォルダに付け替える）
+      if (moved) await moveLocalToFolder(moved, folder);
       toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
       return;
     }
-    // フォルダに直接書けないブラウザ：ダウンロード
+    // フォルダに直接書けないブラウザ（iPad・Safari・Firefox）：本体（このブラウザの保存領域）に保存する
+    const lf = await ensureLocalFolder(folder);
+    if (lf?.local) {
+      await saveIntoLocal(lf, fileName, bytes, kit, doc);
+      return;
+    }
+    // 本体も使えない（プライベートブラウズなど）：ダウンロード
     const side = sidecarBytes(null, fileName);
     downloadSong(fileName, bytes, kit, folder, side);
     if (side && useSidecar.getState().dirty && pendingFiles(folder).length === 0 && kit.length === 0) downloadBytes(sidecarName(fileName), side, 'application/json');
@@ -567,8 +971,33 @@ export async function save(opts: { as?: boolean } = {}) {
     markSaved(doc, { meta: { ...get().meta, fileName } });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return;
-    toast(tr(`保存できませんでした: ${(e as Error).message}`, `Couldn't save: ${(e as Error).message}`), 'error', 8000);
+    toast(
+      isQuotaError(e) && folder?.local
+        ? tr(`${localPlace()}の空きが足りず保存できませんでした。ほかの曲を消して空けるか、書き出してください`, `Not enough space in ${localPlace()} to save. Remove other songs to free space, or export the song`)
+        : tr(`保存できませんでした: ${(e as Error).message}`, `Couldn't save: ${(e as Error).message}`),
+      'error',
+      8000,
+    );
   }
+}
+
+/** 本体の曲を、確かめずに本体へ保存する（書き出したとき。Shift_JIS で） */
+async function saveLocalQuiet(): Promise<boolean> {
+  const s = get();
+  const folder = s.folder;
+  if (!isLocalFolder(folder) || s.screen !== 'editor') return false;
+  try {
+    const { bytes } = encodeForSave(s.doc);
+    return await saveIntoLocal(folder, s.meta.fileName, bytes, await kitFilesNeeded(s.doc, folder), s.doc, true);
+  } catch {
+    return false;
+  }
+}
+
+/** 曲フォルダを ZIP でダウンロード（PC で本体に置いた曲を NX へ渡すとき） */
+export async function exportSongZip() {
+  const r = await buildExport('folder');
+  if (r) await deliverExport(r.file, 'download');
 }
 
 function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; bytes: Uint8Array; origin: string; library: boolean }[], folder: SongFolder | null, side: Uint8Array | null = null) {
@@ -608,14 +1037,10 @@ let lastAutosaved: DtxDoc | null = null;
 /** 最後にこのブラウザへ自動保存した時刻（タブレットの「保存と書き出し」に出す） */
 export let lastAutosaveAt = 0;
 
-export async function autosaveNow(saved = false) {
-  const s = get();
-  if (s.screen !== 'editor') return;
-  if (!saved && s.doc === lastAutosaved) return;
-  lastAutosaved = s.doc;
-  lastAutosaveAt = Date.now();
+/** 自動保存の控え（最近の曲）。PC の曲フォルダは handle、本体の曲は id を持つ */
+function autosaveEntry(s: EditorState): RecentEntry {
   const f = s.doc.fields;
-  const entry: RecentEntry = {
+  return {
     id: s.meta.recentId ?? recentIdFor(s.folder, s.meta.fileName),
     title: f['TITLE'] ?? tr('無題', 'Untitled'),
     artist: f['ARTIST'] ?? '',
@@ -623,13 +1048,22 @@ export async function autosaveNow(saved = false) {
     level: f['DLEVEL'] ?? '',
     fileName: s.meta.fileName,
     folderName: s.folder?.name ?? '',
-    dir: s.folder?.dir,
+    dir: isDiskFolder(s.folder) ? s.folder.dir : undefined,
+    local: s.folder?.local,
     text: serializeDtx(withSongEnd(s.doc)),
     sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()),
     saved: !isDirty(s),
     updatedAt: Date.now(),
   };
-  await putRecent(entry);
+}
+
+export async function autosaveNow(saved = false) {
+  const s = get();
+  if (s.screen !== 'editor') return;
+  if (!saved && s.doc === lastAutosaved) return;
+  lastAutosaved = s.doc;
+  lastAutosaveAt = Date.now();
+  await putRecent(autosaveEntry(s));
   await trimRecent();
 }
 
@@ -647,9 +1081,18 @@ export function startAutosave() {
   const b = useSidecar.subscribe((s, prev) => {
     if (s.dirty && s !== prev && useEditor.getState().screen === 'editor') later();
   });
+  // メモリにだけある曲フォルダ（ZIP・落としたファイル・新しい曲）を開いたら、音ごと本体に入れる
+  const c = useEditor.subscribe((s, prev) => {
+    const folder = s.folder;
+    if (!folder || folder === prev.folder || folder.dir) return;
+    void checkLocal().then((ok) => {
+      if (ok && get().folder === folder) void promoteToLocal(folder);
+    });
+  });
   return () => {
     a();
     b();
+    c();
   };
 }
 
@@ -657,19 +1100,34 @@ export { listRecent };
 
 export async function openRecent(e: RecentEntry) {
   if (!(await confirmDiscard())) return;
-  if (e.dir) {
+  await openRecentEntry(e);
+}
+
+/** 曲フォルダの中で、自動保存した譜面を開く（DTX がまだフォルダに無い新しい曲は、控えの本文から） */
+async function openEntryInFolder(folder: SongFolder, e: RecentEntry) {
+  const f = findFile(folder, e.fileName);
+  if (f) {
+    await openDtxFile(folder, f, undefined, e.saved ? undefined : e.text, e.sidecar);
+    return;
+  }
+  const parsed = parseDtx(e.text);
+  openDocument(parsed.doc, { ...newMeta(e.fileName, folder), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, folder, { dirty: true });
+  await loadSidecarFor(folder, e.fileName, e.sidecar);
+}
+
+async function openRecentEntry(e: RecentEntry) {
+  if (e.local) {
+    await checkLocal();
+    const folder = await openLocalSong(e.local);
+    if (folder) {
+      await openEntryInFolder(folder, e);
+      return;
+    }
+  } else if (e.dir) {
     try {
       const perm = e.dir.requestPermission ? await e.dir.requestPermission({ mode: 'readwrite' }) : 'granted';
       if (perm === 'granted') {
-        const folder = await folderFromHandle(e.dir);
-        const f = findFile(folder, e.fileName);
-        if (f) {
-          await openDtxFile(folder, f, undefined, e.saved ? undefined : e.text, e.sidecar);
-          return;
-        }
-        const parsed = parseDtx(e.text);
-        openDocument(parsed.doc, { ...newMeta(e.fileName, folder), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, folder, { dirty: true });
-        await loadSidecarFor(folder, e.fileName, e.sidecar);
+        await openEntryInFolder(await folderFromHandle(e.dir), e);
         return;
       }
     } catch {
@@ -677,14 +1135,19 @@ export async function openRecent(e: RecentEntry) {
     }
   }
   const parsed = parseDtx(e.text);
-  openDocument(parsed.doc, { ...newMeta(e.fileName, null), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, null, { dirty: !e.saved });
+  // 本体の曲が消えていたら、控えは別の名前で取り直す（本体が一時的に読めないだけなら、元の控えを残すため）
+  openDocument(parsed.doc, { ...newMeta(e.fileName, null), ...(e.local ? {} : { recentId: e.id }), warnings: parsed.warnings, hasRandom: parsed.hasRandom }, null, { dirty: !e.saved || !!e.local });
   await loadSidecarFor(null, e.fileName, e.sidecar);
-  toast(tr('自動保存した譜面だけを開きました。音を鳴らすには曲フォルダを開いてください', 'Opened only the autosaved chart. Open the song folder to hear the sounds'), 'info', 6000);
+  if (e.local) toastLocalMissing();
+  else toast(tr('自動保存した譜面だけを開きました。音を鳴らすには曲フォルダを開いてください', 'Opened only the autosaved chart. Open the song folder to hear the sounds'), 'info', 6000);
 }
 
 // ---- ZIP（iPad：フォルダを選べない・書けない） ------------------------------------------
 
-/** ZIP にまとめた曲フォルダを開く（ファイル App の「圧縮」や PC で作った ZIP）。中身はメモリに持つ */
+/**
+ * ZIP にまとめた曲フォルダを開く（ファイル App の「圧縮」や PC で作った ZIP）。
+ * 開いたら曲フォルダごと本体に入れる（本体が使えなければメモリに持つ）。本体に同じ名前の曲があれば、どうするか聞く
+ */
 export async function openZipFile(file: File) {
   useEditor.setState({ loading: tr('ZIP を開いています…', 'Opening the ZIP…') });
   let z: Awaited<ReturnType<typeof readZip>>;
@@ -718,6 +1181,8 @@ export async function openZipFile(file: File) {
     if (!picked) return;
     folder = picked;
   }
+  const dup = await checkLocalDuplicate(folder);
+  if (dup !== 'go') return;
   await openFolder(folder);
 }
 
@@ -812,8 +1277,11 @@ export async function deliverExport(f: ExportFile, how: 'share' | 'download'): P
   } else {
     downloadBytes(f.name, f.bytes, f.type);
   }
-  markSidecarSaved();
-  markSaved(get().doc);
+  // 本体の曲は、書き出した中身を本体にも保存しておく（「保存済み」と出すので）
+  if (!(await saveLocalQuiet())) {
+    markSidecarSaved();
+    markSaved(get().doc);
+  }
   toast(tr(`${f.name} を書き出しました`, `Exported ${f.name}`), 'ok');
   return true;
 }

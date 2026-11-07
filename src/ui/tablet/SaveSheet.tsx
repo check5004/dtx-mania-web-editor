@@ -4,8 +4,10 @@
 import { useEffect, useState } from 'react';
 import { tr } from '../../i18n';
 import { buildExport, deliverExport, lastAutosaveAt, type ExportFile, type ExportWhat } from '../../app/fileActions';
+import { isLocalFolder } from '../../fs/folder';
 import { useDevice } from '../../store/device';
 import { useEditor } from '../../store/editor';
+import { localPlace, useLocalSongs } from '../../store/localSongs';
 import { abbrDiff } from '../TopBar';
 import { Icon } from '../icons';
 import { closeSaveSheet, useTabletUi } from './shared';
@@ -42,6 +44,11 @@ function SaveSheetBody() {
   const portrait = useDevice((s) => s.portrait);
   const meta = useEditor((s) => s.meta);
   const folder = useEditor((s) => s.folder);
+  const savedAt = useEditor((s) => s.savedAt);
+  useLocalSongs((s) => s.ver);
+  // 本体に置いた曲：保存（右上）は本体へ、ここは PC・NX へ渡すための書き出し
+  const local = isLocalFolder(folder);
+  const title = local ? tr('書き出し・共有', 'Export and share') : tr('保存と書き出し', 'Save and export');
   const [what, setWhat] = useState<ExportWhat>(folder ? 'folder' : 'dtx');
   const [enc, setEnc] = useState<Enc>('shift_jis');
   const [diffs, setDiffs] = useState<string[]>(() => meta.siblings.map((x) => x.file));
@@ -88,7 +95,7 @@ function SaveSheetBody() {
   const body = (
     <>
       <div className="t-save-head">
-        <b>{tr('保存と書き出し', 'Save and export')}</b>
+        <b>{title}</b>
         <span className="grow" />
         <button className="t-ib" onClick={closeSaveSheet} aria-label={tr('閉じる', 'Close')}>
           {Icon.close(20)}
@@ -97,6 +104,7 @@ function SaveSheetBody() {
       <div className="t-save-auto">
         {Icon.checkCircle(16)}
         <span>
+          {local && savedAt ? tr(`${localPlace()}に保存 · ${clock(savedAt)}（音も）　`, `Saved in ${localPlace()} at ${clock(savedAt)} (with audio) · `) : ''}
           {lastAutosaveAt
             ? tr(`自動保存 · ${clock(lastAutosaveAt)} にこのブラウザへ保存済み`, `Autosaved to this browser at ${clock(lastAutosaveAt)}`)
             : tr('自動保存 · 編集するとこのブラウザへ保存します', 'Autosave · edits are kept in this browser')}
@@ -154,10 +162,15 @@ function SaveSheetBody() {
         </p>
       )}
       <p className="note">
-        {tr(
-          'iPad ではフォルダに直接書き込めないため、ZIP にまとめて渡します。PC では今までどおりフォルダに保存できます。',
-          'iPad cannot write into a folder directly, so the files go out as a ZIP. On a PC you can still save into the folder.',
-        )}
+        {local
+          ? tr(
+              `「保存」は曲フォルダごと${localPlace()}の中に書きます。PC や NX へ渡すときは、ここから ZIP で書き出します（書き出した内容は${localPlace()}にも保存します）。`,
+              `"Save" writes the whole song folder inside ${localPlace()}. To hand it to a PC or NX, export a ZIP here (the exported content is also saved in ${localPlace()}).`,
+            )
+          : tr(
+              'iPad ではフォルダに直接書き込めないため、ZIP にまとめて渡します。PC では今までどおりフォルダに保存できます。',
+              'iPad cannot write into a folder directly, so the files go out as a ZIP. On a PC you can still save into the folder.',
+            )}
       </p>
       <div className="t-save-foot">
         <span className="lbl grow">
@@ -176,7 +189,7 @@ function SaveSheetBody() {
   );
   return (
     <div className="t-modal-back" onPointerDown={(e) => e.target === e.currentTarget && closeSaveSheet()}>
-      <div className={`t-save ${portrait ? 'sheet' : 'card'}`} role="dialog" aria-label={tr('保存と書き出し', 'Save and export')}>
+      <div className={`t-save ${portrait ? 'sheet' : 'card'}`} role="dialog" aria-label={title}>
         {portrait && <span className="t-sheet-handle" />}
         {body}
       </div>

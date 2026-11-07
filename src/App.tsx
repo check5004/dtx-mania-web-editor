@@ -6,6 +6,8 @@ import './store/device';
 import './store/stems';
 import './store/kit';
 import { loadLibrary } from './store/library';
+import { initLocalSongs } from './store/localSongs';
+import { LocalCopyChip } from './ui/LocalStorage';
 import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
@@ -42,11 +44,13 @@ export function App() {
   useLang();
   useEffect(() => startAutosave(), []);
   useEffect(() => void loadLibrary(), []);
+  useEffect(() => void initLocalSongs(), []);
   return (
     <>
       {screen === 'home' ? <Home /> : <Editor />}
       <DialogHost />
       <Toasts />
+      <LocalCopyChip />
     </>
   );
 }

@@ -75,12 +75,12 @@ function InstallCardSection() {
           <span>
             {IS_IOS
               ? tr(
-                  'ホーム画面のアプリと Safari は保存が別です（最近の曲・音源ライブラリ・設定・AI のキー）。Safari で使っていた分は移らないので、どちらか一方で使ってください。',
-                  'The Home Screen app and Safari keep separate storage (recent songs, the sound library, settings, the AI key). Nothing carries over from Safari, so stick to one of them.',
+                  'ホーム画面のアプリと Safari は保存が別です（最近の曲・iPad 本体に保存した曲と音・音源ライブラリ・設定・AI のキー）。Safari で使っていた分は移らないので、どちらか一方で使ってください。',
+                  'The Home Screen app and Safari keep separate storage (recent songs, songs kept on the iPad with their audio, the sound library, settings, the AI key). Nothing carries over from Safari, so stick to one of them.',
                 )
               : tr(
-                  'アプリの窓とブラウザのタブは、同じ保存（最近の曲・音源ライブラリ・設定）を使います。',
-                  'The app window and browser tabs share the same storage (recent songs, the sound library, settings).',
+                  'アプリの窓とブラウザのタブは、同じ保存（最近の曲・ブラウザ内に保存した曲・音源ライブラリ・設定）を使います。',
+                  'The app window and browser tabs share the same storage (recent songs, songs kept in the browser, the sound library, settings).',
                 )}
           </span>
         </p>

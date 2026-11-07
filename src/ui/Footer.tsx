@@ -1,10 +1,11 @@
 import { tr, locale } from '../i18n';
-import { supportsDirectWrite } from '../fs/folder';
+import { isDiskFolder, supportsDirectWrite } from '../fs/folder';
 import { HSplitter } from './Splitter';
 import { bgmSource, docStats } from '../store/derived';
 import { isDirty, useEditor } from '../store/editor';
 import { formatTime } from './format';
 import { stemsActive, useStems } from '../store/stems';
+import { localPlace, useLocalSongs } from '../store/localSongs';
 import { songEndM, useSongLength, useSongSpan, useSoundsVersion } from './hooks';
 import { TrackPanel, useTrackRows } from './Tracks';
 
@@ -26,12 +27,19 @@ export function Footer() {
   const span = useSongSpan(doc);
   // 上の境目の止まる高さ（細く・標準・ゆったり）はトラックの数で決まる
   const rows = useTrackRows().length;
+  // 本体に入れ終わった・曲フォルダへ移したら描き直す
+  useLocalSongs((s) => s.ver);
+  const copying = useLocalSongs((s) => s.copying);
 
-  const where = folder?.dir
+  const where = isDiskFolder(folder)
     ? tr(`${folder.name}/${meta.fileName}（曲フォルダに直接保存）`, `${folder.name}/${meta.fileName} (saved directly to the song folder)`)
-    : supportsDirectWrite()
-      ? tr(`${meta.fileName}（保存するときに曲フォルダを選びます）`, `${meta.fileName} (you choose the song folder when saving)`)
-      : tr(`${meta.fileName}（ダウンロードで保存）`, `${meta.fileName} (saved as a download)`);
+    : folder?.local
+      ? tr(`${folder.name}/${meta.fileName}（音ごと${localPlace()}に保存）`, `${folder.name}/${meta.fileName} (kept in ${localPlace()} with its audio)`)
+      : copying
+        ? tr(`${meta.fileName}（${localPlace()}に保存しています…）`, `${meta.fileName} (keeping it in ${localPlace()}…)`)
+        : supportsDirectWrite()
+          ? tr(`${meta.fileName}（保存するときに曲フォルダを選びます）`, `${meta.fileName} (you choose the song folder when saving)`)
+          : tr(`${meta.fileName}（ダウンロードで保存）`, `${meta.fileName} (saved as a download)`);
 
   return (
     <footer className="footer">

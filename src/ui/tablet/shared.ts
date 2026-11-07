@@ -4,6 +4,7 @@ import { tr } from '../../i18n';
 import { openPickedFiles, save } from '../../app/fileActions';
 import { IS_IOS, type PanelId } from '../../store/device';
 import { useEditor } from '../../store/editor';
+import { useLocalSongs } from '../../store/localSongs';
 
 export interface PanelDef {
   id: PanelId;
@@ -45,9 +46,12 @@ export function closeSaveSheet() {
   useTabletUi.setState({ saveSheet: false });
 }
 
-/** タブレットの保存：曲フォルダに直接書けるならいつもどおり保存、書けなければ「保存と書き出し」を開く */
+/**
+ * タブレットの保存：曲フォルダ（PC で選んだフォルダ・本体）に直接書けるならいつもどおり保存する
+ * （iPad はフォルダを選べないので、本体に曲フォルダごと保存する）。本体も使えなければ「保存と書き出し」を開く
+ */
 export function tabletSave() {
-  if (useEditor.getState().folder?.dir) void save();
+  if (useEditor.getState().folder?.dir || useLocalSongs.getState().ready) void save();
   else openSaveSheet();
 }
 

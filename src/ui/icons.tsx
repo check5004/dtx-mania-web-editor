@@ -306,6 +306,12 @@ export const Icon = {
       <path d="M4.2 3v1.4M8 3v1.4M11.8 3v1.4" />
     </Svg>
   ),
+  storage: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.6" />
+      <path d="M2.5 9.4h11M5 11.3h.1M7.2 11.3h.1" />
+    </Svg>
+  ),
   db: (s?: number) => (
     <Svg size={s}>
       <ellipse cx="8" cy="4" rx="5" ry="2" />

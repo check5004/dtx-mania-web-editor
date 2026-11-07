@@ -3077,3 +3077,45 @@ html.tablet .gen-page .tempo-head {
 html.tablet .gen-page .tempo-title {
   flex: 0 1 auto;
 }
+
+/* ---- 本体に保存している曲（タブレット） ---- */
+
+.local-card.t {
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.local-card.t .local-i {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.local-card.t .local-title b {
+  font-size: 16px;
+}
+
+.local-card.t .local-body,
+.local-card.t .local-row,
+.local-card.t .local-warn {
+  font-size: 13.5px;
+}
+
+.local-card.t .local-warn {
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.notice.t-notice {
+  font-size: 13.5px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+html.tablet .local-chip {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  font-size: 13px;
+}

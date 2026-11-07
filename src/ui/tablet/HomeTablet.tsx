@@ -2,10 +2,12 @@
 // iPad の Safari は曲フォルダを選べないので、曲は ZIP か「DTX と音のファイルをまとめて選ぶ」で開く。最初に iPad での使い方を出す（閉じたら出さない）
 import { useEffect, useRef, useState } from 'react';
 import { tr, pl, locale } from '../../i18n';
-import { listRecent, newEmptySong, openFolderPicker, openPickedFiles, openRecent } from '../../app/fileActions';
-import { deleteRecent, type RecentEntry } from '../../fs/recent';
+import { listRecent, newEmptySong, openFolderPicker, openPickedFiles, openRecent, removeRecentEntry } from '../../app/fileActions';
+import type { RecentEntry } from '../../fs/recent';
 import { IS_IOS, NO_FOLDER_PICK } from '../../store/device';
 import { useEditor } from '../../store/editor';
+import { localBadge, localPlace, useLocalSongs } from '../../store/localSongs';
+import { LocalStorageCard } from '../LocalStorage';
 import { FolderInput } from '../Editor';
 import { formatLevel } from '../format';
 import { Icon } from '../icons';
@@ -60,10 +62,13 @@ export function HomeTablet() {
   const standalone = usePwa((s) => s.standalone);
   // 上に「ホーム画面に追加」の案内を出している間は、使い方の欄から同じ話を外す
   const installHint = useInstallHint();
+  const local = useLocalSongs((s) => s.ready);
+  // 本体の曲が増えた・消えたら一覧を読み直す
+  const localVer = useLocalSongs((s) => s.ver);
 
   useEffect(() => {
     void listRecent().then(setRecent);
-  }, []);
+  }, [localVer]);
 
   const closeTips = () => {
     setTips(false);
@@ -127,7 +132,12 @@ export function HomeTablet() {
                   {tr('曲はZIPでやりとり', 'Move songs as ZIP')}
                 </b>
                 <span className="lbl">
-                  {tr('PC の曲フォルダをZIPにして AirDrop・iCloud Drive で送り、ここで開きます。保存もZIPで書き出します。', 'Zip the song folder on your PC, send it with AirDrop or iCloud Drive, and open it here. Saving exports a ZIP too.')}
+                  {local
+                    ? tr(
+                        'PC の曲フォルダをZIPにして AirDrop・iCloud Drive で送り、ここで開きます。開いた曲は音ごと iPad 本体に保存され、PC へはZIPで書き出します。',
+                        'Zip the song folder on your PC, send it with AirDrop or iCloud Drive, and open it here. Opened songs are kept on the iPad with their audio; export a ZIP to send them back.',
+                      )
+                    : tr('PC の曲フォルダをZIPにして AirDrop・iCloud Drive で送り、ここで開きます。保存もZIPで書き出します。', 'Zip the song folder on your PC, send it with AirDrop or iCloud Drive, and open it here. Saving exports a ZIP too.')}
                 </span>
               </div>
               <div>
@@ -232,17 +242,21 @@ export function HomeTablet() {
                         <span className="pill mono">
                           {r.fileName.replace(/\.dtx$/i, '').toUpperCase()} {formatLevel(r.level)}
                         </span>
+                        {r.local && <span className="pill local">{localBadge()}</span>}
                         {!r.saved && <span className="pill warn">{tr('未保存', 'Unsaved')}</span>}
                       </span>
                     </span>
                   </button>
                   <button
                     className="t-ib th-recent-del"
-                    title={tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')}
+                    title={
+                      r.local
+                        ? tr(`一覧から消す（この曲の最後の1つなら、${localPlace()}に保存した音も消します）`, `Remove from the list (for the last one of this song, the audio kept in ${localPlace()} is removed too)`)
+                        : tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')
+                    }
                     aria-label={tr('一覧から消す', 'Remove from the list')}
                     onClick={async () => {
-                      await deleteRecent(r.id);
-                      setRecent(await listRecent());
+                      if (await removeRecentEntry(r)) setRecent(await listRecent());
                     }}
                   >
                     {Icon.close(16)}
@@ -252,6 +266,8 @@ export function HomeTablet() {
             </div>
           )}
         </section>
+
+        <LocalStorageCard tablet />
 
         <section className="th-section">
           <div className="th-section-head">
