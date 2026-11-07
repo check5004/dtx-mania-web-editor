@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLang } from '../../i18n/useLang';
 import { tr } from '../../i18n';
-import { DRUM_LANES } from '../../dtx/model';
+import { chipColor, DRUM_LANES } from '../../dtx/model';
 import { useInputSettings } from '../../input/settings';
 import { useAssist } from '../../store/assist';
 import { tempoOf } from '../../store/derived';
@@ -33,8 +33,7 @@ export function padName(lane: number, alt: boolean): string {
 }
 
 export function padColor(lane: number, alt: boolean): string {
-  const d = DRUM_LANES[lane];
-  return alt && d.altColor ? d.altColor : d.color;
+  return chipColor(lane, alt);
 }
 
 /** キーボードの割り当て（レーン → 表示する文字） */

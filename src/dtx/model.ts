@@ -94,6 +94,7 @@ export interface LaneDef {
   /** 修飾キーで置く2種目のチップ（HHオープン、左バスドラム） */
   alt?: number;
   altName?: string;
+  /** 2種目のチップの色（HHオープンは NX と同じシルバー） */
   altColor?: string;
 }
 
@@ -101,10 +102,16 @@ function lane(def: Omit<LaneDef, 'name' | 'mainName' | 'altName'>, name: readonl
   return withTr(def as LaneDef, { name, mainName, altName });
 }
 
+/**
+ * HHオープンのチップの色。NX の標準スキン（Graphics/7_chips_drums.png）の HHオープンは灰色の濃淡のシルバー
+ * （縁 #B4B4B4〜中央 #E6E6E6）なので、HHクローズの水色と見分けられるよう同じシルバーにする
+ */
+const HHO_SILVER = '#C9CFD6';
+
 /** ドラムの10レーン。並びは NX の標準（LC・HH・LP・SD・HT・BD・LT・FT・CY・RD） */
 export const DRUM_LANES: readonly LaneDef[] = [
   lane({ key: 'LC', color: '#FF5C8A', main: CH.LC }, ['左シンバル', 'Left cymbal'], ['左シンバル', 'Left cymbal']),
-  lane({ key: 'HH', color: '#4FC3F7', main: CH.HHC, alt: CH.HHO, altColor: '#4FC3F7' }, ['ハイハット', 'Hi-hat'], ['HHクローズ', 'HH closed'], ['HHオープン', 'HH open']),
+  lane({ key: 'HH', color: '#4FC3F7', main: CH.HHC, alt: CH.HHO, altColor: HHO_SILVER }, ['ハイハット', 'Hi-hat'], ['HHクローズ', 'HH closed'], ['HHオープン', 'HH open']),
   lane({ key: 'LP', color: '#F48FB1', main: CH.LP, alt: CH.LBD, altColor: '#CE93D8' }, ['左ペダル', 'Left pedal'], ['左ペダル', 'Left pedal'], ['左バスドラム', 'Left bass drum']),
   lane({ key: 'SD', color: '#FFD54F', main: CH.SD }, ['スネア', 'Snare'], ['スネア', 'Snare']),
   lane({ key: 'HT', color: '#66BB6A', main: CH.HT }, ['ハイタム', 'High tom'], ['ハイタム', 'High tom']),
@@ -114,6 +121,12 @@ export const DRUM_LANES: readonly LaneDef[] = [
   lane({ key: 'CY', color: '#42A5F5', main: CH.CY }, ['右シンバル', 'Right cymbal'], ['右シンバル', 'Right cymbal']),
   lane({ key: 'RD', color: '#80DEEA', main: CH.RD }, ['ライド', 'Ride'], ['ライド', 'Ride']),
 ];
+
+/** チップの色。2種目（HHオープン・左バスドラム）はその色、それ以外はレーンの色 */
+export function chipColor(lane: number, alt = false): string {
+  const l = DRUM_LANES[lane];
+  return alt && l.altColor ? l.altColor : l.color;
+}
 
 export interface DrumChannelInfo {
   lane: number;

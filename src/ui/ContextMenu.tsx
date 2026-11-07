@@ -8,7 +8,7 @@ import { tr, pl } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
-import { CH, DRUM_LANES, drumChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
+import { CH, chipColor, DRUM_LANES, drumChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
 import { fittingGrid, GRID_DIVS, onGrid, type Pos } from '../edit/ops';
 import { useInputSettings } from '../input/settings';
 import { useDevice } from '../store/device';
@@ -223,7 +223,8 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   const lanes = new Set(drums.map((c) => drumChannel(c.ch)!.lane));
   const kinds = new Set(drums.map((c) => drumChannel(c.ch)!.kind));
   const altLanes = [...lanes].filter((l) => DRUM_LANES[l].alt !== undefined).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  const color = one && drumChannel(one.ch) ? DRUM_LANES[drumChannel(one.ch)!.lane].color : one ? '#8B95A4' : 'var(--accent)';
+  const oneInfo = one ? drumChannel(one.ch) : undefined;
+  const color = oneInfo ? chipColor(oneInfo.lane, oneInfo.alt) : one ? '#8B95A4' : 'var(--accent)';
   const isBpm = one && (one.ch === CH.BPM || one.ch === CH.BPM_EX);
   const extras = chipMenuExtras(ids);
 

@@ -4,7 +4,7 @@ import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { computePeaks, stemKindInfo } from '../audio/stems';
 import { engine, type Mix } from '../audio/engine';
-import { DRUM_LANES, drumChannel, isSeChannel, type DtxDoc } from '../dtx/model';
+import { chipColor, DRUM_LANES, drumChannel, isSeChannel, type DtxDoc } from '../dtx/model';
 import { pickBgmFile } from '../app/fileActions';
 import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setSpecSource, setWaveMode, useAssist, type LoopDrag } from '../store/assist';
 import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
@@ -855,14 +855,14 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
           const on = rowAudible(r);
           c.globalAlpha = on ? 0.9 : 0.28;
           if (r.type === 'chart') {
-            // レーンごとの色の印（上が左シンバル、下がライド）
+            // レーンごとの色の印（上が左シンバル、下がライド。色はチップと同じで、HHオープンはシルバー）
             const pad = 3;
             const laneH = (rowH - pad * 2) / DRUM_LANES.length;
             for (const ch of doc.chips) {
               const d = drumChannel(ch.ch);
               if (!d || d.kind !== 'normal') continue;
               const x = (tempo.beatToSec(tempo.beatOf(ch.m, ch.f)) / len) * W;
-              c.fillStyle = DRUM_LANES[d.lane]?.color ?? CHART_COLOR;
+              c.fillStyle = DRUM_LANES[d.lane] ? chipColor(d.lane, d.alt) : CHART_COLOR;
               c.fillRect(Math.floor(x), top + pad + d.lane * laneH, 1.5, Math.max(1, laneH - 0.5));
             }
           } else if (r.type === 'se') {

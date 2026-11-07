@@ -3,7 +3,7 @@ import { tr } from '../i18n';
 import { useEffect, useRef } from 'react';
 import { engine } from '../audio/engine';
 import { toMeasure } from '../dtx/base36';
-import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import { CH, chipColor, DRUM_LANES, drumChannel } from '../dtx/model';
 import { useInputSettings } from '../input/settings';
 import { bgaAt } from '../store/bga';
 import { tempoOf } from '../store/derived';
@@ -241,7 +241,7 @@ export function NxPreview({ full = false }: { full?: boolean }) {
         const y = judgeY - (n.sec - now) * pxPerSec;
         const def = DRUM_LANES[n.lane];
         const { x: lx, w: lw } = xs[n.lane];
-        const color = n.ch === CH.HHO || n.ch === CH.LBD ? (def.altColor ?? def.color) : def.color;
+        const color = chipColor(n.lane, n.ch === CH.HHO || n.ch === CH.LBD);
         const ch = CYMBAL.has(def.key) ? 9 : def.key === 'BD' ? 10 : 8;
         const cx0 = lx + 3;
         const cw = lw - 6;

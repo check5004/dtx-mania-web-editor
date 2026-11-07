@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
 import { estimateLevel } from '../check/level';
 import { toMeasure } from '../dtx/base36';
-import { DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
+import { chipColor, drumChannel, type DtxDoc } from '../dtx/model';
 import { originOf } from '../dtx/origin';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { snapToGrid } from '../edit/ops';
@@ -134,8 +134,7 @@ function chipLook(n: Note, ds: DiffState | null): { lane: number; color: string;
     alt = d.alt;
     kind = 'moved';
   }
-  const def = DRUM_LANES[lane];
-  return { lane, color: alt && def.altColor ? def.altColor : def.color, kind };
+  return { lane, color: chipColor(lane, alt), kind };
 }
 
 function draw(ctx: CanvasRenderingContext2D, l: Local) {

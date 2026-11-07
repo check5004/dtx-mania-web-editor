@@ -3,7 +3,7 @@ import { sameMeasures } from '../assist/similar';
 import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
-import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import { CH, chipColor, DRUM_LANES, drumChannel } from '../dtx/model';
 import { applySimilar, clearSimilarPin, setBandFilter, setSpecGain, setSpecMode, setWaveMode, useAssist } from '../store/assist';
 import type { SpecMode } from '../audio/spectro';
 import { SPEC_ZONES } from './specColors';
@@ -126,7 +126,8 @@ export function SelectionCard() {
   const kind = kinds.size === 1 ? [...kinds][0] : null;
   const vset = new Set(drums.map((c) => c.v));
   const v = vset.size === 1 ? [...vset][0] : null;
-  const color = one && drumChannel(one.ch) ? DRUM_LANES[drumChannel(one.ch)!.lane].color : 'var(--accent)';
+  const oneInfo = one ? drumChannel(one.ch) : undefined;
+  const color = oneInfo ? chipColor(oneInfo.lane, oneInfo.alt) : 'var(--accent)';
 
   return (
     <div className="card">

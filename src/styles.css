@@ -5613,8 +5613,9 @@ button.ms.s.on {
   margin-left: 6px;
 }
 
+/* 残したチップはレーンの色のまま。シルバー一色だと HHオープンの色と紛れるので、レーンの色を並べる */
 .gen-legend i.kept {
-  background: #c9d1dc;
+  background: linear-gradient(90deg, #4fc3f7 0 25%, #ffd54f 25% 50%, #9c84e0 50% 75%, #ff5c8a 75%);
 }
 
 .gen-legend i.removed {

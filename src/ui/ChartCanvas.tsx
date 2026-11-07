@@ -9,7 +9,7 @@ import { SPEC_F_HI, SPEC_F_LO, specFreq, specPos, type SpectroData } from '../au
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
-import { bgaChannel, CH, DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
+import { bgaChannel, CH, chipColor, DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { gridStep, posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import {
@@ -2227,8 +2227,7 @@ function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoM
       if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) continue;
       const y = g.beatToY(beat);
       const cx = g.ox + laneCX(info.lane);
-      const lane = DRUM_LANES[info.lane];
-      const color = info.alt && lane.altColor ? lane.altColor : lane.color;
+      const color = chipColor(info.lane, info.alt);
       roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
       ctx.fillStyle = color + (info.kind === 'normal' ? '38' : '12');
       ctx.fill();
@@ -2368,8 +2367,7 @@ function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm:
     if (!info) return null;
     const beat = tm.beatOf(n.m, n.f);
     if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) return null;
-    const lane = DRUM_LANES[info.lane];
-    return { info, y: g.beatToY(beat), cx: g.ox + laneCX(info.lane), color: info.alt && lane.altColor ? lane.altColor : lane.color };
+    return { info, y: g.beatToY(beat), cx: g.ox + laneCX(info.lane), color: chipColor(info.lane, info.alt) };
   };
   // 外したチップ（クリックで戻せる）
   for (const sk of gv.plan.skipped) {
@@ -3327,8 +3325,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   const drawChip = (v: ChipView, beat: number, col: number, alpha: number, selected: boolean) => {
     const y = g.beatToY(beat);
     if (col >= 0) {
-      const lane = DRUM_LANES[col];
-      const color = v.alt && lane.altColor ? lane.altColor : lane.color;
+      const color = chipColor(col, v.alt);
       const cx = ox + laneCX(col);
       const role = flams.get(v.c.id);
       const hw = role === 'grace' ? GEO.graceHW : GEO.chipHW;
@@ -3493,12 +3490,11 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     for (const n of phCand.notes) {
       const info = drumChannel(n.ch);
       if (!info) continue;
-      const lane = DRUM_LANES[info.lane];
       const beat = tm.beatOf(n.m, n.f);
       if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) continue;
       const y = g.beatToY(beat);
       const cx = ox + laneCX(info.lane);
-      const color = info.alt && lane.altColor ? lane.altColor : lane.color;
+      const color = chipColor(info.lane, info.alt);
       roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
       ctx.fillStyle = color + '40';
       ctx.fill();
@@ -3572,8 +3568,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   // 置く位置のプレビュー（フラムなら2打）
   const hv = l.hover;
   if (hv && hv.pos && !d) {
-    const lane = DRUM_LANES[hv.lane];
-    const color = hv.alt && lane.altColor ? lane.altColor : lane.color;
+    const color = chipColor(hv.lane, hv.alt);
     const cx = ox + laneCX(hv.lane);
     const spot = hv.flam ? flamSpot(tempo, hv.pos, flamOptions()) : null;
     const ghostAt = (p: Pos, alpha: number, edge: boolean, hw = GEO.chipHW) => {
@@ -3967,11 +3962,12 @@ function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Se
     ctx.fillStyle = 'rgba(255,255,255,.05)';
     ctx.fillRect(Math.round(bx + bw * 0.5), GEO.head, 1, H);
     ctx.fillRect(Math.round(bx + bw), GEO.head, 1, H);
-    const color = DRUM_LANES[lane].color;
     ctx.font = '9px "JetBrains Mono", ui-monospace, monospace';
     ctx.textAlign = 'left';
     for (const cv of views) {
       if (cv.col !== lane || cv.kind !== 'normal') continue;
+      // 棒はチップと同じ色（HH のレーンならクローズは水色、オープンはシルバー）
+      const color = chipColor(lane, cv.alt);
       const y = g.beatToY(cv.beat);
       if (y < GEO.head - 6 || y > H + 6) continue;
       const vel = wavVel(doc, cv.c.v);
@@ -4458,7 +4454,7 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
     }
     for (const v of chipViews(doc)) {
       if (v.col < 0) continue;
-      m.fillStyle = DRUM_LANES[v.col].color;
+      m.fillStyle = chipColor(v.col, v.alt);
       m.fillRect(ML + 6 + slotOf(v.col) * 6, Math.round(yOf(v.beat)), 5, 1);
     }
     // BPM の変化
