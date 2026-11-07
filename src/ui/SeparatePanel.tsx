@@ -25,7 +25,7 @@ import {
 } from '../store/separate';
 import { useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
-import { fileExists, useStems } from '../store/stems';
+import { audioReflected, fileExists, undoAudioReflect, useStems } from '../store/stems';
 import { IS_IOS } from '../store/device';
 import { confirmDialog } from './dialogs';
 import { Icon } from './icons';
@@ -39,8 +39,12 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
   const s = useSeparate();
   const stems = useSidecar((x) => x.stems);
   const busy = useStems((x) => x.busy);
-  useEditor((x) => x.doc);
+  useStems((x) => x.reflected);
+  const doc = useEditor((x) => x.doc);
   useEditor((x) => x.folder);
+  // ドラム抜きを BGM に反映して、今もエディタの BGM になっているか（元に戻す・Ctrl+Z で外れる）
+  const reflectedBgm = s.bgmSet ? audioReflected('bgm', doc) : null;
+  const bgmIn = reflectedBgm && reflectedBgm.file === s.bgmSet ? reflectedBgm : null;
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     void checkGpu();
@@ -97,12 +101,12 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
         {isJa() ? (
           <>
             原曲からドラムを取り出し、<b>ドラム</b>と<b>ドラム抜き</b>のステムを作ります。NX で遊ぶときはドラムを譜面の音で鳴らすので、BGM はドラム抜きにすると叩いている感じが出ます。
-            分けたあとは右の「書き出し」の <b>BGM用（ドラム抜き）</b> で DTX の BGM に登録できます。ドラムのステムは原曲の打点（採譜）にも使います。
+            分けたあとは下の「ドラム抜きを BGM に反映」か、右の「書き出し」の <b>BGM用（ドラム抜き）</b> でエディタ（譜面）の BGM にできます。ドラムのステムは原曲の打点（採譜）にも使います。
           </>
         ) : (
           <>
             Pulls the drums out of the original and makes a <b>drums</b> stem and a <b>no-drums</b> stem. In NX the drums are played by the chart&apos;s own sounds, so a no-drums BGM makes it feel like you are the one playing.
-            Afterwards, use <b>BGM (no drums)</b> under &quot;Export&quot; on the right to set it as the DTX BGM. The drums stem is also used for detecting hits in the original.
+            Afterwards, use &quot;Set no-drums as BGM&quot; below or <b>For BGM (no drums)</b> under &quot;Export&quot; on the right to make it the BGM in the editor (chart). The drums stem is also used for detecting hits in the original.
           </>
         )}
       </p>
@@ -315,25 +319,35 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
             {isJa()
               ? `${SEP_MODELS[s.last.model].name} で ${s.last.files.length} 本に分けました（${formatSec(s.last.seconds)}・曲 ${formatSec(s.last.songSec)}・${s.last.backend === 'webgpu' ? s.last.gpu : 'CPU'}）。`
               : `Split into ${s.last.files.length} ${pl(s.last.files.length, 'stem')} with ${SEP_MODELS[s.last.model].name} (${formatSec(s.last.seconds)}, song ${formatSec(s.last.songSec)}, ${s.last.backend === 'webgpu' ? s.last.gpu : 'CPU'}). `}
-            {s.bgmSet ? (
-              isJa() ? (
-                <>
-                  ドラム抜きを <b className="mono">{s.bgmSet}</b> に書き出し、DTX の BGM に登録しました（元の原曲のファイルは残しています）。
-                </>
-              ) : (
-                <>
-                  Wrote the no-drums mix to <b className="mono">{s.bgmSet}</b> and set it as the DTX BGM (the original file is kept).
-                </>
-              )
+            {bgmIn ? (
+              // 反映したあとは、押した所に結果（✓ 反映済み）と「元に戻す」を残す
+              <span className="row wrap sep-reflect">
+                <b>{tr('ドラム抜きを BGM に', 'No-drums as BGM')}</b>
+                <span className="reflect-chip ok">{tr('✓ 反映済み', '✓ Applied')}</span>
+                <span className="mono">{bgmIn.file}</span>
+                <span className="lbl">
+                  {bgmIn.prev === bgmIn.file
+                    ? tr('前と同じ名前のファイルを書き直しました', 'Rewrote the file with the same name')
+                    : bgmIn.prev
+                      ? tr(`元の ${bgmIn.prev} は消さずに残しています`, `The original ${bgmIn.prev} is kept`)
+                      : tr('BGM のチップ（ch01）を001小節に置きました', 'Placed the BGM chip (ch01) in measure 001')}
+                </span>
+                <span className="grow" />
+                {bgmIn.prev !== bgmIn.file && (
+                  <button className="btn small" disabled={!!busy} onClick={() => undoAudioReflect('bgm')} title={tr('BGM を反映する前のファイルに戻します（書き出したファイルは残します）', 'Sets the BGM back to the file it used before (the exported file is kept)')}>
+                    {tr('元に戻す', 'Undo')}
+                  </button>
+                )}
+              </span>
             ) : (
               <>
                 {tr(
-                  'NX で遊ぶ用に、ドラム抜きを BGM にできます（原曲と同じ音量のまま。細かく決めるなら右の「書き出し」）。',
-                  'For playing in NX, you can use the no-drums mix as the BGM (same volume as the original; use "Export" on the right for more control).',
+                  'NX で遊ぶ用に、ドラム抜きをエディタ（譜面）の BGM にできます（原曲と同じ音量のまま。細かく決めるなら右の「書き出し」）。',
+                  'For playing in NX, you can make the no-drums mix the BGM in the editor (chart) (same volume as the original; use "Export" on the right for more control).',
                 )}
                 <span className="row" style={{ gap: 8, marginTop: 6 }}>
                   <button className="btn small primary" disabled={!!busy} onClick={() => void toBgm()}>
-                    {Icon.download(13)} {tr('ドラム抜きを BGM にする', 'Use no-drums as BGM')}
+                    {Icon.download(13)} {tr('ドラム抜きを BGM に反映', 'Set no-drums as BGM')}
                   </button>
                   <span className="mono lbl">→ {drumlessBgmName()}</span>
                 </span>

@@ -1,4 +1,4 @@
-// ステム音源：読み込み・DTM風の再生（ミュート・ソロ・音量・パン）・聞こえ方のプリセット・書き出しと DTX への登録。
+// ステム音源：読み込み・DTM風の再生（ミュート・ソロ・音量・パン）・聞こえ方のプリセット・書き出しとエディタ（譜面）への反映。
 // ステムは BGM チップ（ch01）の位置から鳴らす。ステムがあるときは、その BGM の代わりにステムを鳴らす（ステムの合計＝原曲）。
 import { tr, withTr, pl } from '../i18n';
 import { create } from 'zustand';
@@ -11,7 +11,7 @@ import { freeWavNumber, setField } from '../edit/ops';
 import { AUDIO_EXT, findFile, folderFromFiles, putFile, type SongFolder } from '../fs/folder';
 import { setAnalysisProvider, syncAnalysis, useAssist, type AnalysisSource } from './assist';
 import { bgmSource, setPlaybackTransform, tempoOf, wavPath } from './derived';
-import { edit, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
+import { edit, openedDocs, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
 import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
 
 interface Loaded {
@@ -25,15 +25,29 @@ interface Loaded {
 
 export type StemStatus = 'loading' | 'ready' | 'missing' | 'error';
 
+/** 書き出してエディタに反映した音（BGM・試聴の #PREVIEW）。元に戻すときに使う */
+export interface AudioReflect {
+  /** 反映したファイル */
+  file: string;
+  /** 反映する前のファイル（無かったら null） */
+  prev: string | null;
+  /** BGM の #WAV の番号 */
+  wav?: number;
+  /** BGM のチップが無かったので置いたチップ（元に戻すときに消す） */
+  chipId?: number;
+}
+
 export interface StemsState {
   status: Record<string, StemStatus>;
   /** 読み込みが変わるたびに増える（波形の描き直し用） */
   version: number;
   listen: ListenPreset;
   busy: string | null;
+  /** この曲で書き出してエディタに反映したもの（別の曲を開くと消える） */
+  reflected: { bgm: AudioReflect | null; preview: AudioReflect | null };
 }
 
-export const useStems = create<StemsState>(() => ({ status: {}, version: 0, listen: 'all', busy: null }));
+export const useStems = create<StemsState>(() => ({ status: {}, version: 0, listen: 'all', busy: null, reflected: { bgm: null, preview: null } }));
 
 const sget = useStems.getState;
 const sset = useStems.setState;
@@ -671,7 +685,7 @@ export interface ExportOptions {
   range: ExportRange;
   format: 'ogg' | 'wav';
   fileName: string;
-  /** DTX への登録 */
+  /** 書き出したあとエディタ（譜面）に反映するか：BGM（#WAV と ch01）・試聴（#PREVIEW）・しない（ファイルだけ） */
   register: 'bgm' | 'preview' | 'none';
 }
 
@@ -748,36 +762,98 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
   } finally {
     sset({ busy: null });
   }
-  if (o.mode !== 'each' && o.register !== 'none') registerExport(written[0], o.register, doc0);
-  else void prepareSounds();
+  const reflect = o.mode !== 'each' ? o.register : 'none';
+  const prev = reflect !== 'none' ? registerExport(written[0], reflect, doc0) : undefined;
+  if (reflect === 'none') void prepareSounds();
+  const later = memory ? tr('。曲フォルダへは保存するときに書き出します', '. It is written to the song folder when you save') : '';
+  const was = prev && prev !== written[0] ? (reflect === 'bgm' ? tr(`（前は ${prev}。元のファイルは残しています）`, ` (was ${prev}; the old file is kept)`) : tr(`（前は ${prev}）`, ` (was ${prev})`)) : '';
   toast(
-    tr(
-      `${written.join('、')} を書き出しました${o.register === 'bgm' && o.mode !== 'each' ? '（BGMに登録）' : o.register === 'preview' && o.mode !== 'each' ? '（#PREVIEW に設定）' : ''}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`,
-      `Exported ${written.join(', ')}${o.register === 'bgm' && o.mode !== 'each' ? ' (set as BGM)' : o.register === 'preview' && o.mode !== 'each' ? ' (set as #PREVIEW)' : ''}${memory ? '. It is written to the song folder when you save' : ''}`,
-    ),
+    reflect === 'bgm'
+      ? tr(`${written[0]} を書き出して、エディタの BGM に反映しました${was}${later}`, `Exported ${written[0]} and set it as the BGM in the editor${was}${later}`)
+      : reflect === 'preview'
+        ? tr(`${written[0]} を書き出して、選曲画面の試聴（#PREVIEW）に反映しました${was}${later}`, `Exported ${written[0]} and set it as the song select preview (#PREVIEW)${was}${later}`)
+        : tr(`${written.join('、')} を書き出しました（エディタには反映していません）${later}`, `Exported ${written.join(', ')} (not added to the editor)${later}`),
     'ok',
     7000,
   );
   return written;
 }
 
-function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useEditor.getState().doc) {
+/** 書き出した音をエディタ（譜面）に反映する。前のファイル名を返す（無ければ null） */
+export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useEditor.getState().doc): string | null {
+  const before = sget().reflected[how];
   if (how === 'preview') {
-    edit(tr('#PREVIEW を設定', 'Set #PREVIEW'), (d) => setField(d, 'PREVIEW', file));
-    return;
+    const cur = useEditor.getState().doc.fields['PREVIEW'] ?? null;
+    edit(tr('書き出した音を試聴（#PREVIEW）に反映', 'Set the exported audio as the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', file));
+    // 同じファイルに書き出し直したときは、最初の「前」を覚えておく
+    const prev = before && before.file === file && cur === file ? before.prev : cur;
+    sset((st) => ({ reflected: { ...st.reflected, preview: { file, prev } } }));
+    return prev;
   }
   const bgm = bgmSource(doc0);
-  edit(tr('BGM を登録', 'Set BGM'), (d) => {
+  const cur = bgm ? (doc0.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null;
+  let wav = bgm?.wav ?? 1;
+  let chipId: number | undefined;
+  edit(tr('書き出した音を BGM に反映', 'Set the exported audio as the BGM'), (d) => {
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), file);
       return;
     }
-    const no = freeWavNumber(d) ?? 1;
-    setField(d, 'WAV' + toBase36x2(no), file);
-    d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: no });
+    wav = freeWavNumber(d) ?? 1;
+    setField(d, 'WAV' + toBase36x2(wav), file);
+    chipId = d.nextId;
+    d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: wav });
   });
+  const again = before && before.file === file && cur === file;
+  const r: AudioReflect = again ? before : { file, prev: cur, wav, chipId };
+  sset((st) => ({ reflected: { ...st.reflected, bgm: r } }));
   void prepareSounds();
+  return r.prev;
 }
+
+/** 反映した BGM・試聴が、今もエディタの譜面に入っているか（元に戻す・Ctrl+Z で外れたら null） */
+export function audioReflected(how: 'bgm' | 'preview', doc = useEditor.getState().doc): AudioReflect | null {
+  const r = sget().reflected[how];
+  if (!r) return null;
+  if (how === 'preview') return doc.fields['PREVIEW'] === r.file ? r : null;
+  const bgm = bgmSource(doc);
+  return bgm && doc.fields['WAV' + toBase36x2(bgm.wav)] === r.file ? r : null;
+}
+
+/** 反映した BGM・試聴を、反映する前に戻す（書き出したファイルは消さない） */
+export function undoAudioReflect(how: 'bgm' | 'preview') {
+  const r = audioReflected(how);
+  if (!r) return;
+  if (how === 'preview') {
+    edit(tr('試聴（#PREVIEW）を元に戻す', 'Revert the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', r.prev ?? undefined));
+  } else {
+    edit(tr('BGM を元に戻す', 'Revert the BGM'), (d) => {
+      if (r.chipId !== undefined) {
+        const i = d.chips.findIndex((c) => c.id === r.chipId);
+        if (i >= 0) d.chips.splice(i, 1);
+      }
+      setField(d, 'WAV' + toBase36x2(r.wav ?? 1), r.chipId !== undefined ? undefined : (r.prev ?? undefined));
+    });
+    void prepareSounds();
+  }
+  sset((st) => ({ reflected: { ...st.reflected, [how]: null } }));
+  const what = how === 'bgm' ? 'BGM' : tr('試聴（#PREVIEW）', 'the preview (#PREVIEW)');
+  toast(
+    r.prev
+      ? tr(`${what} を元の ${r.prev} に戻しました（書き出した ${r.file} は曲フォルダに残っています）`, `Set ${what} back to ${r.prev} (the exported ${r.file} stays in the song folder)`)
+      : tr(`${what} を反映する前に戻しました（書き出した ${r.file} は曲フォルダに残っています）`, `Reverted ${what} (the exported ${r.file} stays in the song folder)`),
+    'ok',
+    6000,
+  );
+}
+
+// 別の曲を開いたら、反映した記録は捨てる（保存では捨てない）
+let seenDocs = openedDocs;
+useEditor.subscribe(() => {
+  if (openedDocs === seenDocs) return;
+  seenDocs = openedDocs;
+  if (sget().reflected.bgm || sget().reflected.preview) sset({ reflected: { bgm: null, preview: null } });
+});
 
 /**
  * 書き出しのファイル名の初期値。BGM用は今の BGM のファイル名だが、

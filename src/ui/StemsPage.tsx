@@ -1,4 +1,4 @@
-// ステムとミックスの画面：トラックを縦に並べた DTM 風の再生、解析元の選択、書き出しと DTX への登録。
+// ステムとミックスの画面：トラックを縦に並べた DTM 風の再生、解析元の選択、書き出しとエディタ（譜面）への反映。
 import { tr, pl } from '../i18n';
 import { useLang } from '../i18n/useLang';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -11,6 +11,7 @@ import { bgmSource, tempoOf } from '../store/derived';
 import { backToChart, goToStart, playFrom, setCursorBeat, setMix, togglePause, togglePlay, useEditor } from '../store/editor';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
+  audioReflected,
   chooseAnalysisStem,
   effectiveAnalysisStem,
   defaultExportName,
@@ -29,6 +30,7 @@ import {
   stemInfo,
   stemPeaks,
   stemsDuration,
+  undoAudioReflect,
   updateStem,
   useStems,
   type ExportMode,
@@ -698,7 +700,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
 
 // ---- 書き出し -------------------------------------------------------------------
 
-const modes = (): { id: ExportMode; title: string; body: string; badge?: string }[] => [
+const modes = (): { id: ExportMode; title: string; body: string; badge?: string; muted?: boolean }[] => [
   {
     id: 'bgm',
     title: tr('BGM用（ドラム抜き）', 'For BGM (no drums)'),
@@ -707,8 +709,83 @@ const modes = (): { id: ExportMode; title: string; body: string; badge?: string 
   },
   { id: 'all', title: tr('全部を1本に', 'Everything in one file'), body: tr('原曲と同じ音になります。試聴用（#PREVIEW）や確認に。', 'Sounds the same as the original. For the preview (#PREVIEW) or checking.') },
   { id: 'selected', title: tr('選んだステムを1本に', 'Selected stems in one file'), body: tr('下で選んだステムだけをまとめます。', 'Mixes only the stems you select below.') },
-  { id: 'each', title: tr('選んだステムを1本ずつ', 'Each selected stem separately'), body: tr('ステムごとに別のファイルにします。DTXには登録しません。', "Writes a separate file for each stem. They aren't added to the DTX.") },
+  {
+    id: 'each',
+    title: tr('選んだステムを1本ずつ', 'Each selected stem separately'),
+    badge: tr('ファイルだけ', 'Files only'),
+    muted: true,
+    body: tr('ステムごとに別のファイルにします。エディタ（譜面）には反映しません。', "Writes a separate file for each stem. They aren't added to the editor (chart)."),
+  },
 ];
+
+/** エディタ（譜面）に入っている音：ゲームで鳴る BGM と、選曲画面の試聴（#PREVIEW）。この画面で反映したものには ✓ と「元に戻す」 */
+function ChartAudioCard() {
+  const doc = useEditor((s) => s.doc);
+  const busy = useStems((s) => s.busy);
+  useStems((s) => s.reflected);
+  const bgm = bgmSource(doc);
+  const rows: { key: 'bgm' | 'preview'; label: string; sub: string; file: string | null; tag?: string }[] = [
+    { key: 'bgm', label: 'BGM', sub: tr('ゲームで鳴る', 'Plays in the game'), file: bgm ? (doc.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null, tag: bgm ? `#WAV${toBase36x2(bgm.wav)}` : undefined },
+    { key: 'preview', label: tr('試聴', 'Preview'), sub: '#PREVIEW', file: doc.fields['PREVIEW'] ?? null },
+  ];
+  return (
+    <div className="card chart-audio">
+      <div className="row">
+        <b style={{ fontSize: 13 }}>{tr('エディタに入っている音', 'Audio in the editor')}</b>
+        <span className="grow" />
+        <span className="scope-tag chart" title={tr('譜面（DTX）に書かれている音です。ゲームではこの音が鳴ります', 'The audio written in the chart (DTX). This is what plays in the game')}>
+          {tr('譜面', 'Chart')}
+        </span>
+      </div>
+      {rows.map((r) => {
+        const done = audioReflected(r.key, doc);
+        // 同じ名前のファイルに書き出し直したとき（譜面は変わっていない）は、戻す先が無い
+        const same = !!done && done.prev === done.file;
+        return (
+          <div key={r.key} className="chart-audio-row">
+            <span className="k">
+              {r.label}
+              <span className="lbl">{r.sub}</span>
+            </span>
+            <div className="v">
+              <div className="row">
+                <span className={`mono ellipsis ${r.file ? '' : 'lbl'}`} title={r.file ?? undefined}>
+                  {r.file ?? tr('なし', 'None')}
+                </span>
+                {r.tag && <span className="mono lbl">{r.tag}</span>}
+              </div>
+              {done && (
+                <div className="row">
+                  <span className="reflect-chip ok">{tr('✓ 反映済み', '✓ Applied')}</span>
+                  <span className="grow" />
+                  {!same && (
+                    <button
+                      className="btn small"
+                      disabled={!!busy}
+                      onClick={() => undoAudioReflect(r.key)}
+                      title={tr('反映する前に戻します（書き出したファイルは曲フォルダに残します）', 'Goes back to before it was added (the exported file stays in the song folder)')}
+                    >
+                      {tr('元に戻す', 'Undo')}
+                    </button>
+                  )}
+                </div>
+              )}
+              {done && (
+                <span className="lbl chart-audio-prev" title={done.prev ?? undefined}>
+                  {same
+                    ? tr('前と同じ名前のファイルを書き直しました', 'Rewrote the file with the same name')
+                    : done.prev
+                      ? tr(`前は ${done.prev}（ファイルは残っています）`, `Was ${done.prev} (the file is kept)`)
+                      : tr('前は なし', 'Was none')}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function defaultInclude(mode: ExportMode, stems: StemTrack[]): string[] {
   if (mode === 'bgm') return stems.filter((t) => t.kind !== 'drums').map((t) => t.file);
@@ -728,8 +805,7 @@ function ExportPanel() {
   const [range, setRange] = useState<ExportRange>('song');
   const [format, setFormat] = useState<'ogg' | 'wav'>('ogg');
   const [name, setName] = useState(() => defaultExportName('bgm', 'ogg'));
-  const [previewReg, setPreviewReg] = useState(true);
-  const [selReg, setSelReg] = useState<'bgm' | 'preview' | 'none'>('none');
+  const [selReg, setSelReg] = useState<'bgm' | 'preview'>('bgm');
   const stemKey = stems.map((t) => t.file).join('|');
   useEffect(() => {
     setInclude(defaultInclude(mode, stems));
@@ -749,7 +825,8 @@ function ExportPanel() {
   const dur = r ? Math.max(0, r.to - r.from) : 0;
   const bytes = format === 'ogg' ? dur * 24000 : dur * 44100 * 4;
   const files = mode === 'each' ? included.length : 1;
-  const register: ExportOptions['register'] = mode === 'bgm' ? 'bgm' : mode === 'all' ? (previewReg ? 'preview' : 'none') : mode === 'selected' ? selReg : 'none';
+  // 「書き出してエディタに反映」で入る先（1本ずつはファイルだけ）
+  const register: ExportOptions['register'] = mode === 'bgm' ? 'bgm' : mode === 'all' ? 'preview' : mode === 'selected' ? selReg : 'none';
   const bgm = bgmSource(doc);
   const bgmM = bgm ? tempoOf(doc).locate(bgm.beat).m : 1;
   const bgmOff = bgm ? (bgm.sec - tempoOf(doc).beatToSec(tempoOf(doc).measureStart(bgmM))).toFixed(3) : '';
@@ -764,7 +841,7 @@ function ExportPanel() {
         : mode === 'selected'
           ? tr(`選んだ ${included.length}本 → ${outName}`, `${included.length} selected ${pl(included.length, 'stem')} → ${outName}`)
           : tr(`${included.length}本を別々のファイルに（${outName}）`, `${included.length} ${pl(included.length, 'stem')} as separate files (${outName})`);
-  const run = async () => {
+  const run = async (reflect: boolean) => {
     const targets = mode === 'each' ? included.map((t) => `${name.replace(/\{(名前|name)\}/g, t.name)}.${format}`) : [name];
     const exists = targets.filter(fileExists);
     if (exists.length) {
@@ -776,15 +853,18 @@ function ExportPanel() {
       });
       if (!ok) return;
     }
-    await exportStems({ mode, include, useTrackSettings: useTrack, normalize, range: mode === 'bgm' ? 'song' : range, format, fileName: name, register });
+    await exportStems({ mode, include, useTrackSettings: useTrack, normalize, range: mode === 'bgm' ? 'song' : range, format, fileName: name, register: reflect ? register : 'none' });
   };
 
   if (stems.length === 0) {
     return (
       <aside className="stems-export scroll">
-        <div className="section-title">{tr('書き出し', 'Export')}</div>
+        <ChartAudioCard />
+        <div className="section-title" style={{ marginTop: 14 }}>
+          {tr('書き出し', 'Export')}
+        </div>
         <p className="lbl" style={{ lineHeight: 1.7 }}>
-          {tr('ステムを読み込むと、BGM用（ドラム抜き）などを書き出してDTXに登録できます。', 'Once stems are loaded, you can export files such as a no-drums BGM and add them to the DTX.')}
+          {tr('ステムを読み込むと、BGM用（ドラム抜き）などを書き出してエディタ（譜面）に反映できます。', 'Once stems are loaded, you can export files such as a no-drums BGM and add them to the editor (chart).')}
         </p>
       </aside>
     );
@@ -793,6 +873,7 @@ function ExportPanel() {
   return (
     <aside className="stems-export">
       <div className="scroll stems-export-body">
+        <ChartAudioCard />
         <div className="row" style={{ marginBottom: 10 }}>
           <b style={{ fontSize: 15 }}>{tr('書き出し', 'Export')}</b>
           <span className="grow" />
@@ -804,7 +885,7 @@ function ExportPanel() {
               <span className={`radio-dot ${mode === m.id ? 'on' : ''}`} />
               <span>
                 <b>{m.title}</b>
-                {m.badge && <span className="badge-ok">{m.badge}</span>}
+                {m.badge && <span className={m.muted ? 'badge-muted' : 'badge-ok'}>{m.badge}</span>}
                 <span className="d">{m.body}</span>
               </span>
             </button>
@@ -893,34 +974,32 @@ function ExportPanel() {
           </div>
           {mode === 'each' && <p className="lbl note">{tr('{名前} はステムの名前になります（例: stems_ドラム.ogg）。', '{name} becomes the stem name (e.g. stems_Drums.ogg).')}</p>}
           <div className="kv" style={{ alignItems: 'flex-start' }}>
-            <span className="lbl" style={{ paddingTop: 4 }}>
-              {tr('DTXへの登録', 'Add to DTX')}
+            <span className="lbl" style={{ paddingTop: 4 }} title={tr('「書き出してエディタに反映」で入る所', 'Where “Export and add to editor” puts it')}>
+              {tr('反映先', 'Adds to')}
             </span>
             <div style={{ flex: 1 }}>
               {mode === 'bgm' && (
                 <p className="lbl" style={{ margin: '4px 0 0', lineHeight: 1.6, color: 'var(--text2)' }}>
                   {tr(
-                    `BGMとして登録（#WAV${bgm ? toBase36x2(bgm.wav) : '01'} · ch01）。開始位置はテンポ画面で決めた位置（${bgmAt}）に置きます。`,
-                    `Added as BGM (#WAV${bgm ? toBase36x2(bgm.wav) : '01'} · ch01). It starts at the position set on the Tempo page (${bgmAt}).`,
+                    `BGM（#WAV${bgm ? toBase36x2(bgm.wav) : '01'} · ch01）を差し替えます。開始位置はテンポ画面で決めた位置（${bgmAt}）のままです。`,
+                    `Replaces the BGM (#WAV${bgm ? toBase36x2(bgm.wav) : '01'} · ch01). It keeps the start position set on the Tempo page (${bgmAt}).`,
                   )}
                 </p>
               )}
               {mode === 'all' && (
-                <label className="row lbl" style={{ marginTop: 4 }}>
-                  <input type="checkbox" checked={previewReg} onChange={(e) => setPreviewReg(e.target.checked)} />
-                  {tr('選曲画面の試聴（#PREVIEW）にする', 'Use as the song select preview (#PREVIEW)')}
-                </label>
+                <p className="lbl" style={{ margin: '4px 0 0', lineHeight: 1.6, color: 'var(--text2)' }}>
+                  {tr('選曲画面の試聴（#PREVIEW）にします。', 'The song select preview (#PREVIEW).')}
+                </p>
               )}
               {mode === 'selected' && (
                 <select className="field" value={selReg} onChange={(e) => setSelReg(e.target.value as typeof selReg)}>
-                  <option value="none">{tr('登録しない', "Don't add")}</option>
-                  <option value="bgm">{tr('BGMとして登録', 'Add as BGM')}</option>
-                  <option value="preview">{tr('選曲画面の試聴（#PREVIEW）にする', 'Use as the song select preview (#PREVIEW)')}</option>
+                  <option value="bgm">{tr('BGM（ゲームで鳴る）', 'BGM (plays in the game)')}</option>
+                  <option value="preview">{tr('選曲画面の試聴（#PREVIEW）', 'Song select preview (#PREVIEW)')}</option>
                 </select>
               )}
               {mode === 'each' && (
                 <p className="lbl" style={{ margin: '4px 0 0' }}>
-                  {tr('登録しません。', "Not added to the DTX.")}
+                  {tr('反映しません（ファイルだけ書き出します）。', 'None (files only).')}
                 </p>
               )}
             </div>
@@ -931,15 +1010,36 @@ function ExportPanel() {
         <div className="lbl" style={{ color: 'var(--text2)', lineHeight: 1.6 }}>
           {summary} · {formatTime(dur, false)} · {tr('約', '~')}
           {((bytes * files) / 1e6).toFixed(1)} MB
-          {register === 'bgm'
-            ? tr(` · BGM（#WAV${bgm ? toBase36x2(bgm.wav) : '01'}）に登録`, ` · added as BGM (#WAV${bgm ? toBase36x2(bgm.wav) : '01'})`)
-            : register === 'preview'
-              ? tr(' · #PREVIEW に設定', ' · set as #PREVIEW')
-              : ''}
         </div>
-        <button className="btn primary big" disabled={!canRun} onClick={() => void run()}>
-          {Icon.download(15)} {busy ?? tr('書き出す', 'Export')}
-        </button>
+        {busy && <div className="lbl export-busy">{busy}</div>}
+        {/* ファイルを書くだけか、書いてエディタ（譜面）にも入れるかを、ボタンで分ける */}
+        {register === 'none' ? (
+          <button className="btn primary big" disabled={!canRun} onClick={() => void run(false)}>
+            {Icon.download(15)} {tr('書き出す（ファイルだけ）', 'Export (files only)')}
+          </button>
+        ) : (
+          <>
+            <button
+              className="btn big"
+              disabled={!canRun}
+              onClick={() => void run(false)}
+              title={tr('曲フォルダにファイルを書くだけで、エディタの譜面は変えません', 'Only writes the file to the song folder; the editor’s chart is not changed')}
+            >
+              {Icon.download(15)} {tr('ファイルだけ書き出す', 'Export file only')}
+            </button>
+            <button className="btn primary big" disabled={!canRun} onClick={() => void run(true)}>
+              {Icon.download(15)} {tr('書き出してエディタに反映', 'Export and add to editor')}
+            </button>
+            <div className="lbl" style={{ lineHeight: 1.6 }}>
+              {register === 'bgm'
+                ? tr(
+                    `反映すると BGM（#WAV${bgm ? toBase36x2(bgm.wav) : '01'}）を ${outName} に差し替えます。元のファイルは残し、上の「元に戻す」で戻せます。`,
+                    `Adding replaces the BGM (#WAV${bgm ? toBase36x2(bgm.wav) : '01'}) with ${outName}. The old file is kept, and “Undo” above sets it back.`,
+                  )
+                : tr(`反映すると選曲画面の試聴（#PREVIEW）を ${outName} にします。上の「元に戻す」で戻せます。`, `Adding sets the song select preview (#PREVIEW) to ${outName}. “Undo” above sets it back.`)}
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );

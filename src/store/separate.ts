@@ -50,7 +50,7 @@ export interface SeparateState {
   panelOpen: boolean;
   /** 分ける音（曲フォルダのパス）。null なら BGM（ドラム抜きなら元の原曲を探す） */
   source: string | null;
-  /** ドラム抜きを BGM に登録したファイル */
+  /** ドラム抜きを書き出して BGM に反映したファイル */
   bgmSet: string | null;
   /** ブラウザに覚えてあるモデル（調べる前は null） */
   saved: { model: SepModelId; precision: SepPrecision; bytes: number }[] | null;
@@ -373,7 +373,7 @@ export function drumlessBgmName(): string {
 }
 
 /**
- * 分けたステムのうちドラム以外を1本にまとめて書き出し、DTX の BGM（#WAV）に登録する。
+ * 分けたステムのうちドラム以外を1本にまとめて書き出し、エディタ（譜面）の BGM（#WAV）に反映する。
  * 音量は原曲のまま（揃えない）。元の原曲のファイルは消さない。書いたファイル名を返す
  */
 export async function registerDrumlessBgm(fileName = drumlessBgmName()): Promise<string | null> {
