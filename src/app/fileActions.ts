@@ -7,7 +7,7 @@ import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
 import { decodeDtx, encodeDtx } from '../dtx/encoding';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
-import { hasOriginLine, originOf, type ChartOrigin } from '../dtx/origin';
+import { hasOriginLine, originOf, readOrigin, type ChartOrigin } from '../dtx/origin';
 import { parseDtx } from '../dtx/parse';
 import { serializeDtx } from '../dtx/serialize';
 import {
@@ -139,6 +139,15 @@ async function loadSidecarFor(folder: SongFolder | null, fileName: string, recen
 }
 
 /**
+ * AI難易度生成で作った譜面は作業ファイルを持たない（書き出すのは DTX だけ）。作った元の譜面（#DTXE_ORIGIN の from）の
+ * 作業ファイルを使う：同じ曲の音なので、ステム・解析に使うステム・参照映像・セクションは元の譜面と同じ
+ */
+async function sourceSidecarFor(folder: SongFolder, doc: DtxDoc): Promise<SidecarData | null> {
+  const from = readOrigin(doc)?.from;
+  return from ? readSidecarFor(folder, from) : null;
+}
+
+/**
  * DTX を開く。switching を渡すと同じ曲の別の難易度への切り替え：再生を止めず、▶・表示の位置・ループ・聴く設定はそのまま。
  * switching.stale() が true になったら（もっと新しい切り替えが始まった）途中でやめる
  */
@@ -177,7 +186,7 @@ async function openDtxFile(
   } else {
     openDocument(parsed.doc, meta, folder, { dirty });
     void scanSiblingOrigins(folder);
-    await loadSidecarFor(folder, file.name, recentSidecar);
+    loadSidecar((await readSidecarFor(folder, file.name, recentSidecar)) ?? (await sourceSidecarFor(folder, parsed.doc)));
   }
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }

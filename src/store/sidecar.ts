@@ -150,6 +150,24 @@ export function sameStemFiles(a: readonly StemTrack[], b: readonly StemTrack[]):
 }
 
 /**
+ * 同じ曲（原曲の音が同じ）の別の難易度へ切り替えるときに使う作業ファイル。
+ * 切り替え先に作業ファイルが無い（AI難易度生成で作った譜面・作業ファイルを作っていない譜面）ときは、今の中身をそのまま使う。
+ * 作業ファイルがあっても、ステム（と解析に使うステム）・参照映像が無ければ今のものを使う（譜面ごとではなく、曲の音のもの）。
+ * こうしないと、切り替えるたびにステムを外して読み直し、波形・原曲の打点・スペクトルを作り直して、再生も鳴らし直す
+ */
+export function sameSongSidecar(next: SidecarData | null): SidecarData {
+  const cur = sidecarData();
+  if (!next) return cur;
+  const out = { ...next };
+  if (out.stems.length === 0 && cur.stems.length > 0) {
+    out.stems = cur.stems;
+    out.analysisStem = cur.analysisStem;
+  }
+  if (!out.youtube && cur.youtube) out.youtube = cur.youtube;
+  return out;
+}
+
+/**
  * 同じ曲の別の難易度へ切り替えるときに読み込む作業ファイル。聴く設定（ミックス、ステムのミュート・ソロ）は今のまま引き継ぐ。
  * 再生を止めずに切り替えるので、鳴らす譜面のほかは聞こえ方を変えない（ステムのファイルが同じときに使う。違えば聴く設定の既定も違う）
  */

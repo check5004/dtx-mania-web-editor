@@ -33,7 +33,7 @@ import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
 import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssistForDoc, stretchReady, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
-import { loadSidecar, sameStemFiles, useSidecar, withListening, type SectionMark, type SidecarData, type TempoAnchor } from './sidecar';
+import { loadSidecar, sameSongSidecar, sameStemFiles, useSidecar, withListening, type SectionMark, type SidecarData, type TempoAnchor } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
 enablePatches();
@@ -239,12 +239,21 @@ function stretchedNow(doc: DtxDoc): boolean {
   return playbackEvents(heardDoc(doc)).every((e) => (e.bus !== 'bgm' && e.bus !== 'stem') || at.every((sec) => stretchReady(e.wav, rate, sec - e.sec)));
 }
 
+/** 原曲（最初の BGM チップの音）のファイル。難易度を切り替えるとき、同じ曲の音かを比べる */
+function originalKey(doc: DtxDoc, folder: SongFolder | null): string | null {
+  const bgm = bgmSource(doc);
+  if (!bgm) return null;
+  return wavSources(doc, folder).find((x) => x.no === bgm.wav)?.key ?? null;
+}
+
 let switchSeq = 0;
 
 /**
  * 同じ曲の別の難易度（同じフォルダの別の DTX）に切り替える。譜面を開き直す openDocument と違い、再生は止めない。
  * ▶・表示の位置・ループはそのまま（テンポが違えば同じ秒の所）。鳴らす譜面は、まだ鳴らしていない所から新しい譜面になる。
  * 聴く設定（ミックス）も引き継ぐ。原曲・SE の置き方や音量が違うときは、違う音だけを今の位置からクロスフェードでつなぎ替える。
+ * sidecar は切り替え先の作業ファイル（無ければ null）。原曲が同じなら、ステム・参照映像などは今のものを使い続ける
+ * （作業ファイルの無い譜面へは今の中身ごと。sameSongSidecar）。
  * もっと新しい切り替えが始まった（stale が true）ときはやめて false を返す
  */
 export async function switchDocument(
@@ -273,8 +282,10 @@ export async function switchDocument(
   const to = tempoOf(doc);
   const at = (b: number) => sameTimeBeat(from, to, b);
   const sameLong = longSoundLayout(s.doc, s.folder) === longSoundLayout(doc, s.folder);
+  // 同じ原曲なら、ステム・解析に使うステム・参照映像を外さない（AI難易度生成で作った譜面は作業ファイルを持たない）
+  const side = originalKey(s.doc, s.folder) === originalKey(doc, s.folder) ? sameSongSidecar(sidecar) : sidecar;
   const curStems = useSidecar.getState().stems;
-  const nextStems = sidecar?.stems ?? [];
+  const nextStems = side?.stems ?? [];
   const sameStems = sameStemFiles(curStems, nextStems);
   // スペクトルに選んだ音：原曲などの譜面の音なら切り替え先にも同じ音があるか、ステムなら同じステムを同じずれで読むか
   const oldKeys = new Set(wavSources(s.doc, s.folder).map((x) => x.key));
@@ -300,7 +311,7 @@ export async function switchDocument(
     laneWav,
     missingWavs: [],
   });
-  loadSidecar(sameStems ? withListening(sidecar) : sidecar);
+  loadSidecar(sameStems ? withListening(side) : side);
   await prepareSounds();
   if (stale() || !engine.playing) return true;
   if (sameLong || stretchedNow(get().doc)) {

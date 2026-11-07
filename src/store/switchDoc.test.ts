@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { engine, type SoundEvent } from '../audio/engine';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
-import { useAssist } from './assist';
+import { setSpecSource, useAssist } from './assist';
 import { tempoOf } from './derived';
 import { longSoundLayout, sameTimeBeat, switchDocument, useEditor, type DocMeta } from './editor';
-import { emptySidecar, loadSidecar, sameStemFiles, useSidecar, withListening, type SavedMix, type StemTrack } from './sidecar';
+import { emptySidecar, loadSidecar, sameStemFiles, useSidecar, withListening, type SavedMix, type StemTrack, type YoutubeRef } from './sidecar';
 
 const chip = (id: number, ch: number, m: number, n: number, d: number, v: number) => ({ id, ch, m, f: { n, d }, v });
 
@@ -232,6 +232,72 @@ describe('聴く設定（ミックス）の引き継ぎ', () => {
     loadSidecar({ ...emptySidecar(), mix: mix({ drumMute: true }) });
     await switchDocument(song({ hhPerBar: 4 }), meta('ext.dtx'), null);
     expect(useSidecar.getState().mix).toMatchObject({ drumMute: true });
+  });
+});
+
+describe('作業ファイルの無い譜面への切り替え（AI難易度生成で作った譜面）', () => {
+  const stem = (file: string, p: Partial<StemTrack> = {}): StemTrack => ({ file, name: file, kind: 'drums', gain: 1, pan: 0, mute: false, solo: false, offsetMs: 0, ...p });
+  const yt: YoutubeRef = { url: 'https://www.youtube.com/watch?v=abc', offset: 1.5 };
+  const master = () => ({ ...emptySidecar(), sections: [{ m: 2, name: 'サビ' }], youtube: yt, stems: [stem('stems/drums.ogg'), stem('stems/other.ogg', { kind: 'other' })], analysisStem: 'stems/drums.ogg' });
+
+  it('原曲が同じなら、ステム・解析に使うステム・参照映像・セクションは今のまま（読み直さない・鳴らし直さない）', async () => {
+    loadSidecar(master());
+    await switchDocument(song({ hhPerBar: 4 }), meta('ext_ai.dtx'), null);
+    await flush();
+    const s = useSidecar.getState();
+    expect(s.stems.map((t) => t.file)).toEqual(['stems/drums.ogg', 'stems/other.ogg']);
+    expect(s.analysisStem).toBe('stems/drums.ogg');
+    expect(s.youtube).toEqual(yt);
+    expect(s.sections).toEqual([{ m: 2, name: 'サビ' }]);
+    // 作業ファイルを読んだだけで、保存していない変更にはしない
+    expect(s.dirty).toBe(false);
+    expect(order).not.toContain('stop');
+    expect(order).not.toContain('play');
+  });
+
+  it('元の譜面へ戻っても同じステムのまま、止めずに鳴らし続ける（AI の譜面 ⇄ 元の譜面）', async () => {
+    loadSidecar(master());
+    await switchDocument(song({ hhPerBar: 4 }), meta('ext_ai.dtx'), null);
+    await switchDocument(song(), meta('mstr.dtx'), master());
+    await flush();
+    expect(useSidecar.getState().stems.map((t) => t.file)).toEqual(['stems/drums.ogg', 'stems/other.ogg']);
+    expect(order).not.toContain('stop');
+    expect(order).not.toContain('play');
+  });
+
+  it('スペクトルに選んだステムのスペクトルは作り直さない', async () => {
+    loadSidecar(master());
+    setSpecSource({ key: 'stem:song|stems/drums.ogg|1|0:0', buf: {} as AudioBuffer, name: 'drums' });
+    await switchDocument(song({ hhPerBar: 4 }), meta('ext_ai.dtx'), null);
+    expect(useAssist.getState().specSource).toBe('stem:song|stems/drums.ogg|1|0:0');
+    setSpecSource(null);
+  });
+
+  it('作業ファイルにステム・参照映像が無ければ今のものを使い、セクションは切り替え先のもの', async () => {
+    loadSidecar(master());
+    await switchDocument(song({ hhPerBar: 4 }), meta('ext.dtx'), { ...emptySidecar(), sections: [{ m: 5, name: 'Aメロ' }] });
+    const s = useSidecar.getState();
+    expect(s.stems.map((t) => t.file)).toEqual(['stems/drums.ogg', 'stems/other.ogg']);
+    expect(s.analysisStem).toBe('stems/drums.ogg');
+    expect(s.youtube).toEqual(yt);
+    expect(s.sections).toEqual([{ m: 5, name: 'Aメロ' }]);
+  });
+
+  it('切り替え先の作業ファイルに別のステムがあれば、そちらを使う', async () => {
+    loadSidecar(master());
+    await switchDocument(song({ hhPerBar: 4 }), meta('ext.dtx'), { ...emptySidecar(), stems: [stem('stems/new_drums.wav')], analysisStem: null });
+    const s = useSidecar.getState();
+    expect(s.stems.map((t) => t.file)).toEqual(['stems/new_drums.wav']);
+    expect(s.analysisStem).toBeNull();
+  });
+
+  it('原曲が違う譜面へは、今のステム・参照映像を持ち込まない', async () => {
+    loadSidecar(master());
+    await switchDocument(song({ bgm: 'other.ogg' }), meta('ext.dtx'), null);
+    const s = useSidecar.getState();
+    expect(s.stems).toEqual([]);
+    expect(s.youtube).toBeNull();
+    expect(s.sections).toEqual([]);
   });
 });
 
