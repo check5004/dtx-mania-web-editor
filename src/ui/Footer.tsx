@@ -6,6 +6,7 @@ import { isDirty, useEditor } from '../store/editor';
 import { formatTime } from './format';
 import { stemsActive, useStems } from '../store/stems';
 import { localPlace, useLocalSongs } from '../store/localSongs';
+import { DriveFooterChip } from './DriveUi';
 import { songEndM, useSongLength, useSongSpan, useSoundsVersion } from './hooks';
 import { TrackPanel, useTrackRows } from './Tracks';
 
@@ -67,6 +68,7 @@ export function Footer() {
         <span className="ellipsis" style={{ color: dirty ? 'var(--amber)' : 'var(--mute)' }}>
           {dirty ? tr('未保存の変更あり', 'Unsaved changes') : savedAt ? tr('保存済み', 'Saved') : tr('変更なし', 'No changes')} · {where}
         </span>
+        <DriveFooterChip />
         <span className="pill" title={tr('保存するときの文字コード（NXが読める形式）', 'Text encoding used when saving (a format NX can read)')}>
           Shift_JIS
         </span>

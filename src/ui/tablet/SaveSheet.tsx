@@ -8,6 +8,7 @@ import { isLocalFolder } from '../../fs/folder';
 import { useDevice } from '../../store/device';
 import { useEditor } from '../../store/editor';
 import { localPlace, useLocalSongs } from '../../store/localSongs';
+import { DriveSaveRow } from '../DriveUi';
 import { abbrDiff } from '../TopBar';
 import { Icon } from '../icons';
 import { closeSaveSheet, useTabletUi } from './shared';
@@ -110,6 +111,7 @@ function SaveSheetBody() {
             : tr('自動保存 · 編集するとこのブラウザへ保存します', 'Autosave · edits are kept in this browser')}
         </span>
       </div>
+      <DriveSaveRow />
       <div className="t-save-opts" role="radiogroup">
         {folder && (
           <Option

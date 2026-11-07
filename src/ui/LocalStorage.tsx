@@ -10,6 +10,7 @@ import { localPlace, refreshLocalSongs, useLocalSongs } from '../store/localSong
 import { Icon } from './icons';
 
 export function sizeText(bytes: number): string {
+  if (bytes <= 0) return '0 KB';
   const mb = bytes / 1024 / 1024;
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
   if (mb >= 1) return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;

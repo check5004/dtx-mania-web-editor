@@ -28,8 +28,9 @@ import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
 import { MidiUnavailableNote, PadSettings, TouchSettings } from './tablet/TouchSettings';
 import { AppSettings } from './pwa/AppSettings';
+import { DriveSettings } from './DriveUi';
 
-type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'sound' | 'velocity' | 'ai' | 'app';
+type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'sound' | 'velocity' | 'ai' | 'drive' | 'app';
 
 /** MIDI の割り当て先（名前は今の言語で） */
 const targets = (): { t: LaneTarget; key: string; name: string; color: string }[] =>
@@ -90,6 +91,7 @@ export function SettingsPage() {
           {sec === 'sound' && <AudioCheck />}
           {sec === 'velocity' && <VelocitySettings />}
           {sec === 'ai' && <AiSettings />}
+          {sec === 'drive' && <DriveSettings />}
           {sec === 'app' && <AppSettings />}
         </main>
       </div>
@@ -112,11 +114,12 @@ function navItems(tablet: boolean): [Section, string][] {
   ];
   const ai: [Section, string] = ['ai', tr('AI（OpenRouter）', 'AI (OpenRouter)')];
   const app: [Section, string] = ['app', tr('アプリとして使う', 'Use as an app')];
+  const drive: [Section, string] = ['drive', 'Google Drive'];
   if (tablet) {
     const [midi, keys, ...others] = rest;
-    return [lang, touch, ['pads', tr('入力パッド', 'Pads')], keys, midi, ...others, ai, app];
+    return [lang, touch, ['pads', tr('入力パッド', 'Pads')], keys, midi, ...others, ai, drive, app];
   }
-  return [lang, ...rest, touch, ai, app];
+  return [lang, ...rest, touch, ai, drive, app];
 }
 
 function LanguageSettings() {

@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { downloadDtx, exportSongZip, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
 import { isDiskFolder, isLocalFolder, supportsDirectWrite } from '../fs/folder';
 import { localPlace, useLocalSongs } from '../store/localSongs';
+import { connectDrive, openFromDrive, pushNow } from '../app/driveActions';
+import { useDriveAuth } from '../drive/auth';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
 import {
@@ -130,6 +132,16 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
               ...(s().folder && !isDiskFolder(s().folder) ? [{ label: tr('曲フォルダを ZIP でダウンロード', 'Download song folder as ZIP'), run: () => void exportSongZip() }] : []),
             ]),
         { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: downloadDtx },
+        '-',
+        // Google Drive（操作の中でログインの小窓を開くので、run の中で直に呼ぶ）
+        ...(useDriveAuth.getState().connected
+          ? [
+              { label: tr('Google Drive から開く…', 'Open from Google Drive…'), run: () => openFromDrive() },
+              ...(s().folder?.dir
+                ? [{ label: s().folder?.drive ? tr('Google Drive に今すぐ送る', 'Send to Google Drive now') : tr('Google Drive にも保存する', 'Also save to Google Drive'), run: () => pushNow() }]
+                : []),
+            ]
+          : [{ label: tr('Google Drive につなぐ…', 'Connect Google Drive…'), run: () => connectDrive() }]),
         '-',
         { label: tr('ホームに戻る', 'Back to home'), run: goHome },
       ],

@@ -14,6 +14,8 @@ export interface RecentEntry {
   dir?: FileSystemDirectoryHandle;
   /** 本体に置いた曲（src/fs/local.ts の id） */
   local?: string;
+  /** Google Drive の曲フォルダの id（Drive とつないだ曲） */
+  drive?: string;
   /** 最後に自動保存した DTX の本文 */
   text: string;
   /** 作業ファイル（.dtxe.json）の中身 */

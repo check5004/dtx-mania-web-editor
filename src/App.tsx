@@ -8,6 +8,8 @@ import './store/kit';
 import { loadLibrary } from './store/library';
 import { initLocalSongs } from './store/localSongs';
 import { LocalCopyChip } from './ui/LocalStorage';
+import { initDrive } from './app/driveActions';
+import { DriveProgressChip } from './ui/DriveUi';
 import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
@@ -45,12 +47,14 @@ export function App() {
   useEffect(() => startAutosave(), []);
   useEffect(() => void loadLibrary(), []);
   useEffect(() => void initLocalSongs(), []);
+  useEffect(() => initDrive(), []);
   return (
     <>
       {screen === 'home' ? <Home /> : <Editor />}
       <DialogHost />
       <Toasts />
       <LocalCopyChip />
+      <DriveProgressChip />
     </>
   );
 }

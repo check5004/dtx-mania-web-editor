@@ -6730,3 +6730,79 @@ button.gen-plan {
   font-size: 10.5px;
   vertical-align: 1px;
 }
+
+/* ---- Google Drive（src/ui/DriveUi.tsx） ---- */
+.drive-card .drive-i {
+  background: #13291f;
+  color: #7fdcae;
+}
+
+.drive-card .local-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.pill.drive {
+  background: #13291f;
+  color: #7fdcae;
+}
+
+.pill.drive.mini {
+  margin-right: 6px;
+}
+
+.drive-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.drive-pill.ok {
+  background: #13291f;
+  color: #7fdcae;
+}
+
+.drive-pill.busy {
+  background: #12273a;
+  color: #8ad8ff;
+}
+
+button.drive-pill {
+  cursor: pointer;
+  border: 1px solid transparent;
+  font: inherit;
+}
+
+button.drive-pill.warn {
+  background: #33270f;
+  color: #ffc46b;
+  border-color: #5a4318;
+}
+
+button.drive-pill.info {
+  background: #12273a;
+  color: #8ad8ff;
+  border-color: #23435a;
+}
+
+button.drive-pill:hover {
+  filter: brightness(1.15);
+}
+
+.drive-chip {
+  border-color: #1f4a36;
+  background: #0f1f18;
+  color: #b5ecd0;
+}
+
+.drive-chip .local-chip-bar i {
+  background: #4fd394;
+}
+
+.drive-set .card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

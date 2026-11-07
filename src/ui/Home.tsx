@@ -7,6 +7,7 @@ import { useDevice } from '../store/device';
 import { useEditor } from '../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../store/localSongs';
 import { LocalStorageCard } from './LocalStorage';
+import { DriveHomeCard, PrivacyLine } from './DriveUi';
 import { FolderInput } from './Editor';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -75,7 +76,7 @@ function HomeDesktop() {
         <div>
           <h1>{tr('新しい譜面をつくる・続きを編集する', 'Start a new chart or continue editing')}</h1>
           <p className="lbl" style={{ fontSize: 12.5 }}>
-            {tr('データはこのブラウザの中だけで扱います。どこにもアップロードしません。', 'Your data stays in this browser. Nothing is uploaded anywhere.')}
+            <PrivacyLine />
           </p>
         </div>
         <InstallCard />
@@ -196,6 +197,11 @@ function HomeDesktop() {
                             {localBadge()}
                           </span>
                         )}
+                        {r.drive && (
+                          <span className="pill drive mini" title={tr('Google Drive にも保存しています', 'Also saved on Google Drive')}>
+                            Drive
+                          </span>
+                        )}
                         {r.folderName ? `${r.folderName}/` : ''}
                         {r.fileName} · {ago(r.updatedAt)}
                       </span>
@@ -223,6 +229,7 @@ function HomeDesktop() {
         </section>
 
         <LocalStorageCard />
+        <DriveHomeCard />
 
         <section>
           <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>{tr('操作のきほん', 'Basics')}</h3>

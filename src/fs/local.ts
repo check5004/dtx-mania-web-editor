@@ -20,6 +20,8 @@ export interface LocalSong {
   incomplete?: boolean;
   /** PC（フォルダに直接保存できるブラウザ）で、保存のときに曲フォルダを選ばず、本体に保存する */
   keepInBrowser?: boolean;
+  /** Google Drive の曲フォルダの id（Drive とつないだ曲。Drive から開くとき、この端末の曲を使う） */
+  drive?: string;
 }
 
 export { checkOpfs as checkLocal, opfsReady as localReady };

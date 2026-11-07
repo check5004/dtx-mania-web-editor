@@ -3137,3 +3137,27 @@ html.tablet .safari-notice-x {
   width: 44px;
   height: 44px;
 }
+
+/* 書き出し・共有：Google Drive の行 */
+.t-save-drive {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #1f4a36;
+  background: #0f1f18;
+  color: #7fdcae;
+}
+
+.t-save-drive > .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.t-save-drive .lbl {
+  font-size: 13px;
+}

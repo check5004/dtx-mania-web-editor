@@ -59,10 +59,11 @@ import { frac } from '../dtx/fraction';
 import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
+import { syncedPath } from '../drive/sync';
 
 const get = useEditor.getState;
 
-async function confirmDiscard(): Promise<boolean> {
+export async function confirmDiscard(): Promise<boolean> {
   const s = get();
   if (s.screen !== 'editor' || !isDirty(s)) return true;
   return confirmDialog({
@@ -176,7 +177,7 @@ async function openDtxFile(
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }
 
-function recentIdFor(folder: SongFolder | null, fileName: string) {
+export function recentIdFor(folder: SongFolder | null, fileName: string) {
   if (folder?.local) return `local:${folder.local}/${fileName}`.toLowerCase();
   return `${folder?.name ?? 'new'}/${fileName}`.toLowerCase();
 }
@@ -432,8 +433,11 @@ setWriteErrorHandler((e) => {
   );
 });
 
-/** 曲フォルダを開いた後：DTX を選ぶ、無ければ新規作成 */
-export async function openFolder(folder: SongFolder) {
+/**
+ * 曲フォルダを開いた後：DTX を選ぶ、無ければ新規作成。
+ * restore があれば、その譜面は控えの本文（まだ保存していない続き。Drive の自動保存など）から開く（キーは譜面の名前の小文字）
+ */
+export async function openFolder(folder: SongFolder, restore?: Map<string, { text: string; sidecar?: string }>) {
   const list = dtxFiles(folder);
   const labels = await readSetDefLabels(folder);
   if (list.length === 0) {
@@ -462,7 +466,15 @@ export async function openFolder(folder: SongFolder) {
     if (!picked) return;
     file = picked;
   }
-  await openDtxFile(folder, file, labels);
+  const r = restore?.get(file.name.toLowerCase());
+  await openDtxFile(folder, file, labels, r?.text, r?.sidecar);
+}
+
+/** 曲フォルダの中身が変わったとき（Drive から取り込んだなど）：同じ譜面を開き直す。無ければ選び直す */
+export async function reopenFromFolder(folder: SongFolder, fileName: string, restore?: { text: string; sidecar?: string }) {
+  const f = findFile(folder, fileName);
+  if (f) await openDtxFile(folder, f, undefined, restore?.text, restore?.sidecar);
+  else await openFolder(folder);
 }
 
 function newMeta(fileName: string, folder: SongFolder | null): DocMeta {
@@ -819,9 +831,16 @@ async function moveLocalToFolder(localId: string, target: SongFolder) {
   void refreshLocalSongs();
 }
 
+/** 保存を始めるとき（操作の中、最初の await の前）に呼ぶ。Drive のログインの小窓を開くため（src/app/driveActions.ts） */
+let beforeSave: ((opts: { toFolder?: boolean }) => void) | null = null;
+export function setBeforeSave(fn: ((opts: { toFolder?: boolean }) => void) | null) {
+  beforeSave = fn;
+}
+
 export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
   const s = get();
   if (s.screen !== 'editor') return;
+  beforeSave?.(opts);
   const doc = s.doc;
   const { bytes, lost } = encodeForSave(doc);
   if (lost.length > 0) {
@@ -1050,11 +1069,19 @@ function autosaveEntry(s: EditorState): RecentEntry {
     folderName: s.folder?.name ?? '',
     dir: isDiskFolder(s.folder) ? s.folder.dir : undefined,
     local: s.folder?.local,
+    drive: s.folder?.drive,
     text: serializeDtx(withSongEnd(s.doc)),
     sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()),
     saved: !isDirty(s),
     updatedAt: Date.now(),
   };
+}
+
+/** いまの譜面の控え（Drive の自動保存に送る）。保存済みなら null */
+export function autosaveSnapshot(): { fileName: string; text: string; sidecar?: string } | null {
+  const s = get();
+  if (s.screen !== 'editor' || !isDirty(s)) return null;
+  return { fileName: s.meta.fileName, text: serializeDtx(withSongEnd(s.doc)), sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()) };
 }
 
 export async function autosaveNow(saved = false) {
@@ -1248,7 +1275,7 @@ export async function buildExport(
     return { file: { name: `${title}-dtx.zip`, bytes: zipSync(files, { level: 0 }), type: 'application/zip' }, lost };
   }
   if (folder) {
-    for (const f of folder.files.values()) files[f.path] = new Uint8Array(await (await f.getFile()).arrayBuffer());
+    for (const f of folder.files.values()) if (syncedPath(f.path)) files[f.path] = new Uint8Array(await (await f.getFile()).arrayBuffer());
   }
   for (const k of await kitFilesNeeded(doc, folder)) files[k.path] = k.bytes;
   files[fileName] = bytes;

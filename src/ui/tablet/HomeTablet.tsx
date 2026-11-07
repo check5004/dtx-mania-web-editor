@@ -8,6 +8,7 @@ import { IS_IOS, NO_FOLDER_PICK } from '../../store/device';
 import { useEditor } from '../../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../../store/localSongs';
 import { LocalStorageCard } from '../LocalStorage';
+import { DriveHomeCard, PrivacyLine } from '../DriveUi';
 import { FolderInput } from '../Editor';
 import { formatLevel } from '../format';
 import { Icon } from '../icons';
@@ -99,7 +100,9 @@ export function HomeTablet() {
         <SafariNotice />
         <div>
           <h1>{tr('新しい譜面をつくる・続きを編集する', 'Start a new chart or continue editing')}</h1>
-          <p className="lbl">{tr('データはこのブラウザの中だけで扱います。どこにもアップロードしません。', 'Your data stays in this browser. Nothing is uploaded anywhere.')}</p>
+          <p className="lbl">
+            <PrivacyLine />
+          </p>
         </div>
 
         <InstallCard />
@@ -245,6 +248,7 @@ export function HomeTablet() {
                           {r.fileName.replace(/\.dtx$/i, '').toUpperCase()} {formatLevel(r.level)}
                         </span>
                         {r.local && <span className="pill local">{localBadge()}</span>}
+                        {r.drive && <span className="pill drive">Drive</span>}
                         {!r.saved && <span className="pill warn">{tr('未保存', 'Unsaved')}</span>}
                       </span>
                     </span>
@@ -270,6 +274,7 @@ export function HomeTablet() {
         </section>
 
         <LocalStorageCard tablet />
+        <DriveHomeCard tablet />
 
         <section className="th-section">
           <div className="th-section-head">

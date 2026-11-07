@@ -32,6 +32,8 @@ export interface SongFolder {
   dir?: FileSystemDirectoryHandle;
   /** 本体（このブラウザの保存領域）に置いた曲の id（src/fs/local.ts）。dir はそのフォルダ */
   local?: string;
+  /** Google Drive の曲フォルダの id（曲フォルダの .dtxe-drive.json を読んで入れる。src/drive/sync.ts） */
+  drive?: string;
   /** 正規化したパス（小文字・'/' 区切り）→ ファイル */
   files: Map<string, FolderFile>;
 }
