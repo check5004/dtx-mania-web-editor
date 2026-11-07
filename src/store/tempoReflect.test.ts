@@ -29,6 +29,7 @@ function open(doc: DtxDoc) {
   dialogs.choose.mockReset();
   useSidecar.setState({ anchors: [] });
   // 曲が変わると案を作り直す
+  useTempo.setState({ initialized: false });
   useEditor.setState({
     doc,
     page: 'tempo',
@@ -82,6 +83,15 @@ describe('テンポの案をエディタに反映する', () => {
     const prev = useEditor.getState().past.at(-1)!;
     expect(prev).toBeTruthy();
     useEditor.setState({ doc: song() });
+    expect(tempoReflect()).toBe('pending');
+  });
+
+  it('保存しても案は消えない（別の曲を開いたときだけ作り直す）', () => {
+    setPlanBpm(100);
+    // 保存すると meta は新しくなる
+    useEditor.setState((s) => ({ meta: { ...s.meta }, savedDoc: s.doc }));
+    initTempo();
+    expect(useTempo.getState().plan.bpm).toBe(100);
     expect(tempoReflect()).toBe('pending');
   });
 

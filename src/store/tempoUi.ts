@@ -12,7 +12,7 @@ import type { TempoMap } from '../dtx/timing';
 import { chooseDialog } from '../ui/dialogs';
 import { useAssist } from './assist';
 import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
-import { backToChart, contentEndSec, edit, OPEN_END_SEC, stop as stopChart, toast, useEditor } from './editor';
+import { backToChart, contentEndSec, edit, OPEN_END_SEC, openedDocs, stop as stopChart, toast, useEditor } from './editor';
 import { setAnchors, useSidecar } from './sidecar';
 
 export interface TempoUiState {
@@ -56,9 +56,12 @@ export const useTempo = create<TempoUiState>(() => ({
 const get = useTempo.getState;
 const set = useTempo.setState;
 
-// 別の譜面を開いたら作り直す
-useEditor.subscribe((s, prev) => {
-  if (s.meta !== prev.meta) set({ initialized: false, beats: [], downbeats: [], beatsFor: 0, taps: [], tapBpm: null });
+// 別の譜面を開いたら作り直す（保存では作り直さない。保存しても meta は新しくなるので、開いた回数で見る）
+let seenDocs = openedDocs;
+useEditor.subscribe(() => {
+  if (openedDocs === seenDocs) return;
+  seenDocs = openedDocs;
+  set({ initialized: false, beats: [], downbeats: [], beatsFor: 0, taps: [], tapBpm: null });
 });
 
 let resultMemo: { doc: DtxDoc; plan: TempoPlan; r: PlanResult } | null = null;
