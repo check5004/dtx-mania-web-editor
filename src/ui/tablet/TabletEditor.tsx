@@ -26,6 +26,7 @@ import {
 import { SHEET_GRIP, SHEET_H, SHEET_TABS, snapHeight, snapSheet, stepSheet, trackStops } from '../../store/sheetSnap';
 import { currentBeat, openPage, openTempo, playFrom, redo, setView, undo, useEditor } from '../../store/editor';
 import { unsavedText, useUnsaved } from '../../store/unsaved';
+import { glowsDiff, useGlowDiffs, useGlowing } from '../../store/glow';
 import { toggleFlamMode, useFlam } from '../../store/flam';
 import { useFind } from '../../store/find';
 import { usePhrase } from '../../store/phrase';
@@ -86,6 +87,8 @@ function DiffTabs({ asMenu }: { asMenu: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useOutside(open, ref, () => setOpen(false));
   const cur = meta.siblings.find((sb) => sb.file.toLowerCase() === meta.fileName.toLowerCase());
+  // AI難易度生成で反映した難易度は、戻ったときに数秒光らせる（▼ にまとめているときは ▼ を）
+  const glowDiffs = useGlowDiffs();
   if (!asMenu) {
     return (
       <div className="seg t-seg t-diff">
@@ -93,7 +96,7 @@ function DiffTabs({ asMenu }: { asMenu: boolean }) {
           const on = sb.file.toLowerCase() === meta.fileName.toLowerCase();
           const origin = on ? ownOrigin : (sb.origin ?? 'human');
           return (
-            <button key={sb.file} className={on ? 'on' : ''} onClick={() => void switchDifficulty(sb.file)} title={origin === 'human' ? `${sb.label} · ${sb.file}` : `${sb.label} · ${originTitle(origin)}`}>
+            <button key={sb.file} className={`${on ? 'on' : ''} ${glowsDiff(glowDiffs, sb.file) ? 'glow' : ''}`} onClick={() => void switchDifficulty(sb.file)} title={origin === 'human' ? `${sb.label} · ${sb.file}` : `${sb.label} · ${originTitle(origin)}`}>
               {abbrDiff(sb.label)}
               <OriginBadge origin={origin} tab />
             </button>
@@ -104,7 +107,7 @@ function DiffTabs({ asMenu }: { asMenu: boolean }) {
   }
   return (
     <div className="t-diff-menu" ref={ref}>
-      <button className="t-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={tr('難易度を切り替える', 'Switch difficulty')}>
+      <button className={`t-btn ${glowDiffs?.length ? 'glow' : ''}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={tr('難易度を切り替える', 'Switch difficulty')}>
         <span className="mono">{cur ? abbrDiff(cur.label) : '—'}</span>
         {Icon.chevronDown(14)}
       </button>
@@ -232,6 +235,8 @@ function SpeedSelect() {
 
 function TransportT() {
   const portrait = useDevice((s) => s.portrait);
+  // テンポを反映して戻ったら数秒光らせる
+  const bpmGlow = useGlowing('bpm');
   const loop = useAssist((s) => s.loop);
   const loopMark = useAssist((s) => s.loopMark);
   const follow = useEditor((s) => s.view.follow);
@@ -260,7 +265,7 @@ function TransportT() {
         {Icon.follow(20)}
       </button>
       {!portrait && (
-        <button className="t-btn t-tempo" onClick={openTempo} title={tr('テンポと開始位置を合わせる', 'Match tempo and start position')}>
+        <button className={`t-btn t-tempo ${bpmGlow ? 'glow' : ''}`} onClick={openTempo} title={tr('テンポと開始位置を合わせる', 'Match tempo and start position')}>
           {Icon.metronome(16)}
           <span className="mono">
             {chipBpmLabel(tempo.bpmAt(Math.max(0, beat)))} <span className="dim">{meterLabel(tempo.barLen(m))}</span>

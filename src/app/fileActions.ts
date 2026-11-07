@@ -692,8 +692,8 @@ export async function dropAudioInEditor(files: File[]) {
             {
               label: bgmSource(get().doc) ? tr('原曲を差し替える', 'Replace the original') : tr('原曲にする（おすすめ）', 'Use as the original (recommended)'),
               sub: tr(
-                '曲フォルダにコピーしてBGM（#WAV・ch01）に登録します。波形と原曲の打点はこの音から作ります',
-                'Copies it into the song folder and sets it as the BGM (#WAV, ch01). The waveform and detected hits come from it',
+                '曲フォルダにコピーして、譜面の BGM（#WAV・ch01）に反映します。波形と原曲の打点はこの音から作ります',
+                'Copies it into the song folder and sets it as the chart’s BGM (#WAV, ch01). The waveform and detected hits come from it',
               ),
               value: 'bgm' as const,
             },

@@ -13,6 +13,7 @@ import { Icon } from './icons';
 import { promptDialog } from './dialogs';
 import { TapTempoButton } from './TapTempoPanel';
 import { FlamButton } from './FlamControl';
+import { useGlowing } from '../store/glow';
 
 /** 譜面の表示を ▶ の所へ（エディタの譜面。ほかの画面は自分の表示を動かす関数を渡す） */
 function showInChart(beat: number) {
@@ -201,13 +202,15 @@ export function Transport() {
   const inputMode = useAssist((s) => s.inputMode);
   const midi = useMidi((s) => s.status);
   const midiName = useMidi((s) => s.inputs[0]?.name ?? '');
+  // テンポを反映して戻ったら数秒光らせる
+  const bpmGlow = useGlowing('bpm');
 
   return (
     <div className="transport">
       <PlayControls />
       <div className="vsep" />
       <div className="row" style={{ gap: 4 }}>
-        <button className="tbox tempo-link" title={tr('原曲に合わせてBPMと曲の始まりを決める画面を開く', 'Open the screen for setting the BPM and song start to match the original audio')} onClick={openTempo}>
+        <button className={`tbox tempo-link ${bpmGlow ? 'glow' : ''}`} title={tr('原曲に合わせてBPMと曲の始まりを決める画面を開く', 'Open the screen for setting the BPM and song start to match the original audio')} onClick={openTempo}>
           <span className="lbl">{tr('BPM · 拍子', 'BPM · Meter')}</span>
           <span className="row" style={{ gap: 8 }}>
             <span className="v">

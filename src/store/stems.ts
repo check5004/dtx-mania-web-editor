@@ -13,6 +13,7 @@ import { setAnalysisProvider, syncAnalysis, useAssist, type AnalysisSource } fro
 import { bgmSource, setPlaybackTransform, tempoOf, wavPath } from './derived';
 import { edit, openedDocs, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
 import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
+import { glowReflected } from './glow';
 
 interface Loaded {
   key: string;
@@ -808,6 +809,8 @@ export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useE
   const r: AudioReflect = again ? before : { file, prev: cur, wav, chipId };
   sset((st) => ({ reflected: { ...st.reflected, bgm: r } }));
   void prepareSounds();
+  // エディタに戻ったら、差し替えた原曲（BGM）の行を光らせる
+  glowReflected({ bgm: true });
   return r.prev;
 }
 

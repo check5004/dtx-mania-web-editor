@@ -1,4 +1,4 @@
-// フレーズ候補の状態：範囲、候補（点線で譜面に出す）、選んでいる候補、適用。
+// フレーズ候補の状態：範囲、候補（点線で譜面に出す）、選んでいる候補、反映。
 import { tr } from '../i18n';
 import { create } from 'zustand';
 import { AiError } from '../ai/openrouter';
@@ -127,7 +127,7 @@ export function applyCandidate() {
   const c = current();
   if (!c) return;
   const { from, to } = get();
-  const ok = edit(tr(`フレーズ候補「${c.name}」を適用`, `Apply phrase idea "${c.name}"`), (d) => {
+  const ok = edit(tr(`フレーズ候補「${c.name}」を反映`, `Apply phrase idea "${c.name}"`), (d) => {
     for (let i = d.chips.length - 1; i >= 0; i--) {
       const x = d.chips[i];
       if (x.m >= from && x.m <= to && drumChannel(x.ch)?.kind === 'normal') d.chips.splice(i, 1);

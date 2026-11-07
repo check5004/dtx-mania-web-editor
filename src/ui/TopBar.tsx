@@ -34,6 +34,7 @@ import {
   zoom,
 } from '../store/editor';
 import { unsavedText, useUnsaved } from '../store/unsaved';
+import { glowsDiff, useGlowDiffs } from '../store/glow';
 import { bgmSource, tempoOf } from '../store/derived';
 import { useSongLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
@@ -258,6 +259,8 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
   const unsaved = useUnsaved();
+  // AI難易度生成で反映した難易度は、戻ったときに数秒光らせる
+  const glowDiffs = useGlowDiffs();
   const undoLabel = useEditor((s) => s.past[s.past.length - 1]?.label);
   const redoLabel = useEditor((s) => s.future[s.future.length - 1]?.label);
   const art = usePreimage();
@@ -306,7 +309,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
               const cur = sb.file.toLowerCase() === meta.fileName.toLowerCase();
               const origin = cur ? ownOrigin : (sb.origin ?? 'human');
               return (
-                <button key={sb.file} className={cur ? 'on' : ''} onClick={() => void switchDifficulty(sb.file)} title={origin === 'human' ? sb.file : `${sb.file} · ${originTitle(origin)}`}>
+                <button key={sb.file} className={`${cur ? 'on' : ''} ${glowsDiff(glowDiffs, sb.file) ? 'glow' : ''}`} onClick={() => void switchDifficulty(sb.file)} title={origin === 'human' ? sb.file : `${sb.file} · ${originTitle(origin)}`}>
                   <span className="diff-full">{sb.label}</span>
                   <span className="diff-abbr">{abbrDiff(sb.label)}</span>
                   <OriginBadge origin={origin} tab />

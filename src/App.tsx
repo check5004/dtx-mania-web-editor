@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { tr } from './i18n';
 import { useLang } from './i18n/useLang';
 import { startAutosave } from './app/fileActions';
 import { dismissToast, useEditor } from './store/editor';
@@ -32,6 +33,12 @@ function Toasts() {
               }}
             >
               {t.action.label}
+            </button>
+          )}
+          {/* ボタンのある知らせは長めに出すので、× で閉じられるように */}
+          {t.action && (
+            <button className="toast-close" onClick={() => dismissToast(t.id)} aria-label={tr('閉じる', 'Close')} title={tr('閉じる', 'Close')}>
+              ×
             </button>
           )}
         </div>

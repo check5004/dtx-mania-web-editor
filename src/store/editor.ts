@@ -416,6 +416,21 @@ export function undo() {
   afterSoundChange(h.label);
 }
 
+/** いま積んだ履歴（反映など）。知らせの「元に戻す」で、その変更だけを戻すのに使う */
+export function lastHistory(): HistoryEntry | undefined {
+  return get().past[get().past.length - 1];
+}
+
+/** その変更がまだ履歴のいちばん上なら元に戻す。あとで別の変更をしていたら戻さずに知らせる */
+export function undoIfLast(entry: HistoryEntry | undefined): boolean {
+  if (!entry || lastHistory() !== entry) {
+    toast(tr('あとで別の変更をしたので、ここからは戻せません（Ctrl+Z で順に戻せます）', 'Other changes were made after it, so it can’t be undone from here (step back with Ctrl+Z)'), 'warn', 6000);
+    return false;
+  }
+  undo();
+  return true;
+}
+
 export function redo() {
   const s = get();
   const h = s.future[s.future.length - 1];

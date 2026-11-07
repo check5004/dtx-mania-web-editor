@@ -210,7 +210,7 @@ export function VelocityPanel() {
             <span className="row" style={{ gap: 6 }}>
               <input className="field mono" value={setTo} onChange={(e) => setSetTo(e.target.value)} inputMode="numeric" />
               <button className="btn small" disabled={!ids.length} onClick={() => run(tr(`ベロシティを ${num(setTo, 100)} にそろえる`, `Set velocity to ${num(setTo, 100)}`), () => num(setTo, 100))}>
-                {tr('適用', 'Apply')}
+                {tr('反映', 'Apply')}
               </button>
             </span>
           </label>
@@ -219,7 +219,7 @@ export function VelocityPanel() {
             <span className="row" style={{ gap: 6 }}>
               <input className="field mono" value={scale} onChange={(e) => setScale(e.target.value)} inputMode="numeric" />
               <button className="btn small" disabled={!ids.length} onClick={() => run(tr(`ベロシティを ${num(scale, 100)}% にする`, `Scale velocity to ${num(scale, 100)}%`), (c) => (c * num(scale, 100)) / 100)}>
-                {tr('適用', 'Apply')}
+                {tr('反映', 'Apply')}
               </button>
             </span>
           </label>
@@ -230,7 +230,7 @@ export function VelocityPanel() {
               –
               <input className="field mono" value={hi} onChange={(e) => setHi(e.target.value)} inputMode="numeric" aria-label={tr('上限', 'Maximum')} />
               <button className="btn small" disabled={!ids.length} onClick={narrow}>
-                {tr('適用', 'Apply')}
+                {tr('反映', 'Apply')}
               </button>
             </span>
           </label>
@@ -246,7 +246,7 @@ export function VelocityPanel() {
                   run(tr(`ベロシティに ±${j} のゆらぎ`, `Humanize velocity by ±${j}`), (c) => c + Math.round((Math.random() * 2 - 1) * j));
                 }}
               >
-                {tr('適用', 'Apply')}
+                {tr('反映', 'Apply')}
               </button>
             </span>
           </label>
@@ -302,7 +302,7 @@ export function VelocityPanel() {
                 {tr('やめる', 'Cancel')}
               </button>
               <button className="btn small primary" onClick={adoptProposal}>
-                {tr('採用する', 'Accept')}
+                {tr('反映', 'Apply')}
               </button>
             </>
           ) : (
@@ -361,7 +361,7 @@ export function VelocityPanel() {
               })
             }
           >
-            {tr('適用', 'Apply')}
+            {tr('反映', 'Apply')}
           </button>
         </div>
         <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6 }}>

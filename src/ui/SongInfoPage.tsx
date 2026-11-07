@@ -137,6 +137,28 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
   const folder = useEditor((s) => s.folder);
   const options = f.files && folder ? [...folder.files.values()].filter((x) => f.files!.test(x.name)) : null;
   const differs = (v: string | undefined) => v !== undefined && v.trim() !== '' && v.trim() !== value.trim();
+  // 反映した案は、その欄に「✓ 反映済み」と「元に戻す」を残す（前の値に戻せる）
+  const [taken, setTaken] = useState<{ value: string; prev: string } | null>(null);
+  const isTaken = (v: string | undefined) => !!taken && v !== undefined && v.trim() === taken.value && value.trim() === taken.value;
+  const take = (v: string, label: string) => {
+    setTaken({ value: v.trim(), prev: value });
+    setFieldValue(f.key, v.trim(), label);
+  };
+  const reflected = () => (
+    <>
+      <span className="reflect-chip ok">{tr('✓ 反映済み', '✓ Applied')}</span>
+      <button
+        className="link-btn"
+        onClick={() => {
+          setFieldValue(f.key, taken!.prev.trim() === '' ? undefined : taken!.prev, tr(`${f.label}を元に戻す`, `Revert ${f.label}`));
+          setTaken(null);
+        }}
+        title={taken!.prev.trim() ? tr(`前の「${taken!.prev}」に戻します`, `Back to the previous “${taken!.prev}”`) : tr('前は空でした', 'It was empty before')}
+      >
+        {tr('元に戻す', 'Undo')}
+      </button>
+    </>
+  );
   return (
     <>
       <span className="lbl info-label">
@@ -163,8 +185,8 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
           <CommitInput className={`field ${f.key === 'BPM' || f.key === 'DLEVEL' ? 'mono' : ''}`} value={value} onCommit={(v) => setFieldValue(f.key, v === '' ? undefined : v, tr(`${f.label}を変更`, `Change ${f.label}`))} />
         )}
         {f.key === 'DLEVEL' && value && <span className="lbl"> {tr('表示', 'Shown as')} {formatLevel(value)}</span>}
-        {suggestion && differs(suggestion.value) && (
-          <div className="info-suggest">
+        {suggestion && (differs(suggestion.value) || isTaken(suggestion.value)) && (
+          <div className={`info-suggest ${isTaken(suggestion.value) ? 'taken' : ''}`}>
             <span
               className="ai-mark"
               title={suggestion.src === 'AI' ? tr('AI が調べた案', 'Found by the AI') : suggestion.src === 'tag' ? tr('原曲のファイルのタグ', "Tag in the original's file") : tr('iTunes の配信情報', 'iTunes store info')}
@@ -172,23 +194,31 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
               {srcLabel(suggestion.src)}
             </span>
             <span className="grow">{suggestion.value}</span>
-            <button
-              className="link-btn"
-              onClick={() => setFieldValue(f.key, suggestion.value.trim(), tr(`${f.label}を${srcLabel(suggestion.src)}の案にする`, `Use the ${srcLabel(suggestion.src)} suggestion for ${f.label}`))}
-            >
-              {tr('反映', 'Apply')}
-            </button>
+            {isTaken(suggestion.value) ? (
+              reflected()
+            ) : (
+              <button
+                className="link-btn"
+                onClick={() => take(suggestion.value, tr(`${f.label}を${srcLabel(suggestion.src)}の案にする`, `Use the ${srcLabel(suggestion.src)} suggestion for ${f.label}`))}
+              >
+                {tr('反映', 'Apply')}
+              </button>
+            )}
           </div>
         )}
-        {alt && differs(alt) && (
-          <div className="info-suggest">
+        {alt && (differs(alt) || isTaken(alt)) && (
+          <div className={`info-suggest ${isTaken(alt) ? 'taken' : ''}`}>
             <span className="ai-mark" title={tr('英語・ローマ字などの別の表記', 'Another spelling, such as English or romanized')}>
               {tr('別表記', 'Alt.')}
             </span>
             <span className="grow">{alt}</span>
-            <button className="link-btn" onClick={() => setFieldValue(f.key, alt.trim(), tr(`${f.label}を別表記にする`, `Use the other spelling for ${f.label}`))}>
-              {tr('反映', 'Apply')}
-            </button>
+            {isTaken(alt) ? (
+              reflected()
+            ) : (
+              <button className="link-btn" onClick={() => take(alt, tr(`${f.label}を別表記にする`, `Use the other spelling for ${f.label}`))}>
+                {tr('反映', 'Apply')}
+              </button>
+            )}
           </div>
         )}
       </div>

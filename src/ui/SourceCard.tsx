@@ -1,4 +1,4 @@
-// 原曲（音声ファイル）：読み込む場所。BGM（#WAV と ch01）に登録し、波形と原曲の打点はこの音から作る。
+// 原曲（音声ファイル）：読み込む場所。譜面の BGM（#WAV と ch01）に反映し、波形と原曲の打点はこの音から作る。
 import { tr, pl } from '../i18n';
 import { useState } from 'react';
 import { importBgmFile, pickBgmFile } from '../app/fileActions';
@@ -136,8 +136,8 @@ export function SourceCard() {
           </button>
           <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
             {tr(
-              '曲フォルダにコピーしてBGM（#WAV と ch01）に登録します。譜面の右の波形と原曲の打点はこの音から作ります。楽器ごとに分けた音は',
-              'It is copied into the song folder and set as the BGM (#WAV and ch01). The waveform and detected hits next to the chart come from it. Separate instrument tracks can be loaded from ',
+              '曲フォルダにコピーして、譜面の BGM（#WAV と ch01）に反映します。譜面の右の波形と原曲の打点はこの音から作ります。楽器ごとに分けた音は',
+              'It is copied into the song folder and set as the chart’s BGM (#WAV and ch01). The waveform and detected hits next to the chart come from it. Separate instrument tracks can be loaded from ',
             )}
             <button className="link-btn" onClick={() => openPage('stems')}>
               {tr('ステム', 'Stems')}

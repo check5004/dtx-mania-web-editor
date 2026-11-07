@@ -34,6 +34,7 @@ import { levelOf } from './check';
 import { addPlayDocTransform, addSoundDocs, goBack, prepareSounds, refreshPlayback, songEndMeasure, stop, toast, useEditor } from './editor';
 import { bandOf, guidelineText, levelOfField, loadGuideline, useGuideline } from './guideline';
 import { useSidecar } from './sidecar';
+import { glowReflected } from './glow';
 
 /** 作る元の譜面（いま開いている譜面か、作り直さない既存の譜面） */
 export interface SourceRef {
@@ -1285,13 +1286,25 @@ export async function writeOut(): Promise<boolean> {
   });
   const names = files.map((f) => f.diff).join(tr('・', ', '));
   const list = files.map((f) => f.file).join(tr('・', ', '));
+  // 「開く」は、この画面で最後に見ていた難易度（反映したものの中に無ければ最初のもの）
+  const open = files.find((f) => f.diff === get().selected) ?? files[0];
   toast(
     tr(
       `${names} をエディタに反映しました。難易度の切り替えから開けます（${memory ? `${list} と set.def は、保存（Ctrl+S）で曲フォルダに書き出します` : `曲フォルダに ${list} と set.def を書きました`}）`,
       `Added ${names} to the editor. Open ${files.length === 1 ? 'it' : 'them'} from the difficulty switcher (${memory ? `${list} and set.def are written to the song folder when you save (Ctrl+S)` : `wrote ${list} and set.def to the song folder`})`,
     ),
     'ok',
-    9000,
+    14000,
+    { label: tr(`${open.diff} を開く`, `Open ${open.diff}`), run: () => void openReflected(open.file) },
   );
+  // エディタに戻ったら、増えた難易度のタブを光らせる
+  glowReflected({ diffs: files.map((f) => f.file) });
   return true;
+}
+
+/** 反映した難易度をエディタで開く（この画面にいれば、離れてから。まだ反映していない難易度があれば聞く） */
+async function openReflected(file: string) {
+  if (useEditor.getState().page === 'ai' && !(await leaveGen())) return;
+  const { switchDifficulty } = await import('../app/fileActions');
+  await switchDifficulty(file);
 }

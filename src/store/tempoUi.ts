@@ -12,7 +12,8 @@ import type { TempoMap } from '../dtx/timing';
 import { chooseDialog } from '../ui/dialogs';
 import { useAssist } from './assist';
 import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
-import { backToChart, contentEndSec, edit, OPEN_END_SEC, openedDocs, stop as stopChart, toast, useEditor } from './editor';
+import { backToChart, contentEndSec, edit, lastHistory, OPEN_END_SEC, openedDocs, stop as stopChart, toast, undoIfLast, useEditor } from './editor';
+import { glowReflected } from './glow';
 import { setAnchors, useSidecar } from './sidecar';
 
 export interface TempoUiState {
@@ -427,12 +428,17 @@ export function applyTempo(): boolean {
   const ok = d.any && edit(tr('テンポ合わせを反映', 'Apply tempo map'), (dd) => applyPlan(dd, r, null));
   setAnchors(anchors);
   set({ touched: false, fromEstimate: false, applied: true });
-  toast(
-    ok
-      ? tr(`エディタに反映しました（${diffParts(d).join('・')}）`, `Applied to the editor (${diffParts(d).join(', ')})`)
-      : tr('エディタの譜面は、もうこの案のとおりです', 'The editor’s chart already matches this plan'),
-    'ok',
-  );
+  if (!ok) {
+    toast(tr('エディタの譜面は、もうこの案のとおりです', 'The editor’s chart already matches this plan'), 'ok');
+    return true;
+  }
+  const entry = lastHistory();
+  toast(tr(`エディタに反映しました（${diffParts(d).join('・')}）`, `Applied to the editor (${diffParts(d).join(', ')})`), 'ok', 9000, {
+    label: tr('元に戻す', 'Undo'),
+    run: () => void undoIfLast(entry),
+  });
+  // エディタに戻ったら、変わった BPM（と動かした原曲の行）を光らせる
+  glowReflected({ ...(d.bpm.changed || d.changes.changed ? { bpm: true } : {}), ...(d.bgm?.changed ? { bgm: true } : {}) });
   return true;
 }
 

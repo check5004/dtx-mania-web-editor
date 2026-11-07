@@ -23,6 +23,7 @@ import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
 import { channelName, chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
 import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
+import { levelToField } from '../check/level';
 import { promptDialog } from './dialogs';
 import { usePlayBeat } from './hooks';
 import { visibleBeats } from './ChartCanvas';
@@ -685,6 +686,22 @@ export function CompleteCard() {
   );
 }
 
+/** レベルを曲情報の Lv（#DLEVEL）に反映するボタン。もう同じなら「✓ 反映済み」 */
+function AdoptLevel({ level, cur }: { level: number; cur: string | undefined }) {
+  if (cur === levelToField(level)) {
+    return (
+      <span className="reflect-chip ok" title={tr('曲情報の Lv（#DLEVEL）は、この値です', 'The Lv in song info (#DLEVEL) is this value')}>
+        {tr('✓ 反映済み', '✓ Applied')}
+      </span>
+    );
+  }
+  return (
+    <button className="link-btn" onClick={() => adoptLevel(level)} title={tr('曲情報の Lv（#DLEVEL）に反映します（Ctrl+Z で戻せます）', 'Sets it as the Lv in song info (#DLEVEL). Ctrl+Z to undo')}>
+      {tr('Lv に反映', 'Set as Lv')}
+    </button>
+  );
+}
+
 export function CheckCard() {
   const doc = useEditor((s) => s.doc);
   const show = useCheck((s) => s.showIssues);
@@ -709,11 +726,7 @@ export function CheckCard() {
           <div className="mono" style={{ fontSize: 15 }}>
             {formatLevel(cur)}
           </div>
-          {lv && (
-            <button className="link-btn" onClick={() => adoptLevel(lv.level)} title={tr('#DLEVEL に書きます（Ctrl+Z で戻せます）', 'Writes it to #DLEVEL (Ctrl+Z to undo)')}>
-              {tr('これにする', 'Use this')}
-            </button>
-          )}
+          {lv && <AdoptLevel level={lv.level} cur={cur} />}
         </div>
       </div>
       {lv ? (
@@ -815,9 +828,7 @@ function AiLevelRow({ mech }: { mech: number | null }) {
             </span>
             {mech !== null && <span className="lbl">{tr(`計算 ${mech.toFixed(2)}`, `Computed ${mech.toFixed(2)}`)}</span>}
             <span className="grow" />
-            <button className="link-btn" onClick={() => adoptLevel(r.level)} title={tr('#DLEVEL に書きます（Ctrl+Z で戻せます）', 'Writes it to #DLEVEL (Ctrl+Z to undo)')}>
-              {tr('これにする', 'Use this')}
-            </button>
+            <AdoptLevel level={r.level} cur={doc.fields['DLEVEL']} />
           </div>
           <ul className="ai-reasons">
             {r.reasons.map((x, i) => (

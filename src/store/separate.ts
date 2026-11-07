@@ -1,6 +1,6 @@
 // 原曲をブラウザの中でステムに分解する（ドラムと、ドラム抜き。または楽器ごと）。
 // 分解した音は OGG にして曲フォルダの stems/ に置き、ステムのトラックとして読み込む。
-// そのあと「ドラム抜きを BGM にする」（細かく決めるならステムとミックスの書き出しの BGM用）で DTX の BGM にできる。
+// そのあと「ドラム抜きを BGM に反映」（細かく決めるならステムとミックスの書き出しの BGM用）で DTX の BGM にできる。
 import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { encodeAudio } from '../audio/stems';

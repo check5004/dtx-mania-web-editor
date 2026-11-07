@@ -1,4 +1,4 @@
-// フレーズ候補のパネル（譜面の右下に重ねる）。候補は譜面に点線で出し、適用するまで譜面は変わらない。
+// フレーズ候補のパネル（譜面の右下に重ねる）。候補は譜面に点線で出し、反映するまで譜面は変わらない。
 import { tr, pl, isJa } from '../i18n';
 import { useEffect } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
@@ -142,14 +142,14 @@ export function PhrasePanel() {
             {p.cost !== null && <span className="lbl mono">{formatUsd(p.cost)}</span>}
             <button className="btn small primary" onClick={applyCandidate} disabled={!cand} title={tr('範囲のドラムを候補で置き換えます（Enter、Ctrl+Z で戻せます）', 'Replace the drums in the range with this idea (Enter; undo with Ctrl+Z)')}
             >
-              {tr('適用', 'Apply')}
+              {tr('反映', 'Apply')}
             </button>
           </div>
         </div>
       )}
       <p className="lbl" style={{ margin: '8px 0 0' }}>
         {isJa()
-          ? `小節 ${toMeasure(p.from)}${p.to !== p.from ? `〜${toMeasure(p.to)}` : ''} の候補を点線で出します。適用するまで譜面は変わりません。`
+          ? `小節 ${toMeasure(p.from)}${p.to !== p.from ? `〜${toMeasure(p.to)}` : ''} の候補を点線で出します。反映するまで譜面は変わりません。`
           : `Ideas for measure ${toMeasure(p.from)}${p.to !== p.from ? `–${toMeasure(p.to)}` : ''} are shown dashed. The chart doesn't change until you apply.`}
       </p>
     </div>

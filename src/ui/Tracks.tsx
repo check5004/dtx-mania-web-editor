@@ -35,6 +35,7 @@ import { Icon } from './icons';
 import { useLang } from '../i18n/useLang';
 import { StemTrackPopover } from './StemTrackPopover';
 import { openSeparation, separating, useSeparate } from '../store/separate';
+import { useGlowing } from '../store/glow';
 
 /** トラックの見出しの幅 */
 export const HEAD_W = 344;
@@ -968,6 +969,9 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
   const [edit, setEdit] = useState<DOMRect | null>(null);
   const tall = h >= 42;
   const on = rowAudible(row);
+  // 原曲（BGM）を差し替えて戻ったら、この行を数秒光らせる
+  const glowing = useGlowing('bgm');
+  const glow = glowing && row.type === 'orig';
 
   if (row.type === 'orig' && row.state !== 'ready') {
     return (
@@ -980,7 +984,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
             </span>
           )}
         </div>
-        <button className="btn small" onClick={pickBgmFile} title={tr('原曲（音声ファイル）を読み込む。曲フォルダにコピーして BGM（#WAV・ch01）に登録します', 'Load the original audio file. It is copied into the song folder and registered as the BGM (#WAV, ch01)')}>
+        <button className="btn small" onClick={pickBgmFile} title={tr('原曲（音声ファイル）を読み込む。曲フォルダにコピーして、譜面の BGM（#WAV・ch01）に反映します', 'Load the original audio file. It is copied into the song folder and set as the chart’s BGM (#WAV, ch01)')}>
           {Icon.plus(13)} {tr('原曲を読み込む', 'Load original')}
         </button>
       </div>
@@ -1004,7 +1008,7 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
 
   return (
     <div
-      className={`trk ${on ? '' : 'off'}`}
+      className={`trk ${on ? '' : 'off'} ${glow ? 'glow' : ''}`}
       style={{ height: h, borderLeftColor: row.color }}
       title={why ? tr(`鳴っていません${why}`, `Not playing${why}`) : undefined}
       onContextMenu={

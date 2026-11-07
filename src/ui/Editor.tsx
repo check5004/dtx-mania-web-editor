@@ -60,6 +60,7 @@ import { Transport } from './Transport';
 import { useDevice } from '../store/device';
 import { TabletEditor } from './tablet/TabletEditor';
 import { tabletSave } from './tablet/shared';
+import { hasUnsaved } from '../store/unsaved';
 
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
@@ -328,9 +329,9 @@ export function Editor() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
+    // 保存の ● と同じく、作業ファイルだけの変更も数える
     const beforeUnload = (e: BeforeUnloadEvent) => {
-      const s = useEditor.getState();
-      if (s.doc !== s.savedDoc) e.preventDefault();
+      if (hasUnsaved()) e.preventDefault();
     };
     window.addEventListener('beforeunload', beforeUnload);
     void autoEnableMidi();
