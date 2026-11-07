@@ -24,7 +24,8 @@ import {
   type SheetTab,
 } from '../../store/device';
 import { SHEET_GRIP, SHEET_H, SHEET_TABS, snapHeight, snapSheet, stepSheet, trackStops } from '../../store/sheetSnap';
-import { currentBeat, isDirty, openPage, openTempo, playFrom, redo, setView, undo, useEditor } from '../../store/editor';
+import { currentBeat, openPage, openTempo, playFrom, redo, setView, undo, useEditor } from '../../store/editor';
+import { unsavedText, useUnsaved } from '../../store/unsaved';
 import { toggleFlamMode, useFlam } from '../../store/flam';
 import { useFind } from '../../store/find';
 import { usePhrase } from '../../store/phrase';
@@ -140,7 +141,7 @@ function TopBarT() {
   const doc = useEditor((s) => s.doc);
   const meta = useEditor((s) => s.meta);
   const folder = useEditor((s) => s.folder);
-  const dirty = useEditor(isDirty);
+  const unsaved = useUnsaved();
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
   const undoLabel = useEditor((s) => s.past[s.past.length - 1]?.label);
@@ -167,7 +168,7 @@ function TopBarT() {
         <span className="t-song-text">
           <span className="t-song-title ellipsis">
             {f['TITLE'] || tr('無題', 'Untitled')}
-            {dirty && <i className="t-dirty" title={tr('保存していない変更があります', 'Unsaved changes')} />}
+            {unsaved && <i className="t-dirty" title={tr(`保存していない変更があります：${unsavedText(unsaved)}`, `Unsaved changes: ${unsavedText(unsaved)}`)} />}
           </span>
           <span className="t-song-sub ellipsis">{[f['ARTIST'] || tr('アーティスト未設定', 'No artist'), `${f['BPM'] ?? '120'} BPM`, formatTime(length, false), `Lv ${formatLevel(f['DLEVEL'])}`].join(' · ')}</span>
         </span>

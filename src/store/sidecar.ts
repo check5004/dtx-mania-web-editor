@@ -95,13 +95,15 @@ export interface SidecarData {
 export interface SidecarState extends SidecarData {
   /** 保存していない変更があるか */
   dirty: boolean;
+  /** 保存のあとに変えたもの（未保存の変更として見せる） */
+  changed: (keyof SidecarData)[];
   /** 読み込み直すたびに増える（曲ごとの設定を当て直す合図） */
   loadSeq: number;
 }
 
 export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [] });
 
-export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, loadSeq: 0 }));
+export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, changed: [], loadSeq: 0 }));
 
 /** セクション名の候補。name は今の言語の名前。色はどちらの言語の名前でも同じ（names で引く） */
 type SectionPreset = { name: string; names: readonly [string, string]; color: string };
@@ -145,12 +147,19 @@ export function sectionAt(sections: SectionMark[], m: number): SectionMark | nul
 const set = useSidecar.setState;
 const get = useSidecar.getState;
 
+/** 作業ファイルの中身を変える（保存していない変更になり、何を変えたかを覚える） */
+export function updateSidecar(p: Partial<SidecarData>) {
+  touch(p);
+}
+
 function touch(p: Partial<SidecarData>) {
-  set({ ...p, dirty: true });
+  const keys = Object.keys(p) as (keyof SidecarData)[];
+  const was = get().changed;
+  set({ ...p, dirty: true, changed: keys.every((k) => was.includes(k)) ? was : [...was, ...keys.filter((k) => !was.includes(k))] });
 }
 
 export function loadSidecar(d: SidecarData | null) {
-  set({ ...emptySidecar(), ...(d ?? {}), dirty: false, loadSeq: get().loadSeq + 1 });
+  set({ ...emptySidecar(), ...(d ?? {}), dirty: false, changed: [], loadSeq: get().loadSeq + 1 });
 }
 
 /** ステムのファイルが同じか（並びは問わない） */
@@ -198,7 +207,7 @@ export function withListening(next: SidecarData | null): SidecarData {
 }
 
 export function markSidecarSaved() {
-  set({ dirty: false });
+  set({ dirty: false, changed: [] });
 }
 
 export function sidecarData(): SidecarData {

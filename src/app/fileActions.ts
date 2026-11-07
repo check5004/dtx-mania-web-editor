@@ -52,6 +52,7 @@ import { deleteRecent, getRecent, listRecent, listRecentSongs, putRecent, trimRe
 import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
 import { useDevice } from '../store/device';
 import { createDoc, edit, isDirty, openDocument, prepareSounds, switchDocument, toast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
+import { hasUnsaved } from '../store/unsaved';
 import { bgmSource } from '../store/derived';
 import { freeWavNumber, setField } from '../edit/ops';
 import { toBase36x2 } from '../dtx/base36';
@@ -66,7 +67,8 @@ const get = useEditor.getState;
 
 export async function confirmDiscard(): Promise<boolean> {
   const s = get();
-  if (s.screen !== 'editor' || !isDirty(s)) return true;
+  // 作業ファイル（セクション・ステムの音量など）だけを変えたときも聞く
+  if (s.screen !== 'editor' || !hasUnsaved(s)) return true;
   return confirmDialog({
     title: tr('保存していない変更があります', 'You have unsaved changes'),
     body: tr(
@@ -429,7 +431,7 @@ export async function removeRecentSong(song: RecentSong): Promise<boolean> {
 /** 開いている譜面を閉じる（本体から消した曲を開いていたとき） */
 function closeDocument() {
   const doc = emptyDoc();
-  useEditor.setState({ screen: 'home', page: 'chart', doc, savedDoc: doc, folder: null, past: [], future: [], selection: [], meta: { fileName: 'new.dtx', encoding: 'shift_jis', warnings: [], hasRandom: false, siblings: [] } });
+  useEditor.setState({ screen: 'home', page: 'chart', doc, savedDoc: doc, savedHistory: 0, folder: null, past: [], future: [], selection: [], meta: { fileName: 'new.dtx', encoding: 'shift_jis', warnings: [], hasRandom: false, siblings: [] } });
 }
 
 setWriteErrorHandler((e) => {
@@ -764,7 +766,7 @@ function sidecarBytes(folder: SongFolder | null, fileName: string): Uint8Array |
 
 function markSaved(doc: DtxDoc, patch: Partial<EditorState> = {}) {
   const oldId = get().meta.recentId;
-  useEditor.setState((s) => ({ ...patch, savedDoc: doc, savedAt: Date.now(), meta: { ...s.meta, ...(patch.meta ?? {}), encoding: 'shift_jis', encodingNote: undefined } }));
+  useEditor.setState((s) => ({ ...patch, savedDoc: doc, savedHistory: s.past.length, savedAt: Date.now(), meta: { ...s.meta, ...(patch.meta ?? {}), encoding: 'shift_jis', encodingNote: undefined } }));
   const newId = get().meta.recentId;
   // 保存先が決まって自動保存の名前が変わったら、前の名前の控えは消す（同じ曲が2つ並ばないように）
   if (oldId && newId && oldId !== newId) void deleteRecent(oldId).then(() => autosaveNow(true));

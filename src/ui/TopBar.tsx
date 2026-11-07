@@ -16,7 +16,6 @@ import {
   deleteSelection,
   duplicatePrevMeasure,
   goHome,
-  isDirty,
   openPage,
   openSettings,
   openTempo,
@@ -34,6 +33,7 @@ import {
   useEditor,
   zoom,
 } from '../store/editor';
+import { unsavedText, useUnsaved } from '../store/unsaved';
 import { bgmSource, tempoOf } from '../store/derived';
 import { useSongLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
@@ -257,7 +257,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   const folder = useEditor((s) => s.folder);
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
-  const dirty = useEditor(isDirty);
+  const unsaved = useUnsaved();
   const undoLabel = useEditor((s) => s.past[s.past.length - 1]?.label);
   const redoLabel = useEditor((s) => s.future[s.future.length - 1]?.label);
   const art = usePreimage();
@@ -290,8 +290,8 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
         <div className="song-text">
           <div className="song-title ellipsis">
             {f['TITLE'] || tr('無題', 'Untitled')}
-            {dirty && (
-              <span style={{ color: 'var(--amber)', marginLeft: 6 }} title={tr('保存していない変更があります', 'Unsaved changes')}>
+            {unsaved && (
+              <span style={{ color: 'var(--amber)', marginLeft: 6 }} title={tr(`保存していない変更があります：${unsavedText(unsaved)}`, `Unsaved changes: ${unsavedText(unsaved)}`)}>
                 ●
               </span>
             )}

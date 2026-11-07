@@ -831,11 +831,12 @@ html.t-left .t-panel.overlay {
   overflow: hidden;
 }
 
-/* 角が狭いときは、曲の長さ → 「分解」 → 「ステム」の文字 → 「トラック」の文字の順に畳む */
+/* 角が狭いときは畳む（順は ui/Tracks の FOLD_ORDER） */
 .tracks.t-tracks .tracks-corner.fold-1 .t-fold-1,
 .tracks.t-tracks .tracks-corner.fold-2 :is(.t-fold-1, .t-fold-2),
 .tracks.t-tracks .tracks-corner.fold-3 :is(.t-fold-1, .t-fold-2, .t-fold-3),
-.tracks.t-tracks .tracks-corner.fold-4 :is(.t-fold-1, .t-fold-2, .t-fold-3, .t-fold-4) {
+.tracks.t-tracks .tracks-corner.fold-4 :is(.t-fold-1, .t-fold-2, .t-fold-3, .t-fold-4),
+.tracks.t-tracks .tracks-corner.fold-5 :is(.t-fold-1, .t-fold-2, .t-fold-3, .t-fold-4, .t-fold-5) {
   display: none;
 }
 

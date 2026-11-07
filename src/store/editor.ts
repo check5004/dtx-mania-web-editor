@@ -33,7 +33,7 @@ import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
 import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssistForDoc, stretchReady, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
-import { loadSidecar, sameSongSidecar, sameStemFiles, useSidecar, withListening, type SidecarData } from './sidecar';
+import { loadSidecar, sameSongSidecar, sameStemFiles, updateSidecar, useSidecar, withListening, type SidecarData } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
 enablePatches();
@@ -94,6 +94,8 @@ export interface EditorState {
   meta: DocMeta;
   folder: SongFolder | null;
   savedDoc: DtxDoc | null;
+  /** 保存したときの履歴の数（保存のあとの変更を数える） */
+  savedHistory: number;
   savedAt: number | null;
   past: HistoryEntry[];
   future: HistoryEntry[];
@@ -129,6 +131,7 @@ export const useEditor = create<EditorState>(() => ({
   meta: initialMeta,
   folder: null,
   savedDoc: null,
+  savedHistory: 0,
   savedAt: null,
   past: [],
   future: [],
@@ -152,6 +155,17 @@ const get = useEditor.getState;
 const set = useEditor.setState;
 
 export const isDirty = (s: EditorState) => s.doc !== s.savedDoc;
+
+/**
+ * 保存していない譜面の変更（新しい順の履歴の名前）。保存したあとに元に戻して、保存した所より前に戻ったときは undone に数を入れる。
+ * 保存していなければ null
+ */
+export function unsavedChart(s: Pick<EditorState, 'doc' | 'savedDoc' | 'past' | 'savedHistory'> = get()): { labels: string[]; undone: number } | null {
+  if (s.doc === s.savedDoc) return null;
+  const n = s.past.length - s.savedHistory;
+  if (n > 0) return { labels: s.past.slice(-n).map((h) => h.label).reverse(), undone: 0 };
+  return { labels: [], undone: s.savedDoc ? Math.max(1, -n) : 0 };
+}
 
 // ---- 通知 ---------------------------------------------------------------------
 
@@ -189,6 +203,7 @@ export function openDocument(doc: DtxDoc, meta: DocMeta, folder: SongFolder | nu
     meta,
     folder,
     savedDoc: opts.dirty ? null : doc,
+    savedHistory: 0,
     savedAt: null,
     past: [],
     future: [],
@@ -302,6 +317,7 @@ export async function switchDocument(
     doc,
     meta,
     savedDoc: opts.dirty ? null : doc,
+    savedHistory: 0,
     savedAt: null,
     past: [],
     future: [],
@@ -579,10 +595,10 @@ function sideForMeasures(before: MeasureMarks, after: MeasureMarks): NonNullable
   const same = JSON.stringify(b) === JSON.stringify(after);
   return {
     undo: () => {
-      if (!same) useSidecar.setState({ ...b, dirty: true });
+      if (!same) updateSidecar({ ...b });
     },
     redo: () => {
-      if (!same) useSidecar.setState({ ...after, dirty: true });
+      if (!same) updateSidecar({ ...after });
     },
   };
 }

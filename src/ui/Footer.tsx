@@ -2,7 +2,8 @@ import { tr, locale } from '../i18n';
 import { isDiskFolder, supportsDirectWrite } from '../fs/folder';
 import { HSplitter } from './Splitter';
 import { bgmSource, docStats } from '../store/derived';
-import { isDirty, useEditor } from '../store/editor';
+import { useEditor } from '../store/editor';
+import { unsavedText, useUnsaved } from '../store/unsaved';
 import { formatTime } from './format';
 import { stemsActive, useStems } from '../store/stems';
 import { localPlace, useLocalSongs } from '../store/localSongs';
@@ -15,7 +16,8 @@ export function Footer() {
   const doc = useEditor((s) => s.doc);
   const meta = useEditor((s) => s.meta);
   const folder = useEditor((s) => s.folder);
-  const dirty = useEditor(isDirty);
+  // 保存していない変更（譜面と作業ファイル）
+  const unsaved = useUnsaved();
   const savedAt = useEditor((s) => s.savedAt);
   const missingAll = useEditor((s) => s.missingWavs);
   useStems((s) => s.version);
@@ -65,8 +67,8 @@ export function Footer() {
           </span>
         )}
         <span className="grow" />
-        <span className="ellipsis" style={{ color: dirty ? 'var(--amber)' : 'var(--mute)' }}>
-          {dirty ? tr('未保存の変更あり', 'Unsaved changes') : savedAt ? tr('保存済み', 'Saved') : tr('変更なし', 'No changes')} · {where}
+        <span className="ellipsis" style={{ color: unsaved ? 'var(--amber)' : 'var(--mute)' }} title={unsaved ? tr(`保存していない変更：${unsavedText(unsaved)}`, `Unsaved changes: ${unsavedText(unsaved)}`) : undefined}>
+          {unsaved ? tr(`未保存：${unsavedText(unsaved)}`, `Unsaved: ${unsavedText(unsaved)}`) : savedAt ? tr('保存済み', 'Saved') : tr('変更なし', 'No changes')} · {where}
         </span>
         <DriveFooterChip />
         <span className="pill" title={tr('保存するときの文字コード（NXが読める形式）', 'Text encoding used when saving (a format NX can read)')}>

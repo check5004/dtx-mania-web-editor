@@ -9,7 +9,7 @@ import { pickBgmFile } from '../app/fileActions';
 import { beginLoopDrag, dragLoop, endLoopDrag, LOOP_DIV, setSpecSource, setWaveMode, useAssist, type LoopDrag } from '../store/assist';
 import { closeCtxMenu, dismissedBy, openCtxMenu } from '../store/ctxMenu';
 import { bgmSource, tempoOf, wavPath } from '../store/derived';
-import { dragSongEnd, openPage, playFrom, resetSongEnd, setCursorBeat, setView, useEditor } from '../store/editor';
+import { dragSongEnd, openPage, playFrom, resetSongEnd, setCursorBeat, setView, toast, useEditor } from '../store/editor';
 import { deskTracksHeight, SEEK_CLOSED_H, togglePanel, useLayout } from '../store/layout';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
@@ -611,8 +611,19 @@ function useRowWheel(ref: React.RefObject<HTMLDivElement | null>, rowH: number, 
   }, [ref, open]);
 }
 
-/** 角が狭いときに畳む段：1 曲の長さ、2 「分解」、3 「ステム」の文字（＋だけに）、4 「トラック」の文字（タブレット版だけ） */
-const CORNER_FOLDS = 4;
+/** 下のトラックの音量・M・S は、どこに効くか */
+const TRACKS_SCOPE = () =>
+  tr(
+    '下のトラックの音量・M・S は、エディタで聴くための設定です（作業ファイルに覚えます）。ゲームの音は変わりません。ゲームで鳴るのは「BGM」の印の原曲と、譜面のチップの音です。',
+    'The volume, M and S in these tracks are for listening in the editor (kept in the work file). They don’t change what plays in the game: the game plays the original marked “BGM” and the chart’s chip sounds.',
+  );
+
+/**
+ * 角が狭いときに畳む順：1 曲の長さ、2 「トラック」の文字（タブレットの横の開け閉め。開くと行が見えるので）、
+ * 3 「ステム」の文字（＋だけに）、4 「エディタだけ」、5 「分解」。行の音量・M・S が何に効くかは、なるべく残す
+ */
+const FOLD_ORDER = { len: 1, trk: 2, stems: 3, tag: 4, split: 5 };
+const CORNER_FOLDS = 5;
 
 function Corner({ length, open, rows, onToggle }: { length: number; open: boolean; rows: number; onToggle?: () => void }) {
   const doc = useEditor((s) => s.doc);
@@ -626,8 +637,9 @@ function Corner({ length, open, rows, onToggle }: { length: number; open: boolea
   const lang = useLang();
   const sepBusy = separating();
   const tablet = TD.tablet;
-  // 入りきらなければ、曲の長さ → 「分解」→ 文字の順に畳む
-  const fold = useFold(box, tablet ? CORNER_FOLDS : CORNER_FOLDS - 1, `${lang}|${open}|${!!onToggle}|${stems.length}|${!!busy}|${sepBusy}|${TD.headW}`);
+  // 入りきらなければ FOLD_ORDER の順に畳む
+  const fc = (k: keyof typeof FOLD_ORDER) => `t-fold-${FOLD_ORDER[k]}`;
+  const fold = useFold(box, CORNER_FOLDS, `${lang}|${open}|${!!onToggle}|${stems.length}|${!!busy}|${sepBusy}|${TD.headW}`);
   return (
     <div
       ref={box}
@@ -648,7 +660,7 @@ function Corner({ length, open, rows, onToggle }: { length: number; open: boolea
           // タブレット版：押しやすい「^ トラック」（上の縁をドラッグで高さ）
           <button className="t-btn t-trk-toggle" onClick={onToggle} aria-expanded={open} aria-label={open ? tr('トラックを閉じる', 'Close the tracks') : tr('トラックを開く', 'Open the tracks')}>
             {open ? Icon.chevronDown(16) : Icon.chevronUp(16)}
-            <span className="t-fold-4">{tr('トラック', 'Tracks')}</span>
+            <span className={fc('trk')}>{tr('トラック', 'Tracks')}</span>
           </button>
         ) : null
       ) : (
@@ -666,8 +678,12 @@ function Corner({ length, open, rows, onToggle }: { length: number; open: boolea
         </button>
       )}
       <span className="mono t-now">{formatTime(tempoOf(doc).beatToSec(Math.max(0, beat)))}</span>
-      <span className="mono lbl t-fold-1">/ {formatTime(length)}</span>
+      <span className={`mono lbl ${fc('len')}`}>/ {formatTime(length)}</span>
       <span className="grow" />
+      {/* ここの音量・M・S は聴くための設定（ゲームの音は変わらない）。押すと説明（タブレットはホバーが無いので） */}
+      <button className={`scope-tag ${fc('tag')}`} onClick={() => toast(TRACKS_SCOPE(), 'info', 9000)} title={TRACKS_SCOPE()}>
+        {tr('エディタだけ', 'Editor only')}
+      </button>
       {onToggle && !open ? null : busy ? (
         <span className="lbl ellipsis" title={busy}>
           {busy}
@@ -684,10 +700,10 @@ function Corner({ length, open, rows, onToggle }: { length: number; open: boolea
             title={tr('ステム（ドラム・ベース・ボーカルなどに分けた音）を読み込んでトラックにする', 'Load stems (audio split into drums, bass, vocals, etc.) as tracks')}
             aria-label={tr('ステムを読み込む', 'Load stems')}
           >
-            {Icon.plus(tablet ? 14 : 12)} <span className="t-fold-3">{tr('ステム', 'Stems')}</span>
+            {Icon.plus(tablet ? 14 : 12)} <span className={fc('stems')}>{tr('ステム', 'Stems')}</span>
           </button>
           {stems.length === 0 && bgmSource(doc) && (
-            <button className="link-btn t-fold-2" onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする', 'Split the original in the browser into drums and no-drums (or per instrument) and add them as stem tracks')}>
+            <button className={`link-btn ${fc('split')}`} onClick={openSeparation} title={tr('原曲をブラウザの中でドラムとドラム抜き（または楽器ごと）に分けて、ステムのトラックにする', 'Split the original in the browser into drums and no-drums (or per instrument) and add them as stem tracks')}>
               {tr('分解', 'Split')}
             </button>
           )}
@@ -1005,6 +1021,12 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
           <b className="ellipsis" onDoubleClick={isStem ? openEdit : undefined} title={isStem ? tr(`${row.name}（ダブルクリックで名前と種類を変える）`, `${row.name} (double-click to change the name and type)`) : undefined}>
             {row.name}
           </b>
+          {row.type === 'orig' && (
+            // ゲームで鳴るのはこの音（譜面の BGM）。ステムはエディタで聴くためだけ
+            <span className="trk-tag" title={tr('譜面の BGM（#WAV・ch01）です。ゲームではこの音が鳴ります', 'The chart’s BGM (#WAV, ch01). This is what plays in the game')}>
+              BGM
+            </span>
+          )}
           {isStem && (
             <button className={`ib trk-edit ${edit ? 'open' : ''}`} onClick={openEdit} title={tr('名前と種類を変える（名前のダブルクリック・右クリックでも）', 'Change the name and type (or double-click / right-click the name)')} aria-label={tr(`${row.name}の名前と種類を変える`, `Change the name and type of ${row.name}`)}>
               {Icon.pencil(11)}

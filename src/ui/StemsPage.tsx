@@ -45,7 +45,7 @@ import { StemTrackPopover } from './StemTrackPopover';
 import { SeparatePanel } from './SeparatePanel';
 import { closeSeparationPanel, useSeparate } from '../store/separate';
 
-const RULER_H = 40;
+const RULER_H = 48;
 const ROW_H = 96;
 
 type Zoom = 'all' | 16 | 4;
@@ -133,9 +133,20 @@ export function StemsPage() {
           <div className="stems-grid">
             <div className="stems-list">
               <div className="stems-list-head" style={{ height: RULER_H }}>
-                <b>{tr('トラック', 'Tracks')}</b>
-                <span className="grow" />
-                <span className="lbl">{tr('M ミュート · S ソロ · ◉ 解析に使う', 'M mute · S solo · ◉ use for analysis')}</span>
+                <div className="row">
+                  <b>{tr('トラック', 'Tracks')}</b>
+                  <span className="grow" />
+                  <span
+                    className="scope-tag"
+                    title={tr(
+                      'ここの音量・パン・M・S は、エディタで聴くための設定です（作業ファイルに覚えます）。ゲームの音は変わりません（ゲームで鳴るのは右の「エディタに入っている音」の BGM）。書き出しで「トラックの音量とパンをそのまま使う」にすると、書き出す音には入ります。',
+                      'The volume, pan, M and S here are for listening in the editor (kept in the work file). They don’t change the game’s audio (the game plays the BGM under “Audio in the editor” on the right). With “Use each track’s volume and pan” when exporting, they are used in the exported audio.',
+                    )}
+                  >
+                    {tr('エディタだけ', 'Editor only')}
+                  </span>
+                </div>
+                <span className="lbl stems-legend">{tr('M ミュート · S ソロ · ◉ 解析に使う', 'M mute · S solo · ◉ use for analysis')}</span>
               </div>
               {stems.map((t) => (
                 <TrackHead key={t.file} t={t} />
