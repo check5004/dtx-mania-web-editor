@@ -2874,19 +2874,6 @@ html.tablet .guide-page .guide-band {
 }
 
 /* 選んでいる難易度のカードの操作：作り直すを1段目いっぱいに、易しく・難しくを2段目に（縦の狭い列でも折り返さない） */
-html.tablet .gen-diff-btns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-html.tablet .gen-diff-btns > :first-child {
-  grid-column: 1 / -1;
-}
-
-html.tablet .gen-diff-btns .btn {
-  justify-content: center;
-}
-
 /* 左の下の「チェックした難易度を作る／作り直す（数）」：縦の狭い列では2行に折り返す */
 html.tablet .gen-page .btn.gen-make-all {
   height: auto;

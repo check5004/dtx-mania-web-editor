@@ -5646,9 +5646,19 @@ button.scope-tag {
   padding-left: 0;
 }
 
+/* 作り直すを上に広く、易しく・難しくを下に並べる（狭い列で「難しく」だけが次の行に落ちないように） */
 .gen-diff-btns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  flex-wrap: wrap;
+}
+
+.gen-diff-btns > :first-child {
+  grid-column: 1 / -1;
+}
+
+.gen-diff-btns .btn {
+  justify-content: center;
 }
 
 /* 左の下の「チェックした難易度を作る／作り直す（数）」：狭い列では2行に折り返す */
