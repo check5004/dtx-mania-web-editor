@@ -3119,3 +3119,21 @@ html.tablet .local-chip {
   bottom: calc(16px + env(safe-area-inset-bottom));
   font-size: 13px;
 }
+
+/* Safari・ホーム画面のアプリの案内：指で押せる大きさに */
+html.tablet .safari-notice {
+  padding: 12px 14px;
+  font-size: 14px;
+  border-radius: 12px;
+}
+
+html.tablet .safari-notice .btn {
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+}
+
+html.tablet .safari-notice-x {
+  width: 44px;
+  height: 44px;
+}

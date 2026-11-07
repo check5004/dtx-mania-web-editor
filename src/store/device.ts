@@ -3,8 +3,11 @@
 // - 横（幅 1024 以上）はパネルを右のレールから1枚だけ開き、下にトラックの帯。縦（幅 1024 未満）はパネルを下のシートに
 // - 高さは visualViewport で測り直す（Safari のバー・ホーム画面に追加したときの全画面）
 import { create } from 'zustand';
+import { IS_IOS } from '../platform';
 import { setView, useEditor } from './editor';
 import { isOpenSheetSize, type OpenSheetSize, type SheetSize } from './sheetSnap';
+
+export { IS_IOS };
 
 export type { OpenSheetSize, SheetSize } from './sheetSnap';
 
@@ -92,11 +95,6 @@ export interface DeviceState extends TouchPrefs {
 }
 
 const KEY = 'dtxe.touch.v1';
-
-/** iPad・iPhone（iPadOS の Safari は Mac と名乗るので、指で触れるかで見分ける） */
-export const IS_IOS =
-  typeof navigator !== 'undefined' &&
-  (/iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1));
 
 /** 曲フォルダを選べない（iPad の Safari はフォルダを選べず、フォルダへ直接書き込めない） */
 export const NO_FOLDER_PICK = IS_IOS;

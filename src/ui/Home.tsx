@@ -11,6 +11,7 @@ import { FolderInput } from './Editor';
 import { formatLevel } from './format';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
+import { SafariNotice } from './SafariNotice';
 import { HomeTablet } from './tablet/HomeTablet';
 import { InstallCard } from './pwa/InstallCard';
 
@@ -70,6 +71,7 @@ function HomeDesktop() {
         )}
       </header>
       <main className="home-main">
+        <SafariNotice />
         <div>
           <h1>{tr('新しい譜面をつくる・続きを編集する', 'Start a new chart or continue editing')}</h1>
           <p className="lbl" style={{ fontSize: 12.5 }}>

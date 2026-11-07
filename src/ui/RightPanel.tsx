@@ -1,4 +1,5 @@
 import { tr, pl, isJa } from '../i18n';
+import { oggUnsupported } from '../platform';
 import { sameMeasures } from '../assist/similar';
 import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
@@ -887,6 +888,14 @@ export function NoticeCard() {
       text: tr(
         '曲フォルダを開いていないため、原曲や曲フォルダの音は鳴りません。チップの音は内蔵キットで鳴ります。',
         "No song folder is open, so the original and the folder's sounds won't play. Chips play with the built-in kit.",
+      ),
+    });
+  if (missing.length > 0 && oggUnsupported() && missing.some((n) => /\.ogg$/i.test(wavPath(doc, n) ?? '')))
+    items.push({
+      level: 'warn',
+      text: tr(
+        'この Safari は OGG の音を読めません（iPadOS・Safari 18.4 以降で読めます）。新しくするか、Chrome をお使いください。',
+        "This version of Safari can't read OGG audio (iPadOS/Safari 18.4 or later can). Update it or use Chrome.",
       ),
     });
   if (missing.length > 0) {

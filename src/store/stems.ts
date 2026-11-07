@@ -101,7 +101,7 @@ export async function syncStems() {
     const cur = loaded.get(t.file);
     if (cur && cur.key === key) {
       if (cur.offsetMs !== t.offsetMs) {
-        const buf = shiftBuffer(engine.ensure(), cur.raw, t.offsetMs);
+        const buf = shiftBuffer(engine.workCtx(), cur.raw, t.offsetMs);
         loaded.set(t.file, { ...cur, buf, offsetMs: t.offsetMs, peaks: computePeaks(buf, PEAK_RATE) });
       }
       status[t.file] = 'ready';
@@ -113,7 +113,7 @@ export async function syncStems() {
       p = (async () => {
         try {
           const bytes = await (await ff.getFile()).arrayBuffer();
-          return await engine.ensure().decodeAudioData(bytes);
+          return await engine.decodeAudio(bytes);
         } catch {
           return null;
         }
@@ -128,7 +128,7 @@ export async function syncStems() {
           status[t.file] = 'error';
           return;
         }
-        const buf = shiftBuffer(engine.ensure(), raw, t.offsetMs);
+        const buf = shiftBuffer(engine.workCtx(), raw, t.offsetMs);
         loaded.set(t.file, { key, raw, buf, offsetMs: t.offsetMs, peaks: computePeaks(buf, PEAK_RATE) });
         status[t.file] = 'ready';
       }),

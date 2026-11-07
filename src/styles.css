@@ -1527,6 +1527,38 @@ body.resizing-y * {
   color: #b9dcf2;
 }
 
+/* Safari・ホーム画面のアプリで開いたときの案内（ホームの先頭。閉じたら出さない） */
+.safari-notice {
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.6;
+}
+
+.safari-notice-i {
+  flex: none;
+  margin-top: 2px;
+}
+
+.safari-notice-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.safari-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.safari-notice-x {
+  flex: none;
+}
+
 .slider-row {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) 36px;
@@ -2460,6 +2492,35 @@ select.field.speed-slow {
 .settings-col h2 {
   margin: 0;
   font-size: 16px;
+}
+
+/* 設定の「音の出力」 */
+.audio-check-grid {
+  display: grid;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.audio-check-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 210px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.audio-check-row > span:last-child {
+  overflow-wrap: anywhere;
+}
+
+.audio-check-bad {
+  color: var(--amber);
+}
+
+.audio-check-tips {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+  font-size: 12.5px;
 }
 
 @media (max-width: 760px) {

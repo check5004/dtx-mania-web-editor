@@ -12,6 +12,7 @@ import { FolderInput } from '../Editor';
 import { formatLevel } from '../format';
 import { Icon } from '../icons';
 import { LangSwitch } from '../LangSwitch';
+import { SafariNotice } from '../SafariNotice';
 import { openFilesPicker } from './shared';
 import { InstallCard, useInstallHint } from '../pwa/InstallCard';
 import { usePwa } from '../../store/pwa';
@@ -95,6 +96,7 @@ export function HomeTablet() {
         )}
       </header>
       <main className="th-main">
+        <SafariNotice />
         <div>
           <h1>{tr('新しい譜面をつくる・続きを編集する', 'Start a new chart or continue editing')}</h1>
           <p className="lbl">{tr('データはこのブラウザの中だけで扱います。どこにもアップロードしません。', 'Your data stays in this browser. Nothing is uploaded anywhere.')}</p>

@@ -594,7 +594,7 @@ export const stretchProvider: StretchProvider = {
       try {
         await wk.loadAudio(got.key, got.buf);
         const r = await wk.stretch(got.key, rate, Math.max(0, k * CHUNK - PAD), (k + 1) * CHUNK + PAD);
-        const ctx = engine.ensure();
+        const ctx = engine.workCtx();
         const len = r.channels[0].length;
         const buf = ctx.createBuffer(r.channels.length, Math.max(1, len), r.sr);
         r.channels.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));

@@ -4,6 +4,7 @@ import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch
 import { create } from 'zustand';
 import { engine, type Mix, type WavSource } from '../audio/engine';
 import { builtinFile, virtualSound } from '../audio/sounds';
+import { IS_IOS, oggUnsupported } from '../platform';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
@@ -843,6 +844,7 @@ export async function prepareSounds(): Promise<void> {
       });
       // 読めない音の知らせは、開いている譜面の音だけ
       if (preparedSig === sig) set({ missingWavs: failed.filter((no) => own.has(no)) });
+      if (preparedSig === sig) warnOldSafariOgg(failed.filter((no) => own.has(no)).map((no) => s.doc.fields['WAV' + toBase36x2(no)] ?? ''));
     } finally {
       set((st) => ({ loading: null, soundsVersion: st.soundsVersion + 1 }));
       syncAnalysis();
@@ -851,6 +853,39 @@ export async function prepareSounds(): Promise<void> {
   preparing = p;
   return p;
 }
+
+let warnedOgg = false;
+
+/** 18.4 より前の Safari（iPad・iPhone・Mac）は OGG を読めない。DTX の音はほとんど OGG なので、1 回だけ知らせる */
+function warnOldSafariOgg(failedPaths: string[]) {
+  if (warnedOgg || !oggUnsupported() || !failedPaths.some((p) => /\.ogg$/i.test(p))) return;
+  warnedOgg = true;
+  toast(
+    IS_IOS
+      ? tr(
+          'この iPad の Safari は OGG の音を読めないため、曲の音が鳴りません（iPadOS 18.4 以降で読めます）。iPadOS を新しくするか、PC の Chrome をお使いください。',
+          "This iPad's Safari can't read OGG audio, so the song's sounds won't play (iPadOS 18.4 or later can). Update iPadOS or use Chrome on a PC.",
+        )
+      : tr(
+          'この Safari は OGG の音を読めないため、曲の音が鳴りません（Safari 18.4 以降で読めます）。Safari を新しくするか、Chrome をお使いください。',
+          "This version of Safari can't read OGG audio, so the song's sounds won't play (Safari 18.4 or later can). Update Safari or use Chrome.",
+        ),
+    'error',
+    15000,
+  );
+}
+
+// Safari：再生を始めても音が出なかった（ブラウザが出力を止めている）。次に ▶ を押すと出力を作り直して鳴らす
+engine.onStall = () => {
+  toast(
+    tr(
+      '音を出せませんでした（ブラウザが音の出力を止めています）。もう一度 ▶ を押してください。続くときはページを開き直すか、Chrome をお使いください。',
+      "Couldn't start the sound (the browser has paused audio output). Press ▶ again. If it keeps happening, reload the page or use Chrome.",
+    ),
+    'warn',
+    9000,
+  );
+};
 
 export function previewWav(no: number) {
   engine.ensure();
@@ -874,7 +909,6 @@ const previewCache = new Map<string, Promise<AudioBuffer | null>>();
 
 /** ファイル（曲フォルダの音・標準キット・ライブラリの音）を読み込む。読めなければ null */
 export async function fileBuffer(path: string): Promise<AudioBuffer | null> {
-  const ctx = engine.ensure();
   const s = get();
   const f = findFile(s.folder, path, s.doc.fields['PATH_WAV'] ?? '');
   const vs = f ? null : virtualSound(path);
@@ -884,7 +918,7 @@ export async function fileBuffer(path: string): Promise<AudioBuffer | null> {
   if (!p) {
     p = (async () => {
       try {
-        if (f) return await ctx.decodeAudioData(await (await f.getFile()).arrayBuffer());
+        if (f) return await engine.decodeAudio(await (await f.getFile()).arrayBuffer());
         return await vs!.load();
       } catch {
         return null;
@@ -899,6 +933,8 @@ export async function fileBuffer(path: string): Promise<AudioBuffer | null> {
 
 /** ファイル（曲フォルダの音・標準キット・ライブラリの音）を1回鳴らす。譜面は変えない */
 export async function previewFile(path: string, gain = 1): Promise<boolean> {
+  // 出力は押した操作の中（読み込みを待つ前）で用意する（Safari。docs/safari.md）
+  engine.ensure();
   const buf = await fileBuffer(path);
   if (!buf) return false;
   engine.previewBuffer(buf, gain);

@@ -1,5 +1,8 @@
 // 再生エンジン。Web Audio の先読みスケジューラで BGM とチップ音を鳴らす。
 // スロー再生（音程そのまま）・区間ループ・再生中の譜面の書き換え・レーンのミュートに対応する。
+// 再生用の AudioContext を作るのはここだけ（ensure）。Safari・iPad の決まりは docs/safari.md
+import { IS_IOS, IS_WEBKIT } from '../platform';
+import { audioSessionType, inUserGesture, isAsleep, playSilence, preferPlaybackSession, watchGestures } from './unlock';
 
 export interface WavSource {
   no: number;
@@ -93,6 +96,29 @@ export const STEM_BASE = 2000;
 
 export type BgmFilter = 'all' | 'low' | 'mid' | 'high';
 
+/** 再生を始めても音の時刻が進まなかったとき（ブラウザが出力を止めている） */
+export interface StallInfo {
+  /** そのときの出力の状態（suspended・interrupted・running など） */
+  state: string;
+  /** 出力は running なのに時刻が進まない */
+  frozen: boolean;
+}
+
+/** 出力の様子（設定の「音のチェック」） */
+export interface OutputStatus {
+  created: boolean;
+  state: string | null;
+  sampleRate: number | null;
+  baseLatency: number | null;
+  outputLatency: number | null;
+  /** navigator.audioSession.type（Safari だけ） */
+  session: string | null;
+  stalls: number;
+}
+
+/** 再生を始めてから、音の時刻が進んでいるかを確かめるまで（ミリ秒） */
+const STALL_CHECK_MS = 2000;
+
 interface Voice {
   src: AudioBufferSourceNode;
   gain: GainNode;
@@ -153,6 +179,8 @@ interface Run {
   /** 今の区間で、ここ（曲の秒）までは予約した */
   sched: number;
   timer: number;
+  /** 音の時刻が進んでいるかを確かめるタイマー（Safari） */
+  watch: number;
   voices: Set<Voice>;
   chokes: Map<string, Voice>;
   /** ループで頭に戻るときに止める BGM・SE */
@@ -202,55 +230,185 @@ class AudioEngine {
 
   private run: Run | null = null;
 
+  /** 再生用の出力が使えない（起こしても時刻が進まなかった）。次に ensure したとき（タップの中）に作り直す */
+  private broken = false;
+  /** 次の操作の中で無音を鳴らして出力を開く（Safari：作った直後・画面に戻ったあと） */
+  private needKick = false;
+  /** 再生を始めても音の時刻が進まなかった回数（進めば 0 に戻す） */
+  private stalls = 0;
+  /** 音の読み込み・波形の計算用（Safari で、再生用の出力をまだ作っていないとき） */
+  private offline: OfflineAudioContext | null = null;
+  /** ステムのトラックの鳴らし方（出力を作り直したら入れ直す） */
+  private stripDefs: StemStrip[] = [];
+  /** 再生を始めても音が出なかったとき（ブラウザが出力を止めている）。画面が案内を出す */
+  onStall: ((info: StallInfo) => void) | null = null;
+
+  /**
+   * 再生用の出力を用意して返す。止まっていれば起こす。
+   * Safari はタップ・キーの操作の中でしか出力を起こせないので、押した操作の中で（await の前に）呼ぶ。docs/safari.md
+   */
   ensure(): AudioContext {
-    if (!this.ctx) {
-      const ctx = new AudioContext({ latencyHint: 'interactive' });
-      this.ctx = ctx;
-      this.master = ctx.createGain();
-      this.master.connect(ctx.destination);
-      const bus = (to: AudioNode = this.master) => {
-        const g = ctx.createGain();
-        g.connect(to);
-        return g;
-      };
-      this.bgmOut = ctx.createGain();
-      this.bgmOut.connect(this.master);
-      let drumOut: AudioNode = this.master;
-      if (ctx.createStereoPanner) {
-        this.drumPanNode = ctx.createStereoPanner();
-        this.drumPanNode.connect(this.master);
-        drumOut = this.drumPanNode;
-      }
-      let bgmIn: AudioNode = this.bgmOut;
-      if (ctx.createStereoPanner) {
-        this.bgmPanNode = ctx.createStereoPanner();
-        this.bgmPanNode.connect(this.bgmOut);
-        bgmIn = this.bgmPanNode;
-      }
-      this.buses = { bgm: bus(bgmIn), drum: bus(drumOut), se: bus(), click: bus() };
-      this.stemBus = bus(this.bgmOut);
-      const chain = (...nodes: BiquadFilterNode[]) => {
-        for (let i = 0; i + 1 < nodes.length; i++) nodes[i].connect(nodes[i + 1]);
-        nodes[nodes.length - 1].connect(this.master);
-        return { input: nodes[0], output: nodes[nodes.length - 1] };
-      };
-      const f = (type: BiquadFilterType, freq: number) => {
-        const n = ctx.createBiquadFilter();
-        n.type = type;
-        n.frequency.value = freq;
-        n.Q.value = 0.707;
-        return n;
-      };
-      this.filters = {
-        low: chain(f('lowpass', 160), f('lowpass', 160)),
-        mid: chain(f('highpass', 200), f('highpass', 200), f('lowpass', 3500)),
-        high: chain(f('highpass', 5000), f('highpass', 5000)),
-      };
-      this.applyMix();
-      this.applyFilter();
+    if (this.ctx && (this.broken || this.ctx.state === 'closed')) this.discard();
+    if (!this.ctx) this.build();
+    this.wake();
+    return this.ctx!;
+  }
+
+  /**
+   * 止まっている出力（suspended、Safari の interrupted）を起こす。タップ・キーの中で呼べば Safari でも起きる。
+   * Safari は作った直後・画面に戻ったあとの操作で、1 回無音を鳴らして出力を開く
+   */
+  wake() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const asleep = isAsleep(ctx);
+    if (!asleep && !this.needKick) return;
+    if (asleep) void ctx.resume().catch(() => undefined);
+    if (IS_WEBKIT) {
+      playSilence(ctx);
+      if (inUserGesture()) this.needKick = false;
     }
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
-    return this.ctx;
+  }
+
+  /** 音の読み込み・波形の計算に使う context。Safari では、再生用の出力をタップの外で作らないようオフラインのものを使う */
+  workCtx(): BaseAudioContext {
+    if (this.ctx && this.ctx.state !== 'closed') return this.ctx;
+    if (!IS_WEBKIT) return this.ensure();
+    // iPad の出力はふつう 48kHz（違っても鳴らすときに合わせる）
+    return (this.offline ??= new OfflineAudioContext(2, 1, 48000));
+  }
+
+  /** 音声ファイルの中身を AudioBuffer にする。decodeAudioData はここを通す（docs/safari.md） */
+  decodeAudio(bytes: ArrayBuffer): Promise<AudioBuffer> {
+    return this.workCtx().decodeAudioData(bytes);
+  }
+
+  /** 音の出力を作り直す（設定の「音の出力を作り直す」。押したボタンの中で呼ぶ）。読み込んだ音はそのまま使う */
+  resetOutput(): AudioContext {
+    this.broken = true;
+    this.stalls = 0;
+    return this.ensure();
+  }
+
+  /** 出力の様子（設定の「音のチェック」） */
+  status(): OutputStatus {
+    const ctx = this.ctx;
+    return {
+      created: !!ctx,
+      state: ctx ? (ctx.state as string) : null,
+      sampleRate: ctx?.sampleRate ?? null,
+      baseLatency: ctx && typeof ctx.baseLatency === 'number' ? ctx.baseLatency : null,
+      outputLatency: ctx && typeof ctx.outputLatency === 'number' ? ctx.outputLatency : null,
+      session: audioSessionType(),
+      stalls: this.stalls,
+    };
+  }
+
+  /** 確かめ用の短い音（ピッ・ポッ）。マスターの音量・ミュートに関係なく鳴らす */
+  testTone() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime + 0.05;
+    [880, 1320].forEach((freq, i) => {
+      const t0 = t + i * 0.18;
+      const o = ctx.createOscillator();
+      o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.35, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0);
+      o.stop(t0 + 0.17);
+    });
+  }
+
+  /** 再生用の出力を捨てる（次の ensure で作る）。読み込んだ音（AudioBuffer）は context に縛られないのでそのまま使う */
+  private discard() {
+    const old = this.ctx;
+    this.stopAndNotify();
+    this.stopAudition();
+    this.ctx = null;
+    this.strips.clear();
+    this.drumPanNode = null;
+    this.bgmPanNode = null;
+    this.broken = false;
+    if (old && old.state !== 'closed') void old.close().catch(() => undefined);
+  }
+
+  /** 再生を止めて、止まったことを再生を頼んだ側に知らせる（onEnd） */
+  private stopAndNotify() {
+    const cb = this.run?.req.onEnd;
+    if (!this.run) return;
+    this.stop();
+    cb?.();
+  }
+
+  /** 画面を離れた。iPad・iPhone は裏ではタイマーが止まり、続けると戻ったときに音が一度に鳴るので止める */
+  private onHidden() {
+    if (!IS_IOS) return;
+    this.stopAndNotify();
+    this.stopAudition();
+  }
+
+  /** 画面に戻った。Safari は戻ったあと出力が止まっていることがあるので、起こす（起きなければ次の操作で） */
+  private onVisible() {
+    if (!this.ctx) return;
+    if (IS_WEBKIT) this.needKick = true;
+    this.wake();
+  }
+
+  private build() {
+    // iPad・iPhone：消音でも黙らないよう、出力を作る前に「再生」の音にする
+    preferPlaybackSession();
+    const ctx = new AudioContext({ latencyHint: 'interactive' });
+    this.ctx = ctx;
+    this.broken = false;
+    this.master = ctx.createGain();
+    this.master.connect(ctx.destination);
+    const bus = (to: AudioNode = this.master) => {
+      const g = ctx.createGain();
+      g.connect(to);
+      return g;
+    };
+    this.bgmOut = ctx.createGain();
+    this.bgmOut.connect(this.master);
+    let drumOut: AudioNode = this.master;
+    if (ctx.createStereoPanner) {
+      this.drumPanNode = ctx.createStereoPanner();
+      this.drumPanNode.connect(this.master);
+      drumOut = this.drumPanNode;
+    }
+    let bgmIn: AudioNode = this.bgmOut;
+    if (ctx.createStereoPanner) {
+      this.bgmPanNode = ctx.createStereoPanner();
+      this.bgmPanNode.connect(this.bgmOut);
+      bgmIn = this.bgmPanNode;
+    }
+    this.buses = { bgm: bus(bgmIn), drum: bus(drumOut), se: bus(), click: bus() };
+    this.stemBus = bus(this.bgmOut);
+    const chain = (...nodes: BiquadFilterNode[]) => {
+      for (let i = 0; i + 1 < nodes.length; i++) nodes[i].connect(nodes[i + 1]);
+      nodes[nodes.length - 1].connect(this.master);
+      return { input: nodes[0], output: nodes[nodes.length - 1] };
+    };
+    const f = (type: BiquadFilterType, freq: number) => {
+      const n = ctx.createBiquadFilter();
+      n.type = type;
+      n.frequency.value = freq;
+      n.Q.value = 0.707;
+      return n;
+    };
+    this.filters = {
+      low: chain(f('lowpass', 160), f('lowpass', 160)),
+      mid: chain(f('highpass', 200), f('highpass', 200), f('lowpass', 3500)),
+      high: chain(f('highpass', 5000), f('highpass', 5000)),
+    };
+    this.applyStripDefs();
+    this.applyMix();
+    this.applyFilter();
+    // Safari：作った直後の操作で無音を鳴らして出力を開く
+    this.needKick = IS_WEBKIT;
+    watchGestures({ wake: () => this.wake(), onVisible: () => this.onVisible(), onHidden: () => this.onHidden() });
   }
 
   setMix(m: Partial<Mix>) {
@@ -296,9 +454,19 @@ class AudioEngine {
     if (st.pan) st.pan.pan.value = Math.max(-1, Math.min(1, st.def.pan));
   }
 
-  /** ステムのトラック（音量・パン・ミュート）。無くなったトラックは外す */
+  /**
+   * ステムのトラック（音量・パン・ミュート）。無くなったトラックは外す。
+   * 出力がまだ無ければ覚えておき、作ったときに入れる（Safari ではタップの外で出力を作らない）
+   */
   setStemStrips(list: StemStrip[]) {
-    const ctx = this.ensure();
+    this.stripDefs = list;
+    if (this.ctx) this.applyStripDefs();
+  }
+
+  private applyStripDefs() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const list = this.stripDefs;
     const keep = new Set(list.map((x) => x.no));
     for (const [no, st] of this.strips) {
       if (keep.has(no)) continue;
@@ -365,11 +533,10 @@ class AudioEngine {
   private decode(src: WavSource): Promise<AudioBuffer | null> {
     let p = this.cache.get(src.key);
     if (!p) {
-      const ctx = this.ensure();
       p = (async () => {
         if (src.load) {
           try {
-            return await ctx.decodeAudioData(await src.load());
+            return await this.decodeAudio(await src.load());
           } catch {
             if (!src.fallback) return null;
           }
@@ -625,6 +792,7 @@ class AudioEngine {
       clickIdx: 0,
       sched: req.startSec,
       timer: 0,
+      watch: 0,
       voices: new Set(),
       chokes: new Map(),
       longVoices: new Set(),
@@ -634,6 +802,33 @@ class AudioEngine {
     this.startSegment(run, req.startSec, t0);
     this.pump();
     run.timer = window.setInterval(() => this.pump(), TICK_MS);
+    if (IS_WEBKIT) this.watchStart(run, ctx);
+  }
+
+  /**
+   * Safari：再生を始めてしばらくしても音の時刻が進まなければ（出力が起きない・止まったまま）、再生を止めて知らせる。
+   * 出力は次にタップの中で ensure したときに作り直す（起こしても起きない出力は、作り直すと鳴ることが多い）
+   */
+  private watchStart(run: Run, ctx: AudioContext) {
+    const c0 = ctx.currentTime;
+    const check = () => {
+      if (this.run !== run || this.ctx !== ctx) return;
+      // 裏にいる間はタイマーが遅れるので、戻ってから確かめる
+      if (typeof document !== 'undefined' && document.hidden) {
+        run.watch = window.setTimeout(check, STALL_CHECK_MS);
+        return;
+      }
+      const state = ctx.state as string;
+      if (state === 'running' && ctx.currentTime - c0 > 0.05) {
+        this.stalls = 0;
+        return;
+      }
+      this.stalls++;
+      this.broken = true;
+      this.stopAndNotify();
+      this.onStall?.({ state, frozen: state === 'running' });
+    };
+    run.watch = window.setTimeout(check, STALL_CHECK_MS);
   }
 
   /** 区間の頭：すでに鳴り始めている BGM・SE を途中から鳴らし、予約の位置をそろえる */
@@ -945,6 +1140,7 @@ class AudioEngine {
     const run = this.run;
     if (!run) return;
     window.clearInterval(run.timer);
+    window.clearTimeout(run.watch);
     const now = this.ctx?.currentTime ?? 0;
     for (const v of run.voices) {
       try {

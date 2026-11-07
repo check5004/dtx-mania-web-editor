@@ -26,6 +26,8 @@ onPlayback((e) => {
 
 /** その レーンの音を鳴らす（譜面で使っている音、無ければ内蔵キット） */
 export function previewLane(lane: number, alt: boolean, gain = 1) {
+  // 出力は叩いた操作の中で用意する（内蔵キットの音は読み込みを待つので、その前に。Safari。docs/safari.md）
+  engine.ensure();
   const no = wavForLane(lane, alt);
   if (no !== null && engine.has(no)) {
     engine.preview(no, gain);

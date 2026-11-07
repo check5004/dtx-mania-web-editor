@@ -23,12 +23,13 @@ import { NO_MIDI, useDevice } from '../store/device';
 import { goBack, openPage, useEditor } from '../store/editor';
 import { velPresetNames } from '../store/velocity';
 import { AiSettings } from './AiSettings';
+import { AudioCheck } from './AudioCheck';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
 import { MidiUnavailableNote, PadSettings, TouchSettings } from './tablet/TouchSettings';
 import { AppSettings } from './pwa/AppSettings';
 
-type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai' | 'app';
+type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'sound' | 'velocity' | 'ai' | 'app';
 
 /** MIDI の割り当て先（名前は今の言語で） */
 const targets = (): { t: LaneTarget; key: string; name: string; color: string }[] =>
@@ -86,6 +87,7 @@ export function SettingsPage() {
           {sec === 'keys' && <KeySettings />}
           {sec === 'lanes' && <LaneOrderSettings />}
           {sec === 'latency' && <LatencySettings />}
+          {sec === 'sound' && <AudioCheck />}
           {sec === 'velocity' && <VelocitySettings />}
           {sec === 'ai' && <AiSettings />}
           {sec === 'app' && <AppSettings />}
@@ -105,6 +107,7 @@ function navItems(tablet: boolean): [Section, string][] {
     ['keys', tr('キーボード', 'Keyboard')],
     ['lanes', tr('レーンの並び', 'Lane order')],
     ['latency', tr('入力の遅れの補正', 'Input latency')],
+    ['sound', tr('音の出力', 'Audio output')],
     ['velocity', tr('ベロシティ', 'Velocity')],
   ];
   const ai: [Section, string] = ['ai', tr('AI（OpenRouter）', 'AI (OpenRouter)')];
