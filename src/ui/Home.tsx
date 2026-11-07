@@ -10,6 +10,7 @@ import { formatLevel } from './format';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
 import { HomeTablet } from './tablet/HomeTablet';
+import { InstallCard } from './pwa/InstallCard';
 
 function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
@@ -70,6 +71,7 @@ function HomeDesktop() {
             {tr('データはこのブラウザの中だけで扱います。どこにもアップロードしません。', 'Your data stays in this browser. Nothing is uploaded anywhere.')}
           </p>
         </div>
+        <InstallCard />
         {!direct && (
           <div className="notice">
             <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>

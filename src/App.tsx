@@ -9,11 +9,13 @@ import { loadLibrary } from './store/library';
 import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
+import { UpdateNotice } from './ui/pwa/UpdateNotice';
 
 function Toasts() {
   const toasts = useEditor((s) => s.toasts);
   return (
     <div className="toasts" aria-live="polite">
+      <UpdateNotice />
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.level} ${t.action ? 'has-action' : ''}`}>
           <span>{t.text}</span>

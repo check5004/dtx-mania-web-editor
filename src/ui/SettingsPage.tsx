@@ -1,4 +1,4 @@
-// 設定画面: 言語、電子ドラム（MIDI）、キーボード、入力の遅れの補正。ブラウザに保存する。
+// 設定画面: 言語、電子ドラム（MIDI）、キーボード、入力の遅れの補正、AI、アプリ（追加・オフライン・更新）。ブラウザに保存する。
 import { tr, pl, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
@@ -26,8 +26,9 @@ import { AiSettings } from './AiSettings';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
 import { MidiUnavailableNote, PadSettings, TouchSettings } from './tablet/TouchSettings';
+import { AppSettings } from './pwa/AppSettings';
 
-type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai';
+type Section = 'lang' | 'touch' | 'pads' | 'midi' | 'keys' | 'lanes' | 'latency' | 'velocity' | 'ai' | 'app';
 
 /** MIDI の割り当て先（名前は今の言語で） */
 const targets = (): { t: LaneTarget; key: string; name: string; color: string }[] =>
@@ -82,6 +83,7 @@ export function SettingsPage() {
           {sec === 'latency' && <LatencySettings />}
           {sec === 'velocity' && <VelocitySettings />}
           {sec === 'ai' && <AiSettings />}
+          {sec === 'app' && <AppSettings />}
         </main>
       </div>
     </div>
@@ -101,11 +103,12 @@ function navItems(tablet: boolean): [Section, string][] {
     ['velocity', tr('ベロシティ', 'Velocity')],
   ];
   const ai: [Section, string] = ['ai', tr('AI（OpenRouter）', 'AI (OpenRouter)')];
+  const app: [Section, string] = ['app', tr('アプリとして使う', 'Use as an app')];
   if (tablet) {
     const [midi, keys, ...others] = rest;
-    return [lang, touch, ['pads', tr('入力パッド', 'Pads')], keys, midi, ...others, ai];
+    return [lang, touch, ['pads', tr('入力パッド', 'Pads')], keys, midi, ...others, ai, app];
   }
-  return [lang, ...rest, touch, ai];
+  return [lang, ...rest, touch, ai, app];
 }
 
 function LanguageSettings() {

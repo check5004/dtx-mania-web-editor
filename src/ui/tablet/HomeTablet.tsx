@@ -11,6 +11,8 @@ import { formatLevel } from '../format';
 import { Icon } from '../icons';
 import { LangSwitch } from '../LangSwitch';
 import { openFilesPicker } from './shared';
+import { InstallCard, useInstallHint } from '../pwa/InstallCard';
+import { usePwa } from '../../store/pwa';
 
 const TIPS_KEY = 'dtxe.ipadTips.closed';
 
@@ -55,6 +57,9 @@ export function HomeTablet() {
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [tips, setTips] = useState(() => IS_IOS && !tipsClosed());
   const hasDoc = useEditor((s) => s.doc.header.length > 0 || s.doc.chips.length > 0);
+  const standalone = usePwa((s) => s.standalone);
+  // 上に「ホーム画面に追加」の案内を出している間は、使い方の欄から同じ話を外す
+  const installHint = useInstallHint();
 
   useEffect(() => {
     void listRecent().then(setRecent);
@@ -90,6 +95,8 @@ export function HomeTablet() {
           <p className="lbl">{tr('データはこのブラウザの中だけで扱います。どこにもアップロードしません。', 'Your data stays in this browser. Nothing is uploaded anywhere.')}</p>
         </div>
 
+        <InstallCard />
+
         {tips && (
           <section className="th-tips">
             <div className="th-tips-head">
@@ -100,14 +107,20 @@ export function HomeTablet() {
                 {Icon.close(20)}
               </button>
             </div>
-            <div className="th-tips-cols">
-              <div>
-                <b>
-                  {Icon.share(16)}
-                  {tr('全画面にする', 'Go full screen')}
-                </b>
-                <span className="lbl">{tr('共有 › ホーム画面に追加 で開くと、Safari のバーが消えて譜面が広くなります。', 'Share › Add to Home Screen hides the Safari bars and gives the chart more room.')}</span>
-              </div>
+            <div className={`th-tips-cols ${installHint ? 'two' : ''}`}>
+              {!installHint && (
+                <div>
+                  <b>
+                    {Icon.share(16)}
+                    {standalone ? tr('ホーム画面のアプリ', 'Home Screen app') : tr('ホーム画面に追加', 'Add to Home Screen')}
+                  </b>
+                  <span className="lbl">
+                    {standalone
+                      ? tr('Safari のバーが無いぶん譜面が広く、ネットにつながっていなくても開けます。', 'Without the Safari bars the chart has more room, and it opens without an internet connection.')
+                      : tr('共有 › ホーム画面に追加 で開くと、Safari のバーが消えて譜面が広くなり、オフラインでも開けます。', 'Share › Add to Home Screen hides the Safari bars, gives the chart more room and lets it open offline.')}
+                  </span>
+                </div>
+              )}
               <div>
                 <b>
                   {Icon.zip(16)}

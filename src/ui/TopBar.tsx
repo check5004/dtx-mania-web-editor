@@ -208,6 +208,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         '-',
         { label: tr('設定（電子ドラム・キー・遅延補正）…', 'Settings (e-drums, keys, latency)…'), run: () => openSettings() },
         { label: tr('AIの設定（OpenRouter）…', 'AI settings (OpenRouter)…'), run: () => openSettings('ai') },
+        { label: tr('アプリとして使う（追加・オフライン・更新）…', 'Use as an app (install, offline, updates)…'), run: () => openSettings('app') },
       ],
     },
   ];
