@@ -278,11 +278,7 @@ export function AiGenPage() {
         <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? tr(`1難易度 約 ${formatUsd(costPer)}＋判定`, `About ${formatUsd(costPer)} per difficulty + level check`) : noKeyTitle()}>
           {hasKey ? `● OpenRouter · ${model}` : tr('キー未設定 · ルールだけで簡略化', 'No API key · rule-based simplification only')}
         </span>
-        {selMade && ds.enabled && ds.result && (
-          <button className="btn small" onClick={() => void generate(g.selected)} disabled={g.busy || ds.status === 'planning' || ds.status === 'judging'}>
-            {tr('この難易度を作り直す', 'Regenerate this difficulty')}
-          </button>
-        )}
+        {/* 1つの難易度の作り直し・易しく・難しくは、その難易度のカードの中（右上はエディタに反映だけ） */}
         <button
           className={`btn small ${allApplied ? 'gen-applied' : 'primary'}`}
           onClick={() => void writeOut()}
@@ -296,7 +292,11 @@ export function AiGenPage() {
                 )
           }
         >
-          {allApplied ? tr('✓ エディタに反映済み', '✓ In the editor') : tr('エディタに反映', 'Add to editor')}
+          {allApplied
+            ? tr('✓ エディタに反映済み', '✓ In the editor')
+            : pending.length > 0
+              ? tr(`エディタに反映（${pending.length}）`, `Add to editor (${pending.length})`)
+              : tr('エディタに反映', 'Add to editor')}
         </button>
       </header>
       <GenTransport />
@@ -334,12 +334,18 @@ export function AiGenPage() {
               )}
             </p>
           ) : !anyResult ? (
-            <button className="btn primary" style={{ width: '100%', margin: '6px 0 4px' }} onClick={() => void generateAll()} disabled={g.busy || g.chartsLoading || makes.length === 0}>
-              {Icon.sparkle(14)} {tr('選んだ難易度を作る', 'Generate selected difficulties')}
+            <button className="btn primary gen-make-all" style={{ width: '100%', margin: '6px 0 4px' }} onClick={() => void generateAll()} disabled={g.busy || g.chartsLoading || makes.length === 0}>
+              {Icon.sparkle(14)} {tr(`チェックした難易度を作る（${makes.length}）`, `Generate checked difficulties (${makes.length})`)}
             </button>
           ) : (
-            <button className="btn small" style={{ width: '100%', margin: '6px 0 4px' }} onClick={() => void generateAll()} disabled={g.busy || g.chartsLoading || makes.length === 0}>
-              {tr('選んだ難易度をすべて作り直す', 'Regenerate all selected difficulties')}
+            <button
+              className="btn small gen-make-all"
+              style={{ width: '100%', margin: '6px 0 4px' }}
+              onClick={() => void generateAll()}
+              disabled={g.busy || g.chartsLoading || makes.length === 0}
+              title={tr('チェックした難易度をまとめて作り直します（1つだけなら、その難易度のカードの「作り直す」）', 'Regenerates every checked difficulty (to remake just one, use “Regenerate” on its card)')}
+            >
+              {Icon.sparkle(13)} {tr(`チェックした難易度を作り直す（${makes.length}）`, `Regenerate checked difficulties (${makes.length})`)}
             </button>
           )}
           {below.length > 0 && makes.length === 0 && !g.chartsLoading && (
@@ -406,17 +412,6 @@ export function AiGenPage() {
                 </b>
                 <span>/ {MAX_RUNG}</span>
                 {ds.result.ease > 0 && <span>{tr(`（4小節のうち${ds.result.ease}小節は次の段）`, `(${ds.result.ease} of every 4 measures use the next step)`)}</span>}
-                <button
-                  className="btn small ghost"
-                  onClick={() => shiftRung(ds.diff, -1)}
-                  disabled={ds.result.rung <= 0 && ds.result.ease === 0}
-                  title={tr('元の譜面に近づける', 'Closer to the original chart')}
-                >
-                  {tr('難しく', 'Harder')}
-                </button>
-                <button className="btn small ghost" onClick={() => shiftRung(ds.diff, 1)} disabled={ds.result.rung >= MAX_RUNG} title={tr('もっと簡単に', 'Make it easier')}>
-                  {tr('易しく', 'Easier')}
-                </button>
                 <span className="ellipsis gen-foot-policy" title={describePolicy(policyFor(ds.result.rung))}>
                   {describePolicy(policyFor(ds.result.rung))}
                 </span>
@@ -427,7 +422,7 @@ export function AiGenPage() {
                   ? tr(`${selChart.label} は曲に既にある譜面です（残します）。`, `${selChart.label} is already in the song (kept). `)
                   : anyResult
                   ? tr(`${ds.diff} はまだ作っていません。`, `${ds.diff} hasn't been generated yet. `)
-                  : tr('左の「選んだ難易度を作る」で作ると、ここに並びます。', 'Use "Generate selected difficulties" on the left and the results line up here. ')}
+                  : tr('左の「チェックした難易度を作る」で作ると、ここに並びます。', 'Use "Generate checked difficulties" on the left and the results line up here. ')}
                 {tablet
                   ? tr('見出しをタップで聴く譜面を切り替え、もう一度タップで判定と方針。', 'Tap a heading to switch the chart you hear; tap it again for rating & plan.')
                   : tr('Space で再生、列の見出しか ←→ で聴く譜面を切り替えます。', 'Space plays; click a column heading or use ←→ to switch the chart you hear.')}
@@ -846,6 +841,55 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
           {tr('作る元の譜面が変わりました。作り直すと反映されます', 'The chart it is made from has changed. Regenerate to use it')}
         </div>
       )}
+      {on && ds.enabled && <DiffActions ds={ds} busy={busy || g.busy} />}
+    </div>
+  );
+}
+
+/** 選んでいる難易度のカードの中の操作：この難易度だけ作り直す・易しく・難しく（変わるのはこのカードと中央の同じ列だけ） */
+function DiffActions({ ds, busy }: { ds: DiffState; busy: boolean }) {
+  const r = ds.result;
+  return (
+    <div className="gen-diff-acts" onClick={(e) => e.stopPropagation()}>
+      {r && (
+        <div className="row lbl gen-diff-line wrap">
+          <span>{tr('簡略化の段', 'Simplification step')}</span>
+          <b className="mono" style={{ color: 'var(--text)' }}>
+            {r.rung}
+          </b>
+          <span>/ {MAX_RUNG}</span>
+          {r.ease > 0 && <span>{tr(`（4小節のうち${r.ease}小節は次の段）`, `(${r.ease} of every 4 measures use the next step)`)}</span>}
+        </div>
+      )}
+      <div className="row gen-diff-btns">
+        <button
+          className="btn small"
+          onClick={() => void generate(ds.diff)}
+          disabled={busy}
+          title={
+            r
+              ? tr(`${ds.diff} だけ作り直します（エディタに反映するまで、エディタの譜面は変わりません）`, `Regenerates only ${ds.diff} (the editor’s chart doesn’t change until you add it to the editor)`)
+              : tr(`${ds.diff} だけ作ります`, `Generates only ${ds.diff}`)
+          }
+        >
+          {Icon.sparkle(12)} {r ? tr('作り直す', 'Regenerate') : tr('作る', 'Generate')}
+        </button>
+        {r && (
+          <>
+            <button className="btn small" onClick={() => shiftRung(ds.diff, 1)} disabled={busy || r.rung >= MAX_RUNG} title={tr('もっと簡単に（簡略化の段を上げる）', 'Make it easier (raise the simplification step)')}>
+              {tr('易しく', 'Easier')}
+            </button>
+            <button
+              className="btn small"
+              onClick={() => shiftRung(ds.diff, -1)}
+              disabled={busy || (r.rung <= 0 && r.ease === 0)}
+              title={tr('元の譜面に近づける（簡略化の段を下げる）', 'Closer to the original chart (lower the simplification step)')}
+            >
+              {tr('難しく', 'Harder')}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -1026,7 +1070,7 @@ function Verdict({ ds }: { ds: DiffState }) {
             )}
           </div>
         ) : (
-          <div className="lbl">{tr('目標の幅から外れています。「易しく／難しく」で段を動かすか、めやすを変えて作り直してください。', 'This is outside the target range. Change the step with "Easier/Harder", or change the aim and regenerate.')}</div>
+          <div className="lbl">{tr('目標の幅から外れています。難易度のカードの「易しく・難しく」で段を動かすか、めやすを変えて作り直してください。', 'This is outside the target range. Change the step with “Easier/Harder” on the difficulty’s card, or change the aim and regenerate.')}</div>
         ))}
       {stairN > 0 && <StairWarn st={stair} up={up} down={down} />}
       {ds.step?.clipped && (

@@ -5463,6 +5463,44 @@ button.ms.s.on {
   border-color: #24563f;
 }
 
+/* 選んでいる難易度のカードの中の操作（作り直す・易しく・難しく） */
+.gen-diff-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 0 22px;
+  padding-top: 8px;
+  border-top: 1px solid #1f3446;
+  cursor: default;
+}
+
+.gen-diff-acts .gen-diff-line {
+  padding-left: 0;
+}
+
+.gen-diff-btns {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 左の下の「チェックした難易度を作る／作り直す（数）」：狭い列では2行に折り返す */
+.btn.gen-make-all {
+  justify-content: center;
+  white-space: normal;
+  text-align: center;
+  height: auto;
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  line-height: 1.35;
+}
+
+.btn.small.gen-make-all {
+  min-height: 26px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
 /* 右上の「エディタに反映」を、全部反映したあとは済みの印にする */
 .btn.gen-applied,
 .btn.gen-applied:disabled {
