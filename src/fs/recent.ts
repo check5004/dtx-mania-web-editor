@@ -1,5 +1,6 @@
 // 最近の曲。編集中の譜面はブラウザ内（IndexedDB）に自動保存して、閉じても失わないようにする。
 // 本体（このブラウザの保存領域）に置いた曲は local に曲の id を持ち、開き直すと音ごと戻る。
+// 控えは難易度（DTX）ごとに持つ（保存していない続きを難易度ごとに残すため）が、一覧には曲ごとに1つだけ出す（groupRecent）。
 import { idb } from './db';
 
 export interface RecentEntry {
@@ -68,12 +69,54 @@ export async function deleteRecentOfLocal(localId: string): Promise<void> {
   for (const e of await listRecent()) if (e.local === localId) await deleteRecent(e.id);
 }
 
+/**
+ * 同じ曲の控えをまとめる鍵。本体の曲は曲の id、曲フォルダの曲はフォルダの名前（控えの id と同じく大文字・小文字は見ない）、
+ * フォルダの無い新しい曲は控えごとに別の曲
+ */
+export function songKeyOf(e: Pick<RecentEntry, 'id' | 'local' | 'folderName'>): string {
+  if (e.local) return `local:${e.local}`;
+  if (e.folderName) return `folder:${e.folderName.toLowerCase()}`;
+  return `entry:${e.id}`;
+}
+
+/** 「最近の曲」の1曲 */
+export interface RecentSong {
+  key: string;
+  /** いちばん新しい控え（一覧にはこの難易度を出し、押すとこれを開く） */
+  latest: RecentEntry;
+  /** この曲の控え（難易度ごと。新しい順） */
+  entries: RecentEntry[];
+}
+
+/** 控えを曲ごとにまとめる（難易度を切り替えても同じ曲が並ばないように）。新しい順 */
+export function groupRecent(all: readonly RecentEntry[]): RecentSong[] {
+  const songs = new Map<string, RecentSong>();
+  for (const e of [...all].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const key = songKeyOf(e);
+    const song = songs.get(key);
+    if (song) song.entries.push(e);
+    else songs.set(key, { key, latest: e, entries: [e] });
+  }
+  return [...songs.values()];
+}
+
+/** 「最近の曲」の一覧（曲ごとに1つ） */
+export async function listRecentSongs(): Promise<RecentSong[]> {
+  return groupRecent(await listRecent());
+}
+
 const MAX_RECENT = 12;
+
+/** 古いので消す控え：曲ごとに数えて、新しい max 曲より前の曲の控えを全部。本体の曲は数えない・消さない */
+export function staleRecent(all: readonly RecentEntry[], max = MAX_RECENT): RecentEntry[] {
+  return groupRecent(all.filter((e) => !e.local))
+    .slice(max)
+    .flatMap((s) => s.entries);
+}
 
 /**
  * 古い自動保存を消す。本体の曲は数えない・消さない（音も一緒に消えてしまうので、一覧の ✕ で消してもらう）
  */
 export async function trimRecent() {
-  const all = (await listRecent()).filter((e) => !e.local);
-  for (const e of all.slice(MAX_RECENT)) await deleteRecent(e.id);
+  for (const e of staleRecent(await listRecent())) await deleteRecent(e.id);
 }

@@ -2,8 +2,8 @@
 // iPad の Safari は曲フォルダを選べないので、曲は ZIP か「DTX と音のファイルをまとめて選ぶ」で開く。最初に iPad での使い方を出す（閉じたら出さない）
 import { useEffect, useRef, useState } from 'react';
 import { tr, pl, locale } from '../../i18n';
-import { listRecent, newEmptySong, openFolderPicker, openPickedFiles, openRecent, removeRecentEntry } from '../../app/fileActions';
-import type { RecentEntry } from '../../fs/recent';
+import { listRecentSongs, newEmptySong, openFolderPicker, openPickedFiles, openRecent, removeRecentSong } from '../../app/fileActions';
+import type { RecentSong } from '../../fs/recent';
 import { IS_IOS, NO_FOLDER_PICK } from '../../store/device';
 import { useEditor } from '../../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../../store/localSongs';
@@ -58,7 +58,7 @@ function artColor(title: string): string {
 export function HomeTablet() {
   const folderInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
-  const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [recent, setRecent] = useState<RecentSong[]>([]);
   const [tips, setTips] = useState(() => IS_IOS && !tipsClosed());
   const hasDoc = useEditor((s) => s.doc.header.length > 0 || s.doc.chips.length > 0);
   const standalone = usePwa((s) => s.standalone);
@@ -69,7 +69,7 @@ export function HomeTablet() {
   const localVer = useLocalSongs((s) => s.ver);
 
   useEffect(() => {
-    void listRecent().then(setRecent);
+    void listRecentSongs().then(setRecent);
   }, [localVer]);
 
   const closeTips = () => {
@@ -231,44 +231,53 @@ export function HomeTablet() {
             <p className="lbl">{tr('まだありません。譜面を開くか作ると、ここに並びます。', 'Nothing yet. Charts you open or create will appear here.')}</p>
           ) : (
             <div className="th-recent">
-              {recent.map((r) => (
-                <div key={r.id} className="th-recent-item">
-                  <button className="th-recent-open" onClick={() => void openRecent(r)}>
-                    <span className="th-recent-art" style={{ background: artColor(r.title || r.fileName) }}>
-                      {Icon.drum(18)}
-                    </span>
-                    <span className="th-recent-text">
-                      <span className="th-recent-row">
-                        <b className="ellipsis">{r.title || tr('無題', 'Untitled')}</b>
-                        <span className="lbl th-recent-ago">{ago(r.updatedAt)}</span>
+              {recent.map((song) => {
+                // 曲ごとに1つ（いちばん新しい難易度を出す。未保存はどれかの難易度に保存していない変更があるとき）
+                const r = song.latest;
+                const unsaved = song.entries.filter((x) => !x.saved).map((x) => x.fileName);
+                return (
+                  <div key={song.key} className="th-recent-item">
+                    <button className="th-recent-open" onClick={() => void openRecent(r)}>
+                      <span className="th-recent-art" style={{ background: artColor(r.title || r.fileName) }}>
+                        {Icon.drum(18)}
                       </span>
-                      <span className="lbl ellipsis">{[r.artist || tr('アーティスト未設定', 'No artist'), r.bpm && `${r.bpm} BPM`].filter(Boolean).join(' · ')}</span>
-                      <span className="th-recent-pills">
-                        <span className="pill mono">
-                          {r.fileName.replace(/\.dtx$/i, '').toUpperCase()} {formatLevel(r.level)}
+                      <span className="th-recent-text">
+                        <span className="th-recent-row">
+                          <b className="ellipsis">{r.title || tr('無題', 'Untitled')}</b>
+                          <span className="lbl th-recent-ago">{ago(r.updatedAt)}</span>
                         </span>
-                        {r.local && <span className="pill local">{localBadge()}</span>}
-                        {r.drive && <span className="pill drive">Drive</span>}
-                        {!r.saved && <span className="pill warn">{tr('未保存', 'Unsaved')}</span>}
+                        <span className="lbl ellipsis">{[r.artist || tr('アーティスト未設定', 'No artist'), r.bpm && `${r.bpm} BPM`].filter(Boolean).join(' · ')}</span>
+                        <span className="th-recent-pills">
+                          <span className="pill mono">
+                            {r.fileName.replace(/\.dtx$/i, '').toUpperCase()} {formatLevel(r.level)}
+                          </span>
+                          {r.local && <span className="pill local">{localBadge()}</span>}
+                          {r.drive && <span className="pill drive">Drive</span>}
+                          {unsaved.length > 0 && (
+                            <span className="pill warn" title={tr(`保存していない変更: ${unsaved.join('、')}`, `Unsaved changes: ${unsaved.join(', ')}`)}>
+                              {tr('未保存', 'Unsaved')}
+                            </span>
+                          )}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                  <button
-                    className="t-ib th-recent-del"
-                    title={
-                      r.local
-                        ? tr(`一覧から消す（この曲の最後の1つなら、${localPlace()}に保存した音も消します）`, `Remove from the list (for the last one of this song, the audio kept in ${localPlace()} is removed too)`)
-                        : tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')
-                    }
-                    aria-label={tr('一覧から消す', 'Remove from the list')}
-                    onClick={async () => {
-                      if (await removeRecentEntry(r)) setRecent(await listRecent());
-                    }}
-                  >
-                    {Icon.close(16)}
-                  </button>
-                </div>
-              ))}
+                    </button>
+                    <button
+                      className="t-ib th-recent-del"
+                      title={
+                        r.local
+                          ? tr(`一覧から消す（${localPlace()}に保存した音も消します）`, `Remove from the list (the audio kept in ${localPlace()} is removed too)`)
+                          : tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')
+                      }
+                      aria-label={tr('一覧から消す', 'Remove from the list')}
+                      onClick={async () => {
+                        if (await removeRecentSong(song)) setRecent(await listRecentSongs());
+                      }}
+                    >
+                      {Icon.close(16)}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

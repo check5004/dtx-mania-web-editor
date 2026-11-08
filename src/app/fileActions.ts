@@ -48,7 +48,7 @@ import {
   type LocalSong,
 } from '../fs/local';
 import { songDir, writeSongFile } from '../fs/opfs';
-import { deleteRecent, listRecent, putRecent, trimRecent, type RecentEntry } from '../fs/recent';
+import { deleteRecent, getRecent, listRecent, listRecentSongs, putRecent, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
 import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
 import { useDevice } from '../store/device';
 import { createDoc, edit, isDirty, openDocument, prepareSounds, switchDocument, toast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
@@ -376,6 +376,7 @@ async function openLocalById(id: string) {
   const entries = (await listRecent()).filter((e) => e.local === id);
   if (entries.length) {
     await openRecentEntry(entries[0]);
+    await tellOtherDrafts();
     return;
   }
   const folder = await openLocalSong(id);
@@ -399,16 +400,12 @@ function toastLocalMissing() {
 }
 
 /**
- * 「最近の曲」の ✕。本体の曲は、その曲の最後の1つを消すときに本体のファイルも消す（確かめてから）
+ * 「最近の曲」の ✕（曲ごと。難易度ごとの控えもまとめて消す）。本体の曲は本体のファイルも消す（確かめてから）
  */
-export async function removeRecentEntry(e: RecentEntry): Promise<boolean> {
+export async function removeRecentSong(song: RecentSong): Promise<boolean> {
+  const e = song.latest;
   if (!e.local) {
-    await deleteRecent(e.id);
-    return true;
-  }
-  const others = (await listRecent()).filter((x) => x.local === e.local && x.id !== e.id);
-  if (others.length) {
-    await deleteRecent(e.id);
+    for (const x of song.entries) await deleteRecent(x.id);
     return true;
   }
   const rec = await getLocalSong(e.local);
@@ -546,7 +543,9 @@ export async function switchDifficulty(fileName: string) {
   const seq = ++switchSeq;
   // 保存していない変更は、いまの内容を「最近の曲」の自動保存に残してから切り替える（確認で伝えたとおりに）
   if (isDirty(get())) await autosaveNow();
-  await openDtxFile(folder, f, undefined, undefined, undefined, { stale: () => seq !== switchSeq || get().folder !== folder });
+  // 切り替える難易度に保存していない続き（自動保存）があれば、そこから開く（「最近の曲」は曲ごとに1つなので、ほかの難易度の続きはここで開く）
+  const resume = await draftFor(folder, f);
+  await openDtxFile(folder, f, undefined, resume?.text, resume?.sidecar, { stale: () => seq !== switchSeq || get().folder !== folder });
 }
 
 /** 落としたファイル（DTX・音声）から開く */
@@ -1137,11 +1136,52 @@ export function startAutosave() {
   };
 }
 
-export { listRecent };
+export { listRecent, listRecentSongs };
 
 export async function openRecent(e: RecentEntry) {
   if (!(await confirmDiscard())) return;
   await openRecentEntry(e);
+  await tellOtherDrafts();
+}
+
+/**
+ * 難易度の保存していない続き（自動保存の控え）。譜面のファイルのほうが新しい（AI難易度生成で反映し直した・ほかで書き換えた）
+ * ときは、古い続きなので使わない
+ */
+async function draftFor(folder: SongFolder, file: FolderFile): Promise<RecentEntry | undefined> {
+  const e = await getRecent(recentIdFor(folder, file.name));
+  if (!e || e.saved) return undefined;
+  try {
+    return e.updatedAt >= (await file.getFile()).lastModified ? e : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 「最近の曲」は曲ごとに1つ（最後の難易度）なので、ほかの難易度に保存していない続きがあれば、
+ * 難易度を切り替えるとそこから開けることを知らせる
+ */
+async function tellOtherDrafts() {
+  const s = get();
+  const folder = s.folder;
+  if (s.screen !== 'editor' || !folder) return;
+  const labels: string[] = [];
+  for (const sb of s.meta.siblings) {
+    if (sb.file.toLowerCase() === s.meta.fileName.toLowerCase()) continue;
+    const f = findFile(folder, sb.file);
+    if (f && (await draftFor(folder, f))) labels.push(sb.label);
+  }
+  if (!labels.length || get().folder !== folder) return;
+  const names = labels.join(tr('・', ', '));
+  toast(
+    tr(
+      `${names} に保存していない変更があります。上のバーで難易度を切り替えると、その続きから開きます`,
+      `${names} ${labels.length === 1 ? 'has' : 'have'} unsaved changes. Switch difficulty in the top bar to continue from there`,
+    ),
+    'info',
+    8000,
+  );
 }
 
 /** 曲フォルダの中で、自動保存した譜面を開く（DTX がまだフォルダに無い新しい曲は、控えの本文から） */
