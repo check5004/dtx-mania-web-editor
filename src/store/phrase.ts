@@ -10,6 +10,7 @@ import { hasAiKey, runAi } from './ai';
 import { aiOnsets } from './assist';
 import { bgmSource, tempoOf } from './derived';
 import { edit, toast, useEditor, wavForChannel } from './editor';
+import { humanMeasure, markAuto } from './provenance';
 
 export interface PhraseState {
   open: boolean;
@@ -88,6 +89,7 @@ export async function makeCandidates(kind: 'fill' | 'rhythm') {
       targetLevel: levelOfField(s.doc.fields['DLEVEL']),
       onsets: onsets && bgm ? onsets : null,
       offsetSec,
+      human: humanMeasure(s.doc),
     });
     const r = await runAi<{ candidates?: unknown[] }>('phrase', { ...phrasePrompt(ctx), schema: phraseSchema(), maxTokens: 3000, signal: ac.signal });
     if (!r) {
@@ -133,6 +135,8 @@ export function applyCandidate() {
     for (const n of c.notes) d.chips.push({ id: d.nextId++, ch: n.ch, m: n.m, f: { n: n.f.n, d: n.f.d }, v: wavForChannel(d, n.ch) });
   });
   if (ok) {
+    // 自動で入れた小節として覚える（AI の手本にしない。手で直すと作者の小節になる）
+    markAuto(useEditor.getState().doc, Array.from({ length: to - from + 1 }, (_, i) => from + i));
     toast(tr(`「${c.name}」を置きました（Ctrl+Z で戻せます）`, `Placed "${c.name}" (undo with Ctrl+Z)`), 'ok');
     set({ cands: [], index: 0 });
   }

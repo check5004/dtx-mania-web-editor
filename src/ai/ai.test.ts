@@ -9,7 +9,7 @@ import { chartHash } from '../dtx/origin';
 import { cleanJudgement, cleanPlan, sectionSpans } from './judge';
 import { buildChatBody, isChatModel, missingKeys, parseJsonLoose, parseModels, repairPrompt } from './openrouter';
 import { cleanSongInfo, songInfoSchema } from './songInfo';
-import { decodeCandidates, enforcePlayable, measureGrid, ruleCandidates } from './phrase';
+import { buildContext, decodeCandidates, enforcePlayable, measureGrid, phrasePrompt, ruleCandidates } from './phrase';
 import { estimateCost, meetsNeeds, modelInfo, taskDef } from './tasks';
 import { frac } from '../dtx/fraction';
 
@@ -119,6 +119,15 @@ describe('フレーズ候補', () => {
       { ch: CH.HHO, m: 0, f: frac(0) },
     ]);
     expect(r.map((n) => n.ch).sort()).toEqual([CH.HHO, CH.LBD].sort());
+  });
+  it('自動で入れたまま確かめていない前後の小節は、譜面を見せない', () => {
+    const d = doc(beat8(6));
+    const ctx = buildContext(d, buildTempoMap(d), { kind: 'fill', from: 4, to: 4, instruction: '', targetLevel: null, onsets: null, offsetSec: 0, human: (m) => m !== 3 });
+    expect(ctx.measures.find((m) => m.m === 3)).toMatchObject({ grid: [], auto: true });
+    expect(ctx.measures.find((m) => m.m === 2)?.grid.length).toBeGreaterThan(0);
+    // 範囲の中は自動で入れた小節でも見せる（置き換える中身）
+    expect(buildContext(d, buildTempoMap(d), { kind: 'fill', from: 3, to: 3, instruction: '', targetLevel: null, onsets: null, offsetSec: 0, human: (m) => m !== 3 }).measures.find((m) => m.m === 3)?.grid.length).toBeGreaterThan(0);
+    expect(phrasePrompt(ctx).user).toContain('小節 3 （前） 4拍\n（自動で入れたまま作者が確かめていないので、譜面は省きます）');
   });
   it('キーが無いときは直前の小節の複製を出す', () => {
     const d = doc(beat8(2));

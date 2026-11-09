@@ -52,12 +52,12 @@ export const TASKS: readonly TaskDef[] = [
   ),
   task(
     // 2026-11-03 隠した17小節の精度テストで GPT-6 Luna より当たり（作者の譜面との一致 0.86 対 0.74）、速い（約6秒 対 約20秒）
-    { id: 'measure', needs: { json: true }, model: 'openai/gpt-6.1-terra', effort: 'low', est: { in: 3000, out: 600 } },
+    { id: 'measure', needs: { json: true }, model: 'openai/gpt-6.1-terra', effort: 'low', est: { in: 4500, out: 600 } },
     {
       label: ['小節の生成', 'Measure generation'],
       sends: [
-        '前後4小節と似ている小節のチップ・原曲の打点の数値・前後の小節で使っているレーンの割合',
-        'Chips in the 4 measures before and after and in similar measures, hit-strength numbers from the original, and lane usage nearby',
+        '前後の小節と手本（作者が書いた小節）のチップ・原曲の分析（採譜の確からしさ・ドラム強調スペクトルの帯）の数値・読み方の目安・前後の小節で使っているレーンの割合',
+        'Chips in nearby measures and in example measures you wrote, analysis numbers from the original (detection confidence and drum-emphasis spectrum bands), how you read them, and lane usage nearby',
       ],
       why: ['耳コピの精度テストで安いモデルより当たり、速い（約6秒）', 'More accurate than cheaper models in our transcription test, and fast (about 6 s)'],
     },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { binFreq, computeSpectro, renderSpectro, spectroDb, specFreq, specPos, SPEC_BINS, SPEC_RATE, type SpectroData } from './spectro';
+import { binFreq, computeSpectro, renderSpectro, spectroDb, spectroZones, specFreq, specPos, SPEC_BINS, SPEC_RATE, type SpectroData } from './spectro';
 import { eightBeat, synth } from './testSignal';
 import { SPEC_ZONES, zoneLut } from '../ui/specColors';
 
@@ -117,5 +117,34 @@ describe('ドラム向けのスペクトル', () => {
     const bright = zoneLut(SPEC_BINS, undefined, undefined, { gain: 2 });
     expect(bright[(10 * 256 + 60) * 4 + 1]).toBeGreaterThan(lut[(10 * 256 + 60) * 4 + 1]);
     expect(SPEC_ZONES.map((z) => z.listen)).toEqual(['low', 'mid', 'mid', 'mid', 'high']);
+  });
+});
+
+describe('帯ごとの明るさ（AI に渡す）', () => {
+  it('キックの帯はキックで、金物の帯はハイハットで明るく、ほかの所は暗い', () => {
+    const hits = eightBeat(120, 4);
+    const sp = computeSpectro([synth(hits, SR, 9)], SR, 'drum');
+    const z = spectroZones(sp, [
+      { from: 30, to: 120 },
+      { from: 5000, to: 20000 },
+    ]);
+    expect(z.frames).toBe(sp.frames);
+    expect(z.data.length).toBe(sp.frames * 2);
+    // 打った時刻の前後（-20ms〜+40ms）でいちばん明るい所
+    const at = (t: number, k: number) => {
+      const f0 = Math.round(t * SPEC_RATE);
+      let mx = 0;
+      for (let f = f0 - 4; f <= f0 + 8; f++) mx = Math.max(mx, z.data[f * 2 + k]);
+      return mx;
+    };
+    const mean = (a: number[]) => a.reduce((p, q) => p + q, 0) / a.length;
+    const kicks = hits.filter((h) => h.kind === 'kick');
+    const snares = hits.filter((h) => h.kind === 'snare');
+    const hats = hits.filter((h) => h.kind === 'hat');
+    expect(mean(kicks.map((h) => at(h.t, 0)))).toBeGreaterThan(200);
+    expect(mean(snares.map((h) => at(h.t, 0)))).toBeLessThan(160);
+    expect(mean(hats.map((h) => at(h.t, 1)))).toBeGreaterThan(180);
+    // 8分のハイハットのあいだ（16分の裏）は暗い
+    expect(mean(hats.map((h) => at(h.t + 0.125, 1)))).toBeLessThan(60);
   });
 });

@@ -224,6 +224,12 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
           <span title={`${cand.reason}\n\n${sourceTip(cand.source)}`}>
             <b>{cand.name}</b>
             {cand.reason && <span className="gen-reason"> · {cand.reason}</span>}
+            {cand.basis !== undefined && (
+              <span className="gen-reason" title={tr('AI がこの小節の譜面を土台にして、原曲の分析が違う所だけ直した案です', 'The AI started from this measure and changed only where the analysis of the original differs')}>
+                {' · '}
+                {tr(`小節 ${toMeasure(cand.basis)} が土台`, `Based on measure ${toMeasure(cand.basis)}`)}
+              </span>
+            )}
           </span>
         ) : gs.ai === 'loading' ? (
           <span>{tr('AIが案を考えています…（採譜も写せる小節も見つかりませんでした）', 'The AI is working on an idea… (no detected hits or measures to copy were found)')}</span>

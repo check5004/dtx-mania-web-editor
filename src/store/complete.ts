@@ -26,6 +26,7 @@ import { bgmSource, tempoOf } from './derived';
 import { edit, toast, useEditor, wavForChannel } from './editor';
 import { levelOfField } from './guideline';
 import { usePhrase } from './phrase';
+import { humanMeasure, markAuto } from './provenance';
 import { useVel } from './velocity';
 
 export type CompleteAmount = 'few' | 'normal' | 'many';
@@ -518,7 +519,7 @@ export function acceptGhost(count?: number): boolean {
     n === 1
       ? tr(`TAB補完で小節 ${toMeasure(from)} を入れる`, `Tab completion: fill measure ${toMeasure(from)}`)
       : tr(`TAB補完で小節 ${toMeasure(from)}〜${toMeasure(to)} を入れる`, `Tab completion: fill measures ${toMeasure(from)}–${toMeasure(to)}`);
-  edit(label, (d) => {
+  const ok = edit(label, (d) => {
     for (let i = 0; i < n; i++) {
       for (const c of g.measures[i]) {
         // 写した元の音（ベロシティ違いも）のまま。AI の候補はレーンの音
@@ -527,6 +528,8 @@ export function acceptGhost(count?: number): boolean {
       }
     }
   });
+  // 自動で入れた小節として覚える（AI の手本にしない。手で直すと作者の小節になる）
+  if (ok) markAuto(useEditor.getState().doc, Array.from({ length: n }, (_, i) => from + i));
   // 入れた小節の次から続ける（最後に入れた小節が空でも、その次から）
   revealAfter = { from, len: n };
   schedule(to + 1);
@@ -627,6 +630,7 @@ export async function askAi() {
       targetLevel: levelOfField(doc.fields['DLEVEL']),
       onsets: onsets && bgm ? onsets : null,
       offsetSec: bgm?.sec ?? 0,
+      human: humanMeasure(doc),
     });
     const r = await runAi<Parameters<typeof decodeCandidates>[0]>('phrase', { ...phrasePrompt(ctx), schema: phraseSchema(), maxTokens: 3000, signal: ac.signal });
     if (aiAbort !== ac) return;

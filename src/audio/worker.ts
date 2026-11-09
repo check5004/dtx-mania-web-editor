@@ -3,7 +3,7 @@ import { tr, setLang, type Lang } from '../i18n';
 import { alignFeatures, buildRefIndex, PROBE_SEC, ALIGN_FPS, probeFine, probeLocal, searchProbe, type AlignFeat, type RefIndex } from './align';
 import { analyzeAudio } from './analysis';
 import { computeFrameFeatures } from './features';
-import { renderSpectro, spectroDb, type SpecMode } from './spectro';
+import { renderSpectro, spectroDb, spectroZones, type SpecMode } from './spectro';
 import { wsola } from './stretch';
 
 export type WorkerRequest =
@@ -12,6 +12,8 @@ export type WorkerRequest =
   | { id: number; type: 'load'; key: string; channels: Float32Array[]; sr: number }
   | { id: number; type: 'analyze'; key: string }
   | { id: number; type: 'spectro'; key: string; mode: SpecMode }
+  /** ドラム強調のスペクトルの帯ごとの明るさ（AI に渡す） */
+  | { id: number; type: 'zones'; key: string; zones: { from: number; to: number }[] }
   | { id: number; type: 'features'; key: string }
   | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number }
   | { id: number; type: 'alignRef'; key: string }
@@ -63,14 +65,15 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       post({ id: req.id, ok: true, result: r }, transfer as Transferable[]);
       return;
     }
-    if (req.type === 'spectro') {
+    if (req.type === 'spectro' || req.type === 'zones') {
       let db = specCache.get(req.key);
       if (!db) {
         db = spectroDb(src.channels, src.sr, (p) => post({ id: req.id, progress: p * 0.8 }));
         specCache.set(req.key, db);
         while (specCache.size > 2) specCache.delete(specCache.keys().next().value!);
       }
-      const r = renderSpectro(db.db, db.frames, db.fHi, req.mode);
+      const sp = renderSpectro(db.db, db.frames, db.fHi, req.type === 'zones' ? 'drum' : req.mode);
+      const r = req.type === 'zones' ? spectroZones(sp, req.zones) : sp;
       post({ id: req.id, ok: true, result: r }, [r.data.buffer as ArrayBuffer]);
       return;
     }

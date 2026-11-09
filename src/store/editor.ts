@@ -33,7 +33,7 @@ import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
 import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssistForDoc, stretchReady, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
-import { loadSidecar, sameSongSidecar, sameStemFiles, useSidecar, withListening, type SectionMark, type SidecarData, type TempoAnchor } from './sidecar';
+import { loadSidecar, sameSongSidecar, sameStemFiles, useSidecar, withListening, type SidecarData } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
 
 enablePatches();
@@ -532,13 +532,14 @@ export function duplicatePrevMeasure(m: number) {
   });
 }
 
-/** m 小節目の前に n 小節の空の小節を入れる（セクションとテンポのアンカーもずらす） */
+/** m 小節目の前に n 小節の空の小節を入れる（セクション・テンポのアンカー・自動で入れた小節の印もずらす） */
 export function insertMeasures(m: number, n = 1): boolean {
   const before = useSidecar.getState();
   const sections = before.sections.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
   const anchors = before.anchors.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
+  const auto = before.auto.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
   let ok = false;
-  const side = sideForMeasures(before.sections, before.anchors, sections, anchors);
+  const side = sideForMeasures(before, { sections, anchors, auto });
   edit(tr(`小節 ${toMeasure(m)} の前に ${n} 小節を挿入`, `Insert ${n} ${pl(n, 'measure')} before measure ${toMeasure(m)}`), (d) => {
     ok = opInsertMeasures(d, m, n);
   }, { side });
@@ -558,8 +559,12 @@ export function deleteMeasures(m: number, n = 1): DeleteResult {
     const to = shiftMeasure(x.m, m, n, 'delete');
     return to === null ? [] : [{ ...x, m: to }];
   });
+  const auto = before.auto.flatMap((x) => {
+    const to = shiftMeasure(x.m, m, n, 'delete');
+    return to === null ? [] : [{ ...x, m: to }];
+  });
   let res: DeleteResult = { removed: 0, kept: 0 };
-  const side = sideForMeasures(before.sections, before.anchors, sections, anchors);
+  const side = sideForMeasures(before, { sections, anchors, auto });
   const changed = edit(tr(`小節 ${toMeasure(m)}${n > 1 ? `〜${toMeasure(m + n - 1)}` : ''} を削除`, `Delete measure${n > 1 ? 's' : ''} ${toMeasure(m)}${n > 1 ? `–${toMeasure(m + n - 1)}` : ''}`), (d) => {
     res = opDeleteMeasures(d, m, n);
   }, { side });
@@ -567,14 +572,17 @@ export function deleteMeasures(m: number, n = 1): DeleteResult {
   return res;
 }
 
-function sideForMeasures(s0: SectionMark[], a0: TempoAnchor[], s1: SectionMark[], a1: TempoAnchor[]): NonNullable<HistoryEntry['side']> {
-  const same = JSON.stringify([s0, a0]) === JSON.stringify([s1, a1]);
+type MeasureMarks = Pick<SidecarData, 'sections' | 'anchors' | 'auto'>;
+
+function sideForMeasures(before: MeasureMarks, after: MeasureMarks): NonNullable<HistoryEntry['side']> {
+  const b: MeasureMarks = { sections: before.sections, anchors: before.anchors, auto: before.auto };
+  const same = JSON.stringify(b) === JSON.stringify(after);
   return {
     undo: () => {
-      if (!same) useSidecar.setState({ sections: s0, anchors: a0, dirty: true });
+      if (!same) useSidecar.setState({ ...b, dirty: true });
     },
     redo: () => {
-      if (!same) useSidecar.setState({ sections: s1, anchors: a1, dirty: true });
+      if (!same) useSidecar.setState({ ...after, dirty: true });
     },
   };
 }

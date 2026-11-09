@@ -53,8 +53,8 @@ function step16(tempo: TempoMap, m: number, f: { n: number; d: number }): number
   return Math.round((f.n / f.d) * tempo.barLen(m) * 16);
 }
 
-/** 小節 from〜to の前後 span 小節の譜面から、作者の書き方を数える（範囲の中は見ない） */
-export function learnStyle(doc: DtxDoc, tempo: TempoMap, from: number, to: number, span = 8): Style {
+/** 小節 from〜to の前後 span 小節の譜面から、作者の書き方を数える（範囲の中と、use が false の小節は見ない） */
+export function learnStyle(doc: DtxDoc, tempo: TempoMap, from: number, to: number, span = 8, use: (m: number) => boolean = () => true): Style {
   const pattern = Object.fromEntries(DRUM_CLASSES.map((c) => [c, new Map()])) as Record<DrumClass, Votes>;
   const accent = Object.fromEntries(DRUM_CLASSES.map((c) => [c, new Map()])) as Record<DrumClass, Votes>;
   const hhAt = new Map<number, Votes>();
@@ -62,7 +62,7 @@ export function learnStyle(doc: DtxDoc, tempo: TempoMap, from: number, to: numbe
   const per = new Map<number, Map<number, number>>();
   for (const c of doc.chips) {
     if (c.m >= from && c.m <= to) continue;
-    if (c.m < from - span || c.m > to + span) continue;
+    if (c.m < from - span || c.m > to + span || !use(c.m)) continue;
     const d = drumChannel(c.ch);
     if (!d || d.kind !== 'normal') continue;
     let mm = per.get(c.m);

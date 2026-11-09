@@ -13,6 +13,7 @@ import { drumHitsByClass, setDrumSource } from './drums';
 import type { OnsetRows } from '../ai/phrase';
 import { snapToGrid } from '../edit/ops';
 import { edit, toast, useEditor } from './editor';
+import { markAuto } from './provenance';
 
 export type { LoopBeats, LoopMark } from '../assist/loopPoints';
 
@@ -518,9 +519,11 @@ export function applySimilar(targets?: number[]): number {
   let n = 0;
   applyingSimilar = true;
   try {
-    edit(tr(`似た小節 ${to.length} 個にまとめて反映`, `Apply to ${to.length} similar ${pl(to.length, 'measure')}`), (d) => {
+    const ok = edit(tr(`似た小節 ${to.length} 個にまとめて反映`, `Apply to ${to.length} similar ${pl(to.length, 'measure')}`), (d) => {
       n = copyMeasureInto(d, pin.base, to);
     });
+    // 写した先は自動で入れた小節として覚える（直した元の小節は作者のもの）
+    if (ok) markAuto(useEditor.getState().doc, to.filter((m) => m !== pin.base));
   } finally {
     applyingSimilar = false;
   }

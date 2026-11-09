@@ -68,6 +68,15 @@ export interface YoutubeRef {
   auto?: { kind: 'const' | 'drift' | 'edit'; conf: number; at: number };
 }
 
+/**
+ * 自動で入れた小節（TAB補完・小節の生成・フレーズ候補・似た小節へのまとめての反映）と、入れたときのドラムの中身の印。
+ * 中身が印のままなら「自動で入れたまま作者が確かめていない小節」として、AI の手本にしない（store/provenance）
+ */
+export interface AutoMark {
+  m: number;
+  sig: string;
+}
+
 export interface SidecarData {
   sections: SectionMark[];
   /** セクション名 → 色（同じ名前は同じ色） */
@@ -79,6 +88,8 @@ export interface SidecarData {
   /** 解析（波形・原曲の打点・BPM推定）に使うステム。null なら原曲（BGM） */
   analysisStem: string | null;
   mix: SavedMix | null;
+  /** 自動で入れた小節 */
+  auto: AutoMark[];
 }
 
 export interface SidecarState extends SidecarData {
@@ -88,7 +99,7 @@ export interface SidecarState extends SidecarData {
   loadSeq: number;
 }
 
-export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null });
+export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [] });
 
 export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, loadSeq: 0 }));
 
@@ -157,7 +168,8 @@ export function sameStemFiles(a: readonly StemTrack[], b: readonly StemTrack[]):
  */
 export function sameSongSidecar(next: SidecarData | null): SidecarData {
   const cur = sidecarData();
-  if (!next) return cur;
+  // 自動で入れた小節の印は譜面ごと（別の難易度へは持っていかない）
+  if (!next) return { ...cur, auto: [] };
   const out = { ...next };
   if (out.stems.length === 0 && cur.stems.length > 0) {
     out.stems = cur.stems;
@@ -191,12 +203,17 @@ export function markSidecarSaved() {
 
 export function sidecarData(): SidecarData {
   const s = get();
-  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix };
+  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto };
 }
 
 /** 書く中身が無いか（聴く音量だけなら、作業ファイルを新しく作るほどではない） */
 export function sidecarIsEmpty(d: SidecarData = sidecarData()): boolean {
-  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0;
+  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0;
+}
+
+/** 自動で入れた小節の印を書き換える */
+export function setAutoMarks(auto: AutoMark[]) {
+  touch({ auto });
 }
 
 /** ステムを書き換える（音量・パン・ずれは保存する変更、ミュート・ソロは聴くためだけなので quiet） */
@@ -294,6 +311,17 @@ export function parseSidecar(text: string): SidecarData | null {
       out.stems = renameOldOtherStems(out.stems);
     }
     if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
+    if (Array.isArray(j.auto)) {
+      const seen = new Set<number>();
+      for (const a of j.auto) {
+        if (!a || !Number.isFinite(a.m) || a.m < 0 || typeof a.sig !== 'string' || !a.sig || a.sig.length > 32) continue;
+        const m = Math.trunc(a.m);
+        if (seen.has(m)) continue;
+        seen.add(m);
+        out.auto.push({ m, sig: a.sig });
+      }
+      out.auto.sort((a, b) => a.m - b.m);
+    }
     if (j.mix && typeof j.mix === 'object') {
       const m = j.mix as Partial<SavedMix>;
       const v = (x: unknown, def: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(1.5, x)) : def);

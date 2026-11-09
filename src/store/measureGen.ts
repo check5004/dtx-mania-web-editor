@@ -25,6 +25,8 @@ import { drumsAudible, readyDrums, useDrums } from './drums';
 import { addPlayDocTransform, edit, prepareSounds, refreshPlayback, toast, useEditor, wavForChannel } from './editor';
 import { levelOfField } from './guideline';
 import { closePhrase, usePhrase } from './phrase';
+import { humanMeasure, markAuto } from './provenance';
+import { aiAnalysis } from './aiAnalysis';
 import { sectionAt, useSidecar } from './sidecar';
 
 export type GenSource = 'ai' | 'draft' | 'copy';
@@ -42,6 +44,8 @@ export interface GenCandidate {
   src?: number;
   /** TAB補完の見込み（写す） */
   score?: number;
+  /** AI が土台にした手本の小節（AI） */
+  basis?: number;
 }
 
 export interface MeasureGenState {
@@ -222,25 +226,6 @@ async function runGenAi(instruction = '', focus = false) {
     set({ ai: 'nokey' });
     return;
   }
-  const doc = useEditor.getState().doc;
-  const tempo = tempoOf(doc);
-  // ドラム抜きの BGM の打点は、ドラムの手がかりにならない（ほかの楽器の音だけ）ので送らない
-  const drumless = drumsAudible() === false;
-  const onsets = drumless ? null : aiOnsets();
-  const bgm = bgmSource(doc);
-  const sections = useSidecar.getState().sections;
-  const ctx = buildMeasureContext(doc, tempo, {
-    from: g.from,
-    to: g.to,
-    onsets: onsets && bgm ? onsets : null,
-    offsetSec: bgm?.sec ?? 0,
-    level: levelOfField(doc.fields['DLEVEL']),
-    style: styleLines(learnStyle(doc, tempo, g.from, g.to)),
-    sectionOf: (m) => sectionAt(sections, m)?.name ?? null,
-    refs: g.cands.filter((c) => c.source === 'copy' && c.src !== undefined).map((c) => ({ src: c.src!, score: c.score ?? null })),
-    drumless,
-    instruction,
-  });
   cancelAi();
   const ac = new AbortController();
   aiAbort = ac;
@@ -248,6 +233,33 @@ async function runGenAi(instruction = '', focus = false) {
   const range = { from: g.from, to: g.to };
   set({ ai: 'loading', aiError: null });
   try {
+    // 原曲の分析（採譜・ドラム強調スペクトル）。スペクトルの帯は初めてのときだけ作るのを待つ
+    const analysis = await aiAnalysis(useEditor.getState().doc);
+    if (aiAbort !== ac) return;
+    const doc = useEditor.getState().doc;
+    const tempo = tempoOf(doc);
+    // ドラム抜きの BGM の打点は、ドラムの手がかりにならない（ほかの楽器の音だけ）ので送らない
+    const drumless = drumsAudible() === false;
+    const onsets = drumless ? null : aiOnsets();
+    const bgm = bgmSource(doc);
+    const sections = useSidecar.getState().sections;
+    // 自動で入れたまま作者が確かめていない小節は、手本・前後の譜面・書き方の要約に使わない
+    const human = humanMeasure(doc);
+    const cur0 = get();
+    const ctx = buildMeasureContext(doc, tempo, {
+      from: range.from,
+      to: range.to,
+      onsets: onsets && bgm ? onsets : null,
+      offsetSec: bgm?.sec ?? 0,
+      level: levelOfField(doc.fields['DLEVEL']),
+      style: styleLines(learnStyle(doc, tempo, range.from, range.to, 8, human)),
+      sectionOf: (m) => sectionAt(sections, m)?.name ?? null,
+      refs: cur0.cands.filter((c) => c.source === 'copy' && c.src !== undefined).map((c) => ({ src: c.src!, score: c.score ?? null })),
+      drumless,
+      instruction,
+      analysis,
+      human,
+    });
     const r = await runAi<unknown>('measure', { ...measurePrompt(ctx), schema: measureSchema(), maxTokens: 3000, signal: ac.signal });
     if (aiAbort !== ac) return;
     aiAbort = null;
@@ -263,9 +275,12 @@ async function runGenAi(instruction = '', focus = false) {
       return;
     }
     const nowDoc = useEditor.getState().doc;
+    const examples = new Set(ctx.examples.map((e) => e.m));
     const ai: GenCandidate[] = pcs.map((pc, i) => {
       const notes = pc.notes.map((n) => ({ ch: n.ch, m: n.m, f: n.f }));
-      return { id: `ai:${seq}:${i}`, source: 'ai', name: pc.name, reason: pc.reason, notes, fit: heardFit(nowDoc, notes, range.from, range.to) };
+      // 土台にした手本の小節（手本に出した小節のときだけ）
+      const basis = pc.basis !== undefined && pc.basis !== null && examples.has(pc.basis) ? pc.basis : undefined;
+      return { id: `ai:${seq}:${i}`, source: 'ai', name: pc.name, reason: pc.reason, notes, fit: heardFit(nowDoc, notes, range.from, range.to), ...(basis !== undefined ? { basis } : {}) };
     });
     const cands = arrange(
       ai,
@@ -452,7 +467,12 @@ export function applyMeasureGen(o: { next?: boolean } = {}): boolean {
   const fieldsBefore = Object.keys(useEditor.getState().doc.fields).length;
   const counts = `+${v.plan.add.length}${v.plan.remove.length ? ` −${v.plan.remove.length}` : ''}`;
   const label = tr(`${range} に${genSourceLabel(v.cand)}の案「${v.cand.name}」を入れる（${counts}）`, `Insert ${genSourceLabel(v.cand)} idea "${v.cand.name}" into ${range} (${counts})`);
+  // 変わる小節（足す・消すチップのある小節）を、自動で入れた小節として覚える
+  const before = useEditor.getState().doc;
+  const removed = new Set(v.plan.remove);
+  const touched = new Set([...v.plan.add.map((n) => n.m), ...before.chips.filter((c) => removed.has(c.id)).map((c) => c.m)]);
   const ok = edit(label, (d) => applyMerge(d, v.plan, wavForChannel));
+  if (ok) markAuto(useEditor.getState().doc, touched);
   closeMeasureGen();
   if (Object.keys(useEditor.getState().doc.fields).length !== fieldsBefore) void prepareSounds();
   if (ok) toast(tr(`${range} に「${v.cand.name}」を入れました（Ctrl+Z で戻せます）`, `Inserted "${v.cand.name}" into ${range} (undo with Ctrl+Z)`), 'ok');

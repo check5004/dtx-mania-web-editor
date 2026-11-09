@@ -3,7 +3,7 @@ import { tr, getLang, subscribeLang } from '../i18n';
 import type { AlignSearch, LocalSim } from './align';
 import type { AnalysisData } from './analysis';
 import type { FrameFeatures } from './features';
-import type { SpecMode, SpectroData } from './spectro';
+import type { SpecMode, SpectroData, SpectroZones } from './spectro';
 
 export type { SpectroData };
 
@@ -76,6 +76,11 @@ export function analyze(key: string, progress?: (p: number) => void): Promise<An
 /** ドラムの耳コピ向けのスペクトル（同じ音で見せ方だけ変えるときは速い） */
 export function spectrogram(key: string, mode: SpecMode, progress?: (p: number) => void): Promise<SpectroData> {
   return call<SpectroData>({ type: 'spectro', key, mode }, [], progress);
+}
+
+/** ドラム強調のスペクトルの帯ごとの明るさ（AI に渡す。スペクトルを作ってあれば速い） */
+export function spectroZones(key: string, zones: readonly { from: number; to: number }[], progress?: (p: number) => void): Promise<SpectroZones> {
+  return call<SpectroZones>({ type: 'zones', key, zones: zones.map(({ from, to }) => ({ from, to })) }, [], progress);
 }
 
 /** 小節どうしの聞こえ方を比べるための特徴（TAB補完の「曲の構造」） */

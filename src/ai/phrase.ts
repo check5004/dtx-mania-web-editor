@@ -38,6 +38,8 @@ export interface PhraseCandidate {
   reason: string;
   source: 'ai' | 'similar' | 'prev';
   notes: PhraseNote[];
+  /** 小節の生成：AI が土台にした手本の小節（無ければ null） */
+  basis?: number | null;
 }
 
 /** 小節の16分の数（4/4 なら16、3/4 なら12） */
@@ -150,12 +152,12 @@ function cellOf(layout: MeasureLayout, i: number, p: number): { i: number; k: nu
 }
 
 /** 行を「x-x-|xxx|…」の文字にする */
-function joinRow(cells: (string | number)[][]): string {
+export function joinRow(cells: (string | number)[][]): string {
   return cells.map((c) => c.join('')).join('|');
 }
 
-/** 小節のドラムを「レーン: x-x-|x-x-|…」の行にする（拍ごとの格子。layout を省くとチップから決める） */
-export function measureGrid(doc: DtxDoc, tempo: TempoMap, m: number, layout: MeasureLayout = measureLayout(doc, tempo, m)): { lines: string[]; rounded: boolean } {
+/** 小節のドラムを、レーンごとの拍ごとの格子（'x' 打つ・'-' 休み）にする。layout を省くとチップから決める */
+export function measureGridCells(doc: DtxDoc, tempo: TempoMap, m: number, layout: MeasureLayout = measureLayout(doc, tempo, m)): { rows: Map<string, string[][]>; rounded: boolean } {
   const rows = new Map<string, string[][]>();
   let rounded = layout.rounded;
   for (const c of gridChips(doc, m)) {
@@ -169,6 +171,12 @@ export function measureGrid(doc: DtxDoc, tempo: TempoMap, m: number, layout: Mea
     if (!r) rows.set(c.code, (r = layout.cells.map((n) => Array(n).fill('-'))));
     r[at.i][at.k] = 'x';
   }
+  return { rows, rounded };
+}
+
+/** 小節のドラムを「レーン: x-x-|x-x-|…」の行にする（拍ごとの格子。layout を省くとチップから決める） */
+export function measureGrid(doc: DtxDoc, tempo: TempoMap, m: number, layout: MeasureLayout = measureLayout(doc, tempo, m)): { lines: string[]; rounded: boolean } {
+  const { rows, rounded } = measureGridCells(doc, tempo, m, layout);
   const lines = GRID_LANES.filter((l) => rows.has(l.code)).map((l) => `${l.code}: ${joinRow(rows.get(l.code)!)}`);
   return { lines, rounded };
 }
@@ -223,22 +231,37 @@ export interface PhraseContext {
   bpm: number;
   targetLevel: number | null;
   instruction: string;
-  /** 範囲と前後4小節の格子（beats は小節の長さの書き方「4拍」など） */
-  measures: { m: number; inRange: boolean; beats: string; grid: string[]; onsets: string[] | null }[];
+  /** 範囲と前後4小節の格子（beats は小節の長さの書き方「4拍」など）。auto は自動で入れたまま作者が確かめていない小節（譜面を見せない） */
+  measures: { m: number; inRange: boolean; beats: string; grid: string[]; onsets: string[] | null; auto?: boolean }[];
   rounded: boolean;
   /** 原曲の打点の種類（採譜モデルの5種か、3帯域か） */
   onsetKind?: 'drums' | 'bands';
 }
 
-export function buildContext(doc: DtxDoc, tempo: TempoMap, o: { kind: 'fill' | 'rhythm'; from: number; to: number; instruction: string; targetLevel: number | null; onsets: OnsetRows | null; offsetSec: number }): PhraseContext {
+export function buildContext(
+  doc: DtxDoc,
+  tempo: TempoMap,
+  o: {
+    kind: 'fill' | 'rhythm';
+    from: number;
+    to: number;
+    instruction: string;
+    targetLevel: number | null;
+    onsets: OnsetRows | null;
+    offsetSec: number;
+    /** 作者が書いた（確かめた）小節か。自動で入れたままの前後の小節は譜面を見せない（省くとみな作者のもの） */
+    human?: (m: number) => boolean;
+  },
+): PhraseContext {
   const measures: PhraseContext['measures'] = [];
   let rounded = false;
   for (let m = Math.max(0, o.from - 4); m <= o.to + 4; m++) {
     const inRange = m >= o.from && m <= o.to;
     const layout = measureLayout(doc, tempo, m, { onsets: o.onsets, offsetSec: o.offsetSec, fit: inRange });
     const g = measureGrid(doc, tempo, m, layout);
-    rounded ||= g.rounded;
-    measures.push({ m, inRange, beats: beatsLabel(layout.beats), grid: g.lines, onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec, layout) : null });
+    const auto = !inRange && g.lines.length > 0 && o.human !== undefined && !o.human(m);
+    if (!auto) rounded ||= g.rounded;
+    measures.push({ m, inRange, beats: beatsLabel(layout.beats), grid: auto ? [] : g.lines, onsets: o.onsets ? onsetGrid(o.onsets, tempo, m, o.offsetSec, layout) : null, ...(auto ? { auto } : {}) });
   }
   return {
     kind: o.kind,
@@ -329,6 +352,7 @@ export function phrasePrompt(ctx: PhraseContext): { system: string; user: string
     const tag = ms.inRange ? `【範囲 index ${ms.m - ctx.from}】` : ms.m < ctx.from ? '（前）' : '（後）';
     lines.push(`小節 ${ms.m} ${tag} ${ms.beats}`);
     if (ms.inRange) lines.push(ms.grid.length ? `いまの譜面（置き換えます）:\n${ms.grid.join('\n')}` : 'いまの譜面: 空');
+    else if (ms.auto) lines.push('（自動で入れたまま作者が確かめていないので、譜面は省きます）');
     else lines.push(ms.grid.length ? ms.grid.join('\n') : '空');
     if (ms.onsets) lines.push(`原曲の打点:\n${ms.onsets.join('\n')}`);
     lines.push('');
@@ -340,6 +364,7 @@ export function phrasePrompt(ctx: PhraseContext): { system: string; user: string
 interface RawCandidate {
   name?: string;
   reason?: string;
+  basis?: unknown;
   measures?: { index?: number; lanes?: { lane?: string; steps?: string }[] }[];
 }
 
@@ -362,7 +387,8 @@ export function decodeCandidates(raw: { candidates?: RawCandidate[] }, ctx: { fr
     const clean = enforcePlayable(notes);
     if (clean.length === 0) continue;
     // 英語の名前・理由は長くなるので、切る長さは広めに
-    out.push({ name: String(c.name ?? tr('候補', 'Idea')).slice(0, 48), reason: String(c.reason ?? '').slice(0, 160), source: 'ai', notes: clean });
+    const basis = typeof c.basis === 'number' && Number.isInteger(c.basis) && c.basis >= 0 ? c.basis : null;
+    out.push({ name: String(c.name ?? tr('候補', 'Idea')).slice(0, 48), reason: String(c.reason ?? '').slice(0, 160), source: 'ai', notes: clean, ...(c.basis !== undefined ? { basis } : {}) });
   }
   return out.slice(0, 3);
 }

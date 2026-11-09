@@ -340,3 +340,42 @@ export function computeSpectro(channels: Float32Array[], sr: number, mode: SpecM
   const r = spectroDb(channels, sr);
   return renderSpectro(r.db, r.frames, r.fHi, mode);
 }
+
+/** 帯ごとの明るさ（AI に渡す）。frames × 帯の数の 0〜255 */
+export interface SpectroZones {
+  rate: number;
+  frames: number;
+  data: Uint8Array;
+}
+
+/**
+ * スペクトルを帯ごとの明るさにする（帯の段の平均）。帯ごとに、曲の中のふつうの明るさ（中央値）を 0、
+ * 明るい所（上から1%）を 255 にそろえる（帯によって明るさの出方が違うので、数字を読み比べやすくする）
+ */
+export function spectroZones(sp: SpectroData, zones: readonly { from: number; to: number }[]): SpectroZones {
+  const nz = zones.length;
+  const ranges = zones.map((z) => {
+    const bins: number[] = [];
+    for (let b = 0; b < sp.bins; b++) {
+      const f = binFreq(b, sp.bins, sp.fLo, sp.fHi);
+      if (f >= z.from && f < z.to) bins.push(b);
+    }
+    return bins;
+  });
+  const data = new Uint8Array(sp.frames * nz);
+  const col = new Float32Array(sp.frames);
+  ranges.forEach((bins, z) => {
+    for (let f = 0; f < sp.frames; f++) {
+      const row = f * sp.bins;
+      let s = 0;
+      for (const b of bins) s += sp.data[row + b];
+      col[f] = bins.length ? s / bins.length : 0;
+    }
+    const sorted = col.slice().sort();
+    const lo = sorted[Math.floor((sorted.length - 1) * 0.5)] ?? 0;
+    const hi = sorted[Math.floor((sorted.length - 1) * 0.99)] ?? 0;
+    const span = Math.max(1, hi - lo);
+    for (let f = 0; f < sp.frames; f++) data[f * nz + z] = Math.round(clamp01((col[f] - lo) / span) * 255);
+  });
+  return { rate: sp.rate, frames: sp.frames, data };
+}
