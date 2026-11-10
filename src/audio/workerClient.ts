@@ -9,8 +9,8 @@ export type { SpectroData };
 
 export interface StretchChunk {
   channels: Float32Array[];
-  /** 出力の 0 サンプル目が元の何秒目か */
-  fromSec: number;
+  /** 出力の 0 サンプル目が、渡した音の何サンプル目か */
+  fromSample: number;
   sr: number;
 }
 
@@ -65,7 +65,7 @@ export async function loadAudio(key: string, buf: AudioBuffer): Promise<void> {
   for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) channels.push(buf.getChannelData(c).slice());
   await call({ type: 'load', key, channels, sr: buf.sampleRate }, channels.map((c) => c.buffer));
   loaded.add(key);
-  // ワーカーは7曲まで持つ（ステムをスロー再生するとき全部を伸ばすため）
+  // ワーカーは7曲まで持つ（原曲とステムの解析）
   while (loaded.size > 7) loaded.delete(loaded.values().next().value!);
 }
 
@@ -88,8 +88,12 @@ export function features(key: string, progress?: (p: number) => void): Promise<{
   return call<{ frames: FrameFeatures; duration: number }>({ type: 'features', key }, [], progress);
 }
 
-export function stretch(key: string, rate: number, from: number, to: number): Promise<StretchChunk> {
-  return call<StretchChunk>({ type: 'stretch', key, rate, from, to });
+/**
+ * スロー再生用に、channels の from〜to サンプル目を rate 倍の速さにする（音程はそのまま）。
+ * channels はワーカーへ渡してしまう（呼んだ側では使えなくなる）。ワーカーに音を残さないので、いくつ伸ばしても前の音を追い出さない
+ */
+export function stretch(channels: Float32Array[], sr: number, rate: number, from: number, to: number): Promise<StretchChunk> {
+  return call<StretchChunk>({ type: 'stretch', channels, sr, rate, from, to }, channels.map((c) => c.buffer as ArrayBuffer));
 }
 
 /** YouTube との自動合わせ: 原曲の特徴を作っておく（同じ曲は一度だけ） */

@@ -183,6 +183,42 @@ describe('難易度の切り替え（再生を止めない）', () => {
     }
   });
 
+  describe('スロー再生で SE のある譜面', () => {
+    const withSe = (d: DtxDoc, volume: number, file = 'drums.ogg'): DtxDoc => ({
+      ...d,
+      fields: { ...d.fields, WAV03: file, VOLUME03: String(volume) },
+      chips: [...d.chips, chip(999, 0x61, 1, 0, 1, 3)],
+    });
+    // 音量は曲フォルダにあるファイルの音にだけ効く
+    const file = (name: string) => [name, { path: name, name, size: 1, getFile: async () => new File([], name) }] as const;
+    const folder = { name: 'song', files: new Map([file('bgm.ogg'), file('hh.wav'), file('drums.ogg'), file('drums2.ogg')]) };
+
+    beforeEach(() => {
+      // 伸ばした音はまだ一つも無い（engine.buffer が null）
+      vi.spyOn(engine, 'rate', 'get').mockReturnValue(0.5);
+      vi.spyOn(engine, 'duration').mockReturnValue(300);
+      useAssist.setState({ speed: 0.5 });
+      const cur = withSe(song(), 25);
+      useEditor.setState({ doc: cur, savedDoc: cur, folder });
+    });
+    afterEach(() => useAssist.setState({ speed: 1 }));
+
+    it('SE の音量だけが違う難易度へは、伸ばした音を待たずに止めずにつなぎ替える（原曲・SE は今の伸ばした音を鳴らし続ける）', async () => {
+      await switchDocument(withSe(song({ hhPerBar: 4 }), 40), meta('ext.dtx'), null);
+      await flush();
+      expect(order).toContain('splice');
+      expect(order).not.toContain('stop');
+      expect(order).not.toContain('play');
+    });
+
+    it('切り替え先の SE が別の音で、伸ばした音がまだ無いときは、伸ばしてから今の位置で鳴らし直す', async () => {
+      await switchDocument(withSe(song({ hhPerBar: 4 }), 25, 'drums2.ogg'), meta('ext.dtx'), null);
+      await flush();
+      expect(order).not.toContain('splice');
+      expect(order.slice(-2)).toEqual(['stop', 'play']);
+    });
+  });
+
   it('続けて切り替えたら、最後に選んだ難易度だけを開く', async () => {
     const adv = song({ hhPerBar: 4 });
     const bsc = song({ hhPerBar: 2 });

@@ -15,7 +15,8 @@ export type WorkerRequest =
   /** ドラム強調のスペクトルの帯ごとの明るさ（AI に渡す） */
   | { id: number; type: 'zones'; key: string; zones: { from: number; to: number }[] }
   | { id: number; type: 'features'; key: string }
-  | { id: number; type: 'stretch'; key: string; rate: number; from: number; to: number }
+  /** スロー再生用に伸ばす。音は伸ばす所（from〜to サンプル目）の前後を少し足したものを毎回渡す（ワーカーに音を残さない） */
+  | { id: number; type: 'stretch'; channels: Float32Array[]; sr: number; rate: number; from: number; to: number }
   | { id: number; type: 'alignRef'; key: string }
   | { id: number; type: 'alignProbe'; key: string; pcm: Float32Array; sr: number }
   | { id: number; type: 'alignLocal'; key: string; probe: number; v: number; os: number[]; fine?: boolean };
@@ -55,6 +56,11 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       store.set(req.key, { channels: req.channels, sr: req.sr });
       while (store.size > 7) store.delete(store.keys().next().value!);
       post({ id: req.id, ok: true });
+      return;
+    }
+    if (req.type === 'stretch') {
+      const r = wsola(req.channels, req.sr, req.rate, req.from, req.to);
+      post({ id: req.id, ok: true, result: { channels: r.channels, fromSample: r.fromSample, sr: req.sr } }, r.channels.map((c) => c.buffer as ArrayBuffer));
       return;
     }
     const src = store.get(req.key);
@@ -104,11 +110,6 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       if (!feat) throw new Error(tr('聞き取った音がもうありません', 'The captured audio is no longer available'));
       const r = req.fine ? { local: probeFine(idx.feat, feat, req.v, req.os), floor: 0 } : probeLocal(idx.feat, feat, req.v, req.os);
       post({ id: req.id, ok: true, result: r }, r.local.map((x) => x.sim.buffer as ArrayBuffer));
-      return;
-    }
-    if (req.type === 'stretch') {
-      const r = wsola(src.channels, src.sr, req.rate, req.from * src.sr, req.to * src.sr);
-      post({ id: req.id, ok: true, result: { channels: r.channels, fromSec: r.fromSample / src.sr, sr: src.sr } }, r.channels.map((c) => c.buffer as ArrayBuffer));
       return;
     }
   } catch (err) {

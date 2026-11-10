@@ -15,7 +15,8 @@ function hann(n: number): Float32Array {
 
 /**
  * channels の [from, to) を rate 倍の速さにする（rate < 1 で遅く、長くなる）。
- * 出力の j サンプル目はおおよそ元の from + j × rate サンプル目に当たる。
+ * 出力の j サンプル目は元の from + j × rate サンプル目に当たる（窓の真ん中どうしで合わせる）。
+ * from より前・to より後も、channels にあれば似た所を探すのに使う（区切りの前後を少し足して渡す）
  */
 export function wsola(channels: Float32Array[], sr: number, rate: number, from: number, to: number): StretchResult {
   const len = channels[0].length;
@@ -26,6 +27,9 @@ export function wsola(channels: Float32Array[], sr: number, rate: number, from: 
   while (N < sr * 0.04) N <<= 1;
   const Hs = N >> 1;
   const Ha = Hs * rate;
+  // 出力の窓の真ん中（k × Hs + Hs）が元の from + (k × Hs + Hs) × rate に当たるよう、元の窓の頭を Hs × (1 − rate) 前にする。
+  // 窓の頭どうしで合わせると、伸ばした音がチップより早く聞こえる（50% で約 20ms、25% で約 70ms）
+  const lead = Hs * (1 - rate);
   const tol = Math.round(sr * 0.012);
   const D = 4;
   const w = hann(N);
@@ -43,47 +47,65 @@ export function wsola(channels: Float32Array[], sr: number, rate: number, from: 
   const L = Hs; // 重なり部分の長さ
   const Ld = Math.floor(L / D);
   const frames = Math.ceil(outLen / Hs) + 1;
-  let prev = from;
-  for (let k = 0; k < frames; k++) {
+  let prev = 0;
+  // 頭の半窓（出力の 0〜Hs）も窓の重なりで作るため、k = −1 の窓から始める（窓の立ち上がりで小さくならない）
+  for (let k = -1; k < frames; k++) {
     const outPos = k * Hs;
-    const nominal = Math.round(from + k * Ha);
+    const nominal = Math.round(from + k * Ha - lead);
     let start = nominal;
-    if (k > 0) {
-      const natural = prev + Hs;
-      // 大まかな探索（間引いた信号）
+    const natural = prev + Hs;
+    if (k === 0 && nominal < 0) {
+      // 音の頭：k = −1 の窓の続きから（頭の打音を欠けさせず、窓の立ち上がりで小さくしない）
+      start = from;
+    } else if (k >= 0 && natural >= 0 && natural + L < len) {
+      // 大まかな探索（間引いた信号）。同じ似かたなら元の位置（nominal）に近い所を選ぶ（無音の所で端に寄らない）
       const nd = Math.floor(natural / D);
-      let best = -Infinity;
-      let bestD = 0;
-      for (let d = -Math.floor(tol / D); d <= Math.floor(tol / D); d++) {
+      const coarse = (d: number) => {
         const cd = Math.floor((nominal + d * D) / D);
-        if (cd < 0 || cd + Ld >= dec.length || nd + Ld >= dec.length) continue;
+        if (cd < 0 || cd + Ld >= dec.length || nd + Ld >= dec.length) return -Infinity;
         let s = 0;
         for (let i = 0; i < Ld; i++) s += dec[nd + i] * dec[cd + i];
-        if (s > best) {
-          best = s;
-          bestD = d * D;
+        return s;
+      };
+      let best = coarse(0);
+      let bestD = 0;
+      for (let d = 1; d <= Math.floor(tol / D); d++) {
+        for (const dd of [-d, d]) {
+          const s = coarse(dd);
+          if (s > best) {
+            best = s;
+            bestD = dd * D;
+          }
         }
       }
       // 細かい探索（元の信号）
-      let fine = bestD;
-      best = -Infinity;
-      for (let d = bestD - D; d <= bestD + D; d++) {
+      const exact = (d: number) => {
         const c = nominal + d;
-        if (c < 0 || c + L >= len || natural + L >= len) continue;
+        if (c < 0 || c + L >= len) return -Infinity;
         let s = 0;
         for (let i = 0; i < L; i += 2) s += mono[natural + i] * mono[c + i];
-        if (s > best) {
-          best = s;
-          fine = d;
+        return s;
+      };
+      let fine = bestD;
+      best = exact(bestD);
+      for (let d = 1; d <= D; d++) {
+        for (const dd of [bestD - d, bestD + d]) {
+          const s = exact(dd);
+          if (s > best) {
+            best = s;
+            fine = dd;
+          }
         }
       }
       start = nominal + fine;
     }
-    start = Math.max(0, Math.min(len - 1, start));
+    start = Math.min(len - 1, start);
+    // 音の頭より前（start < 0）は無音として重ねる
+    const i0 = Math.max(0, -start, -outPos);
     for (let ch = 0; ch < channels.length; ch++) {
       const src = channels[ch];
       const dst = out[ch];
-      for (let i = 0; i < N; i++) {
+      for (let i = i0; i < N; i++) {
         const si = start + i;
         if (si >= len) break;
         const oi = outPos + i;
@@ -92,12 +114,6 @@ export function wsola(channels: Float32Array[], sr: number, rate: number, from: 
       }
     }
     prev = start;
-  }
-  // 最初の半窓は窓の立ち上がりで小さくなっているので、元の音をそのまま入れる
-  for (let ch = 0; ch < channels.length; ch++) {
-    const src = channels[ch];
-    const dst = out[ch];
-    for (let i = 0; i < Hs && from + i < len; i++) dst[i] = src[from + i];
   }
   return { channels: out.map((c) => c.subarray(0, outLen).slice()), fromSample: from };
 }

@@ -2,7 +2,7 @@
 import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { pickOnsets, type AnalysisData, type Band, type Onset } from '../audio/analysis';
-import { engine, type BgmFilter, type StretchProvider } from '../audio/engine';
+import { engine, type BgmFilter, type SoundEvent, type StretchProvider } from '../audio/engine';
 import * as wk from '../audio/workerClient';
 import type { SpecMode } from '../audio/spectro';
 import { grabLoop, placeLoopPoint, type LoopBeats, type LoopGrab, type LoopMark } from '../assist/loopPoints';
@@ -562,12 +562,33 @@ export function carryAssistToDoc(at: (beat: number) => number, keepSpec: (key: s
   });
 }
 
-// ---- スロー再生の BGM（伸ばした音をワーカーで作る） --------------------------------------
+// ---- スロー再生の曲の音（原曲・SE・ステムを伸ばした音をワーカーで作る） --------------------------
 
 const CHUNK = 20;
 const PAD = 0.25;
-const chunkCache = new Map<string, { buf: AudioBuffer; fromSec: number }>();
+/** 伸ばす所の前後に足してワーカーへ渡す（似た所を探す幅と窓の長さより長く） */
+const MARGIN = 0.1;
+/** 伸ばした音を持っておく量（元の音の秒で、区切り8つぶん）。SE のような短い音は、その長さぶんだけ数える */
+const CACHE_SEC = 8 * (CHUNK + 2 * PAD);
+const chunkCache = new Map<string, { buf: AudioBuffer; fromSec: number; span: number }>();
+let cachedSec = 0;
 const chunkJobs = new Map<string, Promise<unknown>>();
+
+function putChunk(key: string, entry: { buf: AudioBuffer; fromSec: number; span: number }) {
+  const old = chunkCache.get(key);
+  if (old) {
+    chunkCache.delete(key);
+    cachedSec -= old.span;
+  }
+  chunkCache.set(key, entry);
+  cachedSec += entry.span;
+  // 使っていないものから捨てる（今入れたものは残す）
+  while (cachedSec > CACHE_SEC && chunkCache.size > 1) {
+    const [k0, e0] = chunkCache.entries().next().value!;
+    chunkCache.delete(k0);
+    cachedSec -= e0.span;
+  }
+}
 
 function chunkKey(wav: number, rate: number, k: number) {
   const got = engine.buffer(wav);
@@ -595,14 +616,21 @@ export const stretchProvider: StretchProvider = {
     if (!got || k * CHUNK >= got.buf.duration) return Promise.resolve();
     const job = (async () => {
       try {
-        await wk.loadAudio(got.key, got.buf);
-        const r = await wk.stretch(got.key, rate, Math.max(0, k * CHUNK - PAD), (k + 1) * CHUNK + PAD);
+        const b = got.buf;
+        const sr = b.sampleRate;
+        const from = Math.max(0, k * CHUNK - PAD);
+        const to = Math.min(b.duration, (k + 1) * CHUNK + PAD);
+        // 伸ばす所の前後だけを渡す（音をワーカーに置いておかないので、SE がいくつあっても原曲・ステムを追い出さない）
+        const s0 = Math.max(0, Math.floor((from - MARGIN) * sr));
+        const s1 = Math.min(b.length, Math.ceil((to + MARGIN) * sr));
+        const channels: Float32Array[] = [];
+        for (let c = 0; c < Math.min(2, b.numberOfChannels); c++) channels.push(b.getChannelData(c).slice(s0, s1));
+        const r = await wk.stretch(channels, sr, rate, Math.floor(from * sr) - s0, Math.floor(to * sr) - s0);
         const ctx = engine.workCtx();
         const len = r.channels[0].length;
         const buf = ctx.createBuffer(r.channels.length, Math.max(1, len), r.sr);
         r.channels.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i));
-        chunkCache.set(key, { buf, fromSec: r.fromSec });
-        while (chunkCache.size > 8) chunkCache.delete(chunkCache.keys().next().value!);
+        putChunk(key, { buf, fromSec: (s0 + r.fromSample) / sr, span: to - from });
       } finally {
         chunkJobs.delete(key);
       }
@@ -612,6 +640,29 @@ export const stretchProvider: StretchProvider = {
   },
 };
 engine.stretch = stretchProvider;
+
+/**
+ * スロー再生で、曲の秒 at（いくつか）から鳴らすのに要る伸ばした音（WAV 番号 → その音の何秒目か）。
+ * at で鳴っている曲の音（原曲・SE・ステム）と、at から ahead 秒（曲の秒）のうちに鳴り始める音
+ */
+export function slowNeeds(events: readonly SoundEvent[], at: readonly number[], ahead: number): Map<number, number[]> {
+  const out = new Map<number, number[]>();
+  for (const e of events) {
+    if (e.bus === 'drum') continue;
+    const dur = engine.duration(e.wav);
+    for (const x of at) {
+      const off = x - e.sec;
+      if (off >= 0 ? off >= dur : -off > ahead) continue;
+      const list = out.get(e.wav) ?? [];
+      list.push(Math.max(0, off));
+      // 区切りの終わりのすぐ手前から鳴らすときは、次の区切りもすぐ要る
+      const next = (Math.floor(Math.max(0, off) / CHUNK) + 1) * CHUNK;
+      if (off >= 0 && off + ahead >= next && next < dur) list.push(next);
+      out.set(e.wav, list);
+    }
+  }
+  return out;
+}
 
 /** スロー再生で、WAV no の srcSec 秒の所を伸ばした音がもうできているか（無い所・鳴り終わった所は true） */
 export function stretchReady(wav: number, rate: number, srcSec: number): boolean {

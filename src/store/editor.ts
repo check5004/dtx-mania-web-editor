@@ -2,7 +2,7 @@
 import { tr, pl, isJa } from '../i18n';
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer';
 import { create } from 'zustand';
-import { engine, type Mix, type WavSource } from '../audio/engine';
+import { engine, type Mix, type SoundEvent, type WavSource } from '../audio/engine';
 import { builtinFile, virtualSound } from '../audio/sounds';
 import { IS_IOS, oggUnsupported } from '../platform';
 import { toBase36x2, toMeasure } from '../dtx/base36';
@@ -31,7 +31,7 @@ import { opRelane, type AltMode } from '../edit/transform';
 import { quantizeVel, velOfWav, wavVariant } from '../edit/velocity';
 import { findFile, type SongFolder } from '../fs/folder';
 import { shiftLane, useInputSettings } from '../input/settings';
-import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssistForDoc, stretchReady, syncAnalysis, trackSimilar, useAssist } from './assist';
+import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssistForDoc, slowNeeds, stretchReady, syncAnalysis, trackSimilar, useAssist } from './assist';
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
 import { loadSidecar, sameSongSidecar, sameStemFiles, updateSidecar, useSidecar, withListening, type SidecarData } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
@@ -227,31 +227,46 @@ export function sameTimeBeat(from: TempoMap, to: TempoMap, beat: number): number
 }
 
 /**
- * 途中から鳴らし続ける音（原曲・SE・ステム）の置き方。同じなら、いま鳴っている音をそのまま使い続けられる
- * （違えば engine.spliceLong で違う音だけつなぎ替える）。スロー再生では伸ばした原曲を WAV 番号で引くので、番号も比べる
+ * 途中から鳴らし続ける音（原曲・SE・ステム）：いつ・どの音を・どこへ（base）と音量。
+ * スロー再生では伸ばした音を WAV 番号で引くので、番号も base に入れる
  */
-export function longSoundLayout(doc: DtxDoc, folder: SongFolder | null): string {
+function longSounds(doc: DtxDoc, folder: SongFolder | null): { e: SoundEvent; base: string; volume: number }[] {
   const src = new Map(wavSources(doc, folder).map((x) => [x.no, x]));
   const slow = engine.playing && engine.rate < 0.999;
-  const out: string[] = [];
+  const out: { e: SoundEvent; base: string; volume: number }[] = [];
   for (const e of playbackEvents(heardDoc(doc))) {
     if (e.bus === 'drum') continue;
     const x = src.get(e.wav);
-    out.push(`${e.bus}|${e.sec.toFixed(4)}|${x ? `${x.key}|${x.volume}|${x.pan}` : `#${e.wav}`}${slow ? `|${e.wav}` : ''}`);
+    out.push({ e, base: `${e.bus}|${e.sec.toFixed(4)}|${x ? `${x.key}|${x.pan}` : `#${e.wav}`}${slow ? `|${e.wav}` : ''}`, volume: x?.volume ?? -1 });
   }
-  // 同じ時刻の音は、譜面に書いた順で並ぶ（難易度で順が違うことがある）ので、並びは比べない
-  return out.sort().join('\n');
+  return out;
 }
 
 /**
- * スロー再生のとき、今の位置（とループの頭）から鳴らす原曲・ステムの伸ばした音がもうあるか。
- * 無い（難易度で原曲のファイルが違う）ときにつなぎ替えると、伸ばし終わるまで音が途切れる
+ * 途中から鳴らし続ける音（原曲・SE・ステム）の置き方。同じなら、いま鳴っている音をそのまま使い続けられる
+ * （違えば engine.spliceLong で違う音だけつなぎ替える）
  */
-function stretchedNow(doc: DtxDoc): boolean {
+export function longSoundLayout(doc: DtxDoc, folder: SongFolder | null): string {
+  // 同じ時刻の音は、譜面に書いた順で並ぶ（難易度で順が違うことがある）ので、並びは比べない
+  return longSounds(doc, folder)
+    .map((x) => `${x.base}|${x.volume}`)
+    .sort()
+    .join('\n');
+}
+
+/**
+ * スロー再生のとき、今の位置（とループの頭）から鳴らす曲の音（原曲・SE・ステム）の伸ばした音がもうあるか。
+ * 無い（難易度で原曲のファイルが違う）ときにつなぎ替えると、伸ばし終わるまで音が途切れる。
+ * いま鳴らしている音（playing：置き方が同じもの。音量だけが違う SE も）は伸ばした音を鳴らし続けるので、見ない
+ */
+function stretchedNow(doc: DtxDoc, folder: SongFolder | null, playing: Set<string>): boolean {
   const rate = engine.rate;
   if (rate >= 0.999) return true;
   const at = [engine.currentSec() ?? 0, ...(engine.loop ? [engine.loop.from] : [])];
-  return playbackEvents(heardDoc(doc)).every((e) => (e.bus !== 'bgm' && e.bus !== 'stem') || at.every((sec) => stretchReady(e.wav, rate, sec - e.sec)));
+  const fresh = longSounds(doc, folder)
+    .filter((x) => !playing.has(x.base))
+    .map((x) => x.e);
+  return [...slowNeeds(fresh, at, 0)].every(([wav, secs]) => secs.every((sec) => stretchReady(wav, rate, sec)));
 }
 
 /** 原曲（最初の BGM チップの音）のファイル。難易度を切り替えるとき、同じ曲の音かを比べる */
@@ -297,6 +312,7 @@ export async function switchDocument(
   const to = tempoOf(doc);
   const at = (b: number) => sameTimeBeat(from, to, b);
   const sameLong = longSoundLayout(s.doc, s.folder) === longSoundLayout(doc, s.folder);
+  const playingLong = new Set(longSounds(s.doc, s.folder).map((x) => x.base));
   // 同じ原曲なら、ステム・解析に使うステム・参照映像を外さない（AI難易度生成で作った譜面は作業ファイルを持たない）
   const side = originalKey(s.doc, s.folder) === originalKey(doc, s.folder) ? sameSongSidecar(sidecar) : sidecar;
   const curStems = useSidecar.getState().stems;
@@ -330,7 +346,7 @@ export async function switchDocument(
   loadSidecar(sameStems ? withListening(side) : side);
   await prepareSounds();
   if (stale() || !engine.playing) return true;
-  if (sameLong || stretchedNow(get().doc)) {
+  if (sameLong || stretchedNow(get().doc, get().folder, playingLong)) {
     // 原曲・SE の置き方や音量が違う（難易度ごとに SE の音量が違う譜面は多い）ときは、違う音だけを今の位置からつなぎ替える。
     // 新しい譜面の音の表（prepareSounds）ができた直後、次の予約より前に替える
     if (!sameLong) engine.spliceLong();
@@ -1241,6 +1257,8 @@ export function refreshPlayback() {
 }
 
 let playToken = 0;
+/** スロー再生を始める前に、何秒先（聞こえる秒）までに鳴り始める曲の音を伸ばしておくか */
+const SLOW_PREP_SEC = 2;
 /** いまの再生を始めた位置（秒）。曲の終わりが動いたら止める所を直すため */
 let playStartSec = 0;
 
@@ -1276,12 +1294,13 @@ export async function playFrom(beat: number, opts: { keepStart?: boolean } = {})
   playStartSec = startSec;
   const rate = a.speed;
   const events = playbackEvents(heardDoc(doc));
-  const longs = new Map<number, number>();
-  for (const e of events) if ((e.bus === 'bgm' || e.bus === 'stem') && !longs.has(e.wav)) longs.set(e.wav, e.sec);
-  if (rate < 0.999 && longs.size > 0) {
+  // スロー再生：始める所（とループの頭）で鳴っている曲の音（原曲・SE・ステム）と、すぐ鳴り始める音を先に伸ばしておく
+  // （その先の音は、鳴らしながらエンジンが先に伸ばしておく）
+  const needs = rate < 0.999 ? slowNeeds(events, [startSec, ...(loop ? [loop.from] : [])], SLOW_PREP_SEC * rate) : new Map<number, number[]>();
+  if (needs.size > 0) {
     set({ loading: tr('スロー再生の準備中…', 'Preparing slow playback…') });
     try {
-      await Promise.all([...longs].map(([wav, sec]) => prepareStretch(wav, rate, [startSec - sec, ...(loop ? [loop.from - sec] : [])])));
+      await Promise.all([...needs].map(([wav, secs]) => prepareStretch(wav, rate, secs)));
     } catch (e) {
       toast(tr(`スロー再生の準備ができませんでした: ${(e as Error).message}`, `Couldn't prepare slow playback: ${(e as Error).message}`), 'error');
     } finally {

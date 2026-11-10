@@ -1,5 +1,6 @@
 // 再生エンジン。Web Audio の先読みスケジューラで BGM とチップ音を鳴らす。
 // スロー再生（音程そのまま）・区間ループ・再生中の譜面の書き換え・レーンのミュートに対応する。
+// スロー再生では、曲の音（原曲・SE・ステム）は伸ばした音を鳴らし、チップの音（ドラム）は叩いた音なのでそのままの速さで鳴らす。
 // 再生用の AudioContext を作るのはここだけ（ensure）。Safari・iPad の決まりは docs/safari.md
 import { IS_IOS, IS_WEBKIT } from '../platform';
 import { audioSessionType, inUserGesture, isAsleep, playSilence, preferPlaybackSession, watchGestures } from './unlock';
@@ -124,6 +125,8 @@ interface Voice {
   gain: GainNode;
   /** 長い音（原曲・SE・ステム）なら、その中身と鳴り始める時刻（ctx）。難易度を切り替えたとき、同じ音は鳴らし続ける（spliceLong） */
   long?: LongKey & { when: number };
+  /** 伸ばした音の区切り（スロー再生）なら、鳴らす時刻（ctx）と頭のフェードの有無。終わりで次の区切りへクロスフェードする */
+  span?: { from: number; to: number; fade: boolean };
 }
 
 /** 長い音の中身：いつ・どの音を・どこへ鳴らすか（base）と音量 */
@@ -134,10 +137,10 @@ interface LongKey {
 
 const longSig = (k: LongKey) => `${k.base}|${k.volume}`;
 
-/** スロー再生のときの BGM。伸ばした音を区切り（チャンク）ごとにつないで鳴らす */
+/** スロー再生のときの曲の音（原曲・SE・ステム）。伸ばした音を区切り（チャンク）ごとにつないで鳴らす */
 interface Stream {
   wav: number;
-  bus: 'bgm' | 'stem';
+  bus: Exclude<SoundEvent['bus'], 'drum'>;
   nextSrc: number;
   nextCtx: number;
   voices: Voice[];
@@ -146,7 +149,7 @@ interface Stream {
   long: LongKey;
 }
 
-/** 伸ばした BGM を返す（無ければ null で、作り始める） */
+/** 伸ばした曲の音を返す（無ければ null で、作り始める） */
 export interface StretchProvider {
   chunkSec: number;
   get(wav: number, rate: number, k: number): { buf: AudioBuffer; fromSec: number } | null;
@@ -156,6 +159,10 @@ export interface StretchProvider {
 const LOOKAHEAD = 0.18;
 const TICK_MS = 25;
 const XF = 0.012;
+/** スロー再生で、これから鳴り始める曲の音（SE など）を何秒先（ctx）まで伸ばしておくか */
+const PREFETCH = 8;
+/** 先読みを見直す間隔（ctx の秒） */
+const PREFETCH_EVERY = 0.25;
 
 function lowerBound<T extends { sec: number }>(arr: T[], sec: number): number {
   let lo = 0;
@@ -186,6 +193,12 @@ interface Run {
   /** ループで頭に戻るときに止める BGM・SE */
   longVoices: Set<Voice>;
   streams: Stream[];
+  /** 曲の音（ドラム以外）だけを時刻の順に（スロー再生の先読みに使う） */
+  longs: SoundEvent[];
+  /** 最後に先読みを見直した時刻（ctx） */
+  prefAt: number;
+  /** 先読みで頼んだ区切り。同じ区切りは1回の中で1回だけ頼む（持ちきれずに捨てた区切りを頼み続けない） */
+  asked: Set<string>;
 }
 
 class AudioEngine {
@@ -797,6 +810,9 @@ class AudioEngine {
       chokes: new Map(),
       longVoices: new Set(),
       streams: [],
+      longs: req.events.filter((e) => e.bus !== 'drum'),
+      prefAt: -Infinity,
+      asked: new Set(),
     };
     this.run = run;
     this.startSegment(run, req.startSec, t0);
@@ -847,9 +863,17 @@ class AudioEngine {
     run.sched = song;
   }
 
-  /** スロー再生では、原曲とステムは伸ばした音を区切りごとにつないで鳴らす */
+  /**
+   * スロー再生では、曲の音（原曲・SE・ステム）は伸ばした音を区切りごとにつないで鳴らす（曲と同じ速さで進むように）。
+   * チップの音（ドラム）は叩いた音なので、伸ばさずにその時刻に鳴らす
+   */
   private streamed(run: Run, e: SoundEvent): e is SoundEvent & { bus: Stream['bus'] } {
-    return (e.bus === 'bgm' || e.bus === 'stem') && run.rate < 0.999 && this.stretch !== null;
+    return e.bus !== 'drum' && run.rate < 0.999 && this.stretch !== null;
+  }
+
+  /** 伸ばした音を作り始める（もうあれば何もしない）。失敗しても再生は止めない（鳴らす時にもう一度頼む） */
+  private askStretch(wav: number, rate: number, k: number) {
+    void this.stretch?.request(wav, rate, k).catch(() => undefined);
   }
 
   /**
@@ -910,15 +934,31 @@ class AudioEngine {
       return true;
     };
     const keep = new Set<Voice>();
+    const loose: Stream[] = [];
     for (const st of run.streams) {
       if (take(st.long)) for (const v of st.voices) keep.add(v);
-      else st.dead = true;
+      else loose.push(st);
     }
-    run.streams = run.streams.filter((st) => !st.dead);
     const others = [...run.longVoices].filter((v) => !keep.has(v) && !take(v.long));
     const rest = want.filter((w) => take(w.k));
-    // 2. 鳴り始めた音で音量だけが違うものは、その音のまま音量を変える（スロー再生でも位置が飛ばない）
+    // 2. 音量だけが違うものは、その音のまま音量を変える（スロー再生でも位置が飛ばない）。
+    //    伸ばした音（スロー再生）は、鳴らしている区切りも、もう予約した次の区切りも、これから作る区切りも新しい音量にする
+    for (const st of loose) {
+      const i = rest.findIndex((w) => this.streamed(run, w.e) && w.k.base === st.long.base);
+      if (i < 0) {
+        st.dead = true;
+        continue;
+      }
+      for (const v of st.voices) {
+        keep.add(v);
+        this.setVoiceVolume(v, at, rest[i].k.volume);
+      }
+      st.long = rest[i].k;
+      rest.splice(i, 1);
+    }
+    run.streams = run.streams.filter((st) => !st.dead);
     for (const v of others) {
+      if (keep.has(v)) continue;
       const cur = v.long;
       const i = cur && cur.when + 0.01 <= at ? rest.findIndex((w) => !this.streamed(run, w.e) && w.k.base === cur.base) : -1;
       if (i < 0) {
@@ -926,14 +966,7 @@ class AudioEngine {
         run.longVoices.delete(v);
         continue;
       }
-      const g = v.gain.gain;
-      try {
-        g.cancelScheduledValues(at);
-        g.setValueAtTime(g.value, at);
-        g.linearRampToValueAtTime(Math.max(0, Math.min(1, rest[i].k.volume / 100)), at + XF);
-      } catch {
-        // もう止まっている
-      }
+      this.setVoiceVolume(v, at, rest[i].k.volume);
       v.long = { ...rest[i].k, when: cur!.when };
       rest.splice(i, 1);
     }
@@ -952,6 +985,35 @@ class AudioEngine {
       run.longVoices.delete(v);
     };
     if (choke) run.chokes.set(choke, v);
+  }
+
+  /**
+   * 鳴らしている音の音量を at から短く変える（難易度で SE の音量が違うとき）。
+   * 伸ばした音の区切り（span）は、まだ鳴り始めていなければ頭から新しい音量で、終わりのフェード（次の区切りとのつなぎ）も入れ直す
+   */
+  private setVoiceVolume(v: Voice, at: number, volume: number) {
+    const g = v.gain.gain;
+    const to = Math.max(0, Math.min(1, volume / 100));
+    const s = v.span;
+    try {
+      // 終わりのフェードに入っている：次の区切りが新しい音量で鳴る
+      if (s && at >= s.to) return;
+      if (s && at <= s.from + XF) {
+        g.cancelScheduledValues(s.from);
+        g.setValueAtTime(s.fade ? 0 : to, s.from);
+        if (s.fade) g.linearRampToValueAtTime(to, s.from + XF);
+      } else {
+        g.cancelScheduledValues(at);
+        g.setValueAtTime(g.value, at);
+        g.linearRampToValueAtTime(to, at + XF);
+      }
+      if (s) {
+        g.setValueAtTime(to, s.to);
+        g.linearRampToValueAtTime(0, s.to + XF);
+      }
+    } catch {
+      // もう止まっている
+    }
   }
 
   private fadeStop(v: Voice, when: number) {
@@ -980,7 +1042,7 @@ class AudioEngine {
         const k = Math.floor(st.nextSrc / sp.chunkSec);
         const got = sp.get(st.wav, run.rate, k);
         if (!got) {
-          void sp.request(st.wav, run.rate, k);
+          this.askStretch(st.wav, run.rate, k);
           // 間に合わなかったら、用意できた時点の位置から鳴らす
           if (st.nextCtx < ctx.currentTime) {
             const late = ctx.currentTime + 0.05 - st.nextCtx;
@@ -996,20 +1058,26 @@ class AudioEngine {
         const offset = (st.nextSrc - got.fromSec) / run.rate + lateBy;
         const v = this.connectVoice(got.buf, t?.volume ?? 100, t?.pan ?? 0, st.bus, st.wav);
         const g = v.gain.gain.value;
-        v.gain.gain.setValueAtTime(0, when);
-        v.gain.gain.linearRampToValueAtTime(g, when + XF);
+        // 音の頭から時刻どおりに鳴らすときはフェードを入れない（SE の打音の頭を丸めない）。
+        // 途中から・遅れて・区切りのつなぎ目は、短くフェードインする
+        const fade = st.voices.length > 0 || st.nextSrc > 0.001 || lateBy > 0.001;
+        if (fade) {
+          v.gain.gain.setValueAtTime(0, when);
+          v.gain.gain.linearRampToValueAtTime(g, when + XF);
+        }
         const endCtx = st.nextCtx + (endSrc - st.nextSrc) / run.rate;
         v.gain.gain.setValueAtTime(g, endCtx);
         v.gain.gain.linearRampToValueAtTime(0, endCtx + XF);
         v.src.start(when, Math.max(0, offset));
         v.src.stop(endCtx + XF + 0.01);
+        v.span = { from: when, to: endCtx, fade };
         this.track(run, v, null);
         run.longVoices.add(v);
         st.voices.push(v);
         st.nextSrc = endSrc;
         st.nextCtx = endCtx;
         // 次の区切りを先に作っておく
-        void sp.request(st.wav, run.rate, k + 1);
+        if (endSrc < dur) this.askStretch(st.wav, run.rate, k + 1);
       }
     }
     run.streams = run.streams.filter((s) => !s.dead || s.voices.some((v) => run.voices.has(v)));
@@ -1067,6 +1135,8 @@ class AudioEngine {
         for (const st of run.streams) st.dead = true;
         run.streams = [];
         run.segs.push({ ctx: boundary, song: run.loop.from });
+        // 次の回も、先読みで捨てられた区切りを頼み直せるように
+        run.asked.clear();
         // 耳に届くまでの遅れの間は前の区間の位置を出すので、少し残しておく
         if (run.segs.length > 8) run.segs.shift();
         this.startSegment(run, run.loop.from, boundary);
@@ -1076,6 +1146,7 @@ class AudioEngine {
       }
       break;
     }
+    this.prefetch(run, now);
     if (!run.loop) {
       const seg = run.segs[run.segs.length - 1];
       if (now > seg.ctx + (run.req.endSec - seg.song) / run.rate) {
@@ -1086,11 +1157,46 @@ class AudioEngine {
     }
   }
 
+  /**
+   * スロー再生：これから鳴り始める曲の音（SE など）を伸ばした音を、鳴らす時刻より前に作り始める（間に合わないと頭が欠ける）。
+   * ループ中は、頭に戻ったときに鳴らす音（戻った所で鳴っている音は、その位置の区切り）も
+   */
+  private prefetch(run: Run, now: number) {
+    const sp = this.stretch;
+    if (!sp || run.rate >= 0.999 || now < run.prefAt + PREFETCH_EVERY) return;
+    run.prefAt = now;
+    const seg = run.segs[run.segs.length - 1];
+    const from = seg.song + Math.max(0, now - seg.ctx) * run.rate;
+    const to = from + PREFETCH * run.rate;
+    // 頭に戻ったときの分（wrap）は、この回に頼んだ区切りでも、もう捨てていれば頼み直す
+    const want = (e: SoundEvent, srcSec: number, wrap = false) => {
+      const k = Math.floor(srcSec / sp.chunkSec);
+      const key = `${wrap ? 'w' : ''}${e.wav}|${k}`;
+      if (!this.streamed(run, e) || run.asked.has(key)) return;
+      run.asked.add(key);
+      this.askStretch(e.wav, run.rate, k);
+    };
+    const longs = run.longs;
+    const end = run.loop ? Math.min(to, run.loop.to) : to;
+    for (let i = lowerBound(longs, from); i < longs.length && longs[i].sec < end; i++) want(longs[i], 0);
+    if (!run.loop || to <= run.loop.to) return;
+    const head = run.loop.from;
+    const until = Math.min(run.loop.to, head + (to - run.loop.to));
+    for (const e of longs) {
+      if (e.sec >= until) break;
+      const off = head - e.sec;
+      if (off < 0 || off < this.duration(e.wav)) want(e, Math.max(0, off), true);
+    }
+  }
+
   /** 再生中に譜面が変わったとき、まだ予約していない所から新しいチップで鳴らす */
   replaceEvents(events: SoundEvent[], clicks?: Click[]) {
     const run = this.run;
     if (!run) return;
     run.req = { ...run.req, events, clicks: clicks ?? run.req.clicks };
+    run.longs = events.filter((e) => e.bus !== 'drum');
+    run.prefAt = -Infinity;
+    run.asked.clear();
     run.idx = lowerBound(events, run.sched);
     if (clicks) run.clickIdx = lowerBound(clicks, run.sched);
   }
