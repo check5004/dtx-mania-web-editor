@@ -60,7 +60,7 @@ const SAFARI_MISSING = {
 /** 上の API を使ってよいファイル（使えるか確かめている） */
 export const API_OK = {
   'src/fs/folder.ts': 'showDirectoryPicker の有無を見る',
-  'src/app/fileActions.ts': 'supportsDirectWrite()・webkitdirectory の input（iPad は ZIP）',
+  'src/app/songPlace.ts': 'pickDir は supportsDirectWrite() のとき・PC の曲フォルダ（isDiskFolder）のときだけ呼ぶ（fileActions。無いときは webkitdirectory の input・本体・ZIP）',
   'src/store/guideline.ts': 'window.showDirectoryPicker があるときだけ',
   'src/store/library.ts': 'window.showDirectoryPicker があるときだけ',
   'src/input/midi.ts': "'requestMIDIAccess' in navigator を見る",

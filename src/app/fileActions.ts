@@ -23,9 +23,9 @@ import {
   isDiskFolder,
   isLocalFolder,
   isQuotaError,
+  normPath,
   parseSetDef,
   pendingFiles,
-  pickFolder,
   putFile,
   setWriteErrorHandler,
   supportsDirectWrite,
@@ -51,7 +51,7 @@ import { songDir, writeSongFile } from '../fs/opfs';
 import { deleteRecent, draftFor, listRecent, listRecentSongs, putRecent, recentIdFor, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
 import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
 import { useDevice } from '../store/device';
-import { createDoc, isDirty, openDocument, prepareSounds, switchDocument, toast, undoIfLast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
+import { createDoc, dismissToast, isDirty, openDocument, prepareSounds, switchDocument, toast, undoIfLast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
 import { glowReflected } from '../store/glow';
 import { editBgm, setAfterSiblingWrite, siblingNote, siblingWrites } from '../store/songBgm';
 import { hasUnsaved } from '../store/unsaved';
@@ -63,7 +63,9 @@ import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarD
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
 import { sortByDifficulty } from '../gen/diffTabs';
-import { syncedPath } from '../drive/sync';
+import { LINK_FILE, syncedPath } from '../drive/sync';
+import { chartRefs, dirLabel, isLibraryLook, lookAtFolder, otherSongsIn, songFilesOf, songFolderName, subFolder } from '../fs/songDir';
+import { chooseSongDir, fewText, makeSongDir, pickDir, pickSongPlace, type SongPlace } from './songPlace';
 
 const get = useEditor.getState;
 
@@ -191,6 +193,7 @@ async function openDtxFile(
     openDocument(parsed.doc, meta, folder, { dirty });
     void scanSiblingOrigins(folder);
     loadSidecar((await readSidecarFor(folder, file.name, recentSidecar)) ?? (await sourceSidecarFor(folder, parsed.doc)));
+    warnLibraryFolder(folder);
   }
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }
@@ -451,6 +454,12 @@ setWriteErrorHandler((e) => {
  */
 export async function openFolder(folder: SongFolder, restore?: Map<string, { text: string; sidecar?: string }>) {
   const list = dtxFiles(folder);
+  if (list.length === 0 && otherSongsIn(folder).length) {
+    // 曲を集めたフォルダ（DTXFiles など）：そこに新しい譜面を作らず、中の曲を選んでもらう
+    const sub = await chooseSongIn(folder);
+    if (sub) await openFolder(sub, restore);
+    return;
+  }
   const labels = await readSetDefLabels(folder);
   if (list.length === 0) {
     const info = await newSongDialog({
@@ -500,13 +509,21 @@ function newMeta(fileName: string, folder: SongFolder | null): DocMeta {
   };
 }
 
-/** フォルダ選択ダイアログ（Chrome/Edge）。無ければ webkitdirectory の input を使う */
+/**
+ * フォルダ選択ダイアログ（Chrome/Edge）。無ければ webkitdirectory の input を使う。
+ * 曲を集めたフォルダ（DTXFiles など）を選んだら、中を全部は読まずに、開く曲を選んでもらう
+ */
 export async function openFolderPicker(fallbackInput?: HTMLInputElement | null) {
   if (!(await confirmDiscard())) return;
   if (supportsDirectWrite()) {
     try {
-      const folder = await pickFolder();
-      if (folder) await openFolder(folder);
+      let dir = await pickDir();
+      for (let depth = 0; dir && depth < 4; depth++) {
+        const look = await lookAtFolder(dir);
+        if (look.charts.length || look.setDef || !isLibraryLook(look)) break;
+        dir = await chooseSongDir(dir);
+      }
+      if (dir) await openFolder(await folderFromHandle(dir));
     } catch (e) {
       toast(tr(`フォルダを開けませんでした: ${(e as Error).message}`, `Couldn't open the folder: ${(e as Error).message}`), 'error');
     }
@@ -515,10 +532,33 @@ export async function openFolderPicker(fallbackInput?: HTMLInputElement | null) 
   fallbackInput?.click();
 }
 
+/** 曲を集めたフォルダ（読み込み済み）の中の曲を選んでもらう。やめたら null */
+async function chooseSongIn(folder: SongFolder): Promise<SongFolder | null> {
+  const songs = otherSongsIn(folder);
+  const picked = await chooseDialog<string>({
+    title: tr(`「${folder.name}」には曲のフォルダが ${songs.length} 個あります`, `"${folder.name}" has ${songs.length} song folders`),
+    body: tr(
+      '開く曲を選んでください。曲を集めたフォルダ（DTXFiles など）は、そのまま曲フォルダとしては開きません（保存したときに、ほかの曲と混ざらないように）。',
+      "Choose the song to open. A folder that holds many songs (such as DTXFiles) isn't opened as a song folder itself, so saving doesn't mix it with other songs.",
+    ),
+    options: songs.map((d) => ({ label: dirLabel(folder, d), value: d })),
+  });
+  if (!picked) return null;
+  if (isDiskFolder(folder)) {
+    let h = folder.dir;
+    for (const part of dirLabel(folder, picked).split('/')) h = await h.getDirectoryHandle(part);
+    return folderFromHandle(h);
+  }
+  return subFolder(folder, picked);
+}
+
 /** <input webkitdirectory> から（フォルダに書けないブラウザ。開いたら曲フォルダごと本体に入れる） */
 export async function openFolderFromInput(list: FileList | null) {
   if (!list || list.length === 0) return;
-  const folder = folderFromFileList(list);
+  let folder: SongFolder | null = folderFromFileList(list);
+  // 曲を集めたフォルダ（DTXFiles など）なら、中の曲を選んでもらう（全部を本体に入れない）
+  if (dtxFiles(folder).length === 0 && otherSongsIn(folder).length) folder = await chooseSongIn(folder);
+  if (!folder) return;
   if ((await checkLocalDuplicate(folder)) !== 'go') return;
   await openFolder(folder);
 }
@@ -851,6 +891,280 @@ async function moveLocalToFolder(localId: string, target: SongFolder) {
   void refreshLocalSongs();
 }
 
+// ---- 曲フォルダを移す（ほかの曲も入ったフォルダから・保存先を変える） ------------------------------------
+
+/** 曲を集めたフォルダ（DTXFiles など）で曲を開いたとき、1回だけ知らせる（保存のときに、この曲だけのフォルダへ移す） */
+const warnedLibrary = new WeakSet<SongFolder>();
+/** その知らせ（移したら閉じる） */
+let libraryToast = 0;
+function warnLibraryFolder(folder: SongFolder) {
+  if (!isDiskFolder(folder) || warnedLibrary.has(folder)) return;
+  const others = otherSongsIn(folder);
+  if (!others.length) return;
+  warnedLibrary.add(folder);
+  libraryToast = toast(
+    tr(
+      `「${folder.name}」はほかの曲（${fewText(others.map((d) => dirLabel(folder, d)))}）も入ったフォルダです。ここには直接保存せず、保存するときにこの曲だけのフォルダを作って移します`,
+      `"${folder.name}" also holds other songs (${fewText(others.map((d) => dirLabel(folder, d)))}). Nothing is saved straight into it; when you save, a folder just for this song is made and the song moves there`,
+    ),
+    'warn',
+    12000,
+    { label: tr('今すぐ移す…', 'Move now…'), run: () => void moveToOwnSongFolder().then((f) => f && save()) },
+  );
+}
+
+/** 譜面が使うファイル（曲フォルダの中のパス。正規化）。直下の譜面と、開いている譜面・ステムから */
+async function songRefs(folder: SongFolder): Promise<Set<string>> {
+  const refs = new Set<string>();
+  for (const f of dtxFiles(folder)) {
+    try {
+      const { text } = decodeDtx(new Uint8Array(await (await f.getFile()).arrayBuffer()));
+      for (const r of chartRefs(text)) refs.add(r);
+    } catch {
+      // 読めない譜面は見ない
+    }
+  }
+  for (const r of chartRefs(serializeDtx(get().doc))) refs.add(r);
+  for (const t of sidecarData().stems) refs.add(normPath(t.file));
+  return refs;
+}
+
+/**
+ * ほかの曲も入ったフォルダ（DTXFiles など）の中の、この曲の分：直下のファイル・stems/・譜面が使うサブフォルダのファイル・まだ書けていないファイル。
+ * 中を全部は読まない（開いたときの読み込みは数に上限があり、直下のファイルまで届いていないことがあるので、ここで直下を読み直す）
+ */
+async function libraryView(from: SongFolder & { dir: FileSystemDirectoryHandle }): Promise<SongFolder> {
+  const files = new Map<string, FolderFile>();
+  let stems: FileSystemDirectoryHandle | null = null;
+  for await (const [name, h] of from.dir.entries()) {
+    if (h.kind === 'file') {
+      const fh = h as FileSystemFileHandle;
+      const size = (await fh.getFile().catch(() => null))?.size ?? 0;
+      files.set(normPath(name), { path: name, name, size, getFile: () => fh.getFile() });
+    } else if (name.toLowerCase() === 'stems') stems = h as FileSystemDirectoryHandle;
+  }
+  if (stems) {
+    for (const f of (await folderFromHandle(stems)).files.values()) {
+      const path = `${stems.name}/${f.path}`;
+      files.set(normPath(path), { ...f, path });
+    }
+  }
+  const view: SongFolder = { name: from.name, dir: from.dir, files };
+  for (const ref of await songRefs(view)) {
+    if (!ref.includes('/') || files.has(ref)) continue;
+    const f = from.files.get(ref) ?? (await fileAt(from.dir, ref));
+    if (f) files.set(ref, f);
+  }
+  for (const f of pendingFiles(from)) files.set(normPath(f.path), f);
+  return view;
+}
+
+/** フォルダの中のファイル（パスは正規化した形。大文字・小文字は見ない）。無ければ undefined */
+async function fileAt(dir: FileSystemDirectoryHandle, key: string): Promise<FolderFile | undefined> {
+  const parts = key.split('/');
+  const names: string[] = [];
+  let d = dir;
+  for (const [i, part] of parts.entries()) {
+    let found: FileSystemHandle | null = null;
+    for await (const [name, h] of d.entries()) {
+      if (name.toLowerCase() !== part) continue;
+      found = h;
+      names.push(name);
+      break;
+    }
+    if (!found) return undefined;
+    if (i < parts.length - 1) {
+      if (found.kind !== 'directory') return undefined;
+      d = found as FileSystemDirectoryHandle;
+    } else {
+      if (found.kind !== 'file') return undefined;
+      const fh = found as FileSystemFileHandle;
+      const file = await fh.getFile();
+      return { path: names.join('/'), name: file.name, size: file.size, getFile: () => fh.getFile() };
+    }
+  }
+  return undefined;
+}
+
+/** フォルダの中のファイルを消す（無ければそのまま） */
+async function removeAt(dir: FileSystemDirectoryHandle, path: string): Promise<void> {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  const name = parts.pop()!;
+  let d = dir;
+  try {
+    for (const p of parts) d = await d.getDirectoryHandle(p);
+    await d.removeEntry(name);
+  } catch (e) {
+    if (!(e instanceof DOMException && e.name === 'NotFoundError')) throw e;
+  }
+}
+
+/**
+ * 開いている曲を、別の曲フォルダへ移す：この曲のファイルを写し、開いている曲・最近の曲・Google Drive とのつなぎを新しいフォルダに付け替える。
+ * 元のフォルダのファイルは消さない（ほかの曲も入ったフォルダからなら、写したファイルを消すか聞く）。移したら新しいフォルダ
+ */
+async function relocate(from: SongFolder & { dir: FileSystemDirectoryHandle }, place: SongPlace, library: boolean): Promise<SongFolder | null> {
+  if (await place.dir.isSameEntry(from.dir)) {
+    toast(tr('いまと同じフォルダです', "That's the folder the song is already in"), 'info', 5000);
+    return null;
+  }
+  // 曲フォルダの中へは移さない（ほかの曲も入ったフォルダからは、その中に作るのが正しい）
+  if (!library && (await from.dir.resolve(place.dir).catch(() => null))) {
+    toast(tr(`いまの曲フォルダ「${from.name}」の中には移せません`, `Can't move it inside its current folder "${from.name}"`), 'warn', 6000);
+    return null;
+  }
+  const view = library ? await libraryView(from) : from;
+  const refs = await songRefs(view);
+  const files = songFilesOf(view, refs, library ? 'library' : 'song');
+  const target: SongFolder = place.created ? { name: place.dir.name, dir: place.dir, files: new Map() } : await folderFromHandle(place.dir);
+  try {
+    for (const [i, f] of files.entries()) {
+      if (i % 4 === 0 && files.length > 8) useEditor.setState({ loading: tr(`曲のファイルを写しています… ${i}/${files.length}`, `Copying the song files… ${i}/${files.length}`) });
+      await writeFile(target, f.path, await f.getFile());
+    }
+  } catch (e) {
+    toast(tr(`曲のファイルを写せませんでした: ${(e as Error).message}`, `Couldn't copy the song files: ${(e as Error).message}`), 'error', 8000);
+    return null;
+  } finally {
+    useEditor.setState({ loading: null });
+  }
+  // Google Drive とのつなぎは新しいフォルダへ（元のフォルダに残すと、2つのフォルダが同じ Drive の曲を書き換えあう）
+  if (findFile(view, LINK_FILE)) {
+    await removeAt(from.dir, LINK_FILE).catch(() => undefined);
+    from.files.delete(LINK_FILE);
+  }
+  const s = get();
+  const labels = await readSetDefLabels(target);
+  const known = new Map(s.meta.siblings.map((x) => [x.file.toLowerCase(), x.origin]));
+  useEditor.setState({
+    folder: target,
+    meta: { ...s.meta, siblings: siblingsOf(target, labels).map((x) => ({ ...x, origin: known.get(x.file.toLowerCase()) })), recentId: recentIdFor(target, s.meta.fileName) },
+  });
+  await moveRecentToFolder(from, target);
+  if (libraryToast) dismissToast(libraryToast);
+  libraryToast = 0;
+  const where = `${place.parent ? `${place.parent}/` : ''}${target.name}`;
+  if (library) await offerLeftoverCleanup(from, view, target, refs, where);
+  else toast(tr(`「${where}」に移しました（元のフォルダ「${from.name}」のファイルはそのまま残しています）`, `Moved to "${where}" (the files in the old folder "${from.name}" are left as they are)`), 'ok', 7000);
+  return target;
+}
+
+/** 最近の曲の控えのうち、元のフォルダの物を新しいフォルダに付け替える */
+async function moveRecentToFolder(from: SongFolder & { dir: FileSystemDirectoryHandle }, target: SongFolder) {
+  for (const e of await listRecent()) {
+    if (e.local || e.folderName.toLowerCase() !== from.name.toLowerCase()) continue;
+    if (e.dir && !(await e.dir.isSameEntry(from.dir).catch(() => false))) continue;
+    await deleteRecent(e.id);
+    await putRecent({ ...e, id: recentIdFor(target, e.fileName), dir: target.dir, folderName: target.name, updatedAt: Math.max(e.updatedAt, Date.now() - 1) });
+  }
+}
+
+/** ほかの曲も入ったフォルダから移したあと：そこに残った、この曲のファイルを消すか聞く（NX に同じ曲が2つ出ないように） */
+async function offerLeftoverCleanup(from: SongFolder & { dir: FileSystemDirectoryHandle }, view: SongFolder, target: SongFolder, refs: Set<string>, where: string) {
+  // 直下と stems/ の、写せた（同じ大きさで新しいフォルダにある）物だけ。ほかの曲のフォルダの中には触らない
+  const left = songFilesOf(view, refs, 'strict').filter((f) => !f.pending && f.path.toLowerCase() !== LINK_FILE && findFile(target, f.path)?.size === f.size);
+  if (!left.length) {
+    toast(tr(`「${where}」に移しました`, `Moved to "${where}"`), 'ok', 6000);
+    return;
+  }
+  const c = await chooseDialog<'remove' | 'keep'>({
+    title: tr(`「${where}」に移しました`, `Moved to "${where}"`),
+    body: tr(
+      `元の「${from.name}」の直下に、この曲のファイルが ${left.length} 個残っています（${fewText(left.map((f) => f.path), 4)}）。残すと、NX に同じ曲が2つ出ます。`,
+      `${left.length} of this song's files are still directly in "${from.name}" (${fewText(left.map((f) => f.path), 4)}). If you keep them, NX shows the song twice.`,
+    ),
+    options: [
+      { label: tr(`「${from.name}」から消す（おすすめ）`, `Remove them from "${from.name}" (recommended)`), sub: tr(`新しいフォルダに写した ${left.length} 個だけを消します。ほかの曲のファイルには触りません`, `Removes only the ${left.length} files copied to the new folder. Other songs' files are not touched`), value: 'remove' },
+      { label: tr('残す', 'Keep them'), sub: tr('あとで自分で片付けます', "I'll tidy them up myself"), value: 'keep' },
+    ],
+  });
+  if (c !== 'remove') return;
+  let removed = 0;
+  for (const f of left) {
+    try {
+      await removeAt(from.dir, f.path);
+      removed++;
+    } catch {
+      // 消せなかった物は残す
+    }
+  }
+  // 空になった stems フォルダも消す
+  await from.dir.removeEntry('stems').catch(() => undefined);
+  toast(tr(`「${from.name}」から、この曲のファイルを ${removed} 個消しました`, `Removed ${removed} of this song's ${pl(removed, 'file')} from "${from.name}"`), 'ok', 6000);
+}
+
+/**
+ * ほかの曲も入ったフォルダ（DTXFiles など）で開いている曲を、この曲だけのフォルダに移す。操作の中で呼ぶ。
+ * 移した・もともと曲フォルダならそのフォルダ、やめたら null
+ */
+export async function moveToOwnSongFolder(): Promise<SongFolder | null> {
+  const s = get();
+  const folder = s.folder;
+  if (!isDiskFolder(folder)) return null;
+  const others = otherSongsIn(folder);
+  if (!others.length) return folder;
+  const name = songFolderName({ title: s.doc.fields['TITLE'], library: true });
+  const c = await chooseDialog<'inside' | 'pick'>({
+    title: tr(`「${folder.name}」はほかの曲も入ったフォルダです`, `"${folder.name}" also holds other songs`),
+    body: tr(
+      `曲のフォルダ（${fewText(others.map((d) => dirLabel(folder, d)))}）が入っているので、ここには直接保存しません（NX でほかの曲と混ざり、Google Drive にもほかの曲まで送ってしまうため）。この曲だけのフォルダを作り、この曲のファイルを写してから保存します。`,
+      `It has song folders in it (${fewText(others.map((d) => dirLabel(folder, d)))}), so nothing is saved straight into it (it would mix with other songs in NX and send other songs to Google Drive too). A folder just for this song is made, the song's files are copied there, and then it is saved.`,
+    ),
+    options: [
+      {
+        label: tr(`「${folder.name}」の中に「${name}」フォルダを作る（おすすめ）`, `Make a "${name}" folder in "${folder.name}" (recommended)`),
+        sub: tr('NX の DTXFiles なら、そのまま NX で遊べます', 'If this is DTXFiles in NX, you can play it in NX right away'),
+        value: 'inside',
+      },
+      { label: tr('別の場所を選ぶ…', 'Choose another place…'), sub: tr(`選んだフォルダの中に「${name}」フォルダを作ります`, `A "${name}" folder is made in the folder you choose`), value: 'pick' },
+    ],
+  });
+  if (!c) return null;
+  try {
+    if (!(await ensureWritable(folder))) {
+      toast(tr('フォルダへの書き込みが許可されませんでした', 'Writing to the folder was not allowed'), 'error');
+      return null;
+    }
+    const place = c === 'inside' ? await makeSongDir(folder.dir, name) : await pickSongPlace(name);
+    if (!place) return null;
+    return await relocate(folder, place, true);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return null;
+    toast(tr(`この曲のフォルダを作れませんでした: ${(e as Error).message}`, `Couldn't make the song folder: ${(e as Error).message}`), 'error', 8000);
+    return null;
+  }
+}
+
+/** 保存先のフォルダを変える（PC の曲フォルダ）。この曲のファイルを新しい曲フォルダに写し、次からそこに保存する。操作の中で呼ぶ */
+export async function changeSongFolder() {
+  const s = get();
+  const folder = s.folder;
+  if (!isDiskFolder(folder) || !supportsDirectWrite()) return;
+  if (otherSongsIn(folder).length) {
+    if (await moveToOwnSongFolder()) await save();
+    return;
+  }
+  const name = songFolderName({ folder: folder.name, title: s.doc.fields['TITLE'] });
+  const count = songFilesOf(folder, new Set()).length;
+  const ok = await confirmDialog({
+    title: tr('保存先のフォルダを変えます', 'Change the save folder'),
+    body: tr(
+      `移す先（NX の DTXFiles など）を選ぶと、その中に「${name}」フォルダを作り、この曲のファイル（譜面・原曲・ステムなど ${count} 個）を写して、次からはそこに保存します。いまのフォルダ「${folder.name}」のファイルは消さずに残します。Google Drive とのつなぎは新しいフォルダに移します。`,
+      `Choose where to move it (such as DTXFiles in NX). A "${name}" folder is made inside it, this song's ${count} ${pl(count, 'file')} (charts, original audio, stems…) are copied there, and later saves go there. The files in the current folder "${folder.name}" are kept. The Google Drive link moves to the new folder.`,
+    ),
+    ok: tr('移す先を選ぶ', 'Choose where to move'),
+  });
+  if (!ok) return;
+  try {
+    const place = await pickSongPlace(name);
+    if (!place) return;
+    if (await relocate(folder, place, false)) await save();
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return;
+    toast(tr(`保存先を変えられませんでした: ${(e as Error).message}`, `Couldn't change the save folder: ${(e as Error).message}`), 'error', 8000);
+  }
+}
+
 /** 保存を始めるとき（操作の中、最初の await の前）に呼ぶ。Drive のログインの小窓を開くため（src/app/driveActions.ts） */
 let beforeSave: ((opts: { toFolder?: boolean }) => void) | null = null;
 export function setBeforeSave(fn: ((opts: { toFolder?: boolean }) => void) | null) {
@@ -885,6 +1199,12 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
   if (folder && !folder.dir) await promotions.get(folder);
   const kit = await kitFilesNeeded(doc, folder);
   try {
+    if (isDiskFolder(folder) && otherSongsIn(folder).length) {
+      // ほかの曲も入ったフォルダ（DTXFiles など）には直接書かない：この曲だけのフォルダを作って移してから保存する
+      const moved = await moveToOwnSongFolder();
+      if (!moved) return;
+      folder = moved;
+    }
     if (isDiskFolder(folder)) {
       if (!(await ensureWritable(folder))) {
         toast(tr('フォルダへの書き込みが許可されませんでした', 'Writing to the folder was not allowed'), 'error');
@@ -912,8 +1232,14 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       return;
     }
     if (supportsDirectWrite()) {
-      // PC（フォルダに直接保存できるブラウザ）。まだ曲フォルダが無い・本体に置いた曲は、NX の曲フォルダを選んで保存する。
+      // PC（フォルダに直接保存できるブラウザ）。まだ曲フォルダが無い・本体に置いた曲は、保存する場所を選んでもらい、
+      // その中に曲のフォルダを作って保存する（選んだフォルダの直下には広げない。src/app/songPlace.ts）。
       // 本体に置いたまま保存することもできる（選んだら、その曲は次から聞かずに本体へ）
+      const songName = songFolderName({ folder: folder?.name, title: doc.fields['TITLE'] });
+      const makeNote = tr(
+        `保存する場所（NX の DTXFiles など）を選ぶと、その中に「${songName}」フォルダを作って、譜面・原曲・ステム・キットの音をまとめて書きます。次からはそのフォルダに上書きします`,
+        `Choose where to save it (such as DTXFiles in NX). A "${songName}" folder is made inside it and the chart, original audio, stems and kit sounds are written there together. Later saves overwrite that folder`,
+      );
       let where: 'folder' | 'local' = 'folder';
       if (!opts.toFolder) {
         const keep = folder?.local ? (await getLocalSong(folder.local))?.keepInBrowser : false;
@@ -921,16 +1247,9 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         else if (await checkLocal()) {
           const c = await chooseDialog<'folder' | 'local'>({
             title: tr('どこに保存しますか？', 'Where do you want to save?'),
-            body: tr('NX で遊ぶには、NX の曲フォルダ（DTXFiles の中など）に保存します。', 'To play it in NX, save it into an NX song folder (inside DTXFiles, for example).'),
+            body: tr('NX で遊ぶには、NX の曲フォルダ（DTXFiles の中）に保存します。', 'To play it in NX, save it as a song folder inside DTXFiles in NX.'),
             options: [
-              {
-                label: tr('曲フォルダを選んで保存（おすすめ）', 'Choose a song folder (recommended)'),
-                sub: tr(
-                  'この曲用の空のフォルダを作って選んでください。譜面・原曲・ステム・キットの音をまとめて書き、次からはそのフォルダに上書きします',
-                  'Create an empty folder for this song and choose it. The chart, original audio, stems and kit sounds are written together, and later saves overwrite that folder',
-                ),
-                value: 'folder',
-              },
+              { label: tr('曲のフォルダを作って保存（おすすめ）', 'Make a song folder and save (recommended)'), sub: makeNote, value: 'folder' },
               {
                 label: tr('このブラウザの中に保存', 'Save inside this browser'),
                 sub: tr(
@@ -945,15 +1264,19 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
           where = c;
         } else {
           const ok = await confirmDialog({
-            title: tr('曲フォルダを選んで保存します', 'Choose a song folder to save to'),
-            body: tr(
-              'NXの曲フォルダ（DTXFiles の中など）に、この曲用の空のフォルダを作って選んでください。譜面・原曲・内蔵キットの音をまとめて保存します。',
-              "Create an empty folder for this song in NX's song folder (inside DTXFiles, for example) and choose it. The chart, the original, and the built-in kit sounds are saved together.",
-            ),
-            ok: tr('フォルダを選ぶ', 'Choose folder'),
+            title: tr('曲のフォルダを作って保存します', 'Make a song folder and save'),
+            body: `${makeNote}${tr('。', '.')}`,
+            ok: tr('保存する場所を選ぶ', 'Choose where to save'),
           });
           if (!ok) return;
         }
+      } else {
+        const ok = await confirmDialog({
+          title: tr('曲フォルダに書き出します', 'Export to a song folder'),
+          body: `${makeNote}${tr('。このブラウザの中の曲は、そのフォルダへ移します。', '. The song kept in this browser moves to that folder.')}`,
+          ok: tr('書き出す場所を選ぶ', 'Choose where to export'),
+        });
+        if (!ok) return;
       }
       if (where === 'local') {
         const lf = await ensureLocalFolder(folder);
@@ -964,8 +1287,9 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         }
         toast(tr(`${localPlace()}に保存できないので、曲フォルダを選んでください`, `Can't save in ${localPlace()}, so choose a song folder`), 'warn', 6000);
       }
-      const dir = await window.showDirectoryPicker!({ id: 'dtx-song', mode: 'readwrite' });
-      const target = await folderFromHandle(dir);
+      const place = await pickSongPlace(songName);
+      if (!place) return;
+      const target: SongFolder = place.created ? { name: place.dir.name, dir: place.dir, files: new Map() } : await folderFromHandle(place.dir);
       if (findFile(target, fileName)) {
         const over = await confirmDialog({
           title: tr(`${fileName} を上書きしますか？`, `Overwrite ${fileName}?`),
@@ -993,7 +1317,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       void scanSiblingOrigins(folder);
       // 本体に置いていた曲は、曲フォルダへ移ったので本体からは消す（自動保存の控えはフォルダに付け替える）
       if (moved) await moveLocalToFolder(moved, folder);
-      toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
+      const made = place.created ? tr(`（「${place.parent}」の中に「${folder.name}」フォルダを作りました）`, ` (made a "${folder.name}" folder in "${place.parent}")`) : '';
+      toast(`${tr('保存しました: ', 'Saved: ')}${place.parent ? `${place.parent}/` : ''}${folder.name}/${fileName}${made}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 6000);
       return;
     }
     // フォルダに直接書けないブラウザ（iPad・Safari・Firefox）：本体（このブラウザの保存領域）に保存する

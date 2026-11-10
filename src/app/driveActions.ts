@@ -6,16 +6,37 @@ import { pl, tr, locale } from '../i18n';
 import { IS_IOS, IS_IPHONE } from '../platform';
 import { DriveAuthError, DriveError } from '../drive/api';
 import { ensureToken, loadGis, setBeforeRedirect, signIn, takeRedirectResult, tokenValid, useDriveAuth, type Resume } from '../drive/auth';
-import { describeFiles, listDriveSongs, newLink, pullSong, pushSong, readAutosaves, readLink, remoteChanges, type DriveLink, type DriveSong, type SyncProgress } from '../drive/sync';
+import {
+  describeFiles,
+  extrasOf,
+  listDriveSongs,
+  listTree,
+  newLink,
+  NotSongFolderError,
+  pullSong,
+  pushSong,
+  readAutosaves,
+  readLink,
+  remoteChanges,
+  songsInside,
+  trashJunk,
+  type DriveLink,
+  type DriveSong,
+  type DriveTree,
+  type JunkDir,
+  type SyncProgress,
+} from '../drive/sync';
 import { folderFromHandle, normPath, type SongFolder } from '../fs/folder';
+import { dirLabel, otherSongsIn } from '../fs/songDir';
 import { checkLocal, createLocalSong, deleteLocalSong, finishLocalSong, freeLocalName, listLocalSongs, openLocalSong, updateLocalSong } from '../fs/local';
 import { songDir } from '../fs/opfs';
 import { getRecent, listRecent } from '../fs/recent';
-import { isDirty, toast, useEditor } from '../store/editor';
+import { dismissToast, isDirty, toast, useEditor } from '../store/editor';
 import { bumpLocal, initLocalSongs, refreshLocalSongs } from '../store/localSongs';
-import { chooseDialog } from '../ui/dialogs';
+import { chooseDialog, confirmDialog } from '../ui/dialogs';
 import { formatLevel } from '../ui/format';
-import { autosaveNow, autosaveSnapshot, confirmDiscard, openFolder, openRecent, recentIdFor, reopenFromFolder, setBeforeSave } from './fileActions';
+import { autosaveNow, autosaveSnapshot, confirmDiscard, moveToOwnSongFolder, openFolder, openRecent, recentIdFor, reopenFromFolder, save, setBeforeSave } from './fileActions';
+import { fewText } from './songPlace';
 
 export type DriveStatus = 'none' | 'busy' | 'ok' | 'auth' | 'error' | 'conflict' | 'newer';
 
@@ -31,9 +52,11 @@ interface DriveSyncState {
   error: string;
   conflicts: string[];
   newer: string[];
+  /** Drive のこの曲のフォルダに入っている、ほかの曲のフォルダ（送りも取りもしない。ゴミ箱に移せる） */
+  junk: JunkDir[];
 }
 
-export const useDriveSync = create<DriveSyncState>(() => ({ linked: false, status: 'none', progress: null, doing: null, at: 0, error: '', conflicts: [], newer: [] }));
+export const useDriveSync = create<DriveSyncState>(() => ({ linked: false, status: 'none', progress: null, doing: null, at: 0, error: '', conflicts: [], newer: [], junk: [] }));
 
 const ed = useEditor.getState;
 const set = useDriveSync.setState;
@@ -138,11 +161,18 @@ async function push(kind: PushKind): Promise<void> {
       device: device(),
       progress: (p) => set({ progress: p }),
     });
+    if (r.notSong) {
+      // ほかの曲も入ったフォルダ（DTXFiles など）は送らない
+      set({ status: 'error', error: notSongText(folder, r.notSong), doing: null, progress: null });
+      if (kind !== 'autosave' || !toldNotSong.has(folder)) tellNotSong(folder, r.notSong);
+      return;
+    }
     if (r.skipped || !r.link) {
       set({ status: folder.drive ? 'ok' : 'none', doing: null });
       return;
     }
     folder.drive = r.link.folderId;
+    noteJunk(folder, r.junk);
     synced.set(folder.drive, Date.now());
     if (folder.local && !wasLinked) {
       await updateLocalSong(folder.local, { drive: folder.drive });
@@ -173,6 +203,67 @@ async function push(kind: PushKind): Promise<void> {
       });
     }
   }
+}
+
+// ---- 曲フォルダでない・ほかの曲が入っている -------------------------------------------
+
+const toldNotSong = new WeakSet<SongFolder>();
+/** その知らせ（曲のフォルダに移したら閉じる） */
+let notSongToast = 0;
+
+function notSongText(folder: SongFolder, songs: string[]): string {
+  const names = fewText(songs.map((d) => dirLabel(folder, d)));
+  return tr(
+    `「${folder.name}」にはほかの曲（${names}）も入っているので、Google Drive には送りません。この曲だけのフォルダに移すと送れます`,
+    `"${folder.name}" also holds other songs (${names}), so it isn't sent to Google Drive. Move the song to a folder of its own to send it`,
+  );
+}
+
+function tellNotSong(folder: SongFolder, songs: string[]) {
+  toldNotSong.add(folder);
+  notSongToast = toast(notSongText(folder, songs), 'warn', 12000, { label: tr('この曲のフォルダに移す…', 'Move to its own folder…'), run: () => void moveToOwnSongFolder().then((f) => f && save()) });
+}
+
+function sizeText(bytes: number): string {
+  return bytes >= 1 << 30 ? `${(bytes / (1 << 30)).toFixed(1)} GB` : bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** Drive の曲フォルダに入っている物の数と大きさ（「フォルダ 3 個・ファイル 40 個以上・1.2 GB」） */
+function junkSummary(items: readonly JunkDir[]): string {
+  const files = items.reduce((a, j) => a + j.files, 0);
+  const bytes = items.reduce((a, j) => a + j.bytes, 0);
+  const songs = items.filter((j) => j.kind === 'song').length;
+  const dirs = items.filter((j) => j.kind === 'dir').length;
+  const parts = [
+    songs ? tr(`曲のフォルダ ${songs} 個`, `${songs} song ${pl(songs, 'folder')}`) : '',
+    dirs ? tr(`フォルダ ${dirs} 個`, `${dirs} ${pl(dirs, 'folder')}`) : '',
+    files ? (songs ? tr(`ファイル ${files} 個以上`, `${files}+ ${pl(files, 'file')}`) : tr(`ファイル ${files} 個`, `${files} ${pl(files, 'file')}`)) : '',
+    bytes ? (songs ? tr(`${sizeText(bytes)} 以上`, `${sizeText(bytes)}+`) : sizeText(bytes)) : '',
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
+
+/** 知らせた Drive の曲フォルダ（この画面で1回だけ） */
+const toldJunk = new Set<string>();
+/** その知らせ（片付けたら閉じる） */
+let junkToast = 0;
+
+/** Drive のこの曲のフォルダに、ほかの曲のフォルダが入っていたら知らせる（片付けられる） */
+function noteJunk(folder: SongFolder, junk: JunkDir[]) {
+  if (ed().folder !== folder) return;
+  set({ junk });
+  const id = folder.drive;
+  if (!junk.length || !id || toldJunk.has(id)) return;
+  toldJunk.add(id);
+  junkToast = toast(
+    tr(
+      `Google Drive のこの曲のフォルダに、ほかの曲のフォルダが ${junk.length} 個入っています（${fewText(junk.map((j) => j.path))}）。この曲の物ではないので、送りも取り込みもしません。ゴミ箱に移して片付けられます`,
+      `This song's folder on Google Drive has ${junk.length} other song ${pl(junk.length, 'folder')} in it (${fewText(junk.map((j) => j.path))}). They aren't part of this song, so they are neither sent nor taken. You can move them to the trash`,
+    ),
+    'warn',
+    15000,
+    { label: tr('片付ける…', 'Clean up…'), run: () => cleanDriveJunk() },
+  );
 }
 
 function newerToast(paths: string[]) {
@@ -257,11 +348,13 @@ async function pullCurrent() {
     synced.set(link.folderId, Date.now());
     if (folder.local) await finishLocalSong(folder.local, folder);
     set({ status: r.conflicts.length ? 'conflict' : 'ok', at: Date.now(), conflicts: r.conflicts, newer: [], doing: null });
+    noteJunk(folder, r.junk);
     toast(r.got ? tr(`Google Drive から ${r.got} 個取り込みました`, `Got ${r.got} ${pl(r.got, 'file')} from Google Drive`) : tr('Google Drive と同じでした', 'Already the same as Google Drive'), 'ok', 4000);
     if (r.got && ed().folder === folder) await reopenFromFolder(folder, fileName);
   } catch (e) {
     set({ status: e instanceof DriveAuthError ? 'auth' : 'error', error: errorText(e), doing: null, progress: null });
-    if (!(e instanceof DriveAuthError)) toast(tr(`Google Drive から取り込めませんでした: ${errorText(e)}`, `Couldn't get files from Google Drive: ${errorText(e)}`), 'error', 8000);
+    if (e instanceof NotSongFolderError) tellNotSong(folder, e.songs);
+    else if (!(e instanceof DriveAuthError)) toast(tr(`Google Drive から取り込めませんでした: ${errorText(e)}`, `Couldn't get files from Google Drive: ${errorText(e)}`), 'error', 8000);
   }
 }
 
@@ -271,10 +364,6 @@ export function openFromDrive() {
   void ok.then((y) => {
     if (y) void chooseAndOpen();
   });
-}
-
-function sizeText(bytes: number): string {
-  return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 async function chooseAndOpen() {
@@ -333,6 +422,8 @@ export async function openDriveSong(song: DriveSong) {
       } catch {
         // フォルダが消えた：本体に取ってくる
       }
+      // ほかの曲も入ったフォルダ（間違って DTXFiles を曲フォルダにしていた）には取らない：本体に取ってくる
+      if (folder && otherSongsIn(folder).length) folder = null;
     }
   }
   if (folder) link = await readLink(folder);
@@ -374,13 +465,177 @@ export async function openDriveSong(song: DriveSong) {
       if (e.id === recentIdFor(folder, e.fileName)) restore.set(e.fileName.toLowerCase(), { text: e.text, sidecar: e.sidecar });
     }
     set({ linked: true, status: r.conflicts.length ? 'conflict' : 'ok', at: Date.now(), conflicts: r.conflicts, newer: [], doing: null });
+    const junk = r.junk;
     if (r.got) toast(tr(`Google Drive から取ってきました（${r.got} 個・${sizeText(r.bytes)}）`, `Downloaded from Google Drive (${r.got} ${pl(r.got, 'file')}, ${sizeText(r.bytes)})`), 'ok', 4000);
     await openFolder(folder, restore);
+    noteJunk(folder, junk);
   } catch (e) {
     if (created) await deleteLocalSong(created).catch(() => undefined);
     set({ status: e instanceof DriveAuthError ? 'auth' : 'error', error: errorText(e), doing: null, progress: null });
     toast(tr(`Google Drive から開けませんでした: ${errorText(e)}`, `Couldn't open from Google Drive: ${errorText(e)}`), 'error', 8000);
   }
+}
+
+// ---- 片付ける ------------------------------------------------------------------------
+
+/**
+ * Drive のこの曲のフォルダから、この曲の物ではない物（ほかの曲のフォルダ。選べば、この端末に無い物も）をゴミ箱に移す。
+ * 操作の中で呼ぶ（ログインが切れていれば取り直す）
+ */
+export function cleanDriveJunk() {
+  const ok = ensureToken({ action: 'push', recentId: ed().meta.recentId }, true);
+  void ok.then((y) => {
+    if (y) void enqueue(cleanCurrent);
+  });
+}
+
+async function cleanCurrent() {
+  const folder = ed().folder;
+  if (!folder?.dir) return;
+  const others = songsInside(folder);
+  if (others.length) {
+    tellNotSong(folder, others);
+    return;
+  }
+  const link = await readLink(folder);
+  if (!link) {
+    toast(tr('この曲は Google Drive とつないでいません', "This song isn't linked to Google Drive"), 'info', 5000);
+    return;
+  }
+  let tree: DriveTree;
+  useEditor.setState({ loading: tr('Google Drive のこの曲のフォルダを調べています…', "Checking this song's folder on Google Drive…") });
+  try {
+    tree = await listTree(link.folderId);
+  } catch (e) {
+    if (e instanceof DriveAuthError) set({ status: 'auth' });
+    else toast(tr(`Google Drive を調べられませんでした: ${errorText(e)}`, `Couldn't check Google Drive: ${errorText(e)}`), 'error', 8000);
+    return;
+  } finally {
+    useEditor.setState({ loading: null });
+  }
+  const junk = tree.junk;
+  const extras = extrasOf(folder, tree);
+  if (!junk.length && !extras.length) {
+    set({ junk: [] });
+    toast(tr(`Google Drive の「${link.name}」には、この曲の物しかありません。片付ける物はありません`, `"${link.name}" on Google Drive only has this song's files. Nothing to clean up`), 'ok', 6000);
+    return;
+  }
+  const lines = [
+    junk.length ? tr(`・ほかの曲のフォルダ: ${fewText(junk.map((j) => j.path), 4)}（${junkSummary(junk)}）`, `• Other songs' folders: ${fewText(junk.map((j) => j.path), 4)} (${junkSummary(junk)})`) : '',
+    extras.length ? tr(`・この端末の曲フォルダに無いもの: ${fewText(extras.map((j) => j.path), 4)}（${junkSummary(extras)}）`, `• Not in the song folder on this device: ${fewText(extras.map((j) => j.path), 4)} (${junkSummary(extras)})`) : '',
+  ].filter(Boolean);
+  const choice = await chooseDialog<'junk' | 'all'>({
+    title: tr(`Google Drive の「${link.name}」を片付けます`, `Clean up "${link.name}" on Google Drive`),
+    body: tr(
+      `Drive のこの曲のフォルダ（DTX Web Editor/${link.name}）に、この曲の物ではないものがあります。\n${lines.join('\n')}\n\nゴミ箱に移したものは、Google Drive のゴミ箱から 30 日間は戻せます。この端末のファイルは変わりません。`,
+      `This song's folder on Drive (DTX Web Editor/${link.name}) has things that aren't part of this song.\n${lines.join('\n')}\n\nAnything moved to the trash can be restored from the Google Drive trash for 30 days. Files on this device don't change.`,
+    ),
+    options: [
+      ...(junk.length
+        ? [
+            {
+              label: tr(`ほかの曲のフォルダ ${junk.length} 個をゴミ箱へ（おすすめ）`, `Move the ${junk.length} other song ${pl(junk.length, 'folder')} to the trash (recommended)`),
+              sub: tr('この曲の譜面・原曲・ステムには触りません', "This song's charts, original audio and stems are not touched"),
+              value: 'junk' as const,
+            },
+          ]
+        : []),
+      ...(extras.length
+        ? [
+            {
+              label: junk.length ? tr('この端末に無いものも、まとめてゴミ箱へ', 'Also move everything not on this device to the trash') : tr('この端末に無いものをゴミ箱へ', 'Move what isn’t on this device to the trash'),
+              sub: tr('ほかの端末で足して、まだ取り込んでいないファイルも入ります', "This includes files added on another device that you haven't taken yet"),
+              value: 'all' as const,
+            },
+          ]
+        : []),
+    ],
+  });
+  if (!choice) return;
+  const items = choice === 'all' ? [...junk, ...extras] : junk;
+  set({ status: 'busy', doing: 'up', error: '' });
+  try {
+    const n = await trashJunk(items, {
+      folder,
+      link,
+      progress: (done, total) => useEditor.setState({ loading: tr(`Google Drive のゴミ箱に移しています… ${done}/${total}`, `Moving to the Google Drive trash… ${done}/${total}`) }),
+    });
+    set({ junk: [], status: 'ok', doing: null, newer: [], at: Date.now() });
+    if (junkToast) dismissToast(junkToast);
+    toast(tr(`Google Drive のゴミ箱に ${n} 個移しました（30 日間は Drive のゴミ箱から戻せます）`, `Moved ${n} ${pl(n, 'item')} to the Google Drive trash (restorable from the Drive trash for 30 days)`), 'ok', 8000);
+  } catch (e) {
+    set({ status: e instanceof DriveAuthError ? 'auth' : 'error', error: errorText(e), doing: null });
+    if (!(e instanceof DriveAuthError)) toast(tr(`ゴミ箱に移せませんでした: ${errorText(e)}`, `Couldn't move to the trash: ${errorText(e)}`), 'error', 8000);
+    return;
+  } finally {
+    useEditor.setState({ loading: null });
+  }
+  // 一覧に出す曲の情報（ファイルの数・大きさ）を直す
+  await push('manual');
+}
+
+/** Drive の曲をすべて点検し、ほかの曲のフォルダが入っていればゴミ箱に移す（設定から）。操作の中で呼ぶ */
+export function checkDriveSongs() {
+  const ok = ensureToken({ action: 'connect' }, true);
+  void ok.then((y) => {
+    if (y) void enqueue(checkAll);
+  });
+}
+
+async function checkAll() {
+  const found: { song: DriveSong; junk: JunkDir[] }[] = [];
+  let songs: DriveSong[] = [];
+  try {
+    useEditor.setState({ loading: tr('Google Drive の曲を調べています…', 'Checking songs on Google Drive…') });
+    songs = await listDriveSongs();
+    for (const [i, song] of songs.entries()) {
+      useEditor.setState({ loading: tr(`Google Drive の曲を調べています… ${i + 1}/${songs.length}`, `Checking songs on Google Drive… ${i + 1}/${songs.length}`) });
+      const tree = await listTree(song.id);
+      if (tree.junk.length) found.push({ song, junk: tree.junk });
+    }
+  } catch (e) {
+    toast(tr(`Google Drive を調べられませんでした: ${errorText(e)}`, `Couldn't check Google Drive: ${errorText(e)}`), 'error', 8000);
+    return;
+  } finally {
+    useEditor.setState({ loading: null });
+  }
+  if (!found.length) {
+    toast(tr(`Google Drive の曲 ${songs.length} 個を調べました。ほかの曲が入った曲はありません`, `Checked ${songs.length} ${pl(songs.length, 'song')} on Google Drive. None has other songs in it`), 'ok', 6000);
+    return;
+  }
+  const total = found.reduce((a, f) => a + f.junk.length, 0);
+  const ok = await confirmDialog({
+    title: tr(`ほかの曲が入った曲が ${found.length} 個あります`, `${found.length} ${pl(found.length, 'song')} on Drive ${found.length === 1 ? 'has' : 'have'} other songs in ${found.length === 1 ? 'it' : 'them'}`),
+    body: tr(
+      `${found.map((f) => `・${f.song.name}: ${fewText(f.junk.map((j) => j.path), 3)}（${junkSummary(f.junk)}）`).join('\n')}\n\nこれらのほかの曲のフォルダ ${total} 個を、Google Drive のゴミ箱に移します（30 日間は戻せます）。それぞれの曲の譜面・原曲などには触りません。`,
+      `${found.map((f) => `• ${f.song.name}: ${fewText(f.junk.map((j) => j.path), 3)} (${junkSummary(f.junk)})`).join('\n')}\n\nThese ${total} other song ${pl(total, 'folder')} are moved to the Google Drive trash (restorable for 30 days). Each song's own charts and audio are not touched.`,
+    ),
+    ok: tr('ゴミ箱に移す', 'Move to trash'),
+    danger: true,
+  });
+  if (!ok) return;
+  let n = 0;
+  try {
+    const folder = ed().folder;
+    const link = folder?.dir ? await readLink(folder) : null;
+    for (const f of found) {
+      const mine = folder && link?.folderId === f.song.id ? { folder, link } : {};
+      n += await trashJunk(f.junk, {
+        ...mine,
+        progress: (done) => useEditor.setState({ loading: tr(`Google Drive のゴミ箱に移しています… ${n + done}/${total}`, `Moving to the Google Drive trash… ${n + done}/${total}`) }),
+      });
+      if ('folder' in mine) {
+        set({ junk: [] });
+        if (junkToast) dismissToast(junkToast);
+      }
+    }
+  } catch (e) {
+    toast(tr(`ゴミ箱に移せませんでした: ${errorText(e)}`, `Couldn't move to the trash: ${errorText(e)}`), 'error', 8000);
+    return;
+  } finally {
+    useEditor.setState({ loading: null });
+  }
+  toast(tr(`Google Drive のゴミ箱に ${n} 個移しました（30 日間は Drive のゴミ箱から戻せます）`, `Moved ${n} ${pl(n, 'item')} to the Google Drive trash (restorable from the Drive trash for 30 days)`), 'ok', 8000);
 }
 
 // ---- 曲を開いたとき ---------------------------------------------------------------
@@ -389,24 +644,35 @@ export async function openDriveSong(song: DriveSong) {
 async function onFolder(folder: SongFolder | null) {
   window.clearTimeout(autoTimer);
   firstPending = 0;
+  // 「ほかの曲も入ったフォルダなので送らない」の知らせは、曲フォルダが変わったら閉じる
+  if (notSongToast) dismissToast(notSongToast);
+  notSongToast = 0;
   if (!folder?.dir) {
-    set({ linked: false, status: 'none', conflicts: [], newer: [], error: '' });
+    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '' });
+    return;
+  }
+  // ほかの曲も入ったフォルダ（DTXFiles など）は Drive と合わせない（保存のときに、この曲だけのフォルダへ移す）
+  if (songsInside(folder).length) {
+    folder.drive = undefined;
+    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '' });
     return;
   }
   const link = await readLink(folder);
   if (ed().folder !== folder) return;
   if (!link) {
     folder.drive = undefined;
-    set({ linked: false, status: 'none', conflicts: [], newer: [], error: '' });
+    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '' });
     return;
   }
   folder.drive = link.folderId;
   const busy = useDriveSync.getState().status === 'busy';
-  set({ linked: true, status: busy ? 'busy' : 'ok', at: link.syncedAt, conflicts: [], newer: [], error: '' });
+  set({ linked: true, status: busy ? 'busy' : 'ok', at: link.syncedAt, conflicts: [], newer: [], junk: [], error: '' });
   if (!useDriveAuth.getState().connected || !tokenValid() || busy || Date.now() - (synced.get(link.folderId) ?? 0) < 30_000) return;
   try {
-    const newer = await remoteChanges(folder, link);
-    if (ed().folder !== folder || !newer.length) return;
+    const { newer, junk } = await remoteChanges(folder, link);
+    if (ed().folder !== folder) return;
+    noteJunk(folder, junk);
+    if (!newer.length) return;
     set({ status: 'newer', newer });
     newerToast(newer);
   } catch {

@@ -81,7 +81,7 @@ export function DialogHost() {
         {spec.kind === 'choose' && (
           <>
             <h2>{spec.title}</h2>
-            {spec.body && <p>{spec.body}</p>}
+            {spec.body && <p style={{ whiteSpace: 'pre-wrap' }}>{spec.body}</p>}
             {spec.options.map((o, i) => (
               <button key={i} className="choice" onClick={() => close(o.value)} autoFocus={i === 0}>
                 <span className="grow">

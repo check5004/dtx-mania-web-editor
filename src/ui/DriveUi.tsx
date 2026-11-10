@@ -1,7 +1,7 @@
 // Google Drive の画面：ホームの「Google Drive」欄、設定の「Google Drive」、下の帯の状態、送る・取るの進み具合。
 import { useEffect } from 'react';
-import { tr } from '../i18n';
-import { connectDrive, openFromDrive, pullNow, pushNow, timeText, useDriveSync } from '../app/driveActions';
+import { pl, tr } from '../i18n';
+import { checkDriveSongs, cleanDriveJunk, connectDrive, openFromDrive, pullNow, pushNow, timeText, useDriveSync } from '../app/driveActions';
 import { canRedirect, loadGis, setPrefs, signOut, useDriveAuth } from '../drive/auth';
 import { confirmDialog } from './dialogs';
 import { Icon } from './icons';
@@ -129,7 +129,29 @@ export function DriveSettings() {
             'Autosaves go to .dtxe-autosave in the song folder on Drive and never change the chart itself. "Open from Drive" on another device continues from there. A song is first sent to Drive when you save it.',
           )}
         </p>
+        <p className="lbl">
+          {tr(
+            '送るのは曲のフォルダの中身だけです。ほかの曲も入ったフォルダ（NX の DTXFiles など）は送りません。',
+            "Only the contents of a song's folder are sent. A folder that holds other songs too (such as DTXFiles in NX) is never sent.",
+          )}
+        </p>
       </section>
+      {a.connected && (
+        <section className="card">
+          <h3>{tr('Drive の曲を点検する', 'Check the songs on Drive')}</h3>
+          <p className="lbl">
+            {tr(
+              'Drive の曲のフォルダに、ほかの曲のフォルダが入っていないかを調べ、入っていればゴミ箱に移します（間違って曲を集めたフォルダを保存先にして、ほかの曲まで送ってしまったとき）。Drive のゴミ箱から 30 日間は戻せます。',
+              "Checks whether any song folder on Drive has other songs' folders in it and moves them to the trash (for when a folder holding many songs was used by mistake and other songs got sent too). They can be restored from the Drive trash for 30 days.",
+            )}
+          </p>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn small" onClick={() => checkDriveSongs()}>
+              {tr('点検して片付ける…', 'Check and clean up…')}
+            </button>
+          </div>
+        </section>
+      )}
       <section className="card">
         <h3>{tr('ログインのしかた', 'How to sign in')}</h3>
         <label className="row" style={{ gap: 8 }}>
@@ -150,8 +172,27 @@ export function DriveSettings() {
 /** 下の帯：開いている曲と Drive の様子（押すと送る・取り込む・つなぎ直す） */
 export function DriveFooterChip() {
   const connected = useDriveAuth((s) => s.connected);
-  const st = useDriveSync();
+  const junk = useDriveSync((s) => s.junk.length);
   if (!connected) return null;
+  return (
+    <>
+      <DriveStatusChip />
+      {junk > 0 && (
+        <button
+          className="pill drive-pill warn"
+          title={tr('Google Drive のこの曲のフォルダに、ほかの曲のフォルダが入っています。押すとゴミ箱に移して片付けられます', "This song's folder on Google Drive has other songs' folders in it. Press to move them to the trash")}
+          onClick={() => cleanDriveJunk()}
+        >
+          {Icon.cloud(12)}
+          {tr(`Drive にほかの曲 ${junk}`, `${junk} other ${pl(junk, 'song')} on Drive`)}
+        </button>
+      )}
+    </>
+  );
+}
+
+function DriveStatusChip() {
+  const st = useDriveSync();
   if (st.status === 'none' || (!st.linked && st.status === 'ok')) return null;
   const p = st.progress;
   if (st.status === 'busy') {
@@ -232,6 +273,9 @@ export function DriveSaveRow() {
   } else if (st.status === 'error') {
     text = tr(`送れませんでした: ${st.error}`, `Couldn't send: ${st.error}`);
     action = { label: tr('もう一度', 'Try again'), run: () => pushNow() };
+  } else if (st.junk.length) {
+    text = tr(`Drive のこの曲のフォルダに、ほかの曲のフォルダが ${st.junk.length} 個入っています`, `This song's folder on Drive has ${st.junk.length} other song ${pl(st.junk.length, 'folder')} in it`);
+    action = { label: tr('片付ける', 'Clean up'), run: () => cleanDriveJunk() };
   } else if (st.linked) {
     text = st.at ? tr(`Drive にも保存 · ${timeText(st.at)}`, `Also saved on Drive at ${timeText(st.at)}`) : tr('Drive とつないでいます', 'Linked to Drive');
     action = { label: tr('今すぐ送る', 'Send now'), run: () => pushNow() };

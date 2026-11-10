@@ -4,9 +4,13 @@
 // - 変わったかは MD5 で比べる（Drive は md5Checksum を持つ）。大きさと更新時刻が前に合わせた時と同じなら計算しない。
 // - 両方で変わったファイルは、保存のときだけ聞く（自動保存のときは送らずに置いておく）。消したファイルは消さない（Drive に残す）。
 // - 自動保存（まだ保存していない続き）は .dtxe-autosave/<譜面>.json に送る。どの版の譜面への続きか（base = 譜面の MD5）も書く。
+// - 合わせるのは曲のファイルだけ。曲フォルダの中の「ほかの曲のフォルダ」（譜面などがあるサブフォルダ。src/fs/songDir.ts）は
+//   送らない・取らない。ほかの曲も入ったフォルダ（DTXFiles など）は丸ごと送らない（間違って選んだときに数百曲を送らないため）。
+//   Drive の曲フォルダに入ってしまったほかの曲（JunkDir）は、知らせてゴミ箱に移せるようにする。
 import { pl, tr } from '../i18n';
 import { normPath, writeFile, type FolderFile, type SongFolder } from '../fs/folder';
-import { createFolder, download, downloadText, DriveError, FOLDER_MIME, getFile, listChildren, listFiles, updateMeta, upload, type DriveFile } from './api';
+import { inDirs, isSongMark, otherSongDirs } from '../fs/songDir';
+import { createFolder, download, downloadText, DriveError, FOLDER_MIME, getFile, listChildren, listFiles, trashFile, updateMeta, upload, type DriveFile } from './api';
 import { md5Blob } from './md5';
 
 export const LINK_FILE = '.dtxe-drive.json';
@@ -216,15 +220,46 @@ export async function listDriveSongs(): Promise<DriveSong[]> {
   return out.sort((a, b) => t(b) - t(a));
 }
 
-/** Drive の曲フォルダの中身（サブフォルダも）。自動保存は別に返す */
-export async function listTree(folderId: string): Promise<{ files: Map<string, RemoteEntry>; dirs: Map<string, string>; autosaves: Map<string, DriveFile> }> {
+/**
+ * Drive の曲フォルダの中の、この曲の物ではないもの（ゴミ箱に移す単位）。
+ * song：ほかの曲のフォルダ（直下に譜面・set.def・box.def・成績がある。曲を集めたフォルダごと送ってしまったときなど）。
+ * dir・file：この端末の曲フォルダに無いフォルダ・ファイル（extrasOf）
+ */
+export interface JunkDir {
+  kind: 'song' | 'dir' | 'file';
+  /** 曲フォルダからのパス（元の綴り） */
+  path: string;
+  id: string;
+  /** 中のファイルの数と大きさ（ほかの曲のフォルダは直下だけを数える） */
+  files: number;
+  bytes: number;
+}
+
+export interface DriveTree {
+  /** この曲のファイル（ほかの曲のフォルダの中・自動保存は除く） */
+  files: Map<string, RemoteEntry>;
+  dirs: Map<string, string>;
+  autosaves: Map<string, DriveFile>;
+  /** ほかの曲のフォルダ（この曲として見ない） */
+  junk: JunkDir[];
+}
+
+/** Drive の曲フォルダの中身（サブフォルダも）。自動保存は別に返す。ほかの曲のフォルダは中を見ずに junk に入れる */
+export async function listTree(folderId: string): Promise<DriveTree> {
   const files = new Map<string, RemoteEntry>();
   const dirs = new Map<string, string>([['', folderId]]);
   const autosaves = new Map<string, DriveFile>();
+  const junk: JunkDir[] = [];
   const queue: [string, string, number][] = [['', folderId, 0]];
   while (queue.length) {
     const [prefix, id, depth] = queue.shift()!;
-    for (const f of await listChildren(id)) {
+    const kids = await listChildren(id);
+    if (depth > 0 && kids.some((f) => f.mimeType !== FOLDER_MIME && isSongMark(f.name))) {
+      const own = kids.filter((f) => f.mimeType !== FOLDER_MIME);
+      junk.push({ kind: 'song', path: prefix, id, files: own.length, bytes: own.reduce((a, f) => a + Number(f.size ?? 0), 0) });
+      continue;
+    }
+    for (const f of kids) {
       const path = prefix ? `${prefix}/${f.name}` : f.name;
       const key = normPath(path);
       if (f.mimeType === FOLDER_MIME) {
@@ -243,7 +278,8 @@ export async function listTree(folderId: string): Promise<{ files: Map<string, R
       if (!old || old.modifiedTime < e.modifiedTime) files.set(key, e);
     }
   }
-  return { files, dirs, autosaves };
+  junk.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, dirs, autosaves, junk };
 }
 
 /** フォルダの中に、パスのサブフォルダを作る（あればそれ） */
@@ -278,11 +314,30 @@ export interface SyncProgress {
 
 // ---- 送る・取る ---------------------------------------------------------------------
 
-/** 曲フォルダの、Drive と合わせるファイル */
+/** 曲フォルダの、Drive と合わせるファイル（ほかの曲のフォルダの中は除く） */
 function localFiles(folder: SongFolder): Map<string, FolderFile> {
+  const others = otherSongDirs([...folder.files.values()].map((f) => f.path));
   const m = new Map<string, FolderFile>();
-  for (const [key, f] of folder.files) if (syncedPath(f.path)) m.set(key, f);
+  for (const [key, f] of folder.files) if (syncedPath(f.path) && !inDirs(key, others)) m.set(key, f);
   return m;
+}
+
+/** ほかの曲も入ったフォルダ（曲フォルダではない）か。入っている曲のフォルダ（正規化したパス） */
+export function songsInside(folder: SongFolder): string[] {
+  return otherSongDirs([...folder.files.values()].map((f) => f.path));
+}
+
+/** つなぎの記録から、ほかの曲のフォルダの中の記録を外す */
+function pruneLink(link: DriveLink, junk: readonly JunkDir[]): boolean {
+  const dirs = junk.map((j) => normPath(j.path));
+  let changed = false;
+  for (const key of Object.keys(link.files)) {
+    if (inDirs(key, dirs) || dirs.includes(key)) {
+      delete link.files[key];
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /** 前に合わせた時から変わっていなければ MD5 を計算しない。Drive に同じ名前があるときだけ計算する */
@@ -358,8 +413,12 @@ export interface PushResult {
   newer: string[];
   /** 両方で変わって送らなかった */
   conflicts: string[];
-  /** やめた（つないでいない・聞いてやめた） */
+  /** Drive の曲フォルダに入っている、ほかの曲のフォルダ（送りも取りもしない。ゴミ箱に移せる） */
+  junk: JunkDir[];
+  /** やめた（つないでいない・聞いてやめた・曲フォルダではない） */
   skipped?: boolean;
+  /** 曲フォルダではない（ほかの曲も入ったフォルダ）ので送らなかった。入っている曲のフォルダ */
+  notSong?: string[];
 }
 
 function freeName(name: string, taken: Set<string>): string {
@@ -370,9 +429,13 @@ function freeName(name: string, taken: Set<string>): string {
   }
 }
 
-/** この端末の曲フォルダを Drive に送る（変わったファイルだけ） */
+const NONE = { sent: 0, bytes: 0, newer: [] as string[], conflicts: [] as string[], junk: [] as JunkDir[] };
+
+/** この端末の曲フォルダを Drive に送る（変わったファイルだけ）。ほかの曲も入ったフォルダは送らない */
 export async function pushSong(folder: SongFolder, o: PushOptions): Promise<PushResult> {
   const progress = o.progress ?? (() => {});
+  const others = songsInside(folder);
+  if (others.length) return { link: null, ...NONE, skipped: true, notSong: others };
   let link = await readLink(folder);
   if (link && o.quick && (await unchangedSince(folder, link))) {
     if (o.autosave) {
@@ -380,21 +443,21 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
       await putAutosave(link, o.autosave, o.device);
       if (JSON.stringify([link.autosaveDir, link.autosave]) !== before) await writeLink(folder, link);
     }
-    return { link, sent: 0, bytes: 0, newer: [], conflicts: [] };
+    return { link, ...NONE };
   }
   if (link) {
     const f = await getFile(link.folderId);
     if (!f || f.trashed) link = null; // Drive で消された
   }
   if (!link) {
-    if (!o.create) return { link: null, sent: 0, bytes: 0, newer: [], conflicts: [], skipped: true };
+    if (!o.create) return { link: null, ...NONE, skipped: true };
     const root = (await appRoot(true))!;
     const kids = (await listChildren(root)).filter((f) => f.mimeType === FOLDER_MIME);
     const same = kids.find((f) => f.name.toLowerCase() === folder.name.toLowerCase());
     let target: DriveFile | null = null;
     if (same) {
       const how = o.sameName ? await o.sameName(same.name) : 'new';
-      if (!how) return { link: null, sent: 0, bytes: 0, newer: [], conflicts: [], skipped: true };
+      if (!how) return { link: null, ...NONE, skipped: true };
       if (how === 'join') target = same;
     }
     target ??= await createFolder(freeName(folder.name, new Set(kids.map((k) => k.name.toLowerCase()))), root, { appProperties: { dtxe: 'song' } });
@@ -402,6 +465,7 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
   }
   progress({ phase: 'check', done: 0, total: 0, bytes: 0, totalBytes: 0 });
   const tree = await listTree(link.folderId);
+  pruneLink(link, tree.junk);
   const files = localFiles(folder);
   const { state, blobs } = await localState(files, tree.files, link.files, progress);
   let steps = planSync(state, tree.files, link.files, 'push');
@@ -448,6 +512,7 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
     bytes,
     newer: steps.filter((s) => s.op === 'newer').map((s) => s.path),
     conflicts: steps.filter((s) => s.op === 'conflict').map((s) => s.path),
+    junk: tree.junk,
   };
 }
 
@@ -463,7 +528,7 @@ async function unchangedSince(folder: SongFolder, link: DriveLink): Promise<bool
 }
 
 /** 自動保存（まだ保存していない続き）を送る */
-async function putAutosave(link: DriveLink, a: Autosave, device?: string, tree?: Awaited<ReturnType<typeof listTree>>) {
+async function putAutosave(link: DriveLink, a: Autosave, device?: string, tree?: DriveTree) {
   const dtx = link.files[normPath(a.fileName)];
   const body: AutosaveFile = { v: 1, ...a, base: dtx?.md5 ?? '', device };
   const name = `${a.fileName}.json`;
@@ -491,7 +556,7 @@ async function putAutosave(link: DriveLink, a: Autosave, device?: string, tree?:
 }
 
 /** Drive の自動保存を読む（譜面の名前の小文字 → 中身） */
-export async function readAutosaves(tree: Awaited<ReturnType<typeof listTree>>): Promise<Map<string, AutosaveFile>> {
+export async function readAutosaves(tree: DriveTree): Promise<Map<string, AutosaveFile>> {
   const out = new Map<string, AutosaveFile>();
   for (const [name, f] of tree.autosaves) {
     if (!name.endsWith('.json')) continue;
@@ -514,16 +579,36 @@ export interface PullResult {
   link: DriveLink;
   got: number;
   bytes: number;
-  tree: Awaited<ReturnType<typeof listTree>>;
+  tree: DriveTree;
   /** 両方で変わって取らなかった */
   conflicts: string[];
+  /** Drive の曲フォルダに入っている、ほかの曲のフォルダ（取らない） */
+  junk: JunkDir[];
+}
+
+/** ほかの曲も入ったフォルダ（曲フォルダではない）へは取らない */
+export class NotSongFolderError extends DriveError {
+  constructor(
+    readonly folderName: string,
+    readonly songs: string[],
+  ) {
+    super(
+      tr(`「${folderName}」にはほかの曲も入っているので、Google Drive とは合わせません`, `"${folderName}" also has other songs in it, so it isn't synced with Google Drive`),
+      0,
+      'not-song',
+    );
+    this.name = 'NotSongFolderError';
+  }
 }
 
 /** Drive の曲フォルダをこの端末の曲フォルダへ取る（変わったファイルだけ）。folder は直接書けるフォルダ */
 export async function pullSong(folder: SongFolder, link: DriveLink, o: PullOptions = {}): Promise<PullResult> {
   const progress = o.progress ?? (() => {});
+  const others = songsInside(folder);
+  if (others.length) throw new NotSongFolderError(folder.name, others);
   progress({ phase: 'check', done: 0, total: 0, bytes: 0, totalBytes: 0 });
   const tree = await listTree(link.folderId);
+  pruneLink(link, tree.junk);
   const files = localFiles(folder);
   const { state, blobs } = await localState(files, tree.files, link.files, progress);
   let steps = planSync(state, tree.files, link.files, 'pull');
@@ -560,18 +645,68 @@ export async function pullSong(folder: SongFolder, link: DriveLink, o: PullOptio
     await writeLink(folder, link);
     progress(null);
   }
-  return { link, got, bytes, tree, conflicts: steps.filter((s) => s.op === 'conflict').map((s) => s.path) };
+  return { link, got, bytes, tree, conflicts: steps.filter((s) => s.op === 'conflict').map((s) => s.path), junk: tree.junk };
 }
 
-/** Drive の方が新しいファイルがあるか（開いた曲を、ほかの端末で保存していないか） */
-export async function remoteChanges(folder: SongFolder, link: DriveLink): Promise<string[]> {
+/**
+ * Drive の方が新しいファイルがあるか（開いた曲を、ほかの端末で保存していないか）。
+ * Drive の曲フォルダに入っているほかの曲のフォルダは newer に入れず、junk で返す
+ */
+export async function remoteChanges(folder: SongFolder, link: DriveLink): Promise<{ newer: string[]; junk: JunkDir[] }> {
   const tree = await listTree(link.folderId);
-  const out: string[] = [];
+  const newer: string[] = [];
   for (const [key, r] of tree.files) {
     const rec = link.files[key];
-    if (rec ? rec.md5 !== r.md5 : !folder.files.has(key)) out.push(r.path);
+    if (rec ? rec.md5 !== r.md5 : !folder.files.has(key)) newer.push(r.path);
   }
-  return out;
+  return { newer, junk: tree.junk };
+}
+
+// ---- 片付ける ---------------------------------------------------------------------
+
+/**
+ * Drive にだけあって、この端末の曲フォルダに無いもの。サブフォルダが丸ごと無ければフォルダで（ゴミ箱に移す回数を減らす）。
+ * ほかの曲のフォルダ（tree.junk）は入れない
+ */
+export function extrasOf(folder: SongFolder, tree: DriveTree): JunkDir[] {
+  const local = localFiles(folder);
+  const localTops = new Set([...local.keys()].filter((k) => k.includes('/')).map((k) => k.split('/')[0]));
+  const out = new Map<string, JunkDir>();
+  for (const [key, r] of tree.files) {
+    if (local.has(key)) continue;
+    const top = key.split('/')[0];
+    const dirId = key.includes('/') && !localTops.has(top) ? tree.dirs.get(top) : undefined;
+    if (dirId) {
+      const e = out.get(top) ?? { kind: 'dir' as const, path: r.path.split('/')[0], id: dirId, files: 0, bytes: 0 };
+      e.files++;
+      e.bytes += r.size;
+      out.set(top, e);
+    } else out.set(key, { kind: 'file', path: r.path, id: r.id, files: 1, bytes: r.size });
+  }
+  return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Drive の物をゴミ箱に移す（Drive のゴミ箱から 30 日は戻せる）。つなぎの記録からも外す。
+ * folder を渡せば、その曲フォルダのつなぎの記録を書き直す
+ */
+export async function trashJunk(items: readonly JunkDir[], o: { folder?: SongFolder; link?: DriveLink | null; progress?: (done: number, total: number) => void } = {}): Promise<number> {
+  let done = 0;
+  for (const j of items) {
+    o.progress?.(done, items.length);
+    try {
+      await trashFile(j.id);
+    } catch (e) {
+      // もう無い（ほかの端末で片付けた）なら、それでよい
+      if (!(e instanceof DriveError && e.status === 404)) throw e;
+    }
+    done++;
+  }
+  if (o.folder && o.link) {
+    pruneLink(o.link, items);
+    await writeLink(o.folder, o.link);
+  }
+  return done;
 }
 
 export function describeFiles(paths: string[], max = 4): string {

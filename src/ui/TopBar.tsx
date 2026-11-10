@@ -1,9 +1,9 @@
 import { tr, pl, getLang, setLang, LANG_NAMES } from '../i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { downloadDtx, exportSongZip, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
+import { changeSongFolder, downloadDtx, exportSongZip, newEmptySong, openFolderPicker, pickBgmFile, save, switchDifficulty } from '../app/fileActions';
 import { isDiskFolder, isLocalFolder, supportsDirectWrite } from '../fs/folder';
 import { localPlace, useLocalSongs } from '../store/localSongs';
-import { connectDrive, openFromDrive, pushNow } from '../app/driveActions';
+import { cleanDriveJunk, connectDrive, openFromDrive, pushNow } from '../app/driveActions';
 import { useDriveAuth } from '../drive/auth';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
@@ -133,6 +133,10 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
               ...(isLocalFolder(s().folder) && supportsDirectWrite() ? [{ label: tr('曲フォルダに書き出す…', 'Export to a song folder…'), run: () => void save({ toFolder: true }) }] : []),
               ...(s().folder && !isDiskFolder(s().folder) ? [{ label: tr('曲フォルダを ZIP でダウンロード', 'Download song folder as ZIP'), run: () => void exportSongZip() }] : []),
             ]),
+        // PC の曲フォルダ：保存先を変える（間違ったフォルダを選んだときも、ここで選び直せる）
+        ...(isDiskFolder(s().folder) && supportsDirectWrite()
+          ? [{ label: tr(`保存先のフォルダを変える…（いま「${s().folder?.name}」）`, `Change the save folder… (now "${s().folder?.name}")`), run: () => void changeSongFolder() }]
+          : []),
         { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: downloadDtx },
         '-',
         // Google Drive（操作の中でログインの小窓を開くので、run の中で直に呼ぶ）
@@ -142,6 +146,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
               ...(s().folder?.dir
                 ? [{ label: s().folder?.drive ? tr('Google Drive に今すぐ送る', 'Send to Google Drive now') : tr('Google Drive にも保存する', 'Also save to Google Drive'), run: () => pushNow() }]
                 : []),
+              ...(s().folder?.drive ? [{ label: tr('Google Drive のこの曲のフォルダを片付ける…', "Clean up this song's folder on Google Drive…"), run: () => cleanDriveJunk() }] : []),
             ]
           : [{ label: tr('Google Drive につなぐ…', 'Connect Google Drive…'), run: () => connectDrive() }]),
         '-',

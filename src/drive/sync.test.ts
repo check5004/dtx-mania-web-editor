@@ -16,7 +16,7 @@ vi.mock('../fs/opfs', async (orig) => {
 });
 
 const { setDriveAuth } = await import('./api');
-const { LINK_FILE, listDriveSongs, newLink, planSync, pullSong, pushSong, readAutosaves, readLink, remoteChanges, forgetRoot } = await import('./sync');
+const { LINK_FILE, extrasOf, listDriveSongs, listTree, newLink, planSync, pullSong, pushSong, readAutosaves, readLink, remoteChanges, forgetRoot, trashJunk } = await import('./sync');
 const { folderFromFiles, writeFile } = await import('../fs/folder');
 type SongFolder = import('../fs/folder').SongFolder;
 
@@ -128,7 +128,7 @@ describe('Drive と曲フォルダを合わせる（偽の Drive で）', () => 
     drive.setContent(dtx.id, enc('from PC'));
     drive.add({ name: 'bass.ogg', parents: [drive.byPath('DTX Web Editor/Mephisto')!.id], content: enc('BASS') });
     const link = (await readLink(f))!;
-    expect((await remoteChanges(f, link)).sort()).toEqual(['bass.ogg', 'ext.dtx']);
+    expect((await remoteChanges(f, link)).newer.sort()).toEqual(['bass.ogg', 'ext.dtx']);
     const r = await pushSong(f, { create: false });
     expect(r.newer.sort()).toEqual(['bass.ogg', 'ext.dtx']);
     expect(drive.files.get(dtx.id)!.content).toEqual(enc('from PC'));
@@ -136,7 +136,7 @@ describe('Drive と曲フォルダを合わせる（偽の Drive で）', () => 
     expect(p.got).toBe(2);
     expect(await text(f, 'ext.dtx')).toBe('from PC');
     expect(await text(f, 'bass.ogg')).toBe('BASS');
-    expect(await remoteChanges(f, (await readLink(f))!)).toEqual([]);
+    expect((await remoteChanges(f, (await readLink(f))!)).newer).toEqual([]);
   });
 
   it('両方で変わったファイルは聞く：この端末の方を送る／送らない', async () => {
@@ -212,5 +212,78 @@ describe('Drive と曲フォルダを合わせる（偽の Drive で）', () => 
     setDriveAuth(async () => 'expired', () => lost++);
     await expect(pushSong(f, { create: true })).rejects.toMatchObject({ name: 'DriveAuthError' });
     expect(lost).toBe(1);
+  });
+});
+
+describe('曲のファイルだけを合わせる（DTXFiles を曲フォルダとして選んでしまったとき）', () => {
+  it('ほかの曲も入ったフォルダは送らない（Drive に何も作らない）', async () => {
+    const lib = song({ 'mstr.dtx': 'mine', 'bgm.ogg': 'BGM', 'Mela/mstr.dtx': 'other', 'Mela/bgm.ogg': 'OTHER' }, 'DTXFiles');
+    const r = await pushSong(lib, { create: true });
+    expect(r.skipped).toBe(true);
+    expect(r.notSong).toEqual(['mela']);
+    expect(drive.files.size).toBe(0);
+    expect(drive.calls).toEqual([]);
+  });
+
+  it('ほかの曲も入ったフォルダへは取らない', async () => {
+    const lib = song({ 'mstr.dtx': 'v1', 'Mela/mstr.dtx': 'x' }, 'DTXFiles');
+    await expect(pullSong(lib, newLink('f1', 'Mephisto'))).rejects.toMatchObject({ name: 'NotSongFolderError' });
+  });
+
+  it('Drive の曲フォルダに入ったほかの曲は、新しい内容として知らせず・取らず、ゴミ箱に移せる', async () => {
+    const f = song({ 'mstr.dtx': 'v1', 'bgm.ogg': 'BGM', 'stems/drums.ogg': 'D' });
+    await pushSong(f, { create: true });
+    const songDir = drive.byPath('DTX Web Editor/Mephisto')!;
+    // 間違って DTXFiles ごと送られたほかの曲（譜面より先に、小さい成績だけが届いた曲も）
+    const mela = drive.add({ name: 'Mela', parents: [songDir.id] });
+    drive.add({ name: 'mstr.dtx', parents: [mela.id], content: enc('other chart') });
+    drive.add({ name: 'bgm.ogg', parents: [mela.id], content: enc('OTHER BGM') });
+    const sounds = drive.add({ name: 'sounds', parents: [mela.id] });
+    drive.add({ name: 'kick.wav', parents: [sounds.id], content: enc('K') });
+    const calc = drive.add({ name: 'Calc', parents: [songDir.id] });
+    drive.add({ name: 'ext.dtx.score.ini', parents: [calc.id], content: enc('score') });
+    // つなぎの記録にも、ほかの曲の記録が入っている（送っている途中でファイルを移した）
+    const link = (await readLink(f))!;
+    link.files['mela/mstr.dtx'] = { id: 'x', md5: 'y', size: 1, mtime: 1, path: 'Mela/mstr.dtx' };
+    const rc = await remoteChanges(f, link);
+    expect(rc.newer).toEqual([]);
+    expect(rc.junk.map((j) => [j.kind, j.path, j.files])).toEqual([
+      ['song', 'Calc', 1],
+      ['song', 'Mela', 2],
+    ]);
+    // 送っても・取っても、ほかの曲には触らない（記録からも外す）
+    const pushed = await pushSong(f, { create: false });
+    expect([pushed.sent, pushed.newer, pushed.junk.length]).toEqual([0, [], 2]);
+    expect((await readLink(f))!.files['mela/mstr.dtx']).toBeUndefined();
+    const pulled = await pullSong(f, (await readLink(f))!);
+    expect(pulled.got).toBe(0);
+    expect([...f.files.keys()].some((k) => k.startsWith('mela/') || k.startsWith('calc/'))).toBe(false);
+    // ゴミ箱へ（この曲のファイルはそのまま）
+    expect(await trashJunk(pushed.junk, { folder: f, link: (await readLink(f))! })).toBe(2);
+    expect(drive.files.get(mela.id)!.trashed).toBe(true);
+    expect(drive.files.get(calc.id)!.trashed).toBe(true);
+    expect((await listTree(songDir.id)).junk).toEqual([]);
+    expect(drive.byPath('DTX Web Editor/Mephisto/stems/drums.ogg')).toBeTruthy();
+    expect(drive.byPath('DTX Web Editor/Mephisto/bgm.ogg')).toBeTruthy();
+  });
+
+  it('この端末に無いもの：丸ごと無いフォルダはフォルダで、ほかはファイルで', async () => {
+    const f = song({ 'mstr.dtx': 'v1', 'stems/drums.ogg': 'D' });
+    await pushSong(f, { create: true });
+    const songDir = drive.byPath('DTX Web Editor/Mephisto')!;
+    drive.add({ name: 'bass.ogg', parents: [drive.byPath('DTX Web Editor/Mephisto/stems')!.id], content: enc('B') });
+    const extra = drive.add({ name: 'Extra', parents: [songDir.id] });
+    drive.add({ name: 'a.wav', parents: [extra.id], content: enc('AA') });
+    drive.add({ name: 'b.wav', parents: [extra.id], content: enc('BBB') });
+    drive.add({ name: 'memo.txt', parents: [songDir.id], content: enc('m') });
+    const tree = await listTree(songDir.id);
+    expect(extrasOf(f, tree).map((j) => [j.kind, j.path, j.files, j.bytes])).toEqual([
+      ['dir', 'Extra', 2, 5],
+      ['file', 'memo.txt', 1, 1],
+      ['file', 'stems/bass.ogg', 1, 1],
+    ]);
+    await trashJunk(extrasOf(f, tree), { folder: f, link: (await readLink(f))! });
+    expect(extrasOf(f, await listTree(songDir.id))).toEqual([]);
+    expect(drive.byPath('DTX Web Editor/Mephisto/stems/drums.ogg')).toBeTruthy();
   });
 });
