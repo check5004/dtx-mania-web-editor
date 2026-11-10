@@ -11,11 +11,12 @@ import type { Frac } from '../dtx/fraction';
 import { drumChannel, type DtxDoc } from '../dtx/model';
 import type { HeardDrums } from './heard';
 
-/** 小節の中の1打（写した元の WAV 番号のまま） */
+/** 小節の中の1打（写した元の WAV 番号のまま。AI の候補は v が 0 で、スネアのリムは rim） */
 export interface CNote {
   ch: number;
   f: Frac;
   v: number;
+  rim?: boolean;
 }
 
 export interface MeasureContent {

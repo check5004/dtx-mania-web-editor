@@ -897,6 +897,19 @@ html.phone-port .p-edge-top {
   display: block;
 }
 
+/* スネアの枠（左がリム）：半分の幅に入るように詰める */
+.p-kit .t-kit-split {
+  gap: 3px;
+}
+
+.p-kit .t-kit-split > .t-pad {
+  padding: 7px 3px 6px 5px;
+}
+
+.p-kit .t-kit-split > .t-pad .t-pad-key {
+  font-size: 12px;
+}
+
 .p-pad-side {
   display: flex;
   flex-direction: column;

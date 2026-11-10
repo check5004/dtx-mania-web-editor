@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
 import { CH, chipColor, DRUM_LANES, drumChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
+import { chipAlt, rimWavs } from '../dtx/rim';
 import { fittingGrid, GRID_DIVS, onGrid, type Pos } from '../edit/ops';
 import { useInputSettings } from '../input/settings';
 import { useDevice } from '../store/device';
@@ -44,7 +45,7 @@ import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
 import { placeSongBpm } from '../store/songSync';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
-import { channelName, chipBpmLabel, formatPosition, meterLabel } from './format';
+import { channelName, chipBpmLabel, chipName, formatPosition, meterLabel } from './format';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
 import { currentTrackStop, setTrackStop, trackStopLabel, trackStopNote } from './Splitter';
@@ -267,7 +268,10 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   const kinds = new Set(drums.map((c) => drumChannel(c.ch)!.kind));
   const altLanes = [...lanes].filter((l) => DRUM_LANES[l].alt !== undefined).sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const oneInfo = one ? drumChannel(one.ch) : undefined;
-  const color = oneInfo ? chipColor(oneInfo.lane, oneInfo.alt) : one ? '#8B95A4' : 'var(--accent)';
+  // 2種目（HHオープン・左バスドラム・スネアのリム。リムは音で見分ける）
+  const rims = rimWavs(doc);
+  const isAlt = (c: Chip) => chipAlt(doc, c, rims);
+  const color = oneInfo && one ? chipColor(oneInfo.lane, isAlt(one)) : one ? '#8B95A4' : 'var(--accent)';
   const isBpm = one && (one.ch === CH.BPM || one.ch === CH.BPM_EX);
   const extras = chipMenuExtras(ids);
 
@@ -283,7 +287,7 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
     <>
       <div className="ctx-head">
         <span className="dot" style={{ background: color, width: 10, height: 10, flex: 'none' }} />
-        <b className="ellipsis">{one ? channelName(one.ch) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</b>
+        <b className="ellipsis">{one ? chipName(doc, one) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</b>
         <span className="ctx-head-sub mono ellipsis">{one ? `${toMeasure(one.m)} · ${fracToString(one.f)}` : laneSummary(chips)}</span>
         {drums.length > 0 && (
           <button className="ib tiny" onClick={() => hear(drumIds, anchor, true)} title={tr('音を聴く', 'Listen')} aria-label={tr('音を聴く', 'Listen')}>
@@ -298,7 +302,7 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
           {altLanes.map((lane) => {
             const def = DRUM_LANES[lane];
             const inLane = drums.filter((c) => drumChannel(c.ch)!.lane === lane);
-            const nAlt = inLane.filter((c) => drumChannel(c.ch)!.alt).length;
+            const nAlt = inLane.filter(isAlt).length;
             const state = nAlt === 0 ? 'main' : nAlt === inLane.length ? 'alt' : null;
             const set = (alt: 'main' | 'alt') => {
               closeCtxMenu();

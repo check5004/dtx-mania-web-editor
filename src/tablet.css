@@ -1364,6 +1364,15 @@ html.tablet .t-chart .rec-badge {
   gap: 4px;
 }
 
+/* 1列のときは、スネアの枠（左がリム）を2つ分の幅にする */
+.t-pads.d-row .t-kit:has(.t-kit-split) {
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+}
+
+.t-pads.d-row .t-kit-split {
+  grid-column: span 2;
+}
+
 /* 横のパネルが低いとき（下のトラックを開いたなど）：パッドを低くして、スクロールしないで済むように */
 .t-pads.where-panel.d-compact {
   gap: 10px;
@@ -1391,7 +1400,7 @@ html.tablet .t-chart .rec-badge {
 }
 
 /* キットの段（上・中・下）の切れ目を少しあける */
-.t-pads.d-row .t-kit .t-pad:nth-child(4n + 1):not(:first-child) {
+.t-pads.d-row .t-kit > :nth-child(4n + 1):not(:first-child) {
   margin-left: 6px;
 }
 
@@ -1494,6 +1503,40 @@ html.tablet .t-chart .rec-badge {
   min-height: 0;
   flex: 1;
   padding: 6px 8px;
+}
+
+/* キットのスネアの枠：左がリム、右がスネア（パッドの縁と面のように、1つの枠を左右に分ける） */
+.t-kit-split {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.t-kit-split > .t-pad {
+  flex: 1 1 0;
+  min-height: 0;
+  padding-left: 6px;
+  padding-right: 4px;
+  overflow: hidden;
+}
+
+.t-kit-split > .t-pad .t-pad-key {
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* 横のパネル（360）のように枠が狭いときは、色の点と名前を省いて RIM・SD だけ */
+.t-kit .t-kit-split {
+  container-type: inline-size;
+}
+
+@container (max-width: 100px) {
+  .t-kit .t-kit-split .t-pad-key i,
+  .t-kit .t-kit-split .t-pad-name {
+    display: none;
+  }
 }
 
 .t-lanegrid {

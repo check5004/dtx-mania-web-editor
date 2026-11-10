@@ -64,7 +64,8 @@ import { usePhrase } from '../store/phrase';
 import { doubtKey, setGhostRevealer, useComplete, visibleGhost, type Ghost } from '../store/complete';
 import { CompleteBadge, type GhostAnchor } from './CompleteBadge';
 import { genView, openMeasureGen, toggleGenKeep, toggleGenNote, useMeasureGen, type GenView } from '../store/measureGen';
-import { noteId } from '../edit/merge';
+import { noteId, noteRim, type ProposedNote } from '../edit/merge';
+import { rimWavs } from '../dtx/rim';
 import { GenBadge } from './GenBadge';
 import { gotoNextIssue, issuesOf, useCheck, type Issue } from '../store/check';
 import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
@@ -2387,7 +2388,7 @@ const onsetAccuracy = () =>
   );
 
 /** TAB補完の点線（範囲の枠と、点線のチップ。原曲でその音が聞こえないチップはオレンジの枠） */
-function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoMap) {
+function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoMap, rims: ReadonlySet<number>) {
   const left = g.ox + GEO.laneX;
   const w = GEO.laneW * DRUM_LANES.length;
   const yb = g.beatToY(tm.measureStart(gh.from));
@@ -2408,7 +2409,9 @@ function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoM
       if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) continue;
       const y = g.beatToY(beat);
       const cx = g.ox + laneCX(info.lane);
-      const color = chipColor(info.lane, info.alt);
+      // スネアのリム（写した元の音がリム、または AI の候補のリム）
+      const alt = info.alt || (info.base === CH.SD && (n.rim === true || rims.has(n.v)));
+      const color = chipColor(info.lane, alt);
       roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
       ctx.fillStyle = color + (info.kind === 'normal' ? '38' : '12');
       ctx.fill();
@@ -2417,7 +2420,7 @@ function drawGhost(ctx: CanvasRenderingContext2D, g: Geom, gh: Ghost, tm: TempoM
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.setLineDash([]);
-      if (info.alt) {
+      if (alt) {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(cx, y, 2.3, 0, Math.PI * 2);
@@ -2559,14 +2562,15 @@ function drawGenRange(ctx: CanvasRenderingContext2D, g: Geom, tm: TempoMap) {
  * 小節の生成の案：足すチップは点線（原曲で聞こえない BD・SD・TT はオレンジの枠）、外したチップは薄い点線、
  * 消えるチップには赤い ×、置き換えでも残すチップには緑の枠
  */
-function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm: TempoMap, views: readonly ChipView[]) {
+function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm: TempoMap, views: readonly ChipView[], rims: ReadonlySet<number>) {
   drawGenRange(ctx, g, tm);
-  const at = (n: { ch: number; m: number; f: Frac }) => {
+  const at = (n: ProposedNote) => {
     const info = drumChannel(n.ch);
     if (!info) return null;
     const beat = tm.beatOf(n.m, n.f);
     if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) return null;
-    return { info, y: g.beatToY(beat), cx: g.ox + laneCX(info.lane), color: chipColor(info.lane, info.alt) };
+    const alt = info.alt || noteRim(n, rims);
+    return { info, alt, y: g.beatToY(beat), cx: g.ox + laneCX(info.lane), color: chipColor(info.lane, alt) };
   };
   // 外したチップ（クリックで戻せる）
   for (const sk of gv.plan.skipped) {
@@ -2594,7 +2598,7 @@ function drawGenPreview(ctx: CanvasRenderingContext2D, g: Geom, gv: GenView, tm:
     ctx.lineWidth = 1.6;
     ctx.stroke();
     ctx.setLineDash([]);
-    if (p.info.alt) {
+    if (p.alt) {
       ctx.fillStyle = p.color;
       ctx.beginPath();
       ctx.arc(p.cx, p.y, 2.4, 0, Math.PI * 2);
@@ -3736,7 +3740,8 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       if (beat < g.minBeat - 0.5 || beat > g.maxBeat + 0.5) continue;
       const y = g.beatToY(beat);
       const cx = ox + laneCX(info.lane);
-      const color = chipColor(info.lane, info.alt);
+      const alt = info.alt || n.rim === true;
+      const color = chipColor(info.lane, alt);
       roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, 3);
       ctx.fillStyle = color + '40';
       ctx.fill();
@@ -3745,7 +3750,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
       ctx.lineWidth = 1.6;
       ctx.stroke();
       ctx.setLineDash([]);
-      if (info.alt) {
+      if (alt) {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(cx, y, 2.4, 0, Math.PI * 2);
@@ -3756,9 +3761,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
 
   // TAB補完：打った小節の続きを点線で
   const ghost = visibleGhost();
-  if (ghost) drawGhost(ctx, g, ghost, tempoOf(doc));
+  if (ghost) drawGhost(ctx, g, ghost, tempoOf(doc), rimWavs(doc));
   // 小節の生成：案の点線と、いまの譜面との違い
-  if (gv) drawGenPreview(ctx, g, gv, tempo, visible);
+  if (gv) drawGenPreview(ctx, g, gv, tempo, visible, rimWavs(doc));
   else if (useMeasureGen.getState().open) drawGenRange(ctx, g, tempo);
   // ✨ を指しているときは、生成する小節を薄く示す
   if (l.hover?.gen !== undefined && !d) {

@@ -1,6 +1,6 @@
 // 内蔵の合成ドラムキット。曲フォルダに音が無いレーンに置いたチップは、この音を WAV にして曲フォルダへ書き出す。
 import { withTr } from '../i18n';
-import { CH, drumChannel } from '../dtx/model';
+import { CH, SD_RIM, voiceName } from '../dtx/model';
 
 export interface KitSound {
   ch: number;
@@ -9,7 +9,7 @@ export interface KitSound {
 }
 
 /** 名前はレーンの名前（表示のたびに今の言語で） */
-const kitSound = (ch: number, file: string): KitSound => withTr({ ch, file } as KitSound, { label: () => drumChannel(ch)?.name ?? '' });
+const kitSound = (ch: number, file: string): KitSound => withTr({ ch, file } as KitSound, { label: () => voiceName(ch) });
 
 export const KIT_SOUNDS: readonly KitSound[] = [
   kitSound(CH.LC, 'dtxweb_kit_lc.wav'),
@@ -18,6 +18,7 @@ export const KIT_SOUNDS: readonly KitSound[] = [
   kitSound(CH.LP, 'dtxweb_kit_lp.wav'),
   kitSound(CH.LBD, 'dtxweb_kit_lbd.wav'),
   kitSound(CH.SD, 'dtxweb_kit_sd.wav'),
+  kitSound(SD_RIM, 'dtxweb_kit_rim.wav'),
   kitSound(CH.HT, 'dtxweb_kit_ht.wav'),
   kitSound(CH.BD, 'dtxweb_kit_bd.wav'),
   kitSound(CH.LT, 'dtxweb_kit_lt.wav'),
@@ -118,6 +119,15 @@ const RECIPES: Record<number, { len: number; build: (ctx: Ctx, out: AudioNode) =
     build: (ctx, out) => {
       tone(ctx, out, 'triangle', 240, 175, 0.05, 0.55, 0.12);
       hiss(ctx, out, 0.4, [filter(ctx, 'highpass', 1200), filter(ctx, 'peaking', 3500, 1)], 0.75, 0.22);
+    },
+  },
+  // スネアのリム（クロススティック）：スティックが縁に当たる短い「カッ」。木の響き（1.6kHz あたり）と、胴の鳴りを少し
+  [SD_RIM]: {
+    len: 0.18,
+    build: (ctx, out) => {
+      tone(ctx, out, 'triangle', 1750, 1600, 0.02, 0.5, 0.045);
+      tone(ctx, out, 'sine', 520, 470, 0.03, 0.35, 0.06);
+      hiss(ctx, out, 0.08, [filter(ctx, 'bandpass', 2600, 2.2)], 0.55, 0.025);
     },
   },
   [CH.HHC]: {

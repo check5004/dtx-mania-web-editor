@@ -1,8 +1,14 @@
 // 表示用の書式。
 import { tr } from '../i18n';
 import { toMeasure } from '../dtx/base36';
-import { bgaChannel, CH, drumChannel } from '../dtx/model';
+import { bgaChannel, CH, drumChannel, type Chip, type DtxDoc } from '../dtx/model';
+import { rimChipName } from '../dtx/rim';
 import type { TempoMap } from '../dtx/timing';
+
+/** チップの名前（チャンネルの名前。スネアのレーンでリムの音ならリム） */
+export function chipName(doc: Pick<DtxDoc, 'header' | 'fields'>, c: Pick<Chip, 'ch' | 'v'>): string {
+  return rimChipName(doc, c) ?? channelName(c.ch);
+}
 
 /** チャンネルの名前（スネア・HHオープン・BGM・BPM変化など） */
 export function channelName(ch: number): string {

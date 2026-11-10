@@ -4,8 +4,9 @@ import { tr } from '../i18n';
 import { create } from 'zustand';
 import { builtinFile, builtinKitById, KIT_LANES, laneByKey, virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
-import { drumChannel } from '../dtx/model';
-import { freeWavNumber, setField } from '../edit/ops';
+import { drumChannel, SD_RIM } from '../dtx/model';
+import { chipVoice, rimWavsOf } from '../dtx/rim';
+import { addWav } from '../edit/rim';
 import { pruneUnusedCreated, velOfWav, wavVariant } from '../edit/velocity';
 import { edit, prepareSounds, setKitFileProvider, useEditor } from './editor';
 import { useLibrary } from './library';
@@ -88,34 +89,42 @@ export function setKit(id: string) {
   useEditor.setState({ laneWav });
 }
 
-/** 置いてあるチップの音も、今のキットの音に替える（ベロシティは保つ。Ctrl+Z で戻せる） */
+/** 置いてあるチップの音も、今のキットの音に替える（ベロシティは保つ。リムはキットのリムの音に。Ctrl+Z で戻せる） */
 export function applyKitToChips(kitId = useKit.getState().kitId): number {
   let n = 0;
   const name = kitChoices().find((k) => k.id === kitId)?.name ?? kitId;
   const laneWav: Record<number, number> = {};
   edit(tr(`置いてあるチップの音を「${name}」にする`, `Switch placed chips to "${name}"`), (d) => {
+    // どのチップがリムかは、替える前の音で決める（替えたあともリムの音にする）
+    const voices = new Map<number, number>();
+    const rims = rimWavsOf(d);
+    for (const c of d.chips) {
+      const v = chipVoice(d, c, rims);
+      if (v !== null) voices.set(c.id, v);
+    }
     const baseNo = new Map<number, number>();
-    const noFor = (ch: number): number | null => {
-      if (baseNo.has(ch)) return baseNo.get(ch)!;
-      const file = kitFile(ch, kitId);
+    const noFor = (voice: number): number | null => {
+      if (baseNo.has(voice)) return baseNo.get(voice)!;
+      const file = kitFile(voice, kitId);
       if (!file) return null;
+      const rim = voice === SD_RIM;
       let no: number | null = null;
+      const now = rimWavsOf(d);
       for (const [k, v] of Object.entries(d.fields)) {
-        if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === file.toLowerCase() && !d.fields['VOLUME' + k.slice(3)]) no = parseInt(k.slice(3), 36);
+        if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === file.toLowerCase() && !d.fields['VOLUME' + k.slice(3)] && now.has(parseInt(k.slice(3), 36)) === rim) no = parseInt(k.slice(3), 36);
       }
       if (no === null) {
-        no = freeWavNumber(d);
+        no = addWav(d, file, rim);
         if (no === null) return null;
-        setField(d, 'WAV' + toBase36x2(no), file);
       }
-      baseNo.set(ch, no);
-      laneWav[ch] = no;
+      baseNo.set(voice, no);
+      laneWav[voice] = no;
       return no;
     };
     for (const c of d.chips) {
-      const info = drumChannel(c.ch);
-      if (!info) continue;
-      const base = noFor(info.base);
+      const voice = voices.get(c.id);
+      if (voice === undefined) continue;
+      const base = noFor(voice);
       if (base === null) continue;
       const vel = velOfWav(d.fields, c.v);
       const no = wavVariant(d, base, vel);

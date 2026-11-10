@@ -98,7 +98,9 @@ export function FindPanel() {
           })}
         </div>
         <div className="find-grid">
-          <span className="find-lbl">{tr('HHO・LBD', 'HHO / LBD')}</span>
+          <span className="find-lbl" title={tr('2種目：HHオープン・左バスドラム・リム', 'Second type: HH open, left bass drum, rim')}>
+            {tr('HHO・LBD・リム', 'HHO / LBD / Rim')}
+          </span>
           <div className="seg small">
             {(
               [

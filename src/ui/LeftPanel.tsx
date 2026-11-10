@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { engine } from '../audio/engine';
 import { virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
-import { CH, DRUM_LANES, isSeChannel } from '../dtx/model';
+import { CH, DRUM_LANES, isSeChannel, laneVoice } from '../dtx/model';
 import { serializeHeader } from '../dtx/serialize';
 import { parseDtx } from '../dtx/parse';
 import { freeWavNumber, setField, setFieldComment } from '../edit/ops';
@@ -84,9 +84,10 @@ function KitTab() {
   const choices = kitChoices();
   const cur = choices.find((k) => k.id === kitId) ?? choices[0];
   const wavs = wavList(fields);
-  const rows = DRUM_LANES.flatMap((l) => [
+  // 行は音の番号ごと（スネアのリムはスネアと別の行。リムの音は SD_RIM）
+  const rows = DRUM_LANES.flatMap((l, i) => [
     { ch: l.main, name: l.mainName, color: l.color, key: l.key },
-    ...(l.alt !== undefined ? [{ ch: l.alt, name: l.altName!, color: l.altColor ?? l.color, key: `${l.key}*` }] : []),
+    ...(l.alt !== undefined ? [{ ch: laneVoice(i, true), name: l.altName!, color: l.altColor ?? l.color, key: `${l.key}*` }] : []),
   ]);
   const groups = [
     ['builtin', tr('標準キット', 'Built-in kits')],
@@ -200,11 +201,11 @@ function KitTab() {
       <p className="lbl" style={{ margin: 0 }}>
         {isJa() ? (
           <>
-            <kbd>Shift</kbd>+クリックで、HH は HHオープン、LP は左バスドラムを置きます（＊の行の音）。
+            <kbd>Shift</kbd>+クリックで、HH は HHオープン、LP は左バスドラム、SD はリム（クロススティック）を置きます（＊の行の音）。リムは NX ではスネアのチップで、音だけが違います。
           </>
         ) : (
           <>
-            <kbd>Shift</kbd>+click places HH open on HH and the left bass drum on LP (the sounds in the * rows).
+            <kbd>Shift</kbd>+click places HH open on HH, the left bass drum on LP and a rim (cross-stick) on SD (the sounds in the * rows). In NX a rim is a snare chip with a different sound.
           </>
         )}
       </p>

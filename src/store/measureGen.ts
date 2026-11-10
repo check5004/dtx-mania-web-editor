@@ -12,7 +12,8 @@ import { buildMeasureContext, decodeMeasureCandidates, measureSchema, measurePro
 import { AiError } from '../ai/openrouter';
 import { draftFromHits, learnStyle, styleLines } from '../assist/draft';
 import { toBase36x2, toMeasure } from '../dtx/base36';
-import { drumChannel, type DtxDoc } from '../dtx/model';
+import { CH, drumChannel, type DtxDoc } from '../dtx/model';
+import { chipVoice, rimWavs } from '../dtx/rim';
 import { applyMerge, drumChipsIn, lanesWithChanges, planMerge, type MergeMode, type MergePlan, type ProposedNote } from '../edit/merge';
 import type { DrumActivations } from '../transcribe/model';
 import { drumHits, type DrumHit } from '../transcribe/peaks';
@@ -22,7 +23,7 @@ import { addGhostBlocker, copyCandidates, heardFit, unheardKeys } from './comple
 import type { Candidate } from '../assist/complete';
 import { bgmSource, tempoOf } from './derived';
 import { drumsAudible, readyDrums, useDrums } from './drums';
-import { addPlayDocTransform, edit, prepareSounds, refreshPlayback, toast, useEditor, wavForChannel } from './editor';
+import { addPlayDocTransform, edit, prepareSounds, refreshPlayback, toast, useEditor, wavForVoice } from './editor';
 import { levelOfField } from './guideline';
 import { closePhrase, usePhrase } from './phrase';
 import { humanMeasure, markAuto } from './provenance';
@@ -152,10 +153,12 @@ const copyScore = (c: GenCandidate | undefined) => (c?.source === 'copy' ? (c.sc
 export function localCandidates(doc: DtxDoc, from: number, to: number): GenCandidate[] {
   const copies: GenCandidate[] = [];
   const d = draftCandidate(doc, from, to);
+  const rims = rimWavs(doc);
   for (const c of copyCandidates(doc, from, to - from + 1, 2)) {
     const notes: ProposedNote[] = [];
     c.measures.forEach((ns, i) => {
-      for (const n of ns) if (isNormal(n.ch)) notes.push({ ch: n.ch, m: from + i, f: n.f, v: n.v });
+      // 写した元がリムの音なら、リムの印も付ける（案どうしの比べ・表示に使う）
+      for (const n of ns) if (isNormal(n.ch)) notes.push({ ch: n.ch, m: from + i, f: n.f, v: n.v, ...(n.ch === CH.SD && rims.has(n.v) ? { rim: true } : {}) });
     });
     if (notes.length === 0 || c.src === null) continue;
     const pct = Number.isFinite(c.score) ? tr(`（同じ形の見込み ${Math.round(c.score * 100)}%）`, ` (${Math.round(c.score * 100)}% likely the same)`) : '';
@@ -188,7 +191,7 @@ function arrange(ai: readonly GenCandidate[], local: readonly GenCandidate[]): G
 
 function signature(c: GenCandidate): string {
   return c.notes
-    .map((n) => `${n.m}|${n.ch}|${n.f.n}/${n.f.d}`)
+    .map((n) => `${n.m}|${n.ch}${n.rim ? 'r' : ''}|${n.f.n}/${n.f.d}`)
     .sort()
     .join(',');
 }
@@ -277,7 +280,7 @@ async function runGenAi(instruction = '', focus = false) {
     const nowDoc = useEditor.getState().doc;
     const examples = new Set(ctx.examples.map((e) => e.m));
     const ai: GenCandidate[] = pcs.map((pc, i) => {
-      const notes = pc.notes.map((n) => ({ ch: n.ch, m: n.m, f: n.f }));
+      const notes: ProposedNote[] = pc.notes.map((n) => (n.rim ? { ch: n.ch, m: n.m, f: n.f, rim: true } : { ch: n.ch, m: n.m, f: n.f }));
       // 土台にした手本の小節（手本に出した小節のときだけ）
       const basis = pc.basis !== undefined && pc.basis !== null && examples.has(pc.basis) ? pc.basis : undefined;
       return { id: `ai:${seq}:${i}`, source: 'ai', name: pc.name, reason: pc.reason, notes, fit: heardFit(nowDoc, notes, range.from, range.to), ...(basis !== undefined ? { basis } : {}) };
@@ -433,8 +436,9 @@ export function genView(doc: DtxDoc = useEditor.getState().doc): GenView | null 
     const mk = g.marks[cand.id];
     const rejected = new Set(mk?.rejected ?? []);
     const kept = new Set(mk?.kept ?? []);
-    const plan = planMerge(existing, cand.notes, { mode: g.mode, offLanes: new Set(g.offLanes), rejected, kept });
-    out = { cand, plan, existing, lanes: lanesWithChanges(existing, cand.notes), doubt: unheardKeys(doc, plan.add), rejected, kept };
+    const rims = rimWavs(doc);
+    const plan = planMerge(existing, cand.notes, { mode: g.mode, offLanes: new Set(g.offLanes), rejected, kept, rims });
+    out = { cand, plan, existing, lanes: lanesWithChanges(existing, cand.notes, rims), doubt: unheardKeys(doc, plan.add), rejected, kept };
   }
   viewMemo = { doc, g, out };
   return out;
@@ -471,7 +475,7 @@ export function applyMeasureGen(o: { next?: boolean } = {}): boolean {
   const before = useEditor.getState().doc;
   const removed = new Set(v.plan.remove);
   const touched = new Set([...v.plan.add.map((n) => n.m), ...before.chips.filter((c) => removed.has(c.id)).map((c) => c.m)]);
-  const ok = edit(label, (d) => applyMerge(d, v.plan, wavForChannel));
+  const ok = edit(label, (d) => applyMerge(d, v.plan, wavForVoice));
   if (ok) markAuto(useEditor.getState().doc, touched);
   closeMeasureGen();
   if (Object.keys(useEditor.getState().doc.fields).length !== fieldsBefore) void prepareSounds();
@@ -482,13 +486,13 @@ export function applyMeasureGen(o: { next?: boolean } = {}): boolean {
 
 // ---- 案を鳴らす ----------------------------------------------------------------------
 
-/** 案のチップを鳴らす WAV（読み込み済みの音だけ使う。無ければ鳴らさない） */
-function soundingWav(doc: DtxDoc, ch: number): number {
-  const base = drumChannel(ch)?.base ?? ch;
-  const assigned = useEditor.getState().laneWav[base];
+/** 案のチップを鳴らす WAV（voice はチャンネル、リムは SD_RIM。読み込み済みの音だけ使う。無ければ鳴らさない） */
+function soundingWav(doc: DtxDoc, voice: number): number {
+  const assigned = useEditor.getState().laneWav[voice];
   if (assigned !== undefined && doc.fields['WAV' + toBase36x2(assigned)] !== undefined) return assigned;
+  const rims = rimWavs(doc);
   const count = new Map<number, number>();
-  for (const c of doc.chips) if (c.ch === base) count.set(c.v, (count.get(c.v) ?? 0) + 1);
+  for (const c of doc.chips) if (drumChannel(c.ch)?.kind === 'normal' && chipVoice(doc, c, rims) === voice) count.set(c.v, (count.get(c.v) ?? 0) + 1);
   let best = 0;
   let bn = 0;
   for (const [v, n] of count) if (n > bn) [best, bn] = [v, n];
@@ -498,7 +502,7 @@ function soundingWav(doc: DtxDoc, ch: number): number {
 addPlayDocTransform((doc) => {
   const v = genView(doc);
   if (!v || (v.plan.add.length === 0 && v.plan.remove.length === 0)) return doc;
-  return produce(doc, (d) => applyMerge(d, v.plan, (_d, ch) => soundingWav(doc, ch)));
+  return produce(doc, (d) => applyMerge(d, v.plan, (_d, voice) => soundingWav(doc, voice)));
 });
 
 // ---- ほかの状態とのつながり -------------------------------------------------------------

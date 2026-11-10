@@ -8,7 +8,7 @@
 import { aiLangRule, aiTextLimit } from '../i18n';
 import { analysisSimilarity, readingGuide, seriesLines, type MeasureAnalysis } from './analysisGrid';
 import { beatsLabel } from './beatGrid';
-import { decodeCandidates, GRID_HELP, isDrumRows, measureGrid, measureLayout, onsetGrid, onsetHelp, ROUNDED_NOTE, STEPS_HELP, GRID_LANES, type OnsetRows, type PhraseCandidate } from './phrase';
+import { decodeCandidates, GRID_HELP, isDrumRows, LANE_HELP, measureGrid, measureLayout, onsetGrid, onsetHelp, ROUNDED_NOTE, STEPS_HELP, GRID_LANES, type OnsetRows, type PhraseCandidate } from './phrase';
 import type { DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 
@@ -305,7 +305,7 @@ export function measurePrompt(ctx: MeasureGenContext): { system: string; user: s
     'あなたはドラム譜面（DTXMania、電子ドラム）の耳コピを手伝います。あなたは曲を聴けないので、原曲を分析した数字を読んで書きます。',
     `【生成】の${n === 1 ? '小節' : `${n}小節`}のドラムを、原曲に合わせて書いてください。性格の違う案を3つ作ります。`,
     ...GRID_HELP,
-    'レーン: LC=左シンバル HH=ハイハット(閉) HO=ハイハット(開) LP=左ペダル LB=左バスドラム SD=スネア HT=ハイタム BD=バスドラム LT=ロータム FT=フロアタム CY=右シンバル RD=ライド',
+    ...LANE_HELP,
     hasRows ? ANALYSIS_HELP.head : '',
     ctx.analysis.act ? ANALYSIS_HELP.act : '',
     ctx.analysis.spec ? ANALYSIS_HELP.spec : '',

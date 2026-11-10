@@ -3,13 +3,13 @@ import { tr } from '../i18n';
 import { create } from 'zustand';
 import { AiError } from '../ai/openrouter';
 import { buildContext, decodeCandidates, phraseSchema, phrasePrompt, ruleCandidates, type PhraseCandidate } from '../ai/phrase';
-import { drumChannel } from '../dtx/model';
+import { drumChannel, SD_RIM } from '../dtx/model';
 import { lastMeasure } from '../gen/features';
 import { levelOfField } from './guideline';
 import { hasAiKey, runAi } from './ai';
 import { aiOnsets } from './assist';
 import { bgmSource, tempoOf } from './derived';
-import { edit, toast, useEditor, wavForChannel } from './editor';
+import { edit, prepareSounds, toast, useEditor, wavForChannel, wavForVoice } from './editor';
 import { humanMeasure, markAuto } from './provenance';
 
 export interface PhraseState {
@@ -127,13 +127,16 @@ export function applyCandidate() {
   const c = current();
   if (!c) return;
   const { from, to } = get();
+  const fieldsBefore = Object.keys(useEditor.getState().doc.fields).length;
   const ok = edit(tr(`フレーズ候補「${c.name}」を反映`, `Apply phrase idea "${c.name}"`), (d) => {
     for (let i = d.chips.length - 1; i >= 0; i--) {
       const x = d.chips[i];
       if (x.m >= from && x.m <= to && drumChannel(x.ch)?.kind === 'normal') d.chips.splice(i, 1);
     }
-    for (const n of c.notes) d.chips.push({ id: d.nextId++, ch: n.ch, m: n.m, f: { n: n.f.n, d: n.f.d }, v: wavForChannel(d, n.ch) });
+    // リムはリムの音（スネアと同じチャンネル）
+    for (const n of c.notes) d.chips.push({ id: d.nextId++, ch: n.ch, m: n.m, f: { n: n.f.n, d: n.f.d }, v: n.rim ? wavForVoice(d, SD_RIM) : wavForChannel(d, n.ch) });
   });
+  if (Object.keys(useEditor.getState().doc.fields).length !== fieldsBefore) void prepareSounds();
   if (ok) {
     // 自動で入れた小節として覚える（AI の手本にしない。手で直すと作者の小節になる）
     markAuto(useEditor.getState().doc, Array.from({ length: to - from + 1 }, (_, i) => from + i));

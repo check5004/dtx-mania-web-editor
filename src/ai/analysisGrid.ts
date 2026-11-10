@@ -144,7 +144,7 @@ export function analysisSimilarity(a: MeasureAnalysis, tempo: TempoMap): (x: num
 /** 採譜の種類ごとに、その音として書かれうるレーン */
 const FAMILY: Record<string, readonly string[]> = {
   BD: ['BD', 'LB'],
-  SD: ['SD', 'HT', 'LT', 'FT'],
+  SD: ['SD', 'RM', 'HT', 'LT', 'FT'],
   TT: ['HT', 'LT', 'FT', 'SD'],
   HH: ['HH', 'HO', 'LP', 'RD', 'CY', 'LC'],
   CY: ['CY', 'LC', 'RD', 'HO', 'HH'],

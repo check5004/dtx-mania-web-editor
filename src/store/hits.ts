@@ -3,7 +3,7 @@
 import { tr, pl } from '../i18n';
 import { engine } from '../audio/engine';
 import { virtualSound } from '../audio/sounds';
-import { DRUM_LANES } from '../dtx/model';
+import { laneVoice } from '../dtx/model';
 import { snapToGrid } from '../edit/ops';
 import { emitHit, setHitHandler } from '../input/midi';
 import { midiToVel } from '../edit/velocity';
@@ -33,9 +33,8 @@ export function previewLane(lane: number, alt: boolean, gain = 1) {
     engine.preview(no, gain);
     return;
   }
-  const def = DRUM_LANES[lane];
-  const ch = alt && def.alt !== undefined ? def.alt : def.main;
-  const file = currentKitFile(ch);
+  // キットの音（リムはリムの音）
+  const file = currentKitFile(laneVoice(lane, alt));
   const v = file ? virtualSound(file) : null;
   if (!v) return;
   void v.load().then((buf) => {

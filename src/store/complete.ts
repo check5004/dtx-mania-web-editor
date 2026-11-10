@@ -15,7 +15,7 @@ import type { FrameFeatures } from '../audio/features';
 import * as wk from '../audio/workerClient';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { Frac } from '../dtx/fraction';
-import type { DtxDoc } from '../dtx/model';
+import { SD_RIM, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { hasAiKey, noKeyTitle, runAi } from './ai';
 import { aiOnsets, useAssist } from './assist';
@@ -23,7 +23,7 @@ import { drumsAudible, readyDrums, useDrums } from './drums';
 import { drumHits, type DrumHit } from '../transcribe/peaks';
 import type { DrumActivations } from '../transcribe/model';
 import { bgmSource, tempoOf } from './derived';
-import { edit, toast, useEditor, wavForChannel } from './editor';
+import { edit, prepareSounds, toast, useEditor, wavForChannel, wavForVoice } from './editor';
 import { levelOfField } from './guideline';
 import { usePhrase } from './phrase';
 import { humanMeasure, markAuto } from './provenance';
@@ -519,15 +519,17 @@ export function acceptGhost(count?: number): boolean {
     n === 1
       ? tr(`TAB補完で小節 ${toMeasure(from)} を入れる`, `Tab completion: fill measure ${toMeasure(from)}`)
       : tr(`TAB補完で小節 ${toMeasure(from)}〜${toMeasure(to)} を入れる`, `Tab completion: fill measures ${toMeasure(from)}–${toMeasure(to)}`);
+  const fieldsBefore = Object.keys(useEditor.getState().doc.fields).length;
   const ok = edit(label, (d) => {
     for (let i = 0; i < n; i++) {
       for (const c of g.measures[i]) {
-        // 写した元の音（ベロシティ違いも）のまま。AI の候補はレーンの音
-        const v = c.v > 0 && d.fields['WAV' + toBase36x2(c.v)] !== undefined ? c.v : wavForChannel(d, c.ch);
+        // 写した元の音（ベロシティ違いも）のまま。AI の候補はレーンの音（リムはリムの音）
+        const v = c.v > 0 && d.fields['WAV' + toBase36x2(c.v)] !== undefined ? c.v : c.rim ? wavForVoice(d, SD_RIM) : wavForChannel(d, c.ch);
         d.chips.push({ id: d.nextId++, ch: c.ch, m: from + i, f: { n: c.f.n, d: c.f.d }, v });
       }
     }
   });
+  if (Object.keys(useEditor.getState().doc.fields).length !== fieldsBefore) void prepareSounds();
   // 自動で入れた小節として覚える（AI の手本にしない。手で直すと作者の小節になる）
   if (ok) markAuto(useEditor.getState().doc, Array.from({ length: n }, (_, i) => from + i));
   // 入れた小節の次から続ける（最後に入れた小節が空でも、その次から）
@@ -591,7 +593,7 @@ function aiCandidate(pc: PhraseCandidate, from: number, len: number): Candidate 
   const measures: CNote[][] = Array.from({ length: len }, () => []);
   for (const n of pc.notes) {
     const i = n.m - from;
-    if (i >= 0 && i < len) measures[i].push({ ch: n.ch, f: n.f, v: 0 });
+    if (i >= 0 && i < len) measures[i].push(n.rim ? { ch: n.ch, f: n.f, v: 0, rim: true } : { ch: n.ch, f: n.f, v: 0 });
   }
   while (measures.length > 1 && measures[measures.length - 1].length === 0) measures.pop();
   return { kind: 'ai', from, measures, src: null, score: Number.NaN, ctx: 0, audio: null, period: null, name: pc.name, reason: pc.reason };

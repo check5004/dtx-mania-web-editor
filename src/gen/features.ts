@@ -2,6 +2,7 @@
 // どれも「その要素が譜面に出てくるか」と、密度などの数値。拍の位置で見るので BPM が変わっても同じ物差しになる。
 import { tr, withTr } from '../i18n';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
+import { rimWavs } from '../dtx/rim';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { estimateLevel, LEVEL_VERSION } from '../check/level';
 
@@ -9,6 +10,7 @@ export interface Note {
   id: number;
   ch: number;
   lane: number;
+  /** 2種目（HHオープン・左バスドラム・スネアのリム） */
   alt: boolean;
   m: number;
   /** 曲頭からの拍 */
@@ -27,6 +29,7 @@ export const HAND_LANES = new Set([0, 1, 3, 4, 6, 7, 8, 9]);
 /** ドラムの通常チップを時間順に並べる */
 export function drumNotes(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): Note[] {
   const out: Note[] = [];
+  const rims = rimWavs(doc);
   for (const c of doc.chips) {
     const d = drumChannel(c.ch);
     if (!d || d.kind !== 'normal') continue;
@@ -35,7 +38,7 @@ export function drumNotes(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): No
       id: c.id,
       ch: c.ch,
       lane: d.lane,
-      alt: d.alt,
+      alt: d.alt || (d.base === CH.SD && rims.has(c.v)),
       m: c.m,
       beat,
       inBeat: beat - tempo.measureStart(c.m),

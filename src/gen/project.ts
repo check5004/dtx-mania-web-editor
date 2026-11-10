@@ -5,12 +5,14 @@
 //   （手元の曲でも、難易度ごとに BPM の書き方が少し違うものがある）
 // - 音は、同じファイル・同じ音量・同じパンの WAV 番号に付け替える。無ければ空いている番号に足す
 //   （作者は難易度ごとに #VOLUME を変えていることがある。写す譜面どうしで同じ表を使い、番号がぶつからないようにする）
+//   スネアのリムは音で決まるので、リムの音かどうかも同じものに付け替え、足すときはラベル（「Snare Rim」など）も写す
 import { parseNxNumber, toBase36x2 } from '../dtx/base36';
 import { frac } from '../dtx/fraction';
 import { CH, drumChannel, type Chip, type DtxDoc } from '../dtx/model';
 import { ORIGIN_KEY } from '../dtx/origin';
+import { isRimSound, wavLabel } from '../dtx/rim';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
-import { setField } from '../edit/ops';
+import { setField, setFieldComment } from '../edit/ops';
 
 function numField(fields: Record<string, string>, keys: string[], def: number): number {
   for (const k of keys) {
@@ -27,16 +29,21 @@ interface WavDef {
   path: string;
   volume: number;
   pan: number;
+  /** リムの音か（ラベルかファイル名で決まる） */
+  rim: boolean;
+  /** ラベル（WAV の行のコメント） */
+  label: string | null;
 }
 
 function wavDef(doc: DtxDoc, no: number): WavDef | null {
   const z = toBase36x2(no);
   const path = doc.fields['WAV' + z];
   if (path === undefined) return null;
-  return { path, volume: numField(doc.fields, ['VOLUME' + z, 'WAVVOL' + z], 100), pan: numField(doc.fields, ['PAN' + z, 'WAVPAN' + z], 0) };
+  const label = wavLabel(doc, no);
+  return { path, volume: numField(doc.fields, ['VOLUME' + z, 'WAVVOL' + z], 100), pan: numField(doc.fields, ['PAN' + z, 'WAVPAN' + z], 0), rim: isRimSound(path, label), label };
 }
 
-const keyOf = (w: WavDef) => `${w.path.replace(/\\/g, '/').toLowerCase()}|${Math.round(w.volume)}|${Math.round(w.pan)}`;
+const keyOf = (w: WavDef) => `${w.path.replace(/\\/g, '/').toLowerCase()}|${Math.round(w.volume)}|${Math.round(w.pan)}${w.rim ? '|rim' : ''}`;
 
 /** 最初の BGM チップの秒（無ければ 0） */
 function bgmSec(doc: DtxDoc, t: TempoMap): number {
@@ -127,6 +134,7 @@ export function projectCharts(base: DtxDoc, others: readonly DtxDoc[]): DtxDoc[]
       if (!used.has(no)) continue;
       const z = toBase36x2(no);
       setField(out, 'WAV' + z, w.path);
+      if (w.label) setFieldComment(out, 'WAV' + z, w.label);
       if (Math.round(w.volume) !== 100) setField(out, 'VOLUME' + z, String(Math.round(w.volume)));
       if (Math.round(w.pan) !== 0) setField(out, 'PAN' + z, String(Math.round(w.pan)));
     }

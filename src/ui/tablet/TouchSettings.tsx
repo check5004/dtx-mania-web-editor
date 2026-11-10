@@ -5,7 +5,7 @@ import { engine } from '../../audio/engine';
 import { iosName, IS_IOS, KIT_DEFAULT, setPenMode, setTouchPrefs, useDevice, type OneFinger, type PadLayout, type PanelSide, type PlaceMode, type UiMode, type UiScale } from '../../store/device';
 import type { PadMode } from '../../store/pads';
 import { Icon } from '../icons';
-import { kitSlot, padColor, padKey, padName } from './Pads';
+import { kitSlot, kitSplit, padColor, padKey, padName } from './Pads';
 
 /** 1行：左に名前と説明、右に操作 */
 function Row({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
@@ -216,8 +216,18 @@ function KitOrder() {
       <div className="set-kit-grid" role="group" aria-label={tr('キットの並び', 'Kit layout')}>
         {order.map((k, i) => {
           const [lane, alt] = kitSlot(k);
+          // スネアの枠は左がリム
+          const split = kitSplit(order, lane, alt);
           return (
-            <button key={k} className={`set-kit-pad ${pick === i ? 'on' : ''}`} style={{ color: padColor(lane, alt) }} onClick={() => tap(i)} title={padName(lane, alt)} aria-pressed={pick === i}>
+            <button
+              key={k}
+              className={`set-kit-pad ${pick === i ? 'on' : ''}`}
+              style={{ color: padColor(lane, alt) }}
+              onClick={() => tap(i)}
+              title={split ? `${padName(lane, true)} | ${padName(lane, alt)}` : padName(lane, alt)}
+              aria-pressed={pick === i}
+            >
+              {split && <span style={{ color: padColor(lane, true) }}>{padKey(lane, true)}|</span>}
               {padKey(lane, alt)}
             </button>
           );

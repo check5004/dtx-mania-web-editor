@@ -4,6 +4,7 @@ import type { Draft } from 'immer';
 import { toBase36x2 } from '../dtx/base36';
 import { add, cmp, frac, sub, ZERO, type Frac } from '../dtx/fraction';
 import { CH, DRUM_LANES, channelFor, drumChannel, type Chip, type DtxDoc, type HeaderLine } from '../dtx/model';
+import { chipVoice, rimWavs } from '../dtx/rim';
 import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
 
 /** グリッドの細かさ（全音符をいくつに分けるか）。12・24・48 は3連、20・40 は5連、28 は7連 */
@@ -279,14 +280,18 @@ export function freeWavNumber(doc: Pick<DtxDoc, 'fields' | 'chips'>, from = 1): 
   return null;
 }
 
-/** チャンネルごとに一番多く使われている WAV 番号 */
-export function mostUsedWav(doc: Pick<DtxDoc, 'chips'>): Map<number, number> {
+/**
+ * 音の番号（通常チャンネル。スネアのリムは SD_RIM）ごとに一番多く使われている WAV 番号。
+ * リムのチップはスネアと別に数える（リムが多い曲でも、スネアを置くとスネアの音が鳴るように）
+ */
+export function mostUsedWav(doc: Pick<DtxDoc, 'chips' | 'fields' | 'header'>): Map<number, number> {
   const count = new Map<number, Map<number, number>>();
+  const rims = rimWavs(doc);
   for (const c of doc.chips) {
-    const info = drumChannel(c.ch);
-    if (!info) continue;
-    let m = count.get(info.base);
-    if (!m) count.set(info.base, (m = new Map()));
+    const voice = chipVoice(doc, c, rims);
+    if (voice === null) continue;
+    let m = count.get(voice);
+    if (!m) count.set(voice, (m = new Map()));
     m.set(c.v, (m.get(c.v) ?? 0) + 1);
   }
   const out = new Map<number, number>();

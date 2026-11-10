@@ -1,18 +1,19 @@
 // 曲フォルダに無くてもエディタが用意できる音（標準キットとライブラリの音）。
 // 譜面の #WAV に書かれたファイルが曲フォルダに無いとき、ここから鳴らし、保存するときに曲フォルダへ書き出す。
 import { tr, withTr } from '../i18n';
-import { CH, drumChannel } from '../dtx/model';
+import { CH, SD_RIM, voiceName } from '../dtx/model';
 import { encodeWav, loadKit as loadSynthKit } from './kit';
 
 export interface KitLane {
   key: string;
+  /** 音の番号（通常チャンネル。スネアのリムは SD_RIM） */
   ch: number;
   label: string;
 }
 
-/** キットのレーン（チャンネルごとに1音） */
+/** キットのレーン（音の番号ごとに1音。スネアのリムはスネアと別の音） */
 /** 名前はレーンの名前（表示のたびに今の言語で） */
-const kitLane = (key: string, ch: number): KitLane => withTr({ key, ch } as KitLane, { label: () => drumChannel(ch)?.name ?? '' });
+const kitLane = (key: string, ch: number): KitLane => withTr({ key, ch } as KitLane, { label: () => voiceName(ch) });
 
 export const KIT_LANES: readonly KitLane[] = [
   kitLane('lc', CH.LC),
@@ -21,6 +22,7 @@ export const KIT_LANES: readonly KitLane[] = [
   kitLane('lp', CH.LP),
   kitLane('lbd', CH.LBD),
   kitLane('sd', CH.SD),
+  kitLane('rim', SD_RIM),
   kitLane('ht', CH.HT),
   kitLane('bd', CH.BD),
   kitLane('lt', CH.LT),

@@ -12,7 +12,7 @@ import { toggleVelMode } from '../../store/velocity';
 import { Icon } from '../icons';
 import { useTrackRows } from '../Tracks';
 import { VelocityPanel } from '../VelocityPanel';
-import { kitSlot, ModeSeg, Pad } from '../tablet/Pads';
+import { KitPad, ModeSeg } from '../tablet/Pads';
 import { GridPick, StrengthPick, TrackLine } from './PhoneParts';
 
 /** パッドを初めて開いたか（設定の「パッドを叩いたとき（はじめ）」にするのは最初の 1 回だけ） */
@@ -81,10 +81,9 @@ export function PhonePads({ land = false }: { land?: boolean }) {
       </div>
       <div className="p-pads-body">
         <div className="p-kit">
-          {order.map((k) => {
-            const [lane, alt] = kitSlot(k);
-            return <Pad key={k} lane={lane} alt={alt} />;
-          })}
+          {order.map((k) => (
+            <KitPad key={k} order={order} k={k} />
+          ))}
         </div>
         <SideColumn />
       </div>

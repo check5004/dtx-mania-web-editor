@@ -84,6 +84,13 @@ export const CH = {
 
 export type ChipKind = 'normal' | 'hidden' | 'nochip';
 
+/**
+ * スネアのリム（クロススティックの「カッ」）の音の番号。NX ではスネアのチップ（ch12）で、鳴る音（WAV）だけが違う。
+ * エディタはこれを別の種類として扱い、キットの音・置く音の表（laneWav）でチャンネルの代わりにこの番号を使う。
+ * 譜面のチップのチャンネルには書かない（チップは ch12 のまま。見分け方は dtx/rim）
+ */
+export const SD_RIM = 0x112;
+
 export interface LaneDef {
   key: string;
   name: string;
@@ -91,8 +98,10 @@ export interface LaneDef {
   /** 通常チップのチャンネル */
   main: number;
   mainName: string;
-  /** 修飾キーで置く2種目のチップ（HHオープン、左バスドラム） */
+  /** 修飾キーで置く2種目のチップのチャンネル（HHオープン、左バスドラム。スネアのリムはスネアと同じ ch12） */
   alt?: number;
+  /** 2種目の音の番号（キット・置く音の表のキー）。無ければ alt と同じ。リムは SD_RIM */
+  altVoice?: number;
   altName?: string;
   /** 2種目のチップの色（HHオープンは NX と同じシルバー） */
   altColor?: string;
@@ -108,12 +117,18 @@ function lane(def: Omit<LaneDef, 'name' | 'mainName' | 'altName'>, name: readonl
  */
 const HHO_SILVER = '#C9CFD6';
 
+/**
+ * スネアのリムのチップの色。NX ではスネアと同じ黄色のチップだが、エディタでは見分けられるよう淡いクリーム色にする
+ * （HHオープンのシルバーと同じく「2種目は明るく・中に印」。弱いスネアは暗くなるので、明るい色なら紛れない）
+ */
+const RIM_CREAM = '#FFF0B3';
+
 /** ドラムの10レーン。並びは NX の標準（LC・HH・LP・SD・HT・BD・LT・FT・CY・RD） */
 export const DRUM_LANES: readonly LaneDef[] = [
   lane({ key: 'LC', color: '#FF5C8A', main: CH.LC }, ['左シンバル', 'Left cymbal'], ['左シンバル', 'Left cymbal']),
   lane({ key: 'HH', color: '#4FC3F7', main: CH.HHC, alt: CH.HHO, altColor: HHO_SILVER }, ['ハイハット', 'Hi-hat'], ['HHクローズ', 'HH closed'], ['HHオープン', 'HH open']),
   lane({ key: 'LP', color: '#F48FB1', main: CH.LP, alt: CH.LBD, altColor: '#CE93D8' }, ['左ペダル', 'Left pedal'], ['左ペダル', 'Left pedal'], ['左バスドラム', 'Left bass drum']),
-  lane({ key: 'SD', color: '#FFD54F', main: CH.SD }, ['スネア', 'Snare'], ['スネア', 'Snare']),
+  lane({ key: 'SD', color: '#FFD54F', main: CH.SD, alt: CH.SD, altVoice: SD_RIM, altColor: RIM_CREAM }, ['スネア', 'Snare'], ['スネア', 'Snare'], ['リム', 'Rim']),
   lane({ key: 'HT', color: '#66BB6A', main: CH.HT }, ['ハイタム', 'High tom'], ['ハイタム', 'High tom']),
   lane({ key: 'BD', color: '#9C84E0', main: CH.BD }, ['バスドラム', 'Bass drum'], ['バスドラム', 'Bass drum']),
   lane({ key: 'LT', color: '#EF5350', main: CH.LT }, ['ロータム', 'Low tom'], ['ロータム', 'Low tom']),
@@ -122,16 +137,64 @@ export const DRUM_LANES: readonly LaneDef[] = [
   lane({ key: 'RD', color: '#80DEEA', main: CH.RD }, ['ライド', 'Ride'], ['ライド', 'Ride']),
 ];
 
-/** チップの色。2種目（HHオープン・左バスドラム）はその色、それ以外はレーンの色 */
+/** チップの色。2種目（HHオープン・左バスドラム・スネアのリム）はその色、それ以外はレーンの色 */
 export function chipColor(lane: number, alt = false): string {
   const l = DRUM_LANES[lane];
   return alt && l.altColor ? l.altColor : l.color;
 }
 
+/** スネアのレーンの番号 */
+export const SD_LANE = DRUM_LANES.findIndex((l) => l.main === CH.SD);
+
+/** そのレーンに置くチップのチャンネル（2種目は HHオープン・左バスドラム。リムはスネアと同じ ch12） */
+export function laneChannel(lane: number, alt: boolean): number {
+  const l = DRUM_LANES[lane];
+  return alt && l.alt !== undefined ? l.alt : l.main;
+}
+
+/** そのレーンの音の番号（キット・置く音の表のキー）。ふつうはチャンネル、リムは SD_RIM */
+export function laneVoice(lane: number, alt: boolean): number {
+  const l = DRUM_LANES[lane];
+  return alt && l.alt !== undefined ? (l.altVoice ?? l.alt) : l.main;
+}
+
+/**
+ * チャンネルと違う音の番号 → 置くチャンネル（表で引く。種類を足すときは行を足す）。
+ * 表に無い番号は、そのままチャンネル（HHオープン・左バスドラムなどは音の番号がチャンネル）
+ */
+const VOICE_CHANNEL = new Map<number, number>([[SD_RIM, CH.SD]]);
+
+/** 音の番号のチャンネル（リムはスネアの ch12） */
+export function voiceChannel(voice: number): number {
+  return VOICE_CHANNEL.get(voice) ?? voice;
+}
+
+/** 音の番号のレーンと、2種目か（ドラムの音でなければ undefined） */
+export function voiceLane(voice: number): { lane: number; alt: boolean } | undefined {
+  if (voice === SD_RIM) return { lane: SD_LANE, alt: true };
+  const d = drumInfo.get(voice);
+  return d ? { lane: d.lane, alt: d.alt } : undefined;
+}
+
+/** 音の番号の名前（スネア・HHオープン・リムなど） */
+export function voiceName(voice: number): string {
+  if (voice === SD_RIM) return DRUM_LANES[SD_LANE].altName ?? '';
+  return drumInfo.get(voice)?.name ?? '';
+}
+
+/** 音の番号の色 */
+export function voiceColor(voice: number): string {
+  const v = voiceLane(voice);
+  return v ? chipColor(v.lane, v.alt) : '#8B95A4';
+}
+
 export interface DrumChannelInfo {
   lane: number;
   kind: ChipKind;
-  /** 2種目（HHオープン・左バスドラム）か */
+  /**
+   * 2種目のチャンネル（HHオープン・左バスドラム）か。スネアのリムはチャンネルがスネアと同じなので、ここでは分からない
+   * （チップがリムかは dtx/rim の chipAlt・isRimChip で、音から見る）
+   */
   alt: boolean;
   /** 通常チップに直したときのチャンネル */
   base: number;
@@ -146,7 +209,8 @@ DRUM_LANES.forEach((l, i) => {
     drumInfo.set(base + 0xa0, withTr({ lane: i, kind: 'nochip', alt, base } as DrumChannelInfo, { name: () => `${name()}${tr('（チップ無し時の音）', ' (no-chip sound)')}` }));
   };
   reg(l.main, false, () => l.mainName);
-  if (l.alt !== undefined && l.altName) reg(l.alt, true, () => l.altName ?? '');
+  // リムはスネアと同じチャンネル（音で見分ける）なので、チャンネルとしては登録しない
+  if (l.alt !== undefined && l.alt !== l.main && l.altName) reg(l.alt, true, () => l.altName ?? '');
 });
 
 /** ドラムのチャンネルなら、レーンと種類を返す */

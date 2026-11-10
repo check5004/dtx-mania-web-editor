@@ -28,6 +28,7 @@ import { AudioCheck } from './AudioCheck';
 import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
 import { MidiUnavailableNote, PadSettings, TouchSettings } from './tablet/TouchSettings';
+import { padKey } from './tablet/Pads';
 import { AppSettings } from './pwa/AppSettings';
 import { DriveSettings } from './DriveUi';
 
@@ -38,7 +39,7 @@ const targets = (): { t: LaneTarget; key: string; name: string; color: string }[
   DRUM_LANES.flatMap((l, i) => {
     const main = { t: { lane: i, alt: false }, key: l.key, name: l.mainName, color: l.color };
     if (l.alt === undefined || !l.altName) return [main];
-    return [main, { t: { lane: i, alt: true }, key: l.key === 'HH' ? 'HHO' : 'LBD', name: l.altName, color: l.altColor ?? l.color }];
+    return [main, { t: { lane: i, alt: true }, key: padKey(i, true), name: l.altName, color: l.altColor ?? l.color }];
   });
 
 export function SettingsPage() {

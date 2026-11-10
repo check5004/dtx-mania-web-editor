@@ -4,12 +4,14 @@
 //  - シンバル（CY）: 小節に4つ以上なら「刻み」（作者が刻みに使うレーン。ライドなど）、少なければ「単発」（クラッシュなど）。
 //  - ハイハット（HH）: 16分の位置ごとに、作者がそこをクローズ・オープン・左ペダルのどれで書いているか。
 //  - タム（TT）: 刻みで使うタムがあればそれ。フィルは時間の順に高い方から（ハイ→ロー→フロア）。
+//  - スネア（SD）: 16分の位置ごとに、作者がそこをスネアとリムのどちらで書いているか（採譜はリムを聞き分けない）。
 // 位置は拍ごとに、打点の時刻にいちばん合う細かさ（16分・8分3連・16分3連・32分）に吸着する。
 import { classOfChannel, DRUM_CLASSES, type DrumClass } from '../bench/classes';
 import { enforcePlayable, type PhraseNote } from '../ai/phrase';
 import { beatsOfMeasure, cellPos, fitMeasureCells, locateInBeats } from '../ai/beatGrid';
 import { toNum, ZERO } from '../dtx/fraction';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
+import { rimWavs } from '../dtx/rim';
 import type { TempoMap } from '../dtx/timing';
 
 /** 原曲の打点（時刻は譜面の秒） */
@@ -29,6 +31,8 @@ export interface Style {
   accent: Record<DrumClass, Votes>;
   /** ハイハットの種類：16分の位置 → チャンネル → 数 */
   hhAt: Map<number, Votes>;
+  /** スネアのリム：16分の位置 → スネア・リムの数（無い位置は rim の全体の数） */
+  sdAt: Map<number, { sd: number; rim: number }>;
   /** 見た小節の数（チップのある小節） */
   measures: number;
 }
@@ -58,6 +62,8 @@ export function learnStyle(doc: DtxDoc, tempo: TempoMap, from: number, to: numbe
   const pattern = Object.fromEntries(DRUM_CLASSES.map((c) => [c, new Map()])) as Record<DrumClass, Votes>;
   const accent = Object.fromEntries(DRUM_CLASSES.map((c) => [c, new Map()])) as Record<DrumClass, Votes>;
   const hhAt = new Map<number, Votes>();
+  const sdAt = new Map<number, { sd: number; rim: number }>();
+  const rims = rimWavs(doc);
   // 小節 → チャンネル → 数
   const per = new Map<number, Map<number, number>>();
   for (const c of doc.chips) {
@@ -75,6 +81,13 @@ export function learnStyle(doc: DtxDoc, tempo: TempoMap, from: number, to: numbe
       if (!v) hhAt.set(p, (v = new Map()));
       bump(v, c.ch);
     }
+    if (c.ch === CH.SD) {
+      const p = step16(tempo, c.m, c.f);
+      let v = sdAt.get(p);
+      if (!v) sdAt.set(p, (v = { sd: 0, rim: 0 }));
+      if (rims.has(c.v)) v.rim++;
+      else v.sd++;
+    }
   }
   for (const mm of per.values()) {
     for (const [ch, n] of mm) {
@@ -83,7 +96,7 @@ export function learnStyle(doc: DtxDoc, tempo: TempoMap, from: number, to: numbe
       bump(n >= 4 ? pattern[cls] : accent[cls], ch, n);
     }
   }
-  return { pattern, accent, hhAt, measures: per.size };
+  return { pattern, accent, hhAt, sdAt, measures: per.size };
 }
 
 /** 種類と、その小節でのその種類の打点の数から、書くチャンネルを決める（タム・ハイハット以外） */
@@ -109,6 +122,19 @@ function hhChannel(style: Style, pos: number): number {
   }
   const p = style.pattern.HH;
   return (p.get(CH.HHO) ?? 0) > (p.get(CH.HHC) ?? 0) ? CH.HHO : CH.HHC;
+}
+
+/**
+ * スネアの打点をリムで書くか：その16分の位置で作者がリムの方を多く書いているとき。
+ * 前後に無い位置は、前後の小節でスネアを書かずリムだけ書いているとき
+ */
+function sdRim(style: Style, pos: number): boolean {
+  const v = style.sdAt.get(pos);
+  if (v) return v.rim > v.sd;
+  let sd = 0;
+  let rim = 0;
+  for (const x of style.sdAt.values()) (sd += x.sd), (rim += x.rim);
+  return rim > 0 && sd === 0;
 }
 
 /**
@@ -188,6 +214,8 @@ export function draftFromHits(hits: readonly DraftHit[], tempo: TempoMap, from: 
           else ch = TOMS[Math.min(2, i)];
           notes.push({ ch, m, f: x.f });
         });
+      } else if (cls === 'SD') {
+        for (const x of arr) notes.push(sdRim(style, step16(tempo, m, x.f)) ? { ch: CH.SD, m, f: x.f, rim: true } : { ch: CH.SD, m, f: x.f });
       } else {
         const ch = channelFor(style, cls, arr.length);
         for (const x of arr) notes.push({ ch, m, f: x.f });
@@ -235,6 +263,10 @@ export function styleLines(style: Style): string[] {
   both('CY', 'シンバル類');
   both('HH', 'ハイハット類');
   both('TT', 'タム');
+  let sd = 0;
+  let rim = 0;
+  for (const x of style.sdAt.values()) (sd += x.sd), (rim += x.rim);
+  if (rim > 0) out.push(`スネアとリム: SD ${Math.round((sd / (sd + rim)) * 100)}%・RM ${Math.round((rim / (sd + rim)) * 100)}%`);
   return out;
 }
 // i18n-ignore-end

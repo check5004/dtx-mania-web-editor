@@ -4,6 +4,7 @@ import { ORIGIN_KEY } from '../dtx/origin';
 import { parseDtx } from '../dtx/parse';
 import { buildTempoMap } from '../dtx/timing';
 import { projectCharts } from './project';
+import { isRimChip } from '../dtx/rim';
 
 const load = (lines: string[]) => parseDtx(lines.join('\r\n') + '\r\n').doc;
 
@@ -80,5 +81,17 @@ describe('ほかの難易度の譜面を、開いている譜面の上に写す'
     expect(pa.fields['WAV' + z(va)]).toBe('tom.wav');
     expect(pa.fields['WAV' + z(vb)]).toBeUndefined();
     expect(pb.fields['WAV' + z(vb)]).toBe('crash.wav');
+  });
+});
+
+describe('スネアのリム', () => {
+  it('同じファイルでもリムの音（ラベル「Snare Rim」）はスネアの番号にまとめず、ラベルごと写す', () => {
+    const ext = load(['#BPM: 120', '#WAV07: snare.wav', '#WAV08: snare.wav\t;Snare Rim', '#WAVZZ: song.ogg', '#00001: ZZ', '#00012: 07000800']);
+    const [out] = projectCharts(BASE, [ext]);
+    const sd = out.chips.filter((c) => c.ch === CH.SD);
+    expect(sd[0].v).toBe(1);
+    expect(sd[1].v).not.toBe(1);
+    expect(isRimChip(out, sd[1])).toBe(true);
+    expect(isRimChip(out, sd[0])).toBe(false);
   });
 });

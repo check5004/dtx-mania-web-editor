@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLang } from '../../i18n/useLang';
 import { tr } from '../../i18n';
-import { chipColor, DRUM_LANES } from '../../dtx/model';
+import { chipColor, DRUM_LANES, SD_LANE } from '../../dtx/model';
 import { useInputSettings } from '../../input/settings';
 import { useAssist } from '../../store/assist';
 import { tempoOf } from '../../store/derived';
@@ -21,9 +21,18 @@ export function kitSlot(k: string): [number, boolean] {
   return [Number(l), a === '1'];
 }
 
+/**
+ * キットの枠を左右に分けて、左に2種目（スネアのリム）を置くか。
+ * 2種目のあるレーンで、2種目の枠がキットに無いもの（HHオープン・左バスドラムは自分の枠がある）
+ */
+export function kitSplit(order: readonly string[], lane: number, alt: boolean): boolean {
+  return !alt && DRUM_LANES[lane]?.alt !== undefined && !order.includes(`${lane}:1`);
+}
+
 export function padKey(lane: number, alt: boolean): string {
   if (lane === 1) return alt ? 'HHO' : 'HHC';
   if (lane === 2 && alt) return 'LBD';
+  if (lane === SD_LANE && alt) return 'RIM';
   return DRUM_LANES[lane].key;
 }
 
@@ -187,20 +196,31 @@ function ModeBox({ layout }: { layout: 'panel' | 'side' }) {
   );
 }
 
+/** キットの1枠。スネアは左右に分け、左をリム（パッドの縁を叩くのと同じ） */
+export function KitPad({ order, k }: { order: readonly string[]; k: string }) {
+  const [lane, alt] = kitSlot(k);
+  if (!kitSplit(order, lane, alt)) return <Pad lane={lane} alt={alt} />;
+  return (
+    <div className="t-kit-split">
+      <Pad lane={lane} alt className="split" />
+      <Pad lane={lane} alt={false} className="split" />
+    </div>
+  );
+}
+
 /** キット 4×3（並びは設定の「入力パッド」で入れ替えられる） */
 function KitGrid() {
   const order = useDevice((s) => s.kitOrder);
   return (
     <div className="t-kit">
-      {order.map((k) => {
-        const [lane, alt] = kitSlot(k);
-        return <Pad key={k} lane={lane} alt={alt} />;
-      })}
+      {order.map((k) => (
+        <KitPad key={k} order={order} k={k} />
+      ))}
     </div>
   );
 }
 
-/** レーンの並び（譜面と同じ順）のパッド。HH・LP は上下に2つ（上が HHオープン・左バスドラム） */
+/** レーンの並び（譜面と同じ順）のパッド。HH・LP・SD は上下に2つ（上が HHオープン・左バスドラム・リム） */
 function LaneGrid() {
   const order = useInputSettings((s) => s.laneOrder);
   const keys = useKeyLabels();
@@ -221,7 +241,7 @@ function LaneGrid() {
 
 /**
  * 縦のシート：譜面のレーンの真下に、同じ幅で並べる。
- * slim（シートが低い）：HH・LP を上下に割ると押せないほど小さくなるので、HHオープン・左バスドラムはレーンの右（入らなければ左）の空きに並べる
+ * slim（シートが低い）：HH・LP・SD を上下に割ると押せないほど小さくなるので、HHオープン・左バスドラム・リムはレーンの右（入らなければ左）の空きに並べる
  */
 function LaneStrip({ slim = false }: { slim?: boolean }) {
   const order = useInputSettings((s) => s.laneOrder);
@@ -246,7 +266,7 @@ function LaneStrip({ slim = false }: { slim?: boolean }) {
   const laneW = geo ? geo.laneW : Math.floor(w / 10);
   const x0 = geo ? geo.left - left0 : 0;
   const right0 = x0 + order.length * laneW;
-  // 細いとき：上下に割らずに、Shift で置く音（HHオープン・左バスドラム）を空いた所へ
+  // 細いとき：上下に割らずに、Shift で置く音（HHオープン・左バスドラム・リム）を空いた所へ
   const alts = order.filter((lane) => DRUM_LANES[lane].alt !== undefined);
   const ALT_GAP = 6;
   const altW = (room: number) => Math.min(76, Math.floor((room - 8 - ALT_GAP * (alts.length - 1)) / Math.max(1, alts.length)));

@@ -6,16 +6,18 @@ import { tr, aiLangRule, aiTextLimit } from '../i18n';
 import { beatsLabel, beatsOfMeasure, baseCells, combineCells, exactCells, fitMeasureCells, locateInBeats, parseSteps, type BeatSlot } from './beatGrid';
 import { cmp, div, frac, mul, sub, toNum, type Frac } from '../dtx/fraction';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
+import { rimWavs } from '../dtx/rim';
 import type { TempoMap } from '../dtx/timing';
 
-/** 格子で使うレーンの名前とチャンネル */
-export const GRID_LANES: { code: string; ch: number; hand: boolean; foot?: 'L' | 'R' }[] = [
+/** 格子で使うレーンの名前とチャンネル（RM はスネアのリム。チャンネルはスネアのまま、音がリム） */
+export const GRID_LANES: { code: string; ch: number; hand: boolean; foot?: 'L' | 'R'; rim?: boolean }[] = [
   { code: 'LC', ch: CH.LC, hand: true },
   { code: 'HH', ch: CH.HHC, hand: true },
   { code: 'HO', ch: CH.HHO, hand: true },
   { code: 'LP', ch: CH.LP, hand: false, foot: 'L' },
   { code: 'LB', ch: CH.LBD, hand: false, foot: 'L' },
   { code: 'SD', ch: CH.SD, hand: true },
+  { code: 'RM', ch: CH.SD, hand: true, rim: true },
   { code: 'HT', ch: CH.HT, hand: true },
   { code: 'BD', ch: CH.BD, hand: false, foot: 'R' },
   { code: 'LT', ch: CH.LT, hand: true },
@@ -24,13 +26,15 @@ export const GRID_LANES: { code: string; ch: number; hand: boolean; foot?: 'L' |
   { code: 'RD', ch: CH.RD, hand: true },
 ];
 
-const CODE_OF = new Map(GRID_LANES.map((l) => [l.ch, l.code]));
+const CODE_OF = new Map(GRID_LANES.filter((l) => !l.rim).map((l) => [l.ch, l.code]));
 const LANE_OF = new Map(GRID_LANES.map((l) => [l.code, l]));
 
 export interface PhraseNote {
   ch: number;
   m: number;
   f: Frac;
+  /** スネアのリム（チャンネルはスネアのまま、リムの音で置く） */
+  rim?: boolean;
 }
 
 export interface PhraseCandidate {
@@ -72,14 +76,16 @@ export interface MeasureLayout {
   rounded: boolean;
 }
 
-/** 小節の譜面のドラムのチップ（格子で書くもの） */
+/** 小節の譜面のドラムのチップ（格子で書くもの。スネアのレーンでリムの音のチップは RM） */
 function gridChips(doc: DtxDoc | null, m: number): { code: string; f: Frac }[] {
   const out: { code: string; f: Frac }[] = [];
-  for (const c of doc?.chips ?? []) {
+  if (!doc) return out;
+  const rims = rimWavs(doc);
+  for (const c of doc.chips) {
     if (c.m !== m) continue;
     const d = drumChannel(c.ch);
     if (!d || d.kind !== 'normal') continue;
-    const code = CODE_OF.get(c.ch);
+    const code = d.base === CH.SD && rims.has(c.v) ? 'RM' : CODE_OF.get(c.ch);
     if (code) out.push({ code, f: c.f });
   }
   return out;
@@ -209,6 +215,12 @@ export const GRID_HELP = [
   '答えも同じ形で、拍ごとに | で区切って書いてください。拍ごとに細かさを変えてかまいません（3連の所は3か6、細かい連打は8）。',
 ];
 
+/** AI に渡すレーンの名前（フレーズ候補・小節の生成で共通）。リムはスネアと別の奏法なので入れ替えさせない */
+export const LANE_HELP = [
+  'レーン: LC=左シンバル HH=ハイハット(閉) HO=ハイハット(開) LP=左ペダル LB=左バスドラム SD=スネア RM=スネアのリム(クロススティック) HT=ハイタム BD=バスドラム LT=ロータム FT=フロアタム CY=右シンバル RD=ライド',
+  'RM はスティックをスネアに寝かせて縁を打つ「カッ」という音で、スネアとは別の奏法です。譜面の RM は RM のまま、SD は SD のまま扱い、入れ替えないでください。新しく RM を使うのは、前後の小節や手本の同じ流れの所でリムを使っているときだけにしてください。',
+];
+
 /** 原曲の打点の説明（採譜モデルの5種・3帯域） */
 export function onsetHelp(kind: 'drums' | 'bands'): string {
   return kind === 'drums'
@@ -334,7 +346,7 @@ export function phrasePrompt(ctx: PhraseContext): { system: string; user: string
     'あなたはドラム譜面（DTXMania、電子ドラム）の作者を手伝います。',
     '指定の範囲に入れる' + (ctx.kind === 'fill' ? 'フィルイン' : 'リズムパターン') + 'の候補を、性格の違う3つ作ってください。',
     ...GRID_HELP,
-    'レーン: LC=左シンバル HH=ハイハット(閉) HO=ハイハット(開) LP=左ペダル LB=左バスドラム SD=スネア HT=ハイタム BD=バスドラム LT=ロータム FT=フロアタム CY=右シンバル RD=ライド',
+    ...LANE_HELP,
     ctx.onsetKind ? onsetHelp(ctx.onsetKind) : '',
     '守ること: 手は同時に2つまで、足は左右1つずつ。前後の小節とのつながりを自然に。範囲の外は書かない。',
     '答えは指定の JSON だけで返してください。',
@@ -381,7 +393,7 @@ export function decodeCandidates(raw: { candidates?: RawCandidate[] }, ctx: { fr
       for (const ln of ms.lanes ?? []) {
         const def = LANE_OF.get(String(ln.lane ?? '').toUpperCase());
         if (!def) continue;
-        for (const f of parseSteps(String(ln.steps ?? ''), beats, total)) notes.push({ ch: def.ch, m, f });
+        for (const f of parseSteps(String(ln.steps ?? ''), beats, total)) notes.push(def.rim ? { ch: def.ch, m, f, rim: true } : { ch: def.ch, m, f });
       }
     }
     const clean = enforcePlayable(notes);
@@ -435,8 +447,12 @@ export function enforcePlayable(notes: PhraseNote[]): PhraseNote[] {
 
 // ---- キーが無いときの候補 -----------------------------------------------------------
 
-function drumNotesIn(doc: DtxDoc, m: number): { ch: number; f: Frac }[] {
-  return doc.chips.filter((c) => c.m === m && drumChannel(c.ch)?.kind === 'normal').map((c) => ({ ch: c.ch, f: c.f }));
+/** 小節のドラムの通常チップ（リムの音のスネアは rim） */
+function drumNotesIn(doc: DtxDoc, m: number): { ch: number; f: Frac; rim?: boolean }[] {
+  const rims = rimWavs(doc);
+  return doc.chips
+    .filter((c) => c.m === m && drumChannel(c.ch)?.kind === 'normal')
+    .map((c) => (c.ch === CH.SD && rims.has(c.v) ? { ch: c.ch, f: c.f, rim: true } : { ch: c.ch, f: c.f }));
 }
 
 function cosine(a: number[], b: number[]): number {
@@ -468,8 +484,8 @@ function onsetVector(onsets: OnsetRows, tempo: TempoMap, m: number, offsetSec: n
   return v;
 }
 
-function noteKey(n: { ch: number; f: Frac }) {
-  return `${n.ch}@${n.f.n}/${n.f.d}`;
+function noteKey(n: { ch: number; f: Frac; rim?: boolean }) {
+  return `${n.ch}${n.rim ? 'r' : ''}@${n.f.n}/${n.f.d}`;
 }
 
 /** キーが無いときの候補：原曲の打点が似た小節（譜面のある小節）からのコピーと、直前の小節の複製 */
@@ -489,7 +505,7 @@ export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; 
     if (!seen.has(key) && Array.from({ length: len }, (_, i) => has(p + i)).some(Boolean)) {
       seen.add(key);
       const notes: PhraseNote[] = [];
-      for (let i = 0; i < len; i++) for (const n of drumNotesIn(doc, p + i)) notes.push({ ch: n.ch, m: o.from + i, f: n.f });
+      for (let i = 0; i < len; i++) for (const n of drumNotesIn(doc, p + i)) notes.push({ ...n, m: o.from + i });
       prevCand = {
         name: len === 1 ? tr('直前の小節を複製', 'Repeat the previous measure') : tr(`直前の${len}小節を複製`, `Repeat the previous ${len} measures`),
         reason: tr('前と同じ形を続けます', 'Keeps the same pattern going'),
@@ -528,7 +544,7 @@ export function ruleCandidates(doc: DtxDoc, tempo: TempoMap, o: { from: number; 
     if (seen.has(key)) continue;
     seen.add(key);
     const notes: PhraseNote[] = [];
-    for (let i = 0; i < len; i++) for (const n of drumNotesIn(doc, s.m + i)) notes.push({ ch: n.ch, m: o.from + i, f: n.f });
+    for (let i = 0; i < len; i++) for (const n of drumNotesIn(doc, s.m + i)) notes.push({ ...n, m: o.from + i });
     out.push({ name: tr(`小節 ${s.m} からコピー`, `Copy from measure ${s.m}`), reason: s.why, source: 'similar', notes });
     if (out.length >= 2) break;
   }

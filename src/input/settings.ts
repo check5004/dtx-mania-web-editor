@@ -4,7 +4,7 @@ import { create } from 'zustand';
 
 export interface LaneTarget {
   lane: number;
-  /** HHオープン・左バスドラム */
+  /** 2種目（HHオープン・左バスドラム・スネアのリム） */
   alt: boolean;
 }
 
@@ -61,12 +61,15 @@ export const DEFAULT_KEYS: Record<string, number> = {
 
 const t = (lane: number, alt = false): LaneTarget => ({ lane, alt });
 
-/** General MIDI と、よくある電子ドラム（ボウ・エッジ・リム）の割り当て */
+/**
+ * General MIDI と、よくある電子ドラム（ボウ・エッジ・リム）の割り当て。
+ * 37（GM の Side Stick、Roland の XStick）はスネアのリム。40（電子ドラムのスネアのリムショット）はスネアの強打なのでスネア
+ */
 export function gmNotes(): Record<number, LaneTarget> {
   return {
     35: t(5),
     36: t(5),
-    37: t(3),
+    37: t(3, true),
     38: t(3),
     40: t(3),
     42: t(1),
@@ -97,6 +100,17 @@ export function newProfile(name: string): MidiProfile {
 
 const KEY = 'dtxe.input.v1';
 
+/**
+ * リムを足す前のプロファイルは 37（Side Stick）がスネアになっている。初めて読むときに一度だけリムにする
+ * （そのころリムは選べなかったので、37 をスネアにしていたのは前の初期値のまま）
+ */
+function migrateRim(profiles: MidiProfile[]): MidiProfile[] {
+  return profiles.map((p) => {
+    const n = p.notes[37];
+    return n && n.lane === 3 && !n.alt ? { ...p, notes: { ...p.notes, 37: { lane: 3, alt: true } } } : p;
+  });
+}
+
 function load(): InputSettings {
   const base: InputSettings = { keys: { ...DEFAULT_KEYS }, profiles: [], profileId: '', latencyMs: 0, velPresets: [100, 70, 35], velStep: 5, velCurve: 'normal', laneOrder: [...DEFAULT_LANE_ORDER] };
   try {
@@ -105,6 +119,7 @@ function load(): InputSettings {
       const j = JSON.parse(raw) as Partial<InputSettings>;
       if (j.keys && typeof j.keys === 'object') base.keys = j.keys;
       if (Array.isArray(j.profiles)) base.profiles = j.profiles.filter((p) => p && typeof p.id === 'string' && p.notes);
+      if (!(j as { rim?: boolean }).rim) base.profiles = migrateRim(base.profiles);
       if (typeof j.profileId === 'string') base.profileId = j.profileId;
       if (Number.isFinite(j.latencyMs)) base.latencyMs = Number(j.latencyMs);
       if (Array.isArray(j.velPresets) && j.velPresets.length === 3 && j.velPresets.every((v) => Number.isFinite(v))) base.velPresets = j.velPresets as [number, number, number];
@@ -126,7 +141,7 @@ useInputSettings.subscribe((s) => {
   try {
     localStorage.setItem(
       KEY,
-      JSON.stringify({ keys: s.keys, profiles: s.profiles, profileId: s.profileId, latencyMs: s.latencyMs, velPresets: s.velPresets, velStep: s.velStep, velCurve: s.velCurve, laneOrder: s.laneOrder }),
+      JSON.stringify({ keys: s.keys, profiles: s.profiles, profileId: s.profileId, latencyMs: s.latencyMs, velPresets: s.velPresets, velStep: s.velStep, velCurve: s.velCurve, laneOrder: s.laneOrder, rim: true }),
     );
   } catch {
     // 保存できなくても使える

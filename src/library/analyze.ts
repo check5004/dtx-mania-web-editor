@@ -1,7 +1,7 @@
 // ライブラリの音の解析：レーンでの使われ方から楽器を決める、一覧の波形、似た音を探す特徴量。
 import { tr, withTr } from '../i18n';
 import { fft } from '../audio/dsp';
-import { CH, DRUM_LANES, drumChannel } from '../dtx/model';
+import { CH, DRUM_LANES, drumChannel, SD_RIM, voiceLane } from '../dtx/model';
 import type { Inst } from './db';
 
 export const INSTS: { id: Inst; label: string; color: string }[] = [
@@ -16,8 +16,9 @@ export const INSTS: { id: Inst; label: string; color: string }[] = [
 
 export const instInfo = (i: Inst) => INSTS.find((x) => x.id === i) ?? INSTS[INSTS.length - 1];
 
-/** 通常チャンネル → 楽器 */
+/** 通常チャンネル（音の番号。スネアのリムは SD_RIM）→ 楽器 */
 export function instOfChannel(ch: number): Inst | null {
+  if (ch === SD_RIM) return 'snare';
   const d = drumChannel(ch);
   if (!d) return null;
   switch (d.base) {
@@ -70,7 +71,7 @@ export function classifyUsage(usage: ReadonlyMap<number, number>, name: string):
     if (!inst) continue;
     total += n;
     byInst.set(inst, (byInst.get(inst) ?? 0) + n);
-    const lane = DRUM_LANES[drumChannel(ch)!.lane].key;
+    const lane = DRUM_LANES[voiceLane(ch)?.lane ?? 0].key;
     byLane.set(lane, (byLane.get(lane) ?? 0) + n);
   }
   const hint = instFromName(name);

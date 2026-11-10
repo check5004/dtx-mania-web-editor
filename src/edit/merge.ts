@@ -8,16 +8,17 @@
 import type { Draft } from 'immer';
 import { toBase36x2 } from '../dtx/base36';
 import type { Frac } from '../dtx/fraction';
-import { CH, drumChannel, type Chip, type DtxDoc } from '../dtx/model';
+import { CH, drumChannel, SD_RIM, type Chip, type DtxDoc } from '../dtx/model';
 
 export type MergeMode = 'add' | 'replace';
 
-/** 案のチップ（v は写した元の WAV 番号。無ければレーンの音を使う） */
+/** 案のチップ（v は写した元の WAV 番号。無ければレーンの音を使う。rim はスネアのリム（チャンネルはスネア）） */
 export interface ProposedNote {
   ch: number;
   m: number;
   f: Frac;
   v?: number;
+  rim?: boolean;
 }
 
 export interface MergeOptions {
@@ -28,7 +29,18 @@ export interface MergeOptions {
   rejected: ReadonlySet<string>;
   /** 置き換えでも残すチップ（id） */
   kept: ReadonlySet<number>;
+  /** 譜面のリムの音の WAV 番号（スネアのチップとリムのチップを見分ける。省くと見分けない） */
+  rims?: ReadonlySet<number>;
 }
+
+const NO_RIMS: ReadonlySet<number> = new Set();
+
+/** 譜面のチップがスネアのリムか */
+const chipRim = (c: Chip, rims: ReadonlySet<number>) => drumChannel(c.ch)?.base === CH.SD && rims.has(c.v);
+
+/** 案のチップがスネアのリムか（rim の印か、写した元の音がリム） */
+export const noteRim = (n: ProposedNote, rims: ReadonlySet<number> = NO_RIMS) =>
+  drumChannel(n.ch)?.base === CH.SD && (n.rim === true || (n.v !== undefined && rims.has(n.v)));
 
 export type SkipReason = 'rejected' | 'lane' | 'conflict' | 'playable';
 
@@ -81,6 +93,7 @@ export function drumChipsIn(doc: DtxDoc, from: number, to: number): Chip[] {
  * 不可視・音だけのチップは対象にしない（いつも残す）。
  */
 export function planMerge(existing: readonly Chip[], proposal: readonly ProposedNote[], o: MergeOptions): MergePlan {
+  const rims = o.rims ?? NO_RIMS;
   const bySlot = new Map<string, Chip>();
   for (const c of existing) {
     const k = slotOf(c.ch, c.m, c.f);
@@ -99,7 +112,7 @@ export function planMerge(existing: readonly Chip[], proposal: readonly Proposed
     if (taken.has(k)) continue;
     taken.add(k);
     const ex = bySlot.get(k);
-    if (ex && ex.ch === n.ch) {
+    if (ex && ex.ch === n.ch && chipRim(ex, rims) === noteRim(n, rims)) {
       same.add(ex.id);
       continue;
     }
@@ -112,7 +125,7 @@ export function planMerge(existing: readonly Chip[], proposal: readonly Proposed
       continue;
     }
     if (ex) {
-      // 同じ場所に違う音（HHクローズ⇔オープン、左ペダル⇔左バスドラム）
+      // 同じ場所に違う音（HHクローズ⇔オープン、左ペダル⇔左バスドラム、スネア⇔リム）
       if (o.mode === 'add' || o.kept.has(ex.id)) {
         skipped.push({ note: n, why: 'conflict' });
         continue;
@@ -157,14 +170,15 @@ export function planMerge(existing: readonly Chip[], proposal: readonly Proposed
   return { add: kept, remove: [...remove], same: [...same], keep, skipped };
 }
 
-/** 計画どおりに譜面を書き換える。wavFor は案に音が無いときのレーンの音 */
-export function applyMerge(d: Draft<DtxDoc>, plan: MergePlan, wavFor: (d: Draft<DtxDoc>, ch: number) => number) {
+/** 計画どおりに譜面を書き換える。wavFor は案に音が無いときの音（voice はチャンネル、リムは SD_RIM） */
+export function applyMerge(d: Draft<DtxDoc>, plan: MergePlan, wavFor: (d: Draft<DtxDoc>, voice: number) => number) {
   if (plan.remove.length) {
     const rm = new Set(plan.remove);
     for (let i = d.chips.length - 1; i >= 0; i--) if (rm.has(d.chips[i].id)) d.chips.splice(i, 1);
   }
   for (const n of plan.add) {
-    const v = n.v !== undefined && n.v > 0 && d.fields['WAV' + toBase36x2(n.v)] !== undefined ? n.v : wavFor(d, n.ch);
+    const voice = noteRim(n) ? SD_RIM : (drumChannel(n.ch)?.base ?? n.ch);
+    const v = n.v !== undefined && n.v > 0 && d.fields['WAV' + toBase36x2(n.v)] !== undefined ? n.v : wavFor(d, voice);
     d.chips.push({ id: d.nextId++, ch: n.ch, m: n.m, f: { n: n.f.n, d: n.f.d }, v });
   }
 }
@@ -180,18 +194,19 @@ export function planCounts(plan: MergePlan): { add: number; remove: number; same
   };
 }
 
-/** 案と譜面でチップが違うレーン（レーンごとの切り替えに出す） */
-export function lanesWithChanges(existing: readonly Chip[], proposal: readonly ProposedNote[]): number[] {
+/** 案と譜面でチップが違うレーン（レーンごとの切り替えに出す。スネアとリムは違うチップ） */
+export function lanesWithChanges(existing: readonly Chip[], proposal: readonly ProposedNote[], rims: ReadonlySet<number> = NO_RIMS): number[] {
   const lanes = new Set<number>();
-  const ex = new Set(existing.map((c) => `${c.m}|${c.ch}|${c.f.n}/${c.f.d}`));
+  const key = (m: number, ch: number, f: Frac, rim: boolean) => `${m}|${ch}${rim ? 'r' : ''}|${f.n}/${f.d}`;
+  const ex = new Set(existing.map((c) => key(c.m, c.ch, c.f, chipRim(c, rims))));
   const pr = new Set<string>();
   for (const n of proposal) {
     const d = drumChannel(n.ch);
     if (!d || d.kind !== 'normal') continue;
-    const k = `${n.m}|${n.ch}|${n.f.n}/${n.f.d}`;
+    const k = key(n.m, n.ch, n.f, noteRim(n, rims));
     pr.add(k);
     if (!ex.has(k)) lanes.add(d.lane);
   }
-  for (const c of existing) if (!pr.has(`${c.m}|${c.ch}|${c.f.n}/${c.f.d}`)) lanes.add(drumChannel(c.ch)!.lane);
+  for (const c of existing) if (!pr.has(key(c.m, c.ch, c.f, chipRim(c, rims)))) lanes.add(drumChannel(c.ch)!.lane);
   return [...lanes].sort((a, b) => a - b);
 }

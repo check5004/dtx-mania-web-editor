@@ -1,7 +1,7 @@
 import { produce } from 'immer';
 import { describe, expect, it } from 'vitest';
 import { frac } from '../dtx/fraction';
-import { CH, emptyDoc, type Chip } from '../dtx/model';
+import { CH, emptyDoc, SD_RIM, type Chip } from '../dtx/model';
 import { applyMerge, drumChipsIn, lanesWithChanges, noteId, planMerge, type MergeOptions, type ProposedNote } from './merge';
 
 const chip = (id: number, ch: number, m: number, n: number, d = 16): Chip => ({ id, ch, m, f: frac(n, d), v: 1 });
@@ -91,5 +91,48 @@ describe('lanesWithChanges', () => {
     const pr = [note(CH.BD, 0, 0), note(CH.SD, 0, 6), note(CH.HHC, 0, 0)];
     // HH=1, SD=3
     expect(lanesWithChanges(ex, pr)).toEqual([1, 3]);
+  });
+});
+
+describe('スネアのリム', () => {
+  // WAV 02 はスネア、0W はリムの音
+  const rims = new Set([32]);
+  const sd = (id: number, n: number, v: number): Chip => ({ id, ch: CH.SD, m: 2, f: frac(n, 16), v });
+
+  it('同じ位置のスネアとリムは違うチップ（足すなら入らず、置き換えならリムに替える）', () => {
+    const ex = [sd(1, 4, 2), sd(2, 12, 32)];
+    const pr: ProposedNote[] = [{ ch: CH.SD, m: 2, f: frac(4, 16), rim: true }, { ch: CH.SD, m: 2, f: frac(12, 16), rim: true }];
+    const add = planMerge(ex, pr, opts({ rims }));
+    expect(add.same).toEqual([2]);
+    expect(add.skipped.map((s) => s.why)).toEqual(['conflict']);
+    const rep = planMerge(ex, pr, opts({ mode: 'replace', rims }));
+    expect(rep.remove).toEqual([1]);
+    expect(rep.add.map((n) => n.rim)).toEqual([true]);
+    // リムを見分けないとき（rims を渡さない）はどちらも同じ
+    expect(planMerge(ex, [{ ch: CH.SD, m: 2, f: frac(4, 16) }], opts()).same).toEqual([1]);
+  });
+
+  it('写した元の音がリムなら、印が無くてもリム', () => {
+    const p = planMerge([sd(1, 0, 32)], [{ ch: CH.SD, m: 2, f: frac(0), v: 32 }], opts({ rims }));
+    expect(p.same).toEqual([1]);
+    expect(lanesWithChanges([sd(1, 0, 2)], [{ ch: CH.SD, m: 2, f: frac(0), rim: true }], rims)).toEqual([3]);
+    expect(lanesWithChanges([sd(1, 0, 32)], [{ ch: CH.SD, m: 2, f: frac(0), rim: true }], rims)).toEqual([]);
+  });
+
+  it('入れるときは、リムの音を頼む（チャンネルはスネアのまま）', () => {
+    const doc = emptyDoc();
+    const plan = planMerge([], [{ ch: CH.SD, m: 1, f: frac(0), rim: true }, { ch: CH.SD, m: 1, f: frac(1, 2) }], opts());
+    const asked: number[] = [];
+    const next = produce(doc, (d) =>
+      applyMerge(d, plan, (_d, voice) => {
+        asked.push(voice);
+        return voice === SD_RIM ? 9 : 2;
+      }),
+    );
+    expect(asked).toEqual([SD_RIM, CH.SD]);
+    expect(next.chips.map((c) => [c.ch, c.v])).toEqual([
+      [CH.SD, 9],
+      [CH.SD, 2],
+    ]);
   });
 });

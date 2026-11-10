@@ -5,6 +5,7 @@ import type { BgmFilter } from '../audio/engine';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
 import { CH, chipColor, DRUM_LANES, drumChannel } from '../dtx/model';
+import { chipAlt } from '../dtx/rim';
 import { applySimilar, clearSimilarPin, setBandFilter, setSpecGain, setSpecMode, setWaveMode, useAssist } from '../store/assist';
 import type { SpecMode } from '../audio/spectro';
 import { SPEC_ZONES } from './specColors';
@@ -21,7 +22,7 @@ import { drumStatusText, setDrumsEnabled, useDrums } from '../store/drums';
 import { ADTOF } from '../transcribe/model';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
-import { channelName, chipBpmLabel, formatLevel, meterLabel, parseMeter } from './format';
+import { chipBpmLabel, chipName, formatLevel, meterLabel, parseMeter } from './format';
 import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
 import { levelToField } from '../check/level';
 import { promptDialog } from './dialogs';
@@ -68,7 +69,7 @@ export function SelectionCard() {
         <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
           <div>クリック … チップを置く</div>
           <div>
-            <kbd>Shift</kbd>+クリック … HHオープン／左バスドラム
+            <kbd>Shift</kbd>+クリック … HHオープン／左バスドラム／リム
           </div>
           <div>ダブルクリック … 消す（右ボタンでなぞるとまとめて消す）</div>
           <div>右クリック … メニュー（チップならベロシティ・レーン・削除、何もない所ならグリッド）</div>
@@ -93,7 +94,7 @@ export function SelectionCard() {
           <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
             <div>Click … place a chip</div>
             <div>
-              <kbd>Shift</kbd>+click … HH open / left bass drum
+              <kbd>Shift</kbd>+click … HH open / left bass drum / rim
             </div>
             <div>Double-click … delete (drag with the right button to delete several)</div>
             <div>Right-click … menu (on a chip: velocity, lane, delete; on an empty spot: grid)</div>
@@ -129,13 +130,13 @@ export function SelectionCard() {
   const vset = new Set(drums.map((c) => c.v));
   const v = vset.size === 1 ? [...vset][0] : null;
   const oneInfo = one ? drumChannel(one.ch) : undefined;
-  const color = oneInfo ? chipColor(oneInfo.lane, oneInfo.alt) : 'var(--accent)';
+  const color = oneInfo && one ? chipColor(oneInfo.lane, chipAlt(doc, one)) : 'var(--accent)';
 
   return (
     <div className="card">
       <div className="row" style={{ marginBottom: 10 }}>
         <span className="dot" style={{ background: color, width: 10, height: 10 }} />
-        <span style={{ fontWeight: 600 }}>{one ? channelName(one.ch) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</span>
+        <span style={{ fontWeight: 600 }}>{one ? chipName(doc, one) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</span>
         {one && <span className="lbl mono">ch {one.ch.toString(16).toUpperCase().padStart(2, '0')}</span>}
         <span className="grow" />
         <button className="ib" style={{ width: 28, height: 28 }} onClick={deleteSelection} title={tr('削除（Delete）', 'Delete (Delete)')}>

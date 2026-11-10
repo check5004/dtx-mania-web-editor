@@ -3,6 +3,7 @@ import type { SoundEvent, WavSource } from '../audio/engine';
 import { virtualSound } from '../audio/sounds';
 import { parseNxNumber, toBase36x2 } from '../dtx/base36';
 import { bgaChannel, CH, drumChannel, isSeChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
+import { rimWavs } from '../dtx/rim';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { findFile, type SongFolder } from '../fs/folder';
 
@@ -40,6 +41,7 @@ export interface ChipView {
   beat: number;
   col: number;
   kind: ChipKind;
+  /** 2種目（HHオープン・左バスドラム・スネアのリム） */
   alt: boolean;
 }
 
@@ -49,6 +51,8 @@ export function chipViews(doc: DtxDoc): ChipView[] {
   let v = viewCache.get(doc);
   if (v) return v;
   const t = tempoOf(doc);
+  // スネアのリムは、チャンネルはスネアのまま音で見分ける（2種目として描く）
+  const rims = rimWavs(doc);
   v = [];
   for (const c of doc.chips) {
     const d = drumChannel(c.ch);
@@ -58,7 +62,7 @@ export function chipViews(doc: DtxDoc): ChipView[] {
     else if (c.ch === CH.BGM || isSeChannel(c.ch) || c.ch === CH.FILLIN || c.ch === CH.FILLIN_SOUND) col = COL_BGM;
     else if (bgaChannel(c.ch)) col = COL_BGA;
     else continue;
-    v.push({ c, beat: t.beatOf(c.m, c.f), col, kind: d?.kind ?? 'normal', alt: d?.alt ?? false });
+    v.push({ c, beat: t.beatOf(c.m, c.f), col, kind: d?.kind ?? 'normal', alt: d ? d.alt || (d.base === CH.SD && rims.has(c.v)) : false });
   }
   v.sort((a, b) => a.beat - b.beat);
   viewCache.set(doc, v);

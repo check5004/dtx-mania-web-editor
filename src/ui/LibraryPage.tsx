@@ -2,9 +2,9 @@
 import { tr, pl, locale } from '../i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILTIN_KITS, KIT_LANES, laneByCh } from '../audio/sounds';
-import { toBase36x2 } from '../dtx/base36';
-import { CH } from '../dtx/model';
-import { freeWavNumber, setField } from '../edit/ops';
+import { CH, SD_RIM } from '../dtx/model';
+import { rimWavs } from '../dtx/rim';
+import { addWav } from '../edit/rim';
 import { INSTS, instInfo } from '../library/analyze';
 import type { Inst, LibraryKit } from '../library/db';
 import { playAudition, useStopAuditionOnClose } from '../store/audition';
@@ -77,15 +77,17 @@ async function assignToLane(item: LibItem, ch: number) {
   const s = useEditor.getState();
   if (s.screen !== 'editor') return;
   const file = item.file;
+  // スネアのリムは、リムの音として登録する（ラベル「Snare Rim」。スネアの音と同じファイルでも別の番号）
+  const rim = ch === SD_RIM;
+  const rims = rimWavs(s.doc);
   let no = -1;
   for (const [k, v] of Object.entries(s.doc.fields)) {
-    if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === file.toLowerCase() && s.doc.fields['VOLUME' + k.slice(3)] === undefined) no = parseInt(k.slice(3), 36);
+    if (/^WAV[0-9A-Z]{2}$/.test(k) && v.toLowerCase() === file.toLowerCase() && s.doc.fields['VOLUME' + k.slice(3)] === undefined && rims.has(parseInt(k.slice(3), 36)) === rim) no = parseInt(k.slice(3), 36);
   }
   if (no < 0) {
     const lane = laneByCh.get(ch)?.label ?? tr('レーン', 'lane');
     edit(tr(`${lane}に ${item.name} を割り当て`, `Assign ${item.name} to ${lane}`), (d) => {
-      no = freeWavNumber(d) ?? -1;
-      if (no > 0) setField(d, 'WAV' + toBase36x2(no), file);
+      no = addWav(d, file, rim) ?? -1;
     });
   }
   if (no <= 0) {

@@ -1,6 +1,7 @@
 // 標準キットを作る：GeneralUser GS（SoundFont）のドラムセットから、レーンごとに1音ずつ切り出して OGG にする。
-// 使い方: node scripts/make-kits.mjs <GeneralUser.sf2>
+// 使い方: node scripts/make-kits.mjs <GeneralUser.sf2> [レーン,…]
 //   GeneralUser GS は npm の generaluser パッケージ（ISC、元のライセンスは public/kits/LICENSE-GeneralUser-GS.txt）から取れる。
+//   レーンを書くと、その音だけ作る（例: rim。ほかの音のファイルは変えない）
 // 出力: public/kits/<キット>/<レーン>.ogg
 import fs from 'fs';
 import path from 'path';
@@ -11,9 +12,10 @@ import { createEncoder } from 'wasm-media-encoders';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sf2 = process.argv[2];
 if (!sf2) {
-  console.error('usage: node scripts/make-kits.mjs <GeneralUser.sf2>');
+  console.error('usage: node scripts/make-kits.mjs <GeneralUser.sf2> [lane,...]');
   process.exit(1);
 }
+const only = process.argv[3] ? new Set(process.argv[3].split(',')) : null;
 
 const SR = 44100;
 // レーン → GM のノート番号と長さ（秒）
@@ -24,6 +26,8 @@ const LANES = {
   lp: [44, 0.6],
   lbd: [36, 0.9],
   sd: [38, 1.0],
+  // スネアのリム（クロススティック）: GM の 37 Side Stick
+  rim: [37, 0.6],
   ht: [48, 1.5],
   bd: [36, 0.9],
   lt: [45, 1.6],
@@ -98,6 +102,7 @@ for (const kit of KITS) {
   const dir = path.join(root, 'public/kits', kit.id);
   fs.mkdirSync(dir, { recursive: true });
   for (const [lane, [defNote, sec]] of Object.entries(LANES)) {
+    if (only && !only.has(lane)) continue;
     const note = kit.notes?.[lane] ?? defNote;
     const s = tidy(render(kit.program, note, kit.vel, sec));
     if (!s) {

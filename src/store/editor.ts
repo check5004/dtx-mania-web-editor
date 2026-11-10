@@ -9,13 +9,14 @@ import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
 import { endMeasureOf, moveEndDecorations, naturalEndMeasure, solidEndMeasure } from '../dtx/end';
-import { CH, DRUM_LANES, drumChannel, emptyDoc, type DtxDoc, type HeaderLine, type ParseWarning } from '../dtx/model';
+import { CH, DRUM_LANES, drumChannel, emptyDoc, laneChannel, laneVoice, SD_RIM, type DtxDoc, type HeaderLine, type ParseWarning } from '../dtx/model';
+import { chipAlt, chipVoice, rimWavs } from '../dtx/rim';
+import { addWav, findWavByFile, rimWavFor } from '../edit/rim';
 import type { ChartOrigin } from '../dtx/origin';
 import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
 import { audibleEnd } from '../audio/dsp';
 import {
   channelInLane,
-  freeWavNumber,
   makeClip,
   mostUsedWav,
   opDelete,
@@ -505,34 +506,35 @@ export function setKitFileProvider(fn: (ch: number) => string | null) {
   kitFileProvider = fn;
 }
 
-function findWavByPath(fields: Record<string, string>, file: string): number | null {
-  let hit: number | null = null;
-  for (const [k, v] of Object.entries(fields)) {
-    if (!/^WAV[0-9A-Z]{2}$/.test(k) || v.toLowerCase() !== file.toLowerCase()) continue;
-    const no = parseInt(k.slice(3), 36);
-    // ベロシティ違い（#VOLUME 付き）より、そのままの音を選ぶ
-    if (hit === null || (fields['VOLUME' + k.slice(3)] === undefined && fields['VOLUME' + toBase36x2(hit)] !== undefined)) hit = no;
-  }
-  return hit;
+/** 置くチップの WAV 番号（チャンネルから。リムを置くときは wavForVoice(d, SD_RIM)） */
+export function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
+  return wavForVoice(d, drumChannel(ch)?.base ?? ch);
 }
 
-/** 置くチップの WAV 番号。レーンで使っている音、無ければ今のキットの音を登録する */
-export function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
-  const info = drumChannel(ch);
-  const base = info ? info.base : ch;
-  const assigned = get().laneWav[base];
-  if (assigned !== undefined && d.fields['WAV' + toBase36x2(assigned)] !== undefined) return assigned;
-  const file = kitFileProvider(base);
+/**
+ * 置くチップの WAV 番号。音の番号（通常チャンネル。スネアのリムは SD_RIM）ごとに、レーンで使っている音、無ければ今のキットの音を登録する。
+ * リムはリムの音にする（ラベルかファイル名でリムと分かる番号。選んだ音がリムと読めなければ、ラベル「Snare Rim」の番号を作る）
+ */
+export function wavForVoice(d: Draft<DtxDoc>, voice: number): number {
+  const rim = voice === SD_RIM;
+  const assigned = get().laneWav[voice];
+  if (assigned !== undefined && d.fields['WAV' + toBase36x2(assigned)] !== undefined) {
+    if (!rim) return assigned;
+    const no = rimWavFor(d, assigned);
+    if (no !== assigned) set((s) => ({ laneWav: { ...s.laneWav, [voice]: no } }));
+    return no;
+  }
+  const file = kitFileProvider(voice);
   if (!file) return assigned ?? 1;
-  // 同じキットの音がもう登録されていれば使う
-  const had = findWavByPath(d.fields, file);
+  // 同じキットの音がもう登録されていれば使う（リムはリムの音、ほかはリムでない音から）
+  const had = findWavByFile(d as DtxDoc, file, rim);
   if (had !== null) {
-    set((s) => ({ laneWav: { ...s.laneWav, [base]: had } }));
+    set((s) => ({ laneWav: { ...s.laneWav, [voice]: had } }));
     return had;
   }
-  const no = freeWavNumber(d as DtxDoc) ?? 1;
-  setField(d, 'WAV' + toBase36x2(no), file);
-  set((s) => ({ laneWav: { ...s.laneWav, [base]: no } }));
+  const no = addWav(d, file, rim);
+  if (no === null) return assigned ?? 1;
+  set((s) => ({ laneWav: { ...s.laneWav, [voice]: no } }));
   return no;
 }
 
@@ -573,9 +575,9 @@ export function placeChips(items: readonly PlaceItem[], opts: { label?: string; 
     label,
     (d) => {
       for (const it of items) {
-        const lane = DRUM_LANES[it.lane];
-        const ch = it.alt && lane.alt !== undefined ? lane.alt : lane.main;
-        const base = wavForChannel(d, ch);
+        // チャンネル（リムはスネアと同じ ch12）と、鳴らす音（リムはリムの音）
+        const ch = laneChannel(it.lane, it.alt);
+        const base = wavForVoice(d, laneVoice(it.lane, it.alt));
         const v = wavVariant(d, base, quantizeVel(it.vel ?? defVel, step));
         if (!firstV) firstV = v;
         ids.push(opPlace(d, ch, it.pos, v));
@@ -592,12 +594,11 @@ export function placeChips(items: readonly PlaceItem[], opts: { label?: string; 
 /** レーンのチップに使う WAV 番号（試し打ち用。譜面は変えない） */
 export function wavForLane(lane: number, alt: boolean): number | null {
   const s = get();
-  const def = DRUM_LANES[lane];
-  const ch = alt && def.alt !== undefined ? def.alt : def.main;
-  const assigned = s.laneWav[ch];
+  const voice = laneVoice(lane, alt);
+  const assigned = s.laneWav[voice];
   if (assigned !== undefined && s.doc.fields['WAV' + toBase36x2(assigned)] !== undefined) return assigned;
-  const file = kitFileProvider(ch);
-  return file ? findWavByPath(s.doc.fields, file) : null;
+  const file = kitFileProvider(voice);
+  return file ? findWavByFile(s.doc, file, voice === SD_RIM) : null;
 }
 
 /** 前の小節のドラムをこの小節に写す（Ctrl+D） */
@@ -665,12 +666,13 @@ function sideForMeasures(before: MeasureMarks, after: MeasureMarks): NonNullable
   };
 }
 
-/** 指定位置・レーンのチップ（通常チップ）を探す */
+/** 指定位置・レーンのチップ（通常チップ）を探す。スネアのレーンは、リムか（alt）も合うものだけ */
 export function chipAt(lane: number, alt: boolean, pos: Pos): number | null {
-  const def = DRUM_LANES[lane];
-  const ch = alt && def.alt !== undefined ? def.alt : def.main;
-  for (const c of get().doc.chips) {
-    if (c.ch === ch && c.m === pos.m && cmp(c.f, pos.f) === 0) return c.id;
+  const doc = get().doc;
+  const ch = laneChannel(lane, alt);
+  const rims = DRUM_LANES[lane].altVoice !== undefined ? rimWavs(doc) : null;
+  for (const c of doc.chips) {
+    if (c.ch === ch && c.m === pos.m && cmp(c.f, pos.f) === 0 && (!rims || rims.has(c.v) === alt)) return c.id;
   }
   return null;
 }
@@ -802,20 +804,31 @@ export function setKind(kind: 'normal' | 'hidden' | 'nochip', ids0: readonly num
 }
 
 /**
- * チップを lane へ移す（同じ時刻のまま）。alt: HHオープン・左バスドラムにするか（keep は今のまま）。
- * レーンや種類が変わったチップは、音もそのレーンの音にする（ベロシティは保つ）。移した先にあったチップは上書き
+ * チップを lane へ移す（同じ時刻のまま）。alt: HHオープン・左バスドラム・スネアのリムにするか（keep は今のまま）。
+ * レーンや種類が変わったチップは、音もそのレーンの音にする（ベロシティは保つ。スネア⇔リムは音だけ替わる）。移した先にあったチップは上書き
  */
 export function relaneChips(ids0: readonly number[], lane: number, alt: AltMode = 'keep'): number {
   const ids = new Set(ids0);
   const def = DRUM_LANES[lane];
   if (!def || ids.size === 0) return 0;
-  const before = new Map(get().doc.chips.filter((c) => ids.has(c.id)).map((c) => [c.id, c.ch]));
-  const hadKit = Object.keys(get().doc.fields).length;
+  const doc0 = get().doc;
+  const rims0 = rimWavs(doc0);
+  const before = new Map(doc0.chips.filter((c) => ids.has(c.id)).map((c) => [c.id, { ch: c.ch, voice: chipVoice(doc0, c, rims0), alt: chipAlt(doc0, c, rims0) }]));
+  const hadKit = Object.keys(doc0.fields).length;
   const name = alt === 'alt' && def.altName ? def.altName : alt === 'main' && def.alt !== undefined ? def.mainName : def.name;
   let n = 0;
   edit(tr(`${ids.size === 1 ? 'チップ' : `${ids.size}個のチップ`}を${name}にする`, `Change ${ids.size === 1 ? 'chip' : `${ids.size} chips`} to ${name}`), (d) => {
-    n = opRelane(d, ids, lane, alt);
-    soundFollowsLane(d, before);
+    opRelane(d, ids, lane, alt);
+    for (const c of d.chips) {
+      const b = before.get(c.id);
+      if (!b) continue;
+      const info = drumChannel(c.ch);
+      if (!info) continue;
+      // 移した先の音（スネアのレーンでは、リムにするか・スネアにするかで音が替わる）
+      const voice = info.lane === lane ? laneVoice(lane, alt === 'keep' ? b.alt : alt === 'alt') : info.base;
+      if (voice !== b.voice) c.v = wavVariant(d, wavForVoice(d, voice), velOfWav(d.fields, c.v));
+      if (voice !== b.voice || c.ch !== b.ch) n++;
+    }
   });
   if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
   return n;

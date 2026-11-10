@@ -2,13 +2,14 @@
 import { tr, pl } from '../i18n';
 import { create } from 'zustand';
 import { parseBase36x2, parseMeasure, toBase36x2 } from '../dtx/base36';
-import { DRUM_LANES, drumChannel, type ChipKind, type DtxDoc } from '../dtx/model';
+import { DRUM_LANES, drumChannel, laneVoice, SD_RIM, type ChipKind, type DtxDoc } from '../dtx/model';
+import { chipAlt, chipVoice, rimWavs, rimWavsOf } from '../dtx/rim';
 import { opSetKind } from '../edit/ops';
 import { opMapLanes, opRelane, opReplaceWav, opSwapLanes, type AltMode } from '../edit/transform';
 import { velOfWav, wavVariant } from '../edit/velocity';
 import { laneAt, slotOf } from '../input/settings';
 import { chipViews, tempoOf } from './derived';
-import { edit, prepareSounds, setCursorBeat, setView, toast, useEditor, wavForChannel } from './editor';
+import { edit, prepareSounds, setCursorBeat, setView, toast, useEditor, wavForVoice } from './editor';
 
 export interface FindQuery {
   /** 探すレーン（空ならすべて） */
@@ -74,8 +75,9 @@ export function findChips(doc: DtxDoc, q: FindQuery): { ids: number[]; error: st
     const info = drumChannel(v.c.ch);
     if (!info) continue;
     if (lanes.size && !lanes.has(info.lane)) continue;
-    if (q.alt === 'main' && info.alt) continue;
-    if (q.alt === 'alt' && !info.alt) continue;
+    // 2種目（HHオープン・左バスドラム・スネアのリム。リムは音で見分けた chipViews の alt）
+    if (q.alt === 'main' && v.alt) continue;
+    if (q.alt === 'alt' && !v.alt) continue;
     if (!kinds.has(info.kind)) continue;
     if (wavSet.size && !wavSet.has(v.c.v)) continue;
     if (from !== null && v.c.m < from) continue;
@@ -149,24 +151,32 @@ function targets(): Set<number> {
 
 const laneName = (l: number) => DRUM_LANES[l]?.name ?? '';
 
-/** 見つかったチップを lane に移す。resound なら音もそのレーンの音にする（ベロシティは保つ） */
+/**
+ * 見つかったチップを lane に移す。resound なら音もそのレーンの音にする（ベロシティは保つ）。
+ * スネアのリム⇔スネアは音で決まるので、resound でなくても音を替える
+ */
 export function relaneResults(lane: number, alt: AltMode, resound: boolean) {
   const ids = targets();
   if (!ids.size) return;
   let n = 0;
+  const doc0 = useEditor.getState().doc;
+  const rims0 = rimWavs(doc0);
+  const wasAlt = new Map(doc0.chips.filter((c) => ids.has(c.id)).map((c) => [c.id, chipAlt(doc0, c, rims0)]));
   edit(tr(`${ids.size}個のチップを${laneName(lane)}へ移す`, `Move ${ids.size} ${pl(ids.size, 'chip')} to ${laneName(lane)}`), (d) => {
     n = opRelane(d, ids, lane, alt);
-    if (resound) {
-      for (const c of d.chips) {
-        if (!ids.has(c.id)) continue;
-        const info = drumChannel(c.ch);
-        if (!info) continue;
-        const vel = velOfWav(d.fields, c.v);
-        c.v = wavVariant(d, wavForChannel(d, info.base), vel);
-      }
+    const rims = rimWavsOf(d);
+    for (const c of d.chips) {
+      if (!ids.has(c.id)) continue;
+      const info = drumChannel(c.ch);
+      if (!info) continue;
+      const voice = laneVoice(info.lane, alt === 'keep' ? (wasAlt.get(c.id) ?? false) : alt === 'alt');
+      const now = chipVoice(d, c, rims);
+      if (!resound && (voice === now || (voice !== SD_RIM && now !== SD_RIM))) continue;
+      const vel = velOfWav(d.fields, c.v);
+      c.v = wavVariant(d, wavForVoice(d, voice), vel);
     }
   });
-  if (resound) void prepareSounds();
+  if (resound || Object.keys(useEditor.getState().doc.fields).length !== Object.keys(doc0.fields).length) void prepareSounds();
   toast(tr(`${n}個のチップを${laneName(lane)}へ移しました`, `Moved ${n} ${pl(n, 'chip')} to ${laneName(lane)}`), 'ok');
 }
 

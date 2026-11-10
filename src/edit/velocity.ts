@@ -4,7 +4,9 @@
 import type { Draft } from 'immer';
 import { parseNxNumber, toBase36x2 } from '../dtx/base36';
 import { CH, drumChannel, type Chip, type DtxDoc, type HeaderLine } from '../dtx/model';
+import { rimWavsOf } from '../dtx/rim';
 import { freeWavNumber, setField } from './ops';
+import { copyWavLabel } from './rim';
 
 export const VEL_MIN = 1;
 export const VEL_MAX = 100;
@@ -38,11 +40,14 @@ function normFile(p: string): string {
   return p.trim().replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
 }
 
-/** 「同じ音」の見分け方：ファイルとパンが同じなら、#VOLUME だけ違っても同じ音のベロシティ違い */
-export function soundKeyOf(fields: Fields, no: number): string | null {
+/**
+ * 「同じ音」の見分け方：ファイルとパンが同じなら、#VOLUME だけ違っても同じ音のベロシティ違い。
+ * ただしリムの音（rims。ラベルで決まる）とそうでない音は、同じファイルでも別の音（ベロシティを変えてもリムがスネアにならない）
+ */
+export function soundKeyOf(fields: Fields, no: number, rims?: ReadonlySet<number>): string | null {
   const path = fields['WAV' + toBase36x2(no)];
   if (path === undefined) return null;
-  return `${normFile(path)}|${Math.round(wavPanOf(fields, no))}`;
+  return `${normFile(path)}|${Math.round(wavPanOf(fields, no))}${rims?.has(no) ? '|rim' : ''}`;
 }
 
 export function clampVel(v: number): number {
@@ -74,13 +79,13 @@ function wavNumbers(fields: Fields): number[] {
   return out.sort((a, b) => a - b);
 }
 
-/** 同じ音のベロシティ違い（ベロシティ → WAV 番号）。同じベロシティが複数あれば小さい番号 */
-export function variantsOf(fields: Fields, no: number): Map<number, number> {
-  const key = soundKeyOf(fields, no);
+/** 同じ音のベロシティ違い（ベロシティ → WAV 番号）。同じベロシティが複数あれば小さい番号。rims はリムの音の番号 */
+export function variantsOf(fields: Fields, no: number, rims?: ReadonlySet<number>): Map<number, number> {
+  const key = soundKeyOf(fields, no, rims);
   const out = new Map<number, number>();
   if (key === null) return out;
   for (const n of wavNumbers(fields)) {
-    if (soundKeyOf(fields, n) !== key) continue;
+    if (soundKeyOf(fields, n, rims) !== key) continue;
     const v = velOfWav(fields, n);
     if (!out.has(v)) out.set(v, n);
   }
@@ -88,7 +93,7 @@ export function variantsOf(fields: Fields, no: number): Map<number, number> {
 }
 
 /**
- * 同じ音でベロシティ vel の WAV 番号を返す。無ければ新しい番号を登録する（#WAV と #VOLUME、パンもそろえる）。
+ * 同じ音でベロシティ vel の WAV 番号を返す。無ければ新しい番号を登録する（#WAV と #VOLUME、パンとラベルもそろえる）。
  * 番号が足りないときは元の番号のまま。
  */
 export function wavVariant(d: Draft<DtxDoc>, base: number, vel: number): number {
@@ -98,7 +103,7 @@ export function wavVariant(d: Draft<DtxDoc>, base: number, vel: number): number 
   if (path === undefined) return base;
   const want = clampVel(vel);
   if (velOfWav(fields, base) === want) return base;
-  const hit = variantsOf(fields, base).get(want);
+  const hit = variantsOf(fields, base, rimWavsOf(d as DtxDoc)).get(want);
   if (hit !== undefined) return hit;
   const no = freeWavNumber(d as DtxDoc);
   if (no === null) return base;
@@ -107,6 +112,8 @@ export function wavVariant(d: Draft<DtxDoc>, base: number, vel: number): number 
   if (want !== 100) setField(d, 'VOLUME' + nz, String(want));
   const pan = Math.round(wavPanOf(fields, base));
   if (pan !== 0) setField(d, 'PAN' + nz, String(pan));
+  // ラベルも写す（リムの音はラベルで決まることがあるので、落とすとベロシティを変えたリムがスネアになる）
+  copyWavLabel(d, base, no);
   return no;
 }
 
@@ -134,14 +141,15 @@ export function usedWavs(d: Pick<DtxDoc, 'chips' | 'header'>): Set<number> {
 export function pruneVariants(d: Draft<DtxDoc>): number {
   const fields = d.fields as Fields;
   const used = usedWavs(d as DtxDoc);
+  const rims = rimWavsOf(d as DtxDoc);
   const created = new Set<string>();
   for (const h of d.header as HeaderLine[]) if (h.kind === 'field' && !h.orig && /^WAV[0-9A-Z]{2}$/.test(h.key)) created.add(h.key);
   let n = 0;
   for (const no of wavNumbers(fields)) {
     const z = toBase36x2(no);
     if (used.has(no) || !created.has('WAV' + z)) continue;
-    const key = soundKeyOf(fields, no);
-    const others = wavNumbers(fields).some((o) => o !== no && soundKeyOf(fields, o) === key);
+    const key = soundKeyOf(fields, no, rims);
+    const others = wavNumbers(fields).some((o) => o !== no && soundKeyOf(fields, o, rims) === key);
     if (!others) continue;
     for (const k of ['WAV', 'VOLUME', 'WAVVOL', 'PAN', 'WAVPAN']) if (fields[k + z] !== undefined) setField(d, k + z, undefined);
     n++;
@@ -200,10 +208,10 @@ export interface SoundGroup {
   variants: { no: number; vel: number }[];
 }
 
-export function soundGroups(fields: Fields): SoundGroup[] {
+export function soundGroups(fields: Fields, rims?: ReadonlySet<number>): SoundGroup[] {
   const map = new Map<string, SoundGroup>();
   for (const no of wavNumbers(fields)) {
-    const key = soundKeyOf(fields, no)!;
+    const key = soundKeyOf(fields, no, rims)!;
     let g = map.get(key);
     if (!g) map.set(key, (g = { key, path: fields['WAV' + toBase36x2(no)], variants: [] }));
     g.variants.push({ no, vel: velOfWav(fields, no) });

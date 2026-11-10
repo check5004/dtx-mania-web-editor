@@ -5,7 +5,8 @@ import { create } from 'zustand';
 import { scanCharts } from './guideline';
 import { BUILTIN_KITS, KIT_LANES, decodeBytes, loadBuiltin, registerVirtual, unregisterVirtual, builtinFile } from '../audio/sounds';
 import { decodeDtx } from '../dtx/encoding';
-import { drumChannel } from '../dtx/model';
+import { SD_RIM } from '../dtx/model';
+import { chipVoice, rimWavs } from '../dtx/rim';
 import { parseDtx } from '../dtx/parse';
 import { downloadBytes, folderFromFileList, folderFromHandle, normPath, type FolderFile, type SongFolder } from '../fs/folder';
 import { folderOf, readZip } from '../fs/zip';
@@ -426,20 +427,32 @@ export async function importFolder(folder: SongFolder, refFolderId?: string) {
         title ||= doc.fields['TITLE'] ?? '';
         artist ||= doc.fields['ARTIST'] ?? '';
         const pathWav = doc.fields['PATH_WAV'] ?? '';
-        for (const c of doc.chips) {
-          const d = drumChannel(c.ch);
-          if (!d) continue;
-          const p = doc.fields['WAV' + c.v.toString(36).toUpperCase().padStart(2, '0')];
-          if (!p) continue;
+        const keyOf = (p: string) => {
           const rel = normPath([g.dir, pathWav, p].filter(Boolean).join('/'));
           const fallback = normPath([g.dir, p].filter(Boolean).join('/'));
-          const key = folder.files.has(rel) ? rel : fallback;
+          return folder.files.has(rel) ? rel : fallback;
+        };
+        const count = (key: string, voice: number, n: number) => {
           let u = usage.get(key);
           if (!u) usage.set(key, (u = new Map()));
-          u.set(d.base, (u.get(d.base) ?? 0) + 1);
-          let lu = laneUse.get(d.base);
-          if (!lu) laneUse.set(d.base, (lu = new Map()));
-          lu.set(key, (lu.get(key) ?? 0) + 1);
+          u.set(voice, (u.get(voice) ?? 0) + n);
+          let lu = laneUse.get(voice);
+          if (!lu) laneUse.set(voice, (lu = new Map()));
+          lu.set(key, (lu.get(key) ?? 0) + n);
+        };
+        // 音の番号ごとに数える（スネアのリムはスネアと別。キットのリムの音になる）
+        const rims = rimWavs(doc);
+        for (const c of doc.chips) {
+          const voice = chipVoice(doc, c, rims);
+          if (voice === null) continue;
+          const p = doc.fields['WAV' + c.v.toString(36).toUpperCase().padStart(2, '0')];
+          if (!p) continue;
+          count(keyOf(p), voice, 1);
+        }
+        // 譜面で使っていなくても、リムの音（#WAV のラベル「Snare Rim」など）は取り込む（テンプレートに入っていることが多い）
+        for (const no of rims) {
+          const p = doc.fields['WAV' + no.toString(36).toUpperCase().padStart(2, '0')];
+          if (p && !laneUse.get(SD_RIM)?.has(keyOf(p))) count(keyOf(p), SD_RIM, 0.5);
         }
       } catch {
         // 読めない DTX は飛ばす
