@@ -37,6 +37,7 @@ import {
   type ExportOptions,
   type ExportRange,
 } from '../store/stems';
+import { useSongBgm } from '../store/songBgm';
 import { confirmDialog } from './dialogs';
 import { formatPosition, formatTime } from './format';
 import { useCanvas, usePlayBeat, useSongSpan } from './hooks';
@@ -734,6 +735,8 @@ function ChartAudioCard() {
   const doc = useEditor((s) => s.doc);
   const busy = useStems((s) => s.busy);
   useStems((s) => s.reflected);
+  // ほかの難易度に入れ終わったら描き直す
+  useSongBgm((s) => s.version);
   const bgm = bgmSource(doc);
   const rows: { key: 'bgm' | 'preview'; label: string; sub: string; file: string | null; tag?: string }[] = [
     { key: 'bgm', label: 'BGM', sub: tr('ゲームで鳴る', 'Plays in the game'), file: bgm ? (doc.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null, tag: bgm ? `#WAV${toBase36x2(bgm.wav)}` : undefined },
@@ -789,6 +792,9 @@ function ChartAudioCard() {
                       ? tr(`前は ${done.prev}（ファイルは残っています）`, `Was ${done.prev} (the file is kept)`)
                       : tr('前は なし', 'Was none')}
                 </span>
+              )}
+              {done && !!done.siblings?.labels.length && (
+                <span className="lbl chart-audio-prev">{tr(`ほかの難易度（${done.siblings.labels.join('・')}）にも反映`, `Also in the other difficulties (${done.siblings.labels.join(', ')})`)}</span>
               )}
             </div>
           </div>

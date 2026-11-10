@@ -11,6 +11,7 @@ import { openPage, openTempo, useEditor } from '../store/editor';
 import { readyStems, useStems } from '../store/stems';
 import { useSidecar } from '../store/sidecar';
 import { openSeparation, separating, useSeparate } from '../store/separate';
+import { alignBgm, useBgmSplit, type BgmGroup } from '../store/songBgm';
 import { formatTime } from './format';
 import { useSoundsVersion } from './hooks';
 import { Icon } from './icons';
@@ -36,6 +37,8 @@ export function SourceCard() {
   const stems = readyStems();
   const lost = !!bgm && !has && missing.includes(bgm.wav);
   const len = duration || (bgm ? engine.duration(bgm.wav) : 0);
+  // 難易度によって原曲のファイルが違う（開いている難易度だけで差し替えた古いデータなど）
+  const split = useBgmSplit();
 
   const drop = {
     onDragOver: (e: React.DragEvent) => {
@@ -146,6 +149,41 @@ export function SourceCard() {
           </p>
         </>
       )}
+      {split && <BgmSplitNotice groups={split} />}
+    </div>
+  );
+}
+
+/** 難易度によって原曲が違うことと、そろえるボタン */
+function BgmSplitNotice({ groups }: { groups: BgmGroup[] }) {
+  const sep = tr('・', ', ');
+  const others = groups.filter((g) => !g.current);
+  return (
+    <div className="notice bgm-split" style={{ marginTop: 8 }}>
+      <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>
+      <div style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>
+        <b>{tr('難易度によって原曲が違います', 'The original differs between difficulties')}</b>
+        <ul className="bgm-split-list">
+          {others.map((g) => (
+            <li key={g.key ?? ''}>
+              <span>{g.labels.join(sep)}</span>
+              {g.key === null ? (
+                <span className="lbl">{tr('原曲なし', 'no original')}</span>
+              ) : (
+                <span className="mono ellipsis" title={g.target?.path}>
+                  {g.name}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn small" onClick={() => void alignBgm()} title={tr('どの原曲にそろえるかを選び、すべての難易度の BGM を同じファイルにします（Ctrl+Z で戻せます）', 'Choose one original and make it the BGM of every difficulty (undo with Ctrl+Z)')}>
+            {tr('そろえる…', 'Align…')}
+          </button>
+          <span className="lbl">{tr('NX でも難易度で BGM が変わり、切り替えるたびに原曲を読み直します', 'NX plays a different BGM per difficulty too, and switching reloads the original')}</span>
+        </div>
+      </div>
     </div>
   );
 }

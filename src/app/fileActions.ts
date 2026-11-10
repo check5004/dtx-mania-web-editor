@@ -48,10 +48,12 @@ import {
   type LocalSong,
 } from '../fs/local';
 import { songDir, writeSongFile } from '../fs/opfs';
-import { deleteRecent, getRecent, listRecent, listRecentSongs, putRecent, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
+import { deleteRecent, draftFor, listRecent, listRecentSongs, putRecent, recentIdFor, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
 import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
 import { useDevice } from '../store/device';
-import { createDoc, edit, isDirty, openDocument, prepareSounds, switchDocument, toast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
+import { createDoc, isDirty, openDocument, prepareSounds, switchDocument, toast, undoIfLast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
+import { glowReflected } from '../store/glow';
+import { editBgm, setAfterSiblingWrite, siblingNote, siblingWrites } from '../store/songBgm';
 import { hasUnsaved } from '../store/unsaved';
 import { bgmSource } from '../store/derived';
 import { freeWavNumber, setField } from '../edit/ops';
@@ -193,10 +195,7 @@ async function openDtxFile(
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
 }
 
-export function recentIdFor(folder: SongFolder | null, fileName: string) {
-  if (folder?.local) return `local:${folder.local}/${fileName}`.toLowerCase();
-  return `${folder?.name ?? 'new'}/${fileName}`.toLowerCase();
-}
+export { recentIdFor };
 
 // ---- 本体（このブラウザの保存領域）に曲を置く ----------------------------------------------
 
@@ -540,6 +539,8 @@ export async function switchDifficulty(fileName: string) {
     return;
   }
   if (!(await confirmDiscard())) return;
+  // 原曲を替えたときに書き換えているほかの難易度は、書き終わってから読む
+  await siblingWrites();
   const f = findFile(folder, fileName);
   if (!f) return;
   const seq = ++switchSeq;
@@ -659,7 +660,8 @@ export async function importBgmFile(file: File) {
     path = same.path;
   }
   const bgm = bgmSource(get().doc);
-  edit(bgm ? tr('原曲を差し替える', 'Replace the original') : tr('原曲を読み込む', 'Load the original'), (d) => {
+  // 同じ原曲を使っていたほかの難易度も、この原曲にする（難易度で原曲が分かれないように。src/store/songBgm.ts）
+  const { ok, entry, siblings } = editBgm(bgm ? tr('原曲を差し替える', 'Replace the original') : tr('原曲を読み込む', 'Load the original'), (d) => {
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), path);
       return;
@@ -670,12 +672,15 @@ export async function importBgmFile(file: File) {
     d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: no });
   });
   await prepareSounds();
+  const rep = siblings ? await siblings.done : null;
+  if (rep?.files.length) glowReflected({ diffs: rep.files });
   toast(
-    isJa()
+    (isJa()
       ? `原曲「${path}」を${bgm ? '差し替えました' : '読み込みました（001小節の頭から鳴らします。ずれていたら「テンポ合わせ」で合わせられます）'}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`
-      : `${bgm ? 'Replaced' : 'Loaded'} the original "${path}"${bgm ? '' : ' (it plays from the start of measure 001; if it is off, line it up in "Tempo")'}${memory ? '. It is written to the song folder when you save' : ''}`,
+      : `${bgm ? 'Replaced' : 'Loaded'} the original "${path}"${bgm ? '' : ' (it plays from the start of measure 001; if it is off, line it up in "Tempo")'}${memory ? '. It is written to the song folder when you save' : ''}`) + siblingNote(rep),
     'ok',
-    7000,
+    rep?.changed.length || rep?.kept.length ? 10000 : 7000,
+    ok ? { label: tr('元に戻す', 'Undo'), run: () => void undoIfLast(entry) } : undefined,
   );
 }
 
@@ -1110,6 +1115,8 @@ export async function autosaveNow(saved = false) {
 }
 
 export function startAutosave() {
+  // ほかの難易度の譜面を書き換えたら（原曲をそろえた）、開いている難易度の控えを「最近の曲」でいちばん新しくしておく
+  setAfterSiblingWrite(() => void autosaveNow(true));
   const later = () => {
     window.clearTimeout(autosaveTimer);
     autosaveTimer = window.setTimeout(() => void autosaveNow(true), 1500);
@@ -1135,6 +1142,7 @@ export function startAutosave() {
     a();
     b();
     c();
+    setAfterSiblingWrite(null);
   };
 }
 
@@ -1144,20 +1152,6 @@ export async function openRecent(e: RecentEntry) {
   if (!(await confirmDiscard())) return;
   await openRecentEntry(e);
   await tellOtherDrafts();
-}
-
-/**
- * 難易度の保存していない続き（自動保存の控え）。譜面のファイルのほうが新しい（AI難易度生成で反映し直した・ほかで書き換えた）
- * ときは、古い続きなので使わない
- */
-async function draftFor(folder: SongFolder, file: FolderFile): Promise<RecentEntry | undefined> {
-  const e = await getRecent(recentIdFor(folder, file.name));
-  if (!e || e.saved) return undefined;
-  try {
-    return e.updatedAt >= (await file.getFile()).lastModified ? e : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**

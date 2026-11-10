@@ -397,23 +397,23 @@ export function jumpHistory(n: number) {
   let doc = s.doc;
   const past = [...s.past];
   const future = [...s.future];
-  const labels: string[] = [];
+  const moved: HistoryEntry[] = [];
   while (past.length > n) {
     const h = past.pop()!;
     doc = applyPatches(doc, h.undo);
     h.side?.undo();
     future.push(h);
-    labels.push(h.label);
+    moved.push(h);
   }
   while (past.length < n && future.length) {
     const h = future.pop()!;
     doc = applyPatches(doc, h.redo);
     h.side?.redo();
     past.push(h);
-    labels.push(h.label);
+    moved.push(h);
   }
   set({ doc, past, future, selection: keepSelection(doc, s.selection) });
-  if (labels.some((l) => /WAV|キット|音/.test(l))) void prepareSounds();
+  if (moved.some(changesSounds)) void prepareSounds();
 }
 
 function keepSelection(doc: DtxDoc, sel: number[]): number[] {
@@ -429,7 +429,7 @@ export function undo() {
   const doc = applyPatches(s.doc, h.undo);
   h.side?.undo();
   set({ doc, past: s.past.slice(0, -1), future: [...s.future, h], selection: keepSelection(doc, s.selection) });
-  afterSoundChange(h.label);
+  if (changesSounds(h)) void prepareSounds();
 }
 
 /** いま積んだ履歴（反映など）。知らせの「元に戻す」で、その変更だけを戻すのに使う */
@@ -454,11 +454,24 @@ export function redo() {
   const doc = applyPatches(s.doc, h.redo);
   h.side?.redo();
   set({ doc, future: s.future.slice(0, -1), past: [...s.past, h], selection: keepSelection(doc, s.selection) });
-  afterSoundChange(h.label);
+  if (changesSounds(h)) void prepareSounds();
 }
 
-function afterSoundChange(label: string) {
-  if (/WAV|キット|音/.test(label)) void prepareSounds();
+/** 音の定義（#WAV・音量・パン・PATH_WAV）を変える履歴か。戻す・やり直すと、鳴らす音を読み直す（原曲の差し替えなど） */
+const SOUND_FIELD = /^((WAV|VOLUME|WAVVOL|PAN|WAVPAN)[0-9A-Z]{2}|PATH_WAV)$/;
+function changesSounds(h: HistoryEntry): boolean {
+  if (/WAV|キット|音/.test(h.label)) return true;
+  return [...h.undo, ...h.redo].some((p) => p.path[0] === 'fields' && (p.path.length === 1 || SOUND_FIELD.test(String(p.path[1]))));
+}
+
+/**
+ * 譜面の外だけを変える操作（ほかの難易度の譜面ファイルなど）を履歴に積む。開いている譜面は変えないが、
+ * Ctrl+Z・やり直す・知らせの「元に戻す」で一緒に戻せるようにする
+ */
+export function recordSide(label: string, side: NonNullable<HistoryEntry['side']>): HistoryEntry {
+  const h: HistoryEntry = { label, redo: [], undo: [], side, at: Date.now() };
+  set((s) => ({ past: [...s.past, h], future: [] }));
+  return h;
 }
 
 // ---- チップの配置 ---------------------------------------------------------------

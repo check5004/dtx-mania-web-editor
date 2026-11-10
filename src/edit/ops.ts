@@ -203,7 +203,8 @@ export const INFO_KEYS = [
 
 const GROUP_RE = /^(WAV|VOLUME|WAVVOL|PAN|WAVPAN|BPM|BMP|BMPTEX|AVI|SIZE)[0-9A-Z]{2}$/;
 
-function insertIndexFor(header: readonly HeaderLine[], key: string): number {
+/** 新しい定義の行を入れる所（header の位置）。dtx/patchText もテキストの行に同じ所を選ぶ */
+export function insertIndexFor(header: readonly HeaderLine[], key: string): number {
   const g = GROUP_RE.exec(key);
   let last = -1;
   if (g) {

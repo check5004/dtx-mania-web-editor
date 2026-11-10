@@ -26,6 +26,7 @@ import {
 import { useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
 import { audioReflected, fileExists, undoAudioReflect, useStems } from '../store/stems';
+import { useSongBgm } from '../store/songBgm';
 import { IS_IOS } from '../store/device';
 import { confirmDialog } from './dialogs';
 import { Icon } from './icons';
@@ -40,6 +41,8 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
   const stems = useSidecar((x) => x.stems);
   const busy = useStems((x) => x.busy);
   useStems((x) => x.reflected);
+  // ほかの難易度に入れ終わったら描き直す
+  useSongBgm((x) => x.version);
   const doc = useEditor((x) => x.doc);
   useEditor((x) => x.folder);
   // ドラム抜きを BGM に反映して、今もエディタの BGM になっているか（元に戻す・Ctrl+Z で外れる）
@@ -331,6 +334,8 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
                     : bgmIn.prev
                       ? tr(`元の ${bgmIn.prev} は消さずに残しています`, `The original ${bgmIn.prev} is kept`)
                       : tr('BGM のチップ（ch01）を001小節に置きました', 'Placed the BGM chip (ch01) in measure 001')}
+                  {!!bgmIn.siblings?.labels.length &&
+                    tr(`。ほかの難易度（${bgmIn.siblings.labels.join('・')}）にも反映しました`, `. Also set for the other difficulties (${bgmIn.siblings.labels.join(', ')})`)}
                 </span>
                 <span className="grow" />
                 {bgmIn.prev !== bgmIn.file && (

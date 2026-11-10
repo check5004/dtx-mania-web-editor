@@ -2,6 +2,7 @@
 // 本体（このブラウザの保存領域）に置いた曲は local に曲の id を持ち、開き直すと音ごと戻る。
 // 控えは難易度（DTX）ごとに持つ（保存していない続きを難易度ごとに残すため）が、一覧には曲ごとに1つだけ出す（groupRecent）。
 import { idb } from './db';
+import type { FolderFile, SongFolder } from './folder';
 
 export interface RecentEntry {
   id: string;
@@ -119,4 +120,24 @@ export function staleRecent(all: readonly RecentEntry[], max = MAX_RECENT): Rece
  */
 export async function trimRecent() {
   for (const e of staleRecent(await listRecent())) await deleteRecent(e.id);
+}
+
+/** 曲フォルダの譜面の控えの鍵（本体の曲は曲の id、曲フォルダの曲はフォルダの名前とファイル名。大文字・小文字は見ない） */
+export function recentIdFor(folder: Pick<SongFolder, 'name' | 'local'> | null, fileName: string) {
+  if (folder?.local) return `local:${folder.local}/${fileName}`.toLowerCase();
+  return `${folder?.name ?? 'new'}/${fileName}`.toLowerCase();
+}
+
+/**
+ * 難易度の保存していない続き（自動保存の控え）。譜面のファイルのほうが新しい（AI難易度生成で反映し直した・ほかで書き換えた）
+ * ときは、古い続きなので使わない
+ */
+export async function draftFor(folder: SongFolder, file: FolderFile): Promise<RecentEntry | undefined> {
+  const e = await getRecent(recentIdFor(folder, file.name));
+  if (!e || e.saved) return undefined;
+  try {
+    return e.updatedAt >= (await file.getFile()).lastModified ? e : undefined;
+  } catch {
+    return undefined;
+  }
 }

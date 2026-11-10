@@ -22,7 +22,7 @@ export function headerLineText(line: HeaderLine, fields: Record<string, string>)
   return `#${line.name}${sep}${value}${line.comment !== null ? ` ;${line.comment}` : ''}`;
 }
 
-interface LineBucket {
+export interface LineBucket {
   den: number;
   chips: Chip[];
 }
@@ -47,7 +47,7 @@ export function packChipLines(chips: Chip[]): LineBucket[] {
   return lines;
 }
 
-function lineData(ch: number, bucket: LineBucket): string {
+export function lineData(ch: number, bucket: LineBucket): string {
   const slots: string[] = new Array(bucket.den).fill('00');
   for (const c of bucket.chips) {
     const idx = (c.f.n * bucket.den) / c.f.d;

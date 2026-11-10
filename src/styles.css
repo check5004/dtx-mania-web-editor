@@ -6200,6 +6200,25 @@ button.gen-plan {
   background: #10202b;
 }
 
+/* 難易度によって原曲が違うときの知らせ（原曲のカード） */
+.bgm-split-list {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 0;
+}
+
+.bgm-split-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.bgm-split-list li > span:first-child {
+  flex: none;
+  font-weight: 600;
+}
+
 /* 操作バーが狭いときは、見れば分かる見出し（速度・グリッド・入力）を隠す（説明はマウスを乗せると出る） */
 @media (max-width: 1560px) {
   .transport .tlabel {

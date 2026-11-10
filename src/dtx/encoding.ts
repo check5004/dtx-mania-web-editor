@@ -102,6 +102,18 @@ function getSjisTable(): Map<string, number> {
 }
 
 export function encodeDtx(text: string, encoding: DtxEncoding = 'shift_jis'): EncodedText {
+  if (encoding === 'utf-16le' || encoding === 'utf-16be') {
+    // BOM 付き（読み込むときも BOM で見分ける）。ほかの難易度の譜面を、開いたときの文字コードのまま書き直すときに使う
+    const le = encoding === 'utf-16le';
+    const out = new Uint8Array(2 + text.length * 2);
+    out.set(le ? [0xff, 0xfe] : [0xfe, 0xff]);
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      out[2 + i * 2] = le ? c & 0xff : c >> 8;
+      out[3 + i * 2] = le ? c >> 8 : c & 0xff;
+    }
+    return { bytes: out, lost: [] };
+  }
   if (encoding !== 'shift_jis') {
     const body = new TextEncoder().encode(text);
     if (encoding === 'utf-8') return { bytes: body, lost: [] };

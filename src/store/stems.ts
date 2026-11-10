@@ -14,6 +14,7 @@ import { bgmSource, setPlaybackTransform, tempoOf, wavPath } from './derived';
 import { edit, openedDocs, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
 import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
 import { glowReflected } from './glow';
+import { editBgm, editBgmBack, siblingNote, type SiblingChange } from './songBgm';
 
 interface Loaded {
   key: string;
@@ -36,6 +37,8 @@ export interface AudioReflect {
   wav?: number;
   /** BGM のチップが無かったので置いたチップ（元に戻すときに消す） */
   chipId?: number;
+  /** 同じ原曲だったほかの難易度にも入れた変更（元に戻すと一緒に戻す） */
+  siblings?: SiblingChange | null;
 }
 
 export interface StemsState {
@@ -764,13 +767,17 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
     sset({ busy: null });
   }
   const reflect = o.mode !== 'each' ? o.register : 'none';
+  const recBefore = sget().reflected.bgm;
   const prev = reflect !== 'none' ? registerExport(written[0], reflect, doc0) : undefined;
   if (reflect === 'none') void prepareSounds();
   const later = memory ? tr('。曲フォルダへは保存するときに書き出します', '. It is written to the song folder when you save') : '';
   const was = prev && prev !== written[0] ? (reflect === 'bgm' ? tr(`（前は ${prev}。元のファイルは残しています）`, ` (was ${prev}; the old file is kept)`) : tr(`（前は ${prev}）`, ` (was ${prev})`)) : '';
+  // ほかの難易度にも入れたら、それも伝える（書き終わるのを待つ。同じファイルに書き出し直しただけなら、もう入っている）
+  const rec = sget().reflected.bgm;
+  const sib = reflect === 'bgm' && rec && rec !== recBefore ? await rec.siblings?.done : null;
   toast(
     reflect === 'bgm'
-      ? tr(`${written[0]} を書き出して、エディタの BGM に反映しました${was}${later}`, `Exported ${written[0]} and set it as the BGM in the editor${was}${later}`)
+      ? tr(`${written[0]} を書き出して、エディタの BGM に反映しました${was}${later}`, `Exported ${written[0]} and set it as the BGM in the editor${was}${later}`) + siblingNote(sib)
       : reflect === 'preview'
         ? tr(`${written[0]} を書き出して、選曲画面の試聴（#PREVIEW）に反映しました${was}${later}`, `Exported ${written[0]} and set it as the song select preview (#PREVIEW)${was}${later}`)
         : tr(`${written.join('、')} を書き出しました（エディタには反映していません）${later}`, `Exported ${written.join(', ')} (not added to the editor)${later}`),
@@ -795,7 +802,8 @@ export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useE
   const cur = bgm ? (doc0.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null;
   let wav = bgm?.wav ?? 1;
   let chipId: number | undefined;
-  edit(tr('書き出した音を BGM に反映', 'Set the exported audio as the BGM'), (d) => {
+  // 同じ原曲を使っていたほかの難易度も、この音にする（難易度で BGM が分かれないように。src/store/songBgm.ts）
+  const { siblings } = editBgm(tr('書き出した音を BGM に反映', 'Set the exported audio as the BGM'), (d) => {
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), file);
       return;
@@ -806,7 +814,7 @@ export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useE
     d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: wav });
   });
   const again = before && before.file === file && cur === file;
-  const r: AudioReflect = again ? before : { file, prev: cur, wav, chipId };
+  const r: AudioReflect = again ? before : { file, prev: cur, wav, chipId, siblings };
   sset((st) => ({ reflected: { ...st.reflected, bgm: r } }));
   void prepareSounds();
   // エディタに戻ったら、差し替えた原曲（BGM）の行を光らせる
@@ -830,13 +838,18 @@ export function undoAudioReflect(how: 'bgm' | 'preview') {
   if (how === 'preview') {
     edit(tr('試聴（#PREVIEW）を元に戻す', 'Revert the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', r.prev ?? undefined));
   } else {
-    edit(tr('BGM を元に戻す', 'Revert the BGM'), (d) => {
-      if (r.chipId !== undefined) {
-        const i = d.chips.findIndex((c) => c.id === r.chipId);
-        if (i >= 0) d.chips.splice(i, 1);
-      }
-      setField(d, 'WAV' + toBase36x2(r.wav ?? 1), r.chipId !== undefined ? undefined : (r.prev ?? undefined));
-    });
+    // ほかの難易度に入れた分も一緒に戻す
+    editBgmBack(
+      tr('BGM を元に戻す', 'Revert the BGM'),
+      (d) => {
+        if (r.chipId !== undefined) {
+          const i = d.chips.findIndex((c) => c.id === r.chipId);
+          if (i >= 0) d.chips.splice(i, 1);
+        }
+        setField(d, 'WAV' + toBase36x2(r.wav ?? 1), r.chipId !== undefined ? undefined : (r.prev ?? undefined));
+      },
+      r.siblings,
+    );
     void prepareSounds();
   }
   sset((st) => ({ reflected: { ...st.reflected, [how]: null } }));
