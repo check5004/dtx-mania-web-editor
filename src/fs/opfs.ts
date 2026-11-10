@@ -141,6 +141,22 @@ export function writeSongFile(id: string, rel: string, data: Blob | Uint8Array):
   });
 }
 
+/** 本体の曲のファイルを1つ消す（ファイルの名前を変えたあとの、前の名前。無ければ何もしない） */
+export function removeSongFile(id: string, rel: string): Promise<void> {
+  return serial(async () => {
+    const segs = pathSegs(rel);
+    const name = segs.pop();
+    if (!name) return;
+    let dir = await songDir(id);
+    for (const p of segs) dir = await dir.getDirectoryHandle(p);
+    try {
+      await dir.removeEntry(name);
+    } catch (e) {
+      if ((e as Error)?.name !== 'NotFoundError') throw e;
+    }
+  });
+}
+
 /** 本体の曲のフォルダを中身ごと消す（無ければ何もしない） */
 export function removeSongDir(id: string): Promise<void> {
   return serial(async () => {

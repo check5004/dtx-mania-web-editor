@@ -133,24 +133,46 @@ export function redoBgmIn(d: Draft<DtxDoc> | DtxDoc, u: BgmUndo, path: string, a
 
 // ---- ほかの難易度 -----------------------------------------------------------------
 
+/** 原曲と一緒に替えた試聴（#PREVIEW）：開いている譜面の前の値 → 新しい値 */
+export interface PreviewMove {
+  pre: string | undefined;
+  post: string | undefined;
+}
+
+const pv = (v: string | undefined) => (v ?? '').trim();
+
+/** 試聴を pre から post にする（今が pre のときだけ）。変えたら true */
+function movePreview(d: DtxDoc, from: string | undefined, to: string | undefined): boolean {
+  if (pv(d.fields['PREVIEW']) !== pv(from) || pv(from) === pv(to)) return false;
+  setField(d as Draft<DtxDoc>, 'PREVIEW', to);
+  return true;
+}
+
 /**
  * ほかの難易度の原曲を to にする（書き換えの仕組みは store/siblings）。match は、その難易度の今の原曲
- * （鍵。原曲が無ければ null）を書き換えるか
+ * （鍵。原曲が無ければ null）を書き換えるか。preview があれば、原曲を書き換えた難易度の試聴（#PREVIEW）も、
+ * 開いている譜面と同じだったら同じに替える（試聴は原曲についてくる。src/store/fullMix.ts）
  */
-function startBgmChange(folder: SongFolder, current: string, to: BgmTarget, match: (key: string | null) => boolean): SiblingChange {
-  return startSiblingChange<{ u: BgmUndo; path: string }>(folder, current, {
+function startBgmChange(folder: SongFolder, current: string, to: BgmTarget, match: (key: string | null) => boolean, preview?: PreviewMove): SiblingChange {
+  return startSiblingChange<{ u: BgmUndo | null; path: string; preview: boolean }>(folder, current, {
     apply: (d) => {
       const b = firstBgm(d);
       if (!match(b ? bgmKey(folder, d, b.path) : null)) return 'kept';
       const path = pathFor(to, d);
       if (path === null) return 'failed';
       const u = setBgmIn(d, path, to);
-      return u ? { undo: { u, path } } : 'same';
+      const moved = !!preview && movePreview(d, preview.pre, preview.post);
+      return u || moved ? { undo: { u, path, preview: moved } } : 'same';
     },
-    revert: (d, x) => restoreBgmIn(d, x.u, x.path),
+    revert: (d, x) => {
+      const a = !!x.u && restoreBgmIn(d, x.u, x.path);
+      const b = x.preview && !!preview && movePreview(d, preview.post, preview.pre);
+      return a || b;
+    },
     reapply: (d, x) => {
-      const u = redoBgmIn(d, x.u, x.path, to);
-      return u ? { u, path: x.path } : null;
+      const u = x.u ? redoBgmIn(d, x.u, x.path, to) : null;
+      const moved = x.preview && !!preview && movePreview(d, preview.pre, preview.post);
+      return u || moved ? { u, path: x.path, preview: moved } : null;
     },
   });
 }
@@ -182,6 +204,7 @@ export function editBgm(label: string, recipe: (d: Draft<DtxDoc>) => void, scope
   const folder = s.folder;
   const before = firstBgm(s.doc);
   const fromKey = before ? bgmKey(folder, s.doc, before.path) : null;
+  const previewBefore = s.doc.fields['PREVIEW'];
   let change: SiblingChange | null = null;
   const side = folder ? { undo: () => void change?.revert(), redo: () => void change?.reapply() } : undefined;
   const ok = edit(label, recipe, side ? { side } : {});
@@ -192,7 +215,9 @@ export function editBgm(label: string, recipe: (d: Draft<DtxDoc>) => void, scope
   if (!folder || !after) return { ok, entry, siblings: null };
   const toKey = bgmKey(folder, doc, after.path);
   if (scope === 'same' && toKey === fromKey) return { ok, entry, siblings: null };
-  change = startBgmChange(folder, s.meta.fileName, targetOf(folder, doc, after), scope === 'same' ? (k) => k === fromKey : (k) => k !== toKey);
+  // 一緒に替えた試聴（#PREVIEW）も、原曲を替える難易度で同じだったら替える
+  const preview = pv(previewBefore) !== pv(doc.fields['PREVIEW']) ? { pre: previewBefore, post: doc.fields['PREVIEW'] } : undefined;
+  change = startBgmChange(folder, s.meta.fileName, targetOf(folder, doc, after), scope === 'same' ? (k) => k === fromKey : (k) => k !== toKey, preview);
   return { ok, entry, siblings: change };
 }
 

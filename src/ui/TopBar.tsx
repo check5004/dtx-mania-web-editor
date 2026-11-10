@@ -137,7 +137,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         ...(isDiskFolder(s().folder) && supportsDirectWrite()
           ? [{ label: tr(`保存先のフォルダを変える…（いま「${s().folder?.name}」）`, `Change the save folder… (now "${s().folder?.name}")`), run: () => void changeSongFolder() }]
           : []),
-        { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: downloadDtx },
+        { label: tr('DTXファイルだけダウンロード', 'Download DTX file only'), run: () => void downloadDtx() },
         '-',
         // Google Drive（操作の中でログインの小窓を開くので、run の中で直に呼ぶ）
         ...(useDriveAuth.getState().connected

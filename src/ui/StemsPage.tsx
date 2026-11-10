@@ -8,16 +8,18 @@ import { toBase36x2, toMeasure } from '../dtx/base36';
 import { drumChannel } from '../dtx/model';
 import { toggleLoop, useAssist } from '../store/assist';
 import { bgmSource, tempoOf } from '../store/derived';
-import { backToChart, goToStart, playFrom, setCursorBeat, setMix, togglePause, togglePlay, useEditor } from '../store/editor';
+import { backToChart, goToStart, playFrom, setCursorBeat, setMix, toast, togglePause, togglePlay, useEditor } from '../store/editor';
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
   audioReflected,
   chooseAnalysisStem,
   effectiveAnalysisStem,
   defaultExportName,
+  exportFileNames,
   exportRangeSec,
   exportStems,
   fileExists,
+  overwritesFullMix,
   importStems,
   LISTEN_PRESETS,
   PEAK_RATE,
@@ -38,6 +40,7 @@ import {
   type ExportRange,
 } from '../store/stems';
 import { useSongBgm } from '../store/songBgm';
+import { bgmFileOf, fullOriginal } from '../store/fullMix';
 import { confirmDialog } from './dialogs';
 import { formatPosition, formatTime } from './format';
 import { useCanvas, usePlayBeat, useSongSpan } from './hooks';
@@ -914,10 +917,16 @@ const modes = (): { id: ExportMode; title: string; body: string; badge?: string;
 /** エディタ（譜面）に入っている音：ゲームで鳴る BGM と、選曲画面の試聴（#PREVIEW）。この画面で反映したものには ✓ と「元に戻す」 */
 function ChartAudioCard() {
   const doc = useEditor((s) => s.doc);
+  const folder = useEditor((s) => s.folder);
   const busy = useStems((s) => s.busy);
   useStems((s) => s.reflected);
   // ほかの難易度に入れ終わったら描き直す
   useSongBgm((s) => s.version);
+  useSidecar((s) => s.fullMix);
+  // 完全な原曲（ドラム入り）：BGM と違う（ドラム抜きにした）ときに出す
+  const full = fullOriginal(doc, folder);
+  const bgmFile = bgmFileOf(doc, folder);
+  const showFull = !!full && (!bgmFile || bgmFile.path.toLowerCase() !== full.path.toLowerCase());
   const bgm = bgmSource(doc);
   const rows: { key: 'bgm' | 'preview'; label: string; sub: string; file: string | null; tag?: string }[] = [
     { key: 'bgm', label: 'BGM', sub: tr('ゲームで鳴る', 'Plays in the game'), file: bgm ? (doc.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null, tag: bgm ? `#WAV${toBase36x2(bgm.wav)}` : undefined },
@@ -981,6 +990,34 @@ function ChartAudioCard() {
           </div>
         );
       })}
+      {showFull && full && (
+        <div className="chart-audio-row">
+          <span className="k">
+            {tr('完全な原曲', 'Full original')}
+            <span className="lbl">{tr('ドラム入り', 'With drums')}</span>
+          </span>
+          <div className="v">
+            <div className="row">
+              <span className="mono ellipsis" title={full.path}>
+                {full.path}
+              </span>
+              <span className="grow" />
+              <span
+                className="scope-tag"
+                title={tr(
+                  '作業ファイルに覚えています（譜面には書きません）。分け直すときの元・試聴に使い、書き出しで上書きしません',
+                  'Kept in the work file (not written in the chart). Used to re-split and for the preview; exports never overwrite it',
+                )}
+              >
+                {tr('エディタだけ', 'Editor only')}
+              </span>
+            </div>
+            <span className="lbl chart-audio-prev">
+              {tr('ステムに分ける前の音。分け直す・曲を直すときのために曲フォルダに残しています', 'The audio before splitting into stems. Kept in the song folder for re-splitting and editing the song')}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1029,7 +1066,9 @@ function ExportPanel() {
   const bgmM = bgm ? tempoOf(doc).locate(bgm.beat).m : 1;
   const bgmOff = bgm ? (bgm.sec - tempoOf(doc).beatToSec(tempoOf(doc).measureStart(bgmM))).toFixed(3) : '';
   const bgmAt = bgm ? tr(`${toMeasure(bgmM)}小節 +${bgmOff} 秒`, `measure ${toMeasure(bgmM)} +${bgmOff} s`) : tr('001小節', 'measure 001');
-  const outName = mode === 'each' ? `${name.replace(/\{(名前|name)\}/g, '…')}.${format}` : name;
+  // 書き出す名前（NX で読める名前にして書く）
+  const outName = mode === 'each' ? `${name.replace(/\{(名前|name)\}/g, '…')}.${format}` : (exportFileNames(mode, name, format, [])[0] ?? name);
+  const renamedOut = mode !== 'each' && name.trim() !== '' && outName !== name.trim();
   const canRun = !busy && included.length > 0 && !!r && dur > 0.1 && name.trim() !== '';
   const summary =
     mode === 'bgm'
@@ -1040,7 +1079,20 @@ function ExportPanel() {
           ? tr(`選んだ ${included.length}本 → ${outName}`, `${included.length} selected ${pl(included.length, 'stem')} → ${outName}`)
           : tr(`${included.length}本を別々のファイルに（${outName}）`, `${included.length} ${pl(included.length, 'stem')} as separate files (${outName})`);
   const run = async (reflect: boolean) => {
-    const targets = mode === 'each' ? included.map((t) => `${name.replace(/\{(名前|name)\}/g, t.name)}.${format}`) : [name];
+    const targets = exportFileNames(mode, name, format, included);
+    // 完全な原曲（ドラム入り）は上書きしない
+    const full = overwritesFullMix(targets);
+    if (full.length) {
+      toast(
+        tr(
+          `${full.join('、')} は完全な原曲（ドラム入り。分け直す元）なので上書きしません。別のファイル名にしてください`,
+          `${full.join(', ')} is the full original (with drums, used for re-splitting), so it isn't overwritten. Choose another file name`,
+        ),
+        'warn',
+        8000,
+      );
+      return;
+    }
     const exists = targets.filter(fileExists);
     if (exists.length) {
       const ok = await confirmDialog({
@@ -1170,6 +1222,11 @@ function ExportPanel() {
             <span className="lbl">{tr('ファイル名', 'File name')}</span>
             <input className="field mono" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
+          {renamedOut && (
+            <p className="lbl note">
+              {tr(`NX（Shift_JIS）で読めない文字があるので、${outName} の名前で書き出します。`, `It has characters NX (Shift_JIS) can't read, so it is written as ${outName}.`)}
+            </p>
+          )}
           {mode === 'each' && <p className="lbl note">{tr('{名前} はステムの名前になります（例: stems_ドラム.ogg）。', '{name} becomes the stem name (e.g. stems_Drums.ogg).')}</p>}
           <div className="kv" style={{ alignItems: 'flex-start' }}>
             <span className="lbl" style={{ paddingTop: 4 }} title={tr('「書き出してエディタに反映」で入る所', 'Where “Export and add to editor” puts it')}>

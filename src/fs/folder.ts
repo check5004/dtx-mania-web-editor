@@ -2,7 +2,8 @@
 // フォルダを選んでいない曲（iPad・ZIP・落としたファイル・新しい曲）は本体（このブラウザの保存領域、src/fs/local.ts）に置き、
 // 同じように直接書く。どちらも使えないときはメモリに持ち、保存はダウンロードにする。
 import { tr } from '../i18n';
-import { isQuotaError, writeSongFile } from './opfs';
+import { sjisCanWrite, sjisFriendly } from '../dtx/encoding';
+import { isQuotaError, removeSongFile, writeSongFile } from './opfs';
 
 declare global {
   interface Window {
@@ -36,6 +37,11 @@ export interface SongFolder {
   drive?: string;
   /** 正規化したパス（小文字・'/' 区切り）→ ファイル */
   files: Map<string, FolderFile>;
+  /**
+   * NX で読める名前に変えたファイル（前のパスの小文字 → 今のパス。src/store/nxNames.ts）。開いている間だけ覚え、
+   * 元に戻すなどで前の名前が書かれても今のファイルを見つける（次の保存で譜面も今の名前に直る）
+   */
+  renamed?: Map<string, string>;
 }
 
 /** DTX に書かれたパスをフォルダ内の検索キーにする（NXはWindowsなので大文字小文字を区別しない） */
@@ -135,7 +141,90 @@ export function folderFromFiles(list: File[], name = tr('新しい曲', 'New son
 
 export function findFile(folder: SongFolder | null, path: string, pathWav = ''): FolderFile | undefined {
   if (!folder || !path) return undefined;
-  return folder.files.get(normPath(joinPath(pathWav, path))) ?? folder.files.get(normPath(path));
+  return folder.files.get(normPath(joinPath(pathWav, path))) ?? folder.files.get(normPath(path)) ?? findRenamed(folder, path, pathWav) ?? findLoose(folder, path, pathWav);
+}
+
+/** NX で読める名前に変えたファイルを、前の名前から（開いている間だけ） */
+function findRenamed(folder: SongFolder, path: string, pathWav: string): FolderFile | undefined {
+  if (!folder.renamed?.size) return undefined;
+  for (const k of [normPath(joinPath(pathWav, path)), normPath(path)]) {
+    const to = folder.renamed.get(k);
+    const f = to ? folder.files.get(normPath(to)) : undefined;
+    if (f) return f;
+  }
+  return undefined;
+}
+
+/**
+ * 綴りが少し違う同じファイル。Shift_JIS で保存した譜面では、書けない文字は「?」に、「〜」などは見た目の近い「～」になって
+ * いる（NX はそのファイルを読めない。保存・書き出しのときに書ける名前へ直す。src/store/nxNames.ts）。Mac・iPad で作った名前は
+ * 濁点が別の文字のこともある。そう読める曲フォルダのファイルが1つだけなら、それを返す。
+ * 見つからなければ「?」を「_」としても探す（書ける名前へ変えたあとのファイル。前の名前のまま残った譜面から）
+ */
+function findLoose(folder: SongFolder, path: string, pathWav: string): FolderFile | undefined {
+  // ASCII だけで「?」も無ければ、違いようがない
+  if (/^[\x20-\x3e\x40-\x7e\\/]*$/.test(path)) return undefined;
+  const wants = [...new Set([normPath(joinPath(pathWav, path)), normPath(path)].map(looseChars))];
+  for (const renamed of [false, true]) {
+    let hit: FolderFile | undefined;
+    let many = false;
+    for (const [key, f] of folder.files) {
+      const have = looseChars(key);
+      if (!wants.some((w) => looseSame(w, have, renamed))) continue;
+      // 2つ以上あれば、どれか分からないので選ばない
+      if (hit && hit !== f) many = true;
+      hit = f;
+    }
+    if (many) return undefined;
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+const looseChars = (s: string) => [...s.normalize('NFC').toLowerCase()];
+
+/**
+ * 譜面に書いてあるパス（want）が、曲フォルダのパス（have）を Shift_JIS で書いたものとして読めるか。
+ * renamed なら、「?」が書ける名前に変えたときの「_」でもよい
+ */
+function looseSame(want: string[], have: string[], renamed = false): boolean {
+  if (want.length !== have.length) return false;
+  for (let i = 0; i < want.length; i++) {
+    const w = want[i];
+    const h = have[i];
+    if (w === h) continue;
+    // 書けない文字は「?」になる
+    if (w === '?' && (renamed ? h === '_' : !sjisCanWrite(h))) continue;
+    // 見た目の近い文字に置き換えて書く文字
+    if (!renamed && sjisFriendly(h)?.toLowerCase() === w) continue;
+    return false;
+  }
+  return true;
+}
+
+/** 曲フォルダからファイルを消す（ファイルの名前を変えたあとの、前の名前）。消せなければ false */
+export async function removeFile(folder: SongFolder, path: string): Promise<boolean> {
+  const key = normPath(path);
+  const f = folder.files.get(key);
+  if (!f) return false;
+  if (folder.dir && !f.pending) {
+    try {
+      if (folder.local) {
+        // 本体は書き込みと同じ順番待ちで消す
+        await removeSongFile(folder.local, f.path);
+      } else {
+        const parts = f.path.split('/');
+        const name = parts.pop()!;
+        let dir = folder.dir;
+        for (const p of parts) dir = await dir.getDirectoryHandle(p);
+        await dir.removeEntry(name);
+      }
+    } catch {
+      return false;
+    }
+  }
+  folder.files.delete(key);
+  return true;
 }
 
 export function dtxFiles(folder: SongFolder): FolderFile[] {

@@ -37,6 +37,7 @@ import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssi
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
 import { loadSidecar, sameSongSidecar, sameStemFiles, updateSidecar, useSidecar, withListening, type SidecarData } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
+import { isDrumlessName } from '../separate/names';
 
 enablePatches();
 
@@ -481,6 +482,53 @@ const SOUND_FIELD = /^((WAV|VOLUME|WAVVOL|PAN|WAVPAN)[0-9A-Z]{2}|PATH_WAV)$/;
 function changesSounds(h: HistoryEntry): boolean {
   if (/WAV|キット|音/.test(h.label)) return true;
   return [...h.undo, ...h.redo].some((p) => p.path[0] === 'fields' && (p.path.length === 1 || SOUND_FIELD.test(String(p.path[1]))));
+}
+
+/**
+ * 譜面の項目の値を、履歴の中まで書き換える（曲フォルダのファイルの名前を変えたとき。src/store/nxNames.ts）。
+ * map は新しい値（変えなければ null）。履歴には積まない：ファイルの名前は譜面の編集ではなく、元に戻しても
+ * もう無い名前に戻らないようにするため。変えたら true
+ */
+export function rewriteFieldValues(map: (key: string, value: string) => string | null): boolean {
+  const s = get();
+  const fixFields = (fields: Record<string, string>): Record<string, string> | null => {
+    let out: Record<string, string> | null = null;
+    for (const [k, v] of Object.entries(fields)) {
+      if (typeof v !== 'string') continue;
+      const n = map(k, v);
+      if (n === null || n === v) continue;
+      out ??= { ...fields };
+      out[k] = n;
+    }
+    return out;
+  };
+  const fixDoc = (d: DtxDoc): DtxDoc => {
+    const f = fixFields(d.fields);
+    return f ? { ...d, fields: f } : d;
+  };
+  const fixPatch = (p: Patch): Patch => {
+    if (p.path[0] !== 'fields') return p;
+    if (p.path.length === 2 && typeof p.value === 'string') {
+      const n = map(String(p.path[1]), p.value);
+      return n === null || n === p.value ? p : { ...p, value: n };
+    }
+    if (p.path.length === 1 && p.value && typeof p.value === 'object') {
+      const f = fixFields(p.value as Record<string, string>);
+      return f ? { ...p, value: f } : p;
+    }
+    return p;
+  };
+  const fixEntry = (h: HistoryEntry): HistoryEntry => {
+    const redo = h.redo.map(fixPatch);
+    const undo = h.undo.map(fixPatch);
+    return redo.every((p, i) => p === h.redo[i]) && undo.every((p, i) => p === h.undo[i]) ? h : { ...h, redo, undo };
+  };
+  const doc = fixDoc(s.doc);
+  if (doc === s.doc) return false;
+  // 保存した中身も同じに書き換える（開いたままのファイルの名前が変わっただけで、未保存にはしない。保存すると新しい名前を書く）
+  const savedDoc = s.savedDoc === s.doc ? doc : s.savedDoc ? fixDoc(s.savedDoc) : s.savedDoc;
+  set({ doc, savedDoc, past: s.past.map(fixEntry), future: s.future.map(fixEntry) });
+  return true;
 }
 
 /**
@@ -1529,6 +1577,8 @@ export function createDoc(info: NewSongInfo): DtxDoc {
   add('ARTIST', info.artist);
   add('BPM', String(info.bpm));
   add('DLEVEL', String(info.level ?? 50));
+  // 選曲画面の試聴は原曲（NX は #PREVIEW が無いと選曲画面で何も鳴らさない。src/store/fullMix.ts）
+  if (info.bgmFile && /\.(ogg|wav|mp3)$/i.test(info.bgmFile) && !isDrumlessName(info.bgmFile)) add('PREVIEW', info.bgmFile);
   const doc: DtxDoc = { header, fields, chips: [], barLengths: {}, nextId: 1 };
   if (info.bgmFile) {
     header.push({ kind: 'raw', text: '' });

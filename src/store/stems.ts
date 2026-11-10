@@ -17,6 +17,9 @@ import { glowReflected } from './glow';
 import { editBgm, editBgmBack, siblingNote, type SiblingChange } from './songBgm';
 import { editBack } from './siblings';
 import { editSong, onlyThisAction, songSiblingNote } from './songSync';
+import { isFullMixPath, planBgmSwap, rememberFullMix } from './fullMix';
+import { nxSafeBase, nxSafeName } from '../fs/nxName';
+import { isDrumlessName } from '../separate/names';
 
 interface Loaded {
   key: string;
@@ -724,6 +727,29 @@ function cleanName(n: string) {
   return n.replace(/[\\/:*?"<>|]/g, '_').trim();
 }
 
+/**
+ * 書き出すファイルの名前（曲フォルダの直下）。譜面に書いても NX（Shift_JIS）で読める名前にする
+ * （書けない文字は見た目の近い文字か「_」。src/fs/nxName.ts）。each はステムごと（{名前} をステムの名前に）
+ */
+export function exportFileNames(mode: ExportMode, fileName: string, format: 'ogg' | 'wav', tracks: readonly { name: string }[]): string[] {
+  const ext = format === 'ogg' ? '.ogg' : '.wav';
+  const safe = (n: string, fallback: string) => nxSafeName(`${cleanName(n) || fallback}${ext}`, fallback);
+  return mode === 'each'
+    ? tracks.map((t) => safe(fileName.replace(/\{(名前|name)\}/g, t.name), `stems_${nxSafeBase(t.name, 'stem')}`))
+    : [safe(fileName.replace(/\.(ogg|wav)$/i, ''), 'bgm')];
+}
+
+/** 書き出すと完全な原曲（ドラム入り）を上書きしてしまう名前（無ければ []） */
+export function overwritesFullMix(names: readonly string[]): string[] {
+  return names.filter(isFullMixPath);
+}
+
+const fullMixNote = (names: readonly string[]) =>
+  tr(
+    `${names.join('、')} は完全な原曲（ドラム入り。分け直す元）なので上書きしません。別のファイル名にしてください`,
+    `${names.join(', ')} is the full original (with drums, used for re-splitting), so it isn't overwritten. Choose another file name`,
+  );
+
 export async function exportStems(o: ExportOptions): Promise<string[]> {
   const doc0 = useEditor.getState().doc;
   const folder = useEditor.getState().folder;
@@ -742,11 +768,14 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
     return [];
   }
   const fade = o.mode !== 'bgm' && o.range !== 'song' ? 1 : 0;
-  const ext = o.format === 'ogg' ? '.ogg' : '.wav';
-  const jobs: { name: string; tracks: StemTrack[] }[] =
-    o.mode === 'each'
-      ? list.map((t) => ({ name: `${cleanName(o.fileName.replace(/\{(名前|name)\}/g, t.name)) || `stems_${t.name}`}${ext}`, tracks: [t] }))
-      : [{ name: `${cleanName(o.fileName.replace(/\.(ogg|wav)$/i, '')) || 'bgm'}${ext}`, tracks: list }];
+  const names = exportFileNames(o.mode, o.fileName, o.format, list);
+  const jobs: { name: string; tracks: StemTrack[] }[] = o.mode === 'each' ? list.map((t, i) => ({ name: names[i], tracks: [t] })) : [{ name: names[0], tracks: list }];
+  // 完全な原曲（ドラム入り）は上書きしない
+  const full = overwritesFullMix(names);
+  if (full.length) {
+    toast(fullMixNote(full), 'warn', 8000);
+    return [];
+  }
   const written: string[] = [];
   let memory = 0;
   try {
@@ -774,12 +803,18 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
   if (reflect === 'none') void prepareSounds();
   const later = memory ? tr('。曲フォルダへは保存するときに書き出します', '. It is written to the song folder when you save') : '';
   const was = prev && prev !== written[0] ? (reflect === 'bgm' ? tr(`（前は ${prev}。元のファイルは残しています）`, ` (was ${prev}; the old file is kept)`) : tr(`（前は ${prev}）`, ` (was ${prev})`)) : '';
+  // BGM と一緒に試聴（#PREVIEW）に完全な原曲を入れたら、それも伝える
+  const pvNow = useEditor.getState().doc.fields['PREVIEW'];
+  const pvSet =
+    reflect === 'bgm' && pvNow && (pvNow ?? '') !== (doc0.fields['PREVIEW'] ?? '')
+      ? tr(`。選曲画面の試聴（#PREVIEW）には完全な原曲「${pvNow}」を入れました`, `. The song select preview (#PREVIEW) now uses the full original "${pvNow}"`)
+      : '';
   // ほかの難易度にも入れたら、それも伝える（書き終わるのを待つ。同じファイルに書き出し直しただけなら、もう入っている）
   const rec = reflect === 'none' ? null : sget().reflected[reflect];
   const sib = rec && rec !== recBefore ? await rec.siblings?.done : null;
   toast(
     reflect === 'bgm'
-      ? tr(`${written[0]} を書き出して、エディタの BGM に反映しました${was}${later}`, `Exported ${written[0]} and set it as the BGM in the editor${was}${later}`) + siblingNote(sib)
+      ? tr(`${written[0]} を書き出して、エディタの BGM に反映しました${was}${later}`, `Exported ${written[0]} and set it as the BGM in the editor${was}${later}`) + pvSet + siblingNote(sib)
       : reflect === 'preview'
         ? tr(`${written[0]} を書き出して、選曲画面の試聴（#PREVIEW）に反映しました${was}${later}`, `Exported ${written[0]} and set it as the song select preview (#PREVIEW)${was}${later}`) + songSiblingNote(sib, tr('試聴', 'preview'))
         : tr(`${written.join('、')} を書き出しました（エディタには反映していません）${later}`, `Exported ${written.join(', ')} (not added to the editor)${later}`),
@@ -808,8 +843,11 @@ export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useE
   const cur = bgm ? (doc0.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null;
   let wav = bgm?.wav ?? 1;
   let chipId: number | undefined;
+  // ドラム入りの前の原曲は完全な原曲として覚え、試聴（#PREVIEW）が空なら入れる（src/store/fullMix.ts）
+  const swap = planBgmSwap(file);
   // 同じ原曲を使っていたほかの難易度も、この音にする（難易度で BGM が分かれないように。src/store/songBgm.ts）
-  const { siblings } = editBgm(tr('書き出した音を BGM に反映', 'Set the exported audio as the BGM'), (d) => {
+  const { ok, siblings } = editBgm(tr('書き出した音を BGM に反映', 'Set the exported audio as the BGM'), (d) => {
+    if (swap.preview) setField(d, 'PREVIEW', swap.preview);
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), file);
       return;
@@ -819,6 +857,7 @@ export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useE
     chipId = d.nextId;
     d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: wav });
   });
+  if (ok) rememberFullMix(swap.fullMix);
   const again = before && before.file === file && cur === file;
   const r: AudioReflect = again ? before : { file, prev: cur, wav, chipId, siblings };
   sset((st) => ({ reflected: { ...st.reflected, bgm: r } }));
@@ -892,9 +931,13 @@ export function defaultExportName(mode: ExportMode, format: 'ogg' | 'wav'): stri
   const p = bgm ? wavPath(s.doc, bgm.wav) : null;
   if (!p) return `bgm${ext}`;
   const name = p.split(/[\\/]/).pop() ?? `bgm${ext}`;
-  const base = name.replace(/\.[^.]+$/, '');
-  if (!findFile(s.folder, p, s.doc.fields['PATH_WAV'] ?? '') || /drumless|nodrum|ドラム抜き/i.test(base)) return base + ext;
-  return `${base}_drumless${ext}`;
+  const raw = name.replace(/\.[^.]+$/, '');
+  // NX（Shift_JIS）で読める名前にする（譜面に書くので）
+  const base = nxSafeBase(raw, 'bgm');
+  const drumless = isDrumlessName(name) || /drumless|nodrum|ドラム抜き/i.test(raw);
+  const out = !findFile(s.folder, p, s.doc.fields['PATH_WAV'] ?? '') || drumless ? base + ext : `${base}_drumless${ext}`;
+  // 完全な原曲（ドラム入り）は上書きしない
+  return isFullMixPath(out) ? `${base}_drumless${ext}` : out;
 }
 
 /** 曲フォルダにもうあるファイルか（上書きの確認用） */

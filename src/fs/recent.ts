@@ -22,9 +22,19 @@ export interface RecentEntry {
   text: string;
   /** 作業ファイル（.dtxe.json）の中身 */
   sidecar?: string;
-  /** フォルダに保存済みの内容と同じか */
+  /** フォルダに保存済みの内容と同じか（譜面） */
   saved: boolean;
+  /**
+   * 作業ファイルもフォルダに保存済みか（分けたステムなど、作業ファイルだけを変えたときは false。
+   * 曲フォルダの作業ファイルより新しければ、開くときこちらを使う）。無い控え（前の版）は saved と同じに見る
+   */
+  sidecarSaved?: boolean;
   updatedAt: number;
+}
+
+/** 控えの作業ファイルに、曲フォルダへ保存していない変更があるか */
+export function sidecarUnsaved(e: Pick<RecentEntry, 'saved' | 'sidecarSaved' | 'sidecar'>): boolean {
+  return !!e.sidecar && (e.sidecarSaved === undefined ? !e.saved : !e.sidecarSaved);
 }
 
 export async function putRecent(e: RecentEntry): Promise<void> {

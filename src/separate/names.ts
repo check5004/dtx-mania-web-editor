@@ -18,6 +18,11 @@ export function sourceNameInfo(fileName: string): { base: string; drumless: bool
   return { base, drumless };
 }
 
+/** ファイル名がドラム抜きの音らしいか（bgm_drumless・曲_nodrums・曲（ドラム抜き）。前に書き出した BGM など） */
+export function isDrumlessName(fileName: string): boolean {
+  return sourceNameInfo(fileName).drumless;
+}
+
 /** 画面とトラックに並べる順（ドラムが先、その他が最後） */
 const STEM_ORDER: SepStem[] = ['drums', 'bass', 'vocals', 'guitar', 'piano', 'other'];
 

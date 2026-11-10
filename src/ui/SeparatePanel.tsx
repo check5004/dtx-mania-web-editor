@@ -134,14 +134,14 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
                 {sources.map((x) => (
                   <option key={x.path} value={x.path}>
                     {x.path}
-                    {x.bgm ? tr('（今の BGM）', ' (current BGM)') : ''}
+                    {x.full ? tr('（完全な原曲）', ' (full original)') : x.bgm ? tr('（今の BGM）', ' (current BGM)') : ''}
                   </option>
                 ))}
               </select>
             ) : (
               <b className="mono">{src.name}</b>
             )}
-            {sources.length <= 1 && src.bgm && <span>{tr('（BGM）', '(BGM)')}</span>}
+            {sources.length <= 1 && (src.full ? <span>{tr('（完全な原曲）', '(full original)')}</span> : src.bgm && <span>{tr('（BGM）', '(BGM)')}</span>)}
           </div>
           {src.drumless && (
             <div className="notice" style={{ marginBottom: 10 }}>

@@ -8,6 +8,8 @@ import { AUDIO_EXT, findFile, putFile, type FolderFile } from '../fs/folder';
 import { clearSavedModels, decodeForSeparation, savedModels, separate, SeparateError, webgpuStatus, type SepProgress } from '../separate/client';
 import { SEP_MODELS, SEP_SR, type SepModelId, type SepPrecision } from '../separate/models';
 import { plannedFiles, sourceNameInfo, type SepOutputs } from '../separate/names';
+import { nxSafeBase } from '../fs/nxName';
+import { fullMixFile, rememberSeparationSource } from './fullMix';
 import { bgmSource, wavPath } from './derived';
 import { IS_IOS } from './device';
 import { openPage, openedDocs, toast, useEditor } from './editor';
@@ -170,18 +172,23 @@ export interface SepSource {
   size: number;
   /** 今の BGM */
   bgm: boolean;
+  /** 完全な原曲（前に分けた元・ドラム抜きにする前の原曲。作業ファイルが覚えている） */
+  full: boolean;
   /** 名前からドラム抜きの音らしい（前に書き出した BGM など） */
   drumless: boolean;
 }
 
-function toSource(f: FolderFile, bgm: boolean): SepSource {
+function toSource(f: FolderFile, bgm: boolean, full: boolean): SepSource {
   const name = f.path.split('/').pop() ?? f.path;
-  return { path: f.path, name, size: f.size, bgm, ...sourceNameInfo(name) };
+  const info = sourceNameInfo(name);
+  // できるファイルの名前の頭も NX（Shift_JIS）で読める文字にする（src/fs/nxName.ts）
+  return { path: f.path, name, size: f.size, bgm, full, drumless: info.drumless, base: nxSafeBase(info.base, 'bgm') };
 }
 
 /**
- * 分ける音の候補：曲フォルダの音声ファイルのうち、BGM と、どこにも使っていない長めの音。
- * 譜面の音（#WAV に書いた BGM 以外の音）・#PREVIEW・stems/ の中は除く。
+ * 分ける音の候補：曲フォルダの音声ファイルのうち、BGM・完全な原曲と、どこにも使っていない長めの音。
+ * 譜面の音（#WAV に書いた BGM 以外の音）・stems/ の中は除く。#PREVIEW は、曲全体らしい長さ（BGM の6割以上）のときだけ入れる
+ * （試聴に完全な原曲を入れた曲で、分け直す元を選べるように）
  */
 export function separationSources(): SepSource[] {
   const s = useEditor.getState();
@@ -189,29 +196,38 @@ export function separationSources(): SepSource[] {
   if (!folder) return [];
   const pathWav = s.doc.fields['PATH_WAV'] ?? '';
   const bgm = bgmSource(s.doc);
-  const bgmPath = bgm ? findFile(folder, wavPath(s.doc, bgm.wav) ?? '', pathWav)?.path : undefined;
+  const bgmFile = bgm ? findFile(folder, wavPath(s.doc, bgm.wav) ?? '', pathWav) : undefined;
+  const bgmPath = bgmFile?.path;
+  const fullPath = fullMixFile(folder)?.path;
   const used = new Set<string>();
   for (const [k, v] of Object.entries(s.doc.fields)) {
     if (!/^(WAV[0-9A-Z]{2}|PREVIEW)$/i.test(k) || !v) continue;
     const f = findFile(folder, v, k === 'PREVIEW' ? '' : pathWav);
-    if (f) used.add(f.path);
+    if (!f) continue;
+    if (/^PREVIEW$/i.test(k) && bgmFile && f.size >= bgmFile.size * 0.6) continue;
+    used.add(f.path);
   }
   const out: SepSource[] = [];
   for (const f of folder.files.values()) {
     if (!AUDIO_EXT.test(f.name)) continue;
     const isBgm = f.path === bgmPath;
-    if (!isBgm && (used.has(f.path) || /^stems\//i.test(f.path) || f.size < 500_000)) continue;
-    out.push(toSource(f, isBgm));
+    const isFull = f.path === fullPath;
+    if (!isBgm && !isFull && (used.has(f.path) || /^stems\//i.test(f.path) || f.size < 500_000)) continue;
+    out.push(toSource(f, isBgm, isFull));
   }
-  return out.sort((a, b) => Number(b.bgm) - Number(a.bgm) || Number(a.drumless) - Number(b.drumless) || a.path.localeCompare(b.path));
+  return out.sort((a, b) => Number(b.full) - Number(a.full) || Number(b.bgm) - Number(a.bgm) || Number(a.drumless) - Number(b.drumless) || a.path.localeCompare(b.path));
 }
 
-/** 分ける音。選んでいなければ BGM。BGM がドラム抜きなら、同じ名前の元の原曲（ドラム入り）があればそれ */
+/**
+ * 分ける音。選んでいなければ、覚えている完全な原曲、無ければ BGM。BGM がドラム抜きなら、同じ名前の元の原曲（ドラム入り）があればそれ
+ */
 export function separationSource(): SepSource | { error: string } {
   const list = separationSources();
   const chosen = get().source;
   const pick = chosen ? list.find((x) => x.path === chosen) : undefined;
   if (pick) return pick;
+  const full = list.find((x) => x.full && !x.drumless);
+  if (full) return full;
   const bgm = list.find((x) => x.bgm);
   if (!bgm) {
     const s = useEditor.getState();
@@ -330,6 +346,8 @@ export async function startSeparation(): Promise<boolean> {
     const n = await importStems(files);
     const drums = useSidecar.getState().stems.find((t) => t.file.toLowerCase() === `stems/${plan[0].name}`.toLowerCase() && t.kind === 'drums');
     if (drums) chooseAnalysisStem(drums.file);
+    // 分けた元（ドラム入りの原曲）は、完全な原曲として覚えておく（分け直す・試聴・曲を直すときの元。src/store/fullMix.ts）
+    rememberSeparationSource(src.path);
     const seconds = (performance.now() - t0) / 1000;
     set({
       phase: 'done',

@@ -90,6 +90,11 @@ export interface SidecarData {
   mix: SavedMix | null;
   /** 自動で入れた小節 */
   auto: AutoMark[];
+  /**
+   * 完全な原曲（ステムに分ける前の、ドラムも入った原曲。曲フォルダの中のパス）。BGM をドラム抜きにしても、
+   * 分け直す・試聴にする・曲を直すときのために覚えておく（無ければ null）
+   */
+  fullMix: string | null;
 }
 
 export interface SidecarState extends SidecarData {
@@ -101,7 +106,7 @@ export interface SidecarState extends SidecarData {
   loadSeq: number;
 }
 
-export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [] });
+export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [], fullMix: null });
 
 export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, changed: [], loadSeq: 0 }));
 
@@ -162,6 +167,22 @@ export function loadSidecar(d: SidecarData | null) {
   set({ ...emptySidecar(), ...(d ?? {}), dirty: false, changed: [], loadSeq: get().loadSeq + 1 });
 }
 
+/**
+ * 読み込んだ作業ファイルが、曲フォルダへ保存していない変更（自動保存の控え。分けたステムなど）だったとき：
+ * その欄を保存していない変更にする（保存するまで「未保存」と出し、次の自動保存でも控えを曲フォルダの作業ファイルより優先する）
+ */
+export function markSidecarUnsaved(keys: readonly (keyof SidecarData)[]) {
+  if (!keys.length) return;
+  const was = get().changed;
+  set({ dirty: true, changed: [...was, ...keys.filter((k) => !was.includes(k))] });
+}
+
+/** 2つの作業ファイルで違う欄（聴く音量は数えない。saved が無ければ空と比べる） */
+export function sidecarDiff(saved: SidecarData | null, next: SidecarData): (keyof SidecarData)[] {
+  const base = saved ?? emptySidecar();
+  return (Object.keys(next) as (keyof SidecarData)[]).filter((k) => k !== 'mix' && JSON.stringify(base[k]) !== JSON.stringify(next[k]));
+}
+
 /** ステムのファイルが同じか（並びは問わない） */
 export function sameStemFiles(a: readonly StemTrack[], b: readonly StemTrack[]): boolean {
   if (a.length !== b.length) return false;
@@ -185,6 +206,7 @@ export function sameSongSidecar(next: SidecarData | null): SidecarData {
     out.analysisStem = cur.analysisStem;
   }
   if (!out.youtube && cur.youtube) out.youtube = cur.youtube;
+  if (!out.fullMix && cur.fullMix) out.fullMix = cur.fullMix;
   return out;
 }
 
@@ -212,12 +234,12 @@ export function markSidecarSaved() {
 
 export function sidecarData(): SidecarData {
   const s = get();
-  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto };
+  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto, fullMix: s.fullMix };
 }
 
 /** 書く中身が無いか（聴く音量だけなら、作業ファイルを新しく作るほどではない） */
 export function sidecarIsEmpty(d: SidecarData = sidecarData()): boolean {
-  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0;
+  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0 && !d.fullMix;
 }
 
 /** 自動で入れた小節の印を書き換える */
@@ -233,6 +255,12 @@ export function setStems(stems: StemTrack[], opts: { quiet?: boolean } = {}) {
 
 export function setAnalysisStem(file: string | null) {
   touch({ analysisStem: file });
+}
+
+/** 完全な原曲（ドラムの入った原曲）を覚える。同じなら何もしない */
+export function setFullMix(path: string | null) {
+  if ((get().fullMix ?? null) === path) return;
+  touch({ fullMix: path });
 }
 
 /** 聴く音量を覚える（保存するまで書かないが、未保存の変更とは数えない） */
@@ -320,6 +348,7 @@ export function parseSidecar(text: string): SidecarData | null {
       out.stems = renameOldOtherStems(out.stems);
     }
     if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
+    if (typeof j.fullMix === 'string' && j.fullMix.trim()) out.fullMix = j.fullMix;
     if (Array.isArray(j.auto)) {
       const seen = new Set<number>();
       for (const a of j.auto) {

@@ -101,6 +101,28 @@ function getSjisTable(): Map<string, number> {
   return table;
 }
 
+/** 1文字（コードポイント1つ）が Shift_JIS で書けて、NX が読むと同じ文字に戻るか（見た目の近い文字に置き換える文字は戻らない） */
+export function sjisCanWrite(ch: string): boolean {
+  const cp = ch.codePointAt(0);
+  if (cp === undefined) return false;
+  return cp < 0x80 || getSjisTable().has(ch);
+}
+
+/**
+ * Shift_JIS で書いて NX が読み戻した文字列（書けない文字は「?」、見た目の近い文字に置き換える文字はその文字）。
+ * 譜面に書いたファイル名がどう読まれるかを見るのに使う
+ */
+export function sjisRoundTrip(text: string): string {
+  let out = '';
+  for (const ch of text) out += sjisCanWrite(ch) ? ch : (SJIS_FRIENDLY[ch] ?? '?');
+  return out;
+}
+
+/** Shift_JIS に無い文字の、見た目が同じ書ける文字（無ければ undefined） */
+export function sjisFriendly(ch: string): string | undefined {
+  return SJIS_FRIENDLY[ch];
+}
+
 export function encodeDtx(text: string, encoding: DtxEncoding = 'shift_jis'): EncodedText {
   if (encoding === 'utf-16le' || encoding === 'utf-16be') {
     // BOM 付き（読み込むときも BOM で見分ける）。ほかの難易度の譜面を、開いたときの文字コードのまま書き直すときに使う

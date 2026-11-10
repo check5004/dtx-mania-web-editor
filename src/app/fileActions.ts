@@ -48,18 +48,22 @@ import {
   type LocalSong,
 } from '../fs/local';
 import { songDir, writeSongFile } from '../fs/opfs';
-import { deleteRecent, draftFor, listRecent, listRecentSongs, putRecent, recentIdFor, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
+import { deleteRecent, draftFor, getRecent, listRecent, listRecentSongs, putRecent, recentIdFor, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
 import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
 import { useDevice } from '../store/device';
 import { createDoc, dismissToast, isDirty, openDocument, prepareSounds, switchDocument, toast, undoIfLast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
 import { glowReflected } from '../store/glow';
+import { prepareForNx } from '../store/nxNames';
+import { planBgmSwap, rememberFullMix } from '../store/fullMix';
+import { isNxSafeName, nxSafeName } from '../fs/nxName';
 import { editBgm, setAfterSiblingWrite, siblingNote, siblingWrites } from '../store/songBgm';
 import { hasUnsaved } from '../store/unsaved';
 import { bgmSource } from '../store/derived';
 import { freeWavNumber, setField } from '../edit/ops';
 import { toBase36x2 } from '../dtx/base36';
 import { frac } from '../dtx/fraction';
-import { loadSidecar, markSidecarSaved, parseSidecar, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
+import { loadSidecar, markSidecarSaved, markSidecarUnsaved, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
+import { readSidecarFor, recentSidecarOf, type RecentSidecar } from '../store/sidecarFile';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
 import { sortByDifficulty } from '../gen/diffTabs';
@@ -124,24 +128,11 @@ async function scanSiblingOrigins(folder: SongFolder) {
   useEditor.setState((st) => ({ meta: { ...st.meta, siblings: st.meta.siblings.map((x) => ({ ...x, origin: origins.get(x.file.toLowerCase()) ?? x.origin })) } }));
 }
 
-/** 作業ファイル（.dtxe.json）の中身。フォルダに無ければ自動保存の控えを使う */
-async function readSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string): Promise<SidecarData | null> {
-  const f = folder ? findFile(folder, sidecarName(fileName)) : undefined;
-  let data = null;
-  if (f) {
-    try {
-      data = parseSidecar(await (await f.getFile()).text());
-    } catch {
-      data = null;
-    }
-  }
-  if (!data && recentSidecar) data = parseSidecar(recentSidecar);
-  return data;
-}
-
-/** 作業ファイル（.dtxe.json）を読む。フォルダに無ければ自動保存の控えを使う */
-async function loadSidecarFor(folder: SongFolder | null, fileName: string, recentSidecar?: string) {
-  loadSidecar(await readSidecarFor(folder, fileName, recentSidecar));
+/** 作業ファイル（.dtxe.json）を読む（readSidecarFor。控えから読んだ変更は保存していない変更にする） */
+async function loadSidecarFor(folder: SongFolder | null, fileName: string, recent?: string | RecentSidecar) {
+  const r = await readSidecarFor(folder, fileName, recent);
+  loadSidecar(r.data);
+  markSidecarUnsaved(r.unsaved);
 }
 
 /**
@@ -150,7 +141,7 @@ async function loadSidecarFor(folder: SongFolder | null, fileName: string, recen
  */
 async function sourceSidecarFor(folder: SongFolder, doc: DtxDoc): Promise<SidecarData | null> {
   const from = readOrigin(doc)?.from;
-  return from ? readSidecarFor(folder, from) : null;
+  return from ? (await readSidecarFor(folder, from)).data : null;
 }
 
 /**
@@ -162,7 +153,7 @@ async function openDtxFile(
   file: FolderFile,
   labels?: Map<string, string>,
   recentText?: string,
-  recentSidecar?: string,
+  recentSidecar?: string | RecentSidecar,
   switching?: { stale: () => boolean },
 ) {
   const bytes = new Uint8Array(await (await file.getFile()).arrayBuffer());
@@ -187,12 +178,15 @@ async function openDtxFile(
     // 難易度タブの印（AI で作った譜面か）は読み直すまで今のものを出しておく（ちらつかせない）
     const known = new Map(get().meta.siblings.map((x) => [x.file.toLowerCase(), x.origin]));
     meta.siblings = meta.siblings.map((x) => ({ ...x, origin: known.get(x.file.toLowerCase()) ?? x.origin }));
-    if (switching.stale() || !(await switchDocument(parsed.doc, meta, side, { dirty, stale: switching.stale }))) return;
+    if (switching.stale() || !(await switchDocument(parsed.doc, meta, side.data, { dirty, stale: switching.stale }))) return;
+    markSidecarUnsaved(side.unsaved);
     void scanSiblingOrigins(folder);
   } else {
     openDocument(parsed.doc, meta, folder, { dirty });
     void scanSiblingOrigins(folder);
-    loadSidecar((await readSidecarFor(folder, file.name, recentSidecar)) ?? (await sourceSidecarFor(folder, parsed.doc)));
+    const side = await readSidecarFor(folder, file.name, recentSidecar);
+    loadSidecar(side.data ?? (await sourceSidecarFor(folder, parsed.doc)));
+    markSidecarUnsaved(side.unsaved);
     warnLibraryFolder(folder);
   }
   if (useRecent) toast(tr('前回の自動保存から続きを開きました（まだ曲フォルダには保存されていません）', "Opened from your last autosave (not saved to the song folder yet)"), 'warn', 6000);
@@ -586,9 +580,32 @@ export async function switchDifficulty(fileName: string) {
   const seq = ++switchSeq;
   // 保存していない変更は、いまの内容を「最近の曲」の自動保存に残してから切り替える（確認で伝えたとおりに。作業ファイルだけの変更も）
   if (hasUnsaved(get())) await autosaveNow(true);
-  // 切り替える難易度に保存していない続き（自動保存）があれば、そこから開く（「最近の曲」は曲ごとに1つなので、ほかの難易度の続きはここで開く）
+  // 切り替える難易度に保存していない続き（自動保存）があれば、そこから開く（「最近の曲」は曲ごとに1つなので、ほかの難易度の続きはここで開く）。
+  // 作業ファイルだけの変更（分けたステムなど）も、曲フォルダの作業ファイルより新しければ控えから
   const resume = await draftFor(folder, f);
-  await openDtxFile(folder, f, undefined, resume?.text, resume?.sidecar, { stale: () => seq !== switchSeq || get().folder !== folder });
+  const side = recentSidecarOf(resume ?? (await getRecent(recentIdFor(folder, f.name))));
+  await openDtxFile(folder, f, undefined, resume?.text, side, { stale: () => seq !== switchSeq || get().folder !== folder });
+}
+
+/**
+ * 新しい曲に置く音声ファイルを、NX（Shift_JIS）で読める名前にする（譜面に書く名前が「?」になって、NX が原曲・試聴を
+ * 読めなくならないように）。同じ名前になったら番号を付ける
+ */
+function nxSafeFiles(files: File[]): File[] {
+  const audio = (f: File) => AUDIO_EXT.test(f.name);
+  // もう読める名前のファイルは、そのままの名前で先に取っておく
+  const taken = new Set(files.filter((f) => !audio(f) || isNxSafeName(f.name)).map((f) => f.name.toLowerCase()));
+  return files.map((f) => {
+    if (!audio(f) || isNxSafeName(f.name)) return f;
+    const safe = nxSafeName(f.name, 'bgm');
+    const dot = safe.lastIndexOf('.');
+    const base = dot > 0 ? safe.slice(0, dot) : safe;
+    const ext = dot > 0 ? safe.slice(dot) : '';
+    let name = safe;
+    for (let i = 2; taken.has(name.toLowerCase()) && i < 100; i++) name = `${base} (${i})${ext}`;
+    taken.add(name.toLowerCase());
+    return new File([f], name, { type: f.type, lastModified: f.lastModified });
+  });
 }
 
 /** 落としたファイル（DTX・音声）から開く */
@@ -596,8 +613,8 @@ export async function openDroppedFiles(files: File[]) {
   if (files.length === 0) return;
   if (!(await confirmDiscard())) return;
   const dtx = files.find((f) => /\.dtx$/i.test(f.name));
-  const folder = folderFromFiles(files, dtx ? dtx.name.replace(/\.dtx$/i, '') : files[0].name.replace(/\.[^.]+$/, ''));
   if (dtx) {
+    const folder = folderFromFiles(files, dtx.name.replace(/\.dtx$/i, ''));
     await openDtxFile(folder, folder.files.get(dtx.name.toLowerCase())!);
     if (files.length === 1) toast(tr('DTXだけを開きました。音を鳴らすには曲フォルダごと開いてください', 'Opened only the DTX file. Open the whole song folder to hear the sounds'), 'info', 6000);
     return;
@@ -636,18 +653,33 @@ export async function openDroppedFiles(files: File[]) {
   }
   // 音声ファイルのタグ（曲名・アーティスト・BPM）があれば最初から入れておく
   const tags = await readAudioTags(audio[0]);
+  // 曲フォルダには NX で読める名前で置く
+  const named = nxSafeFiles(files);
+  const pairs = files.map((f, i) => ({ from: f, to: named[i] })).filter((x) => audio.includes(x.from));
+  const namedAudio = pairs.map((x) => x.to);
   const info = await newSongDialog({
     title: tr('新しい譜面をつくる', 'Create a new chart'),
-    audioFiles: audio.map((f) => f.name),
+    audioFiles: namedAudio.map((f) => f.name),
     defaults: {
       title: tags?.title || audio[0].name.replace(/\.[^.]+$/, ''),
       artist: tags?.artist || tags?.albumArtist || undefined,
       bpm: tags?.bpm ? Math.round(tags.bpm * 100) / 100 : undefined,
-      bgmFile: audio[0].name,
+      bgmFile: namedAudio[0]?.name,
     },
   });
   if (!info) return;
+  const folder = folderFromFiles(named, files[0].name.replace(/\.[^.]+$/, ''));
   openDocument(createDoc(info), newMeta('mstr.dtx', null), folder, { dirty: true });
+  const renamed = pairs.filter((x) => x.to.name !== x.from.name).map((x) => `${x.from.name} → ${x.to.name}`);
+  if (renamed.length)
+    toast(
+      tr(
+        `NX（Shift_JIS）で読めない文字があったので、名前を変えて曲フォルダに置きました：${renamed.slice(0, 3).join('、')}`,
+        `Renamed in the song folder because NX (Shift_JIS) can't read some characters: ${renamed.slice(0, 3).join(', ')}`,
+      ),
+      'info',
+      8000,
+    );
 }
 
 /** 原曲の音声ファイルを選ぶダイアログ（読み込むと原曲にする） */
@@ -690,18 +722,24 @@ export async function importBgmFile(file: File) {
     folder = folderFromFiles([], s.doc.fields['TITLE'] || tr('新しい曲', 'New song'));
     useEditor.setState({ folder });
   }
-  const same = findFile(folder, file.name);
-  let path = file.name;
+  // NX（Shift_JIS）で読める名前で置く（同じファイルがもうあれば、それを使う）
+  const safe = nxSafeName(file.name, 'bgm');
+  const same = [findFile(folder, file.name), findFile(folder, safe)].find((f) => f && f.size === file.size);
+  let path: string;
   let memory = false;
-  if (!(same && same.size === file.size)) {
-    path = freePath(folder, file.name);
-    memory = (await putFile(folder, path, file)) === 'memory';
-  } else {
+  if (same) {
     path = same.path;
+  } else {
+    path = freePath(folder, safe);
+    memory = (await putFile(folder, path, file)) === 'memory';
   }
+  const renamed = !same && safe !== file.name;
   const bgm = bgmSource(get().doc);
+  // 試聴（#PREVIEW）は原曲についてくる・ドラム入りの原曲は完全な原曲として覚える（src/store/fullMix.ts）
+  const swap = planBgmSwap(path);
   // 同じ原曲を使っていたほかの難易度も、この原曲にする（難易度で原曲が分かれないように。src/store/songBgm.ts）
   const { ok, entry, siblings } = editBgm(bgm ? tr('原曲を差し替える', 'Replace the original') : tr('原曲を読み込む', 'Load the original'), (d) => {
+    if (swap.preview) setField(d, 'PREVIEW', swap.preview);
     if (bgm) {
       setField(d, 'WAV' + toBase36x2(bgm.wav), path);
       return;
@@ -711,15 +749,25 @@ export async function importBgmFile(file: File) {
     if (d.fields['BGMWAV'] === undefined) setField(d, 'BGMWAV', toBase36x2(no));
     d.chips.push({ id: d.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: no });
   });
+  if (ok) rememberFullMix(swap.fullMix);
   await prepareSounds();
   const rep = siblings ? await siblings.done : null;
   if (rep?.files.length) glowReflected({ diffs: rep.files });
+  const notes = [
+    renamed ? tr('NX（Shift_JIS）で読めない文字があったので、名前を変えて置きました', "Its name had characters NX (Shift_JIS) can't read, so it was saved under a new name") : '',
+    ok && swap.preview ? tr('選曲画面の試聴（#PREVIEW）もこの原曲にしました', 'The song select preview (#PREVIEW) uses it too') : '',
+  ]
+    .filter(Boolean)
+    .map((t) => (isJa() ? `。${t}` : `. ${t}`))
+    .join('');
   toast(
     (isJa()
       ? `原曲「${path}」を${bgm ? '差し替えました' : '読み込みました（001小節の頭から鳴らします。ずれていたら「テンポ合わせ」で合わせられます）'}${memory ? '。曲フォルダへは保存するときに書き出します' : ''}`
-      : `${bgm ? 'Replaced' : 'Loaded'} the original "${path}"${bgm ? '' : ' (it plays from the start of measure 001; if it is off, line it up in "Tempo")'}${memory ? '. It is written to the song folder when you save' : ''}`) + siblingNote(rep),
+      : `${bgm ? 'Replaced' : 'Loaded'} the original "${path}"${bgm ? '' : ' (it plays from the start of measure 001; if it is off, line it up in "Tempo")'}${memory ? '. It is written to the song folder when you save' : ''}`) +
+      notes +
+      siblingNote(rep),
     'ok',
-    rep?.changed.length || rep?.kept.length ? 10000 : 7000,
+    rep?.changed.length || rep?.kept.length || notes ? 10000 : 7000,
     ok ? { label: tr('元に戻す', 'Undo'), run: () => void undoIfLast(entry) } : undefined,
   );
 }
@@ -1172,9 +1220,17 @@ export function setBeforeSave(fn: ((opts: { toFolder?: boolean }) => void) | nul
 }
 
 export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
+  if (get().screen !== 'editor') return;
+  beforeSave?.(opts);
+  // ほかの曲も入ったフォルダ（DTXFiles など）には直接書かない：この曲だけのフォルダを作って移してから保存する
+  // （ファイル名を NX で読める名前に変えるのも、移した先で）
+  const from = get().folder;
+  if (isDiskFolder(from) && otherSongsIn(from).length && !(await moveToOwnSongFolder())) return;
+  // 試聴（#PREVIEW）が空なら原曲を入れ、譜面に書くファイル名を NX で読める名前にしてから
+  // （Shift_JIS で「?」になって、試聴・原曲を NX が読めなくならないように）
+  await prepareForNx();
   const s = get();
   if (s.screen !== 'editor') return;
-  beforeSave?.(opts);
   const doc = s.doc;
   const { bytes, lost } = encodeForSave(doc);
   if (lost.length > 0) {
@@ -1192,19 +1248,16 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
   if (opts.as) {
     const name = await promptDialog({ title: tr('名前を付けて保存', 'Save as'), body: tr('同じ曲フォルダに保存します。', 'Saves into the same song folder.'), value: fileName, ok: tr('保存', 'Save') });
     if (!name) return;
-    fileName = /\.dtx$/i.test(name) ? name : `${name}.dtx`;
+    // set.def（Shift_JIS）に書いても NX が読める名前にする
+    fileName = nxSafeName(/\.dtx$/i.test(name.trim()) ? name.trim() : `${name.trim()}.dtx`, 'chart');
   }
   let folder = s.folder;
   // 本体に入れている途中なら、入れ終わってから保存する
   if (folder && !folder.dir) await promotions.get(folder);
   const kit = await kitFilesNeeded(doc, folder);
   try {
-    if (isDiskFolder(folder) && otherSongsIn(folder).length) {
-      // ほかの曲も入ったフォルダ（DTXFiles など）には直接書かない：この曲だけのフォルダを作って移してから保存する
-      const moved = await moveToOwnSongFolder();
-      if (!moved) return;
-      folder = moved;
-    }
+    // ほかの曲も入ったフォルダ（DTXFiles など）からは、最初にこの曲だけのフォルダへ移している
+    if (isDiskFolder(folder) && otherSongsIn(folder).length) return;
     if (isDiskFolder(folder)) {
       if (!(await ensureWritable(folder))) {
         toast(tr('フォルダへの書き込みが許可されませんでした', 'Writing to the folder was not allowed'), 'error');
@@ -1387,7 +1440,8 @@ function downloadSong(fileName: string, bytes: Uint8Array, kit: { path: string; 
 }
 
 /** 譜面ファイルだけをダウンロード（どのブラウザでも使える控え） */
-export function downloadDtx() {
+export async function downloadDtx() {
+  await prepareForNx({ dtxOnly: true });
   const s = get();
   const { bytes } = encodeForSave(s.doc);
   downloadBytes(s.meta.fileName, bytes);
@@ -1418,6 +1472,7 @@ function autosaveEntry(s: EditorState): RecentEntry {
     text: serializeDtx(withSongEnd(s.doc)),
     sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()),
     saved: !isDirty(s),
+    sidecarSaved: !useSidecar.getState().dirty,
     updatedAt: Date.now(),
   };
 }
@@ -1509,12 +1564,12 @@ async function tellOtherDrafts() {
 async function openEntryInFolder(folder: SongFolder, e: RecentEntry) {
   const f = findFile(folder, e.fileName);
   if (f) {
-    await openDtxFile(folder, f, undefined, e.saved ? undefined : e.text, e.sidecar);
+    await openDtxFile(folder, f, undefined, e.saved ? undefined : e.text, recentSidecarOf(e));
     return;
   }
   const parsed = parseDtx(e.text);
   openDocument(parsed.doc, { ...newMeta(e.fileName, folder), recentId: e.id, warnings: parsed.warnings, hasRandom: parsed.hasRandom }, folder, { dirty: true });
-  await loadSidecarFor(folder, e.fileName, e.sidecar);
+  await loadSidecarFor(folder, e.fileName, recentSidecarOf(e));
 }
 
 async function openRecentEntry(e: RecentEntry) {
@@ -1615,9 +1670,11 @@ export async function buildExport(
   what: ExportWhat,
   opts: { encoding?: 'shift_jis' | 'utf-8-bom'; diffs?: string[]; ask?: boolean } = {},
 ): Promise<{ file: ExportFile; lost: string[] } | null> {
+  const enc = opts.encoding ?? 'shift_jis';
+  // 試聴（#PREVIEW）が空なら原曲を入れ、Shift_JIS で書き出すときは譜面に書くファイル名を NX で読める名前にしてから
+  await prepareForNx({ rename: enc === 'shift_jis', dtxOnly: what !== 'folder' });
   const s = get();
   const doc = s.doc;
-  const enc = opts.encoding ?? 'shift_jis';
   const { bytes, lost } = encodeDtx(serializeDtx(withSongEnd(doc)), enc);
   // ask: false なら確かめずに作り、表せない文字は返す（「保存と書き出し」は前もって作っておき、画面に出す）
   if (lost.length > 0 && opts.ask !== false) {
