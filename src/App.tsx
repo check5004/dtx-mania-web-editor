@@ -3,7 +3,7 @@ import { tr } from './i18n';
 import { useLang } from './i18n/useLang';
 import { startAutosave } from './app/fileActions';
 import { dismissToast, useEditor } from './store/editor';
-import './store/device';
+import { useDevice } from './store/device';
 import './store/stems';
 import './store/kit';
 import { loadLibrary } from './store/library';
@@ -53,6 +53,7 @@ function Toasts() {
 
 export function App() {
   const screen = useEditor((s) => s.screen);
+  const phone = useDevice((s) => s.phone);
   // 言語が変わったら全体を描き直す（memo を使っていないので、ここで描き直せば下の画面もすべて描き直る）
   useLang();
   useEffect(() => startAutosave(), []);
@@ -62,6 +63,8 @@ export function App() {
   return (
     <>
       {screen === 'home' ? <Home /> : <Editor />}
+      {/* スマホの縦：画面の上端に上のバーと同じ色の帯（iOS の Safari が上端にかけるぼかしを消す。phone.css の .p-edge-top） */}
+      {phone && <div className="p-edge-top" aria-hidden="true" />}
       <DialogHost />
       <Toasts />
       <LocalCopyChip />

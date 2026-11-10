@@ -2,6 +2,29 @@
    html.phone のときだけ出る部品（p- で始まる）と、スマホのときだけ変えるほかの画面の見た目。
    スマホは html.tablet も付く（タブレット版の決まりの上に、スマホの画面を出す）。PC・iPad の見た目は変えない */
 
+/* ---- 画面の上端の帯（縦） ----
+   iOS 26 からの Safari は、ページの上端に幅いっぱいの不透明な position: fixed の物があると、その色を
+   ステータスバーの裏まで伸ばし、上端にかけるぼかし（だんだん薄くなる帯）を出さない。無いと、上のバーの上の方が
+   ぼやけて見にくい。そこで上のバーと同じ色の帯を画面の上 6px にだけ置く（指は下へ通す）。
+   Safari がその物の背景色を使うのは高さが 10px を超えるときだけなので、画面の上へはみ出させて 22px にしている。
+   上のバーの中身は 6px より下から（.p-top・.ph-top の上の余白は 4px 以上）。ダイアログやメニューの暗い幕はこの上に重なる */
+
+.p-edge-top {
+  display: none;
+}
+
+html.phone-port .p-edge-top {
+  display: block;
+  position: fixed;
+  top: -16px;
+  left: 0;
+  right: 0;
+  height: 22px;
+  z-index: 6;
+  background: var(--bar);
+  pointer-events: none;
+}
+
 /* ---- エディタの枠 ---- */
 
 .p-editor {
@@ -417,8 +440,9 @@
   align-items: center;
   gap: 2px;
   flex: none;
-  height: calc(44px + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 6px 0 2px;
+  /* 上の余白は 4px 以上（Safari のタブではステータスバーの下がすぐ画面の上端なので、上端の帯 .p-edge-top にボタンがかからないように） */
+  height: calc(44px + max(env(safe-area-inset-top), 4px));
+  padding: max(env(safe-area-inset-top), 4px) 6px 0 2px;
   background: #0e1217;
   border-bottom: 1px solid #1e242d;
   white-space: nowrap;
@@ -1768,10 +1792,11 @@ html.phone .p-chart .rec-badge.key {
 
 /* ---- ホーム（スマホ） ---- */
 
+/* 横では左右の切り欠き（セーフエリア）の内側に。上の余白は 4px 以上（上端の帯 .p-edge-top にかからないように） */
 .ph-top {
   height: 52px;
-  padding: 0 10px 0 16px;
-  padding-top: env(safe-area-inset-top);
+  padding: 0 calc(10px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));
+  padding-top: max(env(safe-area-inset-top), 4px);
   box-sizing: content-box;
 }
 
@@ -1795,7 +1820,7 @@ html.phone .p-chart .rec-badge.key {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+  padding: 16px calc(16px + env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
 }
 
 .ph-main .lbl {
@@ -2541,7 +2566,10 @@ html.phone-land .pg-transport {
 
 html.phone-land .gen-page,
 html.phone-land .ps-page,
-html.phone-land .info-page {
+html.phone-land .info-page,
+html.phone-land .lib-page,
+html.phone-land .tempo-page,
+html.phone-land .guide-page {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }

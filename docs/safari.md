@@ -65,6 +65,16 @@ JavaScript の機能は `tsconfig.json` の `lib`（ES2023 = Safari 16.4 以降�
 - 画面の高さは `--app-h`（`src/store/device.ts` が表示域から入れる）。`100vh` はアドレスバーの出し入れで変わるので、全画面の高さには使わない。
 - ホバーに頼らない（指では出ない）。長押し・右クリックのメニューで代わりを用意する。
 
+### 画面（iPhone）：上端のぼかしと切り欠き
+
+- iOS 26 からの Safari は、ページの上端（ステータスバーのすぐ下）に、だんだん薄くなるぼかしをかける。上のバーのボタンや文字がぼやけて見にくくなる。`theme-color` はもう使われない（色はページから拾う）。
+- ぼかしを消すには、上端に「幅いっぱい（画面の 90% 以上）・不透明・`position: fixed`（か sticky）」の物を置く。Safari は上端の真ん中・上から 4px の所で一番上にある物を探し、見つかるとその背景色をステータスバーの裏まで伸ばして、ぼかしを出さない（WebKit の `LocalFrameView::fixedContainerEdges` と `WKWebView` の `_shouldHideTopScrollPocket`）。背景色をそのまま使うのは、その物の高さが 10px を超えるときだけ（薄いと画素を拾う）。`backdrop-filter` があると「色がいくつもある」扱いになるので付けない。`::before` のような疑似要素では見つけてもらえない（本物の要素にする）。
+- スマホの縦では、`src/App.tsx` が置く `.p-edge-top`（`src/phone.css`）がこの帯。上のバーと同じ色で、画面の上へはみ出させて高さ 22px（見えるのは上の 6px）、指は下へ通す。ダイアログやメニューの暗い幕はこの上に重なる（そのときは Safari が幕の色を伸ばす）。
+- そのため、スマホの縦の全画面の画面は、上のバーの中身を上から 6px より下に置く（`.p-top`・`.ph-top` は `padding-top: max(env(safe-area-inset-top), 4px)`）。Safari のタブの縦では `env(safe-area-inset-top)` は 0 になる（ページはステータスバーの下から始まる）。
+- ホーム画面のアプリは `apple-mobile-web-app-status-bar-style` を `black` にしている（ステータスバーは黒で、ページはその下から始まる）。`black-translucent` にすると、iOS 26 以降はページの上の方に大きくぼかしがかかる報告があるので変えない。この設定はホーム画面に追加したときに読まれるので、変えたら追加し直してもらう必要がある。
+- 横向きでは左右に切り欠き（ノッチ・Dynamic Island）が来る。全画面の画面は `env(safe-area-inset-left)`・`env(safe-area-inset-right)` の内側に中身を置く（`src/phone.css` の `html.phone-land` の各ページの並び、ホームの `.ph-top`・`.ph-main`、譜面の `.p-editor.land`）。スマホの全画面の画面を足したら、ここに足す。
+- 確かめ方: Playwright（Chromium）で CDP の `Emulation.setSafeAreaInsetsOverride` を使い、iPhone 17 の縦（上 62・下 34）・横（左右 62・下 21）と、Safari のタブの縦（上 0）を入れて撮る。上端の真ん中・上から 4px で一番上にあるのが `.p-edge-top` かは、帯の `pointer-events` を一時的に戻して `document.elementFromPoint` で見る。ぼかしそのものは実機でしか見えない。
+
 ## 4. ブラウザの判定
 
 `src/platform.ts` に集めています。UA を見る判定はここ以外に書かない。

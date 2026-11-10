@@ -12,4 +12,5 @@
 - `new AudioContext` は `src/audio/engine.ts` だけ。音の読み込みは `engine.decodeAudio()`。
 - Safari に無い API（フォルダ選択・Web MIDI・タブの音・`requestIdleCallback` など）は、有無を確かめてから使い、無いときの道を用意する。
 - ブラウザの判定は `src/platform.ts`（動きの分岐は `IS_WEBKIT`、案内の文は `IS_SAFARI`）。
+- スマホの全画面の画面を足したら、横は中身を左右の切り欠きの内側（`env(safe-area-inset-left/right)`）に、縦は上のバーの中身を上から 6px より下に置く（上端の帯 `.p-edge-top` が Safari のぼかしを消している）。docs/safari.md の「画面（iPhone）」。
 - Safari のためだけに大きく作り直さない（Chrome で使えれば足りる要望。うまく動かないときは Chrome を案内する）。迷ったら docs/safari.md。
