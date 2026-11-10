@@ -45,6 +45,11 @@ import { Icon } from './icons';
 import { StemTrackPopover } from './StemTrackPopover';
 import { SeparatePanel } from './SeparatePanel';
 import { closeSeparationPanel, useSeparate } from '../store/separate';
+import { useDevice } from '../store/device';
+import { IS_IPHONE } from '../platform';
+import { LoopButton, PlayButtons } from './phone/PhoneEditor';
+import { PosBox, TrackLine } from './phone/PhoneParts';
+import { useTrackRows } from './Tracks';
 
 const RULER_H = 48;
 const ROW_H = 96;
@@ -55,6 +60,12 @@ const db = (g: number) => (g <= 0.0001 ? '−∞ dB' : `${g >= 1 ? '+' : ''}${(2
 const panLabel = (p: number) => (Math.abs(p) < 0.05 ? 'C' : `${p < 0 ? 'L' : 'R'}${Math.round(Math.abs(p) * 10)}`);
 
 export function StemsPage() {
+  const phone = useDevice((s) => s.phone);
+  return phone ? <PhoneStems /> : <StemsWide />;
+}
+
+/** PC・タブレット：トラックを縦に並べ、波形を時間で横に流す */
+function StemsWide() {
   const doc = useEditor((s) => s.doc);
   const stems = useSidecar((s) => s.stems);
   const busy = useStems((s) => s.busy);
@@ -708,6 +719,176 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
       />
     </div>
   );
+}
+
+// ---- スマホ -------------------------------------------------------------------------
+
+/**
+ * スマホ：承認されたデザインのとおり、上から再生の帯・トラック（聞こえ方と、M・S・音量・解析元）・ステムを足す・
+ * エディタに入っている音・書き出し。ステムの分解はしない（メモリが足りない）。PC・iPad で分けたファイルを足すのはできる
+ */
+function PhoneStems() {
+  const doc = useEditor((s) => s.doc);
+  const stems = useSidecar((s) => s.stems);
+  const busy = useStems((s) => s.busy);
+  const listen = useStems((s) => s.listen);
+  useStems((s) => s.version);
+  const rows = useTrackRows();
+  const span = useSongSpan(doc);
+  const total = Math.max(span, stemsDuration() + (bgmSource(doc)?.sec ?? 0), 10);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [pop, setPop] = useState<{ file: string; rect: DOMRect } | null>(null);
+  const hasDrums = stems.some((t) => t.kind === 'drums');
+  return (
+    <div className="tempo-page ps-page pst-page">
+      <header className="ps-head">
+        <button className="p-btn sm" onClick={backToChart}>
+          {Icon.back(16)}
+          <span>{tr('戻る', 'Back')}</span>
+        </button>
+        <span className="ps-title">
+          <b>{tr('ステムとミックス', 'Stems & mix')}</b>
+          <span className="lbl ellipsis">
+            {doc.fields['TITLE'] || tr('無題', 'Untitled')} · {tr(`ステム ${stems.length} 本`, `${stems.length} ${pl(stems.length, 'stem')}`)}
+            {busy ? ` · ${busy}` : ''}
+          </span>
+        </span>
+        <span className="grow" />
+        <button className="p-ib boxed" onClick={() => fileInput.current?.click()} aria-label={tr('ステムを追加', 'Add stems')} title={tr('ステムを追加', 'Add stems')}>
+          {Icon.plus(20)}
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          accept="audio/*,.ogg,.wav,.mp3,.flac,.m4a,.opus"
+          hidden
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])];
+            e.target.value = '';
+            void importStems(files);
+          }}
+        />
+      </header>
+      <div className="pst-transport">
+        <PlayButtons />
+        <PosBox />
+        <span className="grow" />
+        <LoopButton boxed />
+      </div>
+      <main className="scroll pst-main">
+        <section className="ph-sec">
+          <div className="ph-h2">
+            <h2>{tr('トラック', 'Tracks')}</h2>
+            <span className="lbl ellipsis">{tr('M ミュート · S ソロ · ◎ 解析に使う', 'M mute · S solo · ◎ analysis')}</span>
+          </div>
+          {stems.length > 0 && (
+            <div className="p-seg pst-listen" role="radiogroup" aria-label={tr('聞こえ方', 'Listen')}>
+              {LISTEN_PRESETS.map((p) => (
+                <button key={p.id} className={listen === p.id ? 'on' : ''} role="radio" aria-checked={listen === p.id} disabled={p.id === 'drums' && !hasDrums} onClick={() => setListen(p.id)} title={p.hint}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="ph-group pst-tracks">
+            {rows.map((r) => (
+              <div key={r.id} className="pst-trk">
+                <TrackLine row={r} analysis />
+                {r.type === 'stem' && (
+                  <div className="pst-trk-more">
+                    <span className="lbl mono ellipsis">
+                      {r.t.file.replace(/^stems\//, '')} · {stemKindInfo(r.t.kind).label}
+                    </span>
+                    <button
+                      className="p-ib sm"
+                      onClick={(e) => setPop({ file: r.t.file, rect: (e.currentTarget.closest('.pst-trk') as HTMLElement).getBoundingClientRect() })}
+                      aria-label={tr(`${r.t.name}の名前と種類を変える`, `Change the name and type of ${r.t.name}`)}
+                    >
+                      {Icon.pencil(16)}
+                    </button>
+                  </div>
+                )}
+                {r.type === 'stem' && <StemWave t={r.t} total={total} />}
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="ph-tips pst-add">
+          <div className="ph-tips-head">
+            <span className="ph-tip-i">{Icon.layers(20)}</span>
+            <b>{tr('ステムを足す', 'Add stems')}</b>
+          </div>
+          <span className="lbl">
+            {IS_IPHONE
+              ? tr(
+                  'iPhone ではステムの分解はできません（メモリが足りません）。PC か iPad で分けたファイルを、曲の ZIP ごと持ってくるか、ここで足してください。名前の drums・no drums などから種類を決めます。',
+                  'Separating stems is not available on iPhone (not enough memory). Bring files separated on a PC or iPad inside the song ZIP, or add them here. The type is guessed from names like drums or no drums.',
+                )
+              : tr(
+                  'スマホではステムの分解はできません（メモリが足りません）。PC か iPad で分けたファイルを、曲の ZIP ごと持ってくるか、ここで足してください。名前の drums・no drums などから種類を決めます。',
+                  'Separating stems is not available on phones (not enough memory). Bring files separated on a PC or iPad inside the song ZIP, or add them here. The type is guessed from names like drums or no drums.',
+                )}
+          </span>
+          <button className="p-btn pst-add-btn" onClick={() => fileInput.current?.click()}>
+            {Icon.plus(18)}
+            <span>{tr('ファイルを選んで足す', 'Choose files to add')}</span>
+          </button>
+        </section>
+        <ExportPanel />
+      </main>
+      {pop && <StemTrackPopover file={pop.file} anchor={pop.rect} onClose={() => setPop(null)} />}
+    </div>
+  );
+}
+
+/** スマホ：1 本のステムの波形（曲全体）と再生位置。触れた所へ ▶ を動かす */
+function StemWave({ t, total }: { t: StemTrack; total: number }) {
+  const doc = useEditor((s) => s.doc);
+  const version = useStems((s) => s.version);
+  const playing = useEditor((s) => s.playing);
+  const beat = usePlayBeat();
+  const tempo = tempoOf(doc);
+  const anchor = bgmSource(doc)?.sec ?? 0;
+  const color = stemKindInfo(t.kind).color;
+  const off = !stemAudible(t);
+  const ref = useCanvas(
+    (ctx, W, H) => {
+      ctx.clearRect(0, 0, W, H);
+      const peaks = stemPeaks(t.file);
+      const secPerPx = total / W;
+      if (peaks) {
+        ctx.fillStyle = color;
+        ctx.globalAlpha = off ? 0.3 : 0.85;
+        const mid = H / 2;
+        for (let x = 0; x < W; x++) {
+          const t0 = x * secPerPx - anchor;
+          let i0 = Math.floor(t0 * PEAK_RATE);
+          let i1 = Math.ceil((t0 + secPerPx) * PEAK_RATE);
+          if (i1 < 0 || i0 >= peaks.length) continue;
+          i0 = Math.max(0, i0);
+          i1 = Math.min(peaks.length - 1, Math.max(i0, i1));
+          let mx = 0;
+          for (let k = i0; k <= i1; k++) if (peaks[k] > mx) mx = peaks[k];
+          const h = Math.max(0.5, mx * (H / 2 - 2));
+          ctx.fillRect(x, mid - h, 1, h * 2);
+        }
+        ctx.globalAlpha = 1;
+      }
+      const x = (tempo.beatToSec(Math.max(0, beat)) / total) * W;
+      ctx.fillStyle = playing ? '#FFB547' : '#4CC2FF';
+      ctx.fillRect(Math.round(x) - 1, 0, 2, H);
+    },
+    [t, total, version, playing, beat, doc, off],
+  );
+  const seek = (clientX: number) => {
+    const r = ref.current!.getBoundingClientRect();
+    const sec = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * total;
+    const b = tempoOf(useEditor.getState().doc).secToBeat(sec);
+    setCursorBeat(b);
+    if (useEditor.getState().playing) void playFrom(b);
+  };
+  return <canvas ref={ref} className="pst-wave" onClick={(e) => seek(e.clientX)} aria-label={tr(`${t.name}の波形（触れた所へ ▶ を動かす）`, `${t.name} waveform (tap to move ▶ there)`)} />;
 }
 
 // ---- 書き出し -------------------------------------------------------------------

@@ -4,7 +4,7 @@ import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch
 import { create } from 'zustand';
 import { engine, type Mix, type SoundEvent, type WavSource } from '../audio/engine';
 import { builtinFile, virtualSound } from '../audio/sounds';
-import { IS_IOS, oggUnsupported } from '../platform';
+import { IS_IOS, iosName, oggUnsupported } from '../platform';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
@@ -965,9 +965,11 @@ function warnOldSafariOgg(failedPaths: string[]) {
   warnedOgg = true;
   toast(
     IS_IOS
-      ? tr(
-          'この iPad の Safari は OGG の音を読めないため、曲の音が鳴りません（iPadOS 18.4 以降で読めます）。iPadOS を新しくするか、PC の Chrome をお使いください。',
-          "This iPad's Safari can't read OGG audio, so the song's sounds won't play (iPadOS 18.4 or later can). Update iPadOS or use Chrome on a PC.",
+      ? iosName(
+          tr(
+            'この iPad の Safari は OGG の音を読めないため、曲の音が鳴りません（iPadOS 18.4 以降で読めます）。iPadOS を新しくするか、PC の Chrome をお使いください。',
+            "This iPad's Safari can't read OGG audio, so the song's sounds won't play (iPadOS 18.4 or later can). Update iPadOS or use Chrome on a PC.",
+          ),
         )
       : tr(
           'この Safari は OGG の音を読めないため、曲の音が鳴りません（Safari 18.4 以降で読めます）。Safari を新しくするか、Chrome をお使いください。',

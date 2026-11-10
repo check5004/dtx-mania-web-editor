@@ -39,6 +39,13 @@ const chromeIos = typeof window !== 'undefined' && '__gCrWeb' in window;
 
 /** iPad・iPhone */
 export const IS_IOS = detectIos(ua, touch);
+/** iPhone（iPod touch も）。案内の文で「iPad」を「iPhone」にするときに使う */
+export const IS_IPHONE = /iPhone|iPod/.test(ua);
+
+/** 案内の文の「iPad」を iPhone では「iPhone」に、「iPadOS」を「iOS」にする。PC・iPad ではそのまま */
+export function iosName(text: string, iphone = IS_IPHONE): string {
+  return iphone ? text.replace(/iPadOS/g, 'iOS').replace(/iPad/g, 'iPhone') : text;
+}
 /** WebKit（Safari の仕組み）で動いている。iPad・iPhone のブラウザはすべて */
 export const IS_WEBKIT = detectWebkit(ua, touch);
 /** Safari そのもの（Mac・iPad・iPhone）。iPad の Chrome などは含まない */

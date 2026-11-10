@@ -1,5 +1,6 @@
 // 設定画面: 言語、電子ドラム（MIDI）、キーボード、入力の遅れの補正、AI、アプリ（追加・オフライン・更新）。ブラウザに保存する。
-import { tr, pl, isJa } from '../i18n';
+import { tr, pl, isJa, LANG_NAMES } from '../i18n';
+import { useLang } from '../i18n/useLang';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { engine } from '../audio/engine';
 import { DRUM_LANES } from '../dtx/model';
@@ -19,7 +20,7 @@ import {
   useInputSettings,
   type LaneTarget,
 } from '../input/settings';
-import { NO_MIDI, useDevice } from '../store/device';
+import { iosName, IS_IOS, NO_MIDI, useDevice } from '../store/device';
 import { goBack, openPage, useEditor } from '../store/editor';
 import { velPresetNames } from '../store/velocity';
 import { AiSettings } from './AiSettings';
@@ -42,7 +43,7 @@ const targets = (): { t: LaneTarget; key: string; name: string; color: string }[
 
 export function SettingsPage() {
   const tablet = useDevice((s) => s.tablet);
-  const [sec, setSec] = useState<Section>(() => (useEditor.getState().settingsSection as Section | undefined) ?? (useDevice.getState().tablet ? 'touch' : 'midi'));
+  const phone = useDevice((s) => s.phone);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !document.querySelector('.capturing')) goBack();
@@ -53,6 +54,12 @@ export function SettingsPage() {
       startLearn(null);
     };
   }, []);
+  return phone ? <PhoneSettings /> : <WideSettings tablet={tablet} />;
+}
+
+/** PC・タブレット：左に項目、右に中身 */
+function WideSettings({ tablet }: { tablet: boolean }) {
+  const [sec, setSec] = useState<Section>(() => (useEditor.getState().settingsSection as Section | undefined) ?? (tablet ? 'touch' : 'midi'));
   return (
     <div className="tempo-page">
       <header className="tempo-head">
@@ -81,20 +88,107 @@ export function SettingsPage() {
           ))}
         </nav>
         <main className="settings-main scroll">
-          {sec === 'lang' && <LanguageSettings />}
-          {sec === 'touch' && <TouchSettings />}
-          {sec === 'pads' && <PadSettings />}
-          {sec === 'midi' && <MidiSettings />}
-          {sec === 'keys' && <KeySettings />}
-          {sec === 'lanes' && <LaneOrderSettings />}
-          {sec === 'latency' && <LatencySettings />}
-          {sec === 'sound' && <AudioCheck />}
-          {sec === 'velocity' && <VelocitySettings />}
-          {sec === 'ai' && <AiSettings />}
-          {sec === 'drive' && <DriveSettings />}
-          {sec === 'app' && <AppSettings />}
+          <SectionBody sec={sec} />
         </main>
       </div>
+    </div>
+  );
+}
+
+function SectionBody({ sec }: { sec: Section }) {
+  return (
+    <>
+      {sec === 'lang' && <LanguageSettings />}
+      {sec === 'touch' && <TouchSettings />}
+      {sec === 'pads' && <PadSettings />}
+      {sec === 'midi' && <MidiSettings />}
+      {sec === 'keys' && <KeySettings />}
+      {sec === 'lanes' && <LaneOrderSettings />}
+      {sec === 'latency' && <LatencySettings />}
+      {sec === 'sound' && <AudioCheck />}
+      {sec === 'velocity' && <VelocitySettings />}
+      {sec === 'ai' && <AiSettings />}
+      {sec === 'drive' && <DriveSettings />}
+      {sec === 'app' && <AppSettings />}
+    </>
+  );
+}
+
+/** スマホ：項目の一覧から 1 つずつ開く（承認されたデザインの設定のとおり）。電子ドラムは MIDI が無いブラウザでは押せない */
+function PhoneSettings() {
+  const [sec, setSec] = useState<Section | null>(() => (useEditor.getState().settingsSection as Section | undefined) ?? null);
+  const lang = useLang();
+  const place = useDevice((s) => s.placeMode);
+  const names = new Map(navItems(true));
+  const row = (k: Section, value = '', sub = '') => {
+    const off = k === 'midi' && NO_MIDI;
+    return (
+      <button key={k} className={`ps-row ${off ? 'off' : ''}`} onClick={() => setSec(k)} disabled={off}>
+        <span className="ps-row-text">
+          <span className="ellipsis">{names.get(k)}</span>
+          {sub && <span className="lbl ellipsis">{sub}</span>}
+        </span>
+        {value && <span className="lbl ps-row-val ellipsis">{value}</span>}
+        {!off && <span className="ps-chev">{Icon.chevronRight(18)}</span>}
+      </button>
+    );
+  };
+  if (sec) {
+    return (
+      <div className="tempo-page ps-page">
+        <header className="ps-head">
+          <button className="p-btn sm" onClick={() => setSec(null)}>
+            {Icon.back(16)}
+            <span>{tr('設定', 'Settings')}</span>
+          </button>
+          <b className="ellipsis">{names.get(sec)}</b>
+        </header>
+        <main className="settings-main scroll ps-main">
+          <SectionBody sec={sec} />
+        </main>
+      </div>
+    );
+  }
+  return (
+    <div className="tempo-page ps-page">
+      <header className="ps-head">
+        <button className="p-btn sm" onClick={goBack}>
+          {Icon.back(16)}
+          <span>{useEditor.getState().returnPage && useEditor.getState().returnPage !== 'chart' ? tr('戻る', 'Back') : tr('エディタ', 'Editor')}</span>
+        </button>
+        <span className="ps-title">
+          <b>{tr('設定', 'Settings')}</b>
+          <span className="lbl ellipsis">{tr('このブラウザに保存します', 'Saved in this browser')}</span>
+        </span>
+      </header>
+      <main className="scroll ps-list">
+        <div className="ps-group">
+          {row('lang', LANG_NAMES[lang])}
+          {row('touch', place === 'instant' ? tr('すぐ置く', 'Instant') : tr('吹き出し', 'Bubble'))}
+          {row('pads')}
+          {row('keys')}
+          {row('midi', '', NO_MIDI ? (IS_IOS ? iosName(tr('iPad のブラウザは MIDI をつなげません', 'iPad browsers cannot use MIDI')) : tr('このブラウザは MIDI をつなげません', 'This browser cannot use MIDI')) : '')}
+          {row('lanes')}
+        </div>
+        <div className="ps-group">
+          {row('latency')}
+          {row('sound')}
+          {row('velocity')}
+        </div>
+        <div className="ps-group">
+          {row('ai')}
+          <button className="ps-row" onClick={() => openPage('guideline')}>
+            <span className="ps-row-text">
+              <span className="ellipsis">{tr('難易度ガイドライン', 'Difficulty guidelines')}</span>
+            </span>
+            <span className="lbl ps-row-val ellipsis">{tr('横向きで開く', 'Landscape')}</span>
+            <span className="ps-chev">{Icon.chevronRight(18)}</span>
+          </button>
+          {row('drive')}
+          {row('app')}
+        </div>
+        {NO_MIDI && <p className="lbl ps-note">{tr('電子ドラムをつなぐ・曲フォルダを開くは PC の Chrome・Edge で使えます。', 'E-drums and song folders work in Chrome or Edge on a PC.')}</p>}
+      </main>
     </div>
   );
 }

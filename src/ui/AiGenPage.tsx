@@ -2,7 +2,7 @@
 // 曲全体で並べて聴き比べる（押して手直し）、AI のレベル判定と方針、エディタへの反映（曲フォルダに譜面を書き set.def に載せる）。
 // 再生の操作はエディタと同じ（Space・Shift+Space・▶・ループ・速さ）。
 import { tr, pl, locale } from '../i18n';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
 import { frac } from '../dtx/fraction';
@@ -60,6 +60,8 @@ import { Icon } from './icons';
 import { MasterMixer, TrackMixStrip } from './MixPanel';
 import { OriginBadge, originTitle } from './OriginBadge';
 import { FollowToggle, LoopControls, PlayControls, SpeedControl } from './Transport';
+import { PlayButtons } from './phone/PhoneEditor';
+import { PosBox, VolumeButton } from './phone/PhoneParts';
 
 const keepItems = (): { k: keyof ReturnType<typeof useGen.getState>['keep']; label: string }[] => [
   { k: 'backbeat', label: tr('2・4拍のスネア（バックビート）', 'Snare on beats 2 and 4 (backbeat)') },
@@ -221,6 +223,29 @@ function GenTransport() {
   );
 }
 
+/** スマホ：再生・位置・聴く譜面・音量（承認されたデザインの AI 難易度生成のとおり） */
+function PhoneGenTransport() {
+  const listen = useGen((s) => s.listen);
+  const choices = useGen((s) => listenChoices(s).join(','));
+  return (
+    <div className="pg-transport">
+      <PlayButtons />
+      <PosBox />
+      <div className="p-seg pg-listen" role="radiogroup" aria-label={tr('聴く譜面', 'Chart to hear')}>
+        {SLOTS.map((x) => (
+          <button key={x} role="radio" aria-checked={listen === x} className={listen === x ? 'on' : ''} disabled={!choices.split(',').includes(x)} onClick={() => setListen(x)}>
+            {SHORT_SLOT[x]}
+          </button>
+        ))}
+      </div>
+      <span className="grow" />
+      <VolumeButton dir="up-end" />
+    </div>
+  );
+}
+
+const SHORT_SLOT: Record<Slot, string> = { MASTER: 'MAS', EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
+
 export function AiGenPage() {
   const g = useGen();
   const hasKey = useHasAiKey();
@@ -230,6 +255,11 @@ export function AiGenPage() {
   const charts = useGuideline((s) => s.charts.length);
   const sections = useSidecar((s) => s.sections);
   const tablet = useDevice((s) => s.tablet);
+  const phone = useDevice((s) => s.phone);
+  const portrait = useDevice((s) => s.portrait);
+  // スマホの縦：1 つずつ大きく見せる。作る設定は下からのシート
+  const one = phone && portrait;
+  const [setup, setSetup] = useState(false);
   const detail = useTabletUi((s) => s.genDetail);
   useEffect(() => {
     initGen();
@@ -258,10 +288,10 @@ export function AiGenPage() {
   const same = sameGroups(master);
 
   return (
-    <div className="gen-page">
+    <div className={`gen-page ${one ? 'pg-one' : ''} ${one && setup ? 'pg-setup' : ''}`}>
       <header className="tempo-head">
         <button className="btn small ghost" onClick={() => void leaveGen()}>
-          {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
+          {Icon.back(14)} {phone ? tr('戻る', 'Back') : tr('エディタに戻る', 'Back to editor')}
         </button>
         <div className="vsep" />
         <span className="ai-spark">{Icon.sparkle(15)}</span>
@@ -274,10 +304,17 @@ export function AiGenPage() {
           </span>
         </div>
         <span className="grow" />
-        <MasterMixer />
-        <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? tr(`1難易度 約 ${formatUsd(costPer)}＋判定`, `About ${formatUsd(costPer)} per difficulty + level check`) : noKeyTitle()}>
-          {hasKey ? `● OpenRouter · ${model}` : tr('キー未設定 · ルールだけで簡略化', 'No API key · rule-based simplification only')}
-        </span>
+        {one && (
+          <button className={`p-ib ${setup ? 'on' : ''}`} onClick={() => setSetup(!setup)} aria-pressed={setup} aria-label={tr('作る設定', 'Generation settings')} title={tr('作る設定（作る難易度・目標レベル・必ず残すもの）', 'Generation settings (which difficulties, target levels, what to keep)')}>
+            {Icon.sliders(20)}
+          </button>
+        )}
+        {!phone && <MasterMixer />}
+        {!phone && (
+          <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? tr(`1難易度 約 ${formatUsd(costPer)}＋判定`, `About ${formatUsd(costPer)} per difficulty + level check`) : noKeyTitle()}>
+            {hasKey ? `● OpenRouter · ${model}` : tr('キー未設定 · ルールだけで簡略化', 'No API key · rule-based simplification only')}
+          </span>
+        )}
         {/* 1つの難易度の作り直し・易しく・難しくは、その難易度のカードの中（右上はエディタに反映だけ） */}
         <button
           className={`btn small ${allApplied ? 'gen-applied' : 'primary'}`}
@@ -299,9 +336,28 @@ export function AiGenPage() {
               : tr('エディタに反映', 'Add to editor')}
         </button>
       </header>
-      <GenTransport />
+      {phone ? <PhoneGenTransport /> : <GenTransport />}
       <div className="gen-body">
+        {one && (setup || detail) && (
+          <div
+            className="pg-back"
+            onClick={() => {
+              setSetup(false);
+              setGenDetail(false);
+            }}
+            aria-hidden="true"
+          />
+        )}
         <aside className="gen-left scroll">
+          {one && (
+            <div className="row t-gen-pop-head">
+              <b>{tr('作る設定', 'Generation settings')}</b>
+              <span className="grow" />
+              <button className="ib" onClick={() => setSetup(false)} aria-label={tr('閉じる', 'Close')}>
+                {Icon.close(16)}
+              </button>
+            </div>
+          )}
           <div className="lbl">{tr('使う基準', 'Reference')}</div>
           <button className="card gen-guide" onClick={() => openPage('guideline')}>
             <span className="gen-doc">{Icon.file(15)}</span>
@@ -401,7 +457,7 @@ export function AiGenPage() {
           />
         </aside>
         <main className="gen-main">
-          <GenCompare />
+          <GenCompare only={one ? g.listen : undefined} />
           <div className="gen-foot">
             {selMade && ds.result ? (
               <>
@@ -434,12 +490,59 @@ export function AiGenPage() {
             >
               <i className="kept" /> {tr('残した', 'Kept')} <i className="removed" /> {tr('削った', 'Removed')} <i className="moved" /> {tr('移した', 'Moved')}
             </span>
-            {tablet && below.length > 0 && (
+            {tablet && !one && below.length > 0 && (
               <button className={`btn small ${detail ? 'on' : ''}`} onClick={() => setGenDetail((was) => !was)} aria-pressed={detail}>
                 {tr('判定と方針', 'Rating & plan')}
               </button>
             )}
+            {one && (
+              <span className="pill pg-turn">
+                {Icon.screen(14)} {tr('横にすると並べて聴き比べ', 'Turn sideways to compare side by side')}
+              </span>
+            )}
           </div>
+          {one && (
+            <div className="pg-acts">
+              {selMade && (
+                <button className="p-btn" onClick={() => void generate(ds.diff)} disabled={g.busy}>
+                  <span>{ds.result ? tr('作り直す', 'Regenerate') : tr('作る', 'Generate')}</span>
+                </button>
+              )}
+              {selChart && below.includes(g.selected) && (
+                <button className="p-btn" onClick={() => remake(g.selected)} disabled={g.busy} title={tr('この難易度も作り直す（エディタに反映するまで、曲フォルダの譜面は変わりません）', 'Make this difficulty again too (the chart in the song folder stays as it is until you add it to the editor)')}>
+                  <span>{tr('作り直す', 'Remake')}</span>
+                </button>
+              )}
+              {selMade && ds.result && (
+                <button className="p-btn" onClick={() => shiftRung(ds.diff, 1)} disabled={g.busy || ds.result.rung >= MAX_RUNG} title={tr('もっと簡単に（簡略化の段を上げる）', 'Make it easier (raise the simplification step)')}>
+                  {Icon.arrowDown(14)}
+                  <span>{tr('易しく', 'Easier')}</span>
+                </button>
+              )}
+              {selMade && ds.result && (
+                <button
+                  className="p-btn"
+                  onClick={() => shiftRung(ds.diff, -1)}
+                  disabled={g.busy || (ds.result.rung <= 0 && ds.result.ease === 0)}
+                  title={tr('元の譜面に近づける（簡略化の段を下げる）', 'Closer to the original chart (lower the simplification step)')}
+                >
+                  {Icon.arrowUp(14)}
+                  <span>{tr('難しく', 'Harder')}</span>
+                </button>
+              )}
+              {!selMade && !selChart && below.length > 0 && (
+                <button className="p-btn primary" onClick={() => void generateAll()} disabled={g.busy || g.chartsLoading || makes.length === 0}>
+                  {Icon.sparkle(14)}
+                  <span>{anyResult ? tr(`まとめて作り直す（${makes.length}）`, `Regenerate all (${makes.length})`) : tr(`まとめて作る（${makes.length}）`, `Generate all (${makes.length})`)}</span>
+                </button>
+              )}
+              {below.length > 0 && (
+                <button className={`p-btn ${detail ? 'on' : ''}`} onClick={() => setGenDetail((was) => !was)} aria-pressed={detail}>
+                  {tr('判定と方針', 'Rating & plan')}
+                </button>
+              )}
+            </div>
+          )}
           {!tablet && <TrackMixStrip />}
         </main>
         <aside className={`gen-right scroll ${tablet ? `t-gen-pop ${detail ? 'open' : ''}` : ''}`} aria-hidden={tablet && !detail ? true : undefined}>
@@ -538,7 +641,7 @@ export function AiGenPage() {
           {tablet && <p className="lbl t-gen-pop-hint">{tr('見出しをタップで聴く譜面を切り替え、もう一度タップでこの詳細。', 'Tap a heading to switch the chart you hear; tap it again for these details.')}</p>}
         </aside>
       </div>
-      {tablet && (
+      {tablet && !phone && (
         <div className="t-gen-mix">
           <TrackMixStrip />
         </div>

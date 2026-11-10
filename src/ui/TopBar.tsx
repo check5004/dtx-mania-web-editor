@@ -53,7 +53,8 @@ import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
 import { MasterMixer } from './MixPanel';
 import { MenuBar, type MenuDef, type MenuEntry } from './MenuBar';
-import { NO_FOLDER_PICK, openSheet, setTracksOpen, togglePanelT, useDevice, type PanelId } from '../store/device';
+import { NO_FOLDER_PICK, openPhoneTab, openSheet, setTracksOpen, togglePanelT, useDevice, type PanelId, type PhoneTab } from '../store/device';
+import { useAssist } from '../store/assist';
 import { openFilesPicker, openSaveSheet, tabletPanels } from './tablet/shared';
 import { useLang } from '../i18n/useLang';
 import { ORIGIN_KEY, originOf } from '../dtx/origin';
@@ -112,8 +113,8 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
     {
       label: tr('ファイル', 'File'),
       items: () => [
-        NO_FOLDER_PICK
-          ? { label: tr('ZIP・ファイルを開く…', 'Open ZIP or files…'), run: () => openFilesPicker() }
+        NO_FOLDER_PICK || useDevice.getState().phone
+          ? { label: tr('曲の ZIP・ファイルを開く…', 'Open song ZIP or files…'), run: () => openFilesPicker() }
           : { label: tr('曲フォルダを開く…', 'Open song folder…'), key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
         { label: tr('新しい譜面…', 'New chart…'), run: () => void newEmptySong() },
         { label: bgmSource(s().doc) ? tr('原曲を差し替える…', 'Replace original audio…') : tr('原曲（音声ファイル）を読み込む…', 'Load original audio file…'), run: pickBgmFile },
@@ -190,12 +191,17 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         '-',
         ...GRID_DIVS.map((d) => ({ label: tr(`グリッド ${gridLabel(d)}`, `Grid ${gridLabel(d)}`), checked: s().view.div === d, run: () => setView({ div: d }) })),
         '-',
-        { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) },
+        { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) && !useDevice.getState().phone },
         { label: tr('BGA の列を広げてサムネイルを出す', 'Widen BGA columns to show thumbnails'), checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
         '-',
-        tablet
-          ? { label: tr('NX風プレビュー（パネル）', 'NX-style preview (panel)'), checked: useDevice.getState().panel === 'prev', key: 'P', run: () => togglePanelT('prev') }
-          : { label: tr('NX風プレビュー（右のパネル）', 'NX-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
+        // スマホのプレビューは全画面だけ
+        ...(useDevice.getState().phone
+          ? []
+          : [
+              tablet
+                ? { label: tr('NX風プレビュー（パネル）', 'NX-style preview (panel)'), checked: useDevice.getState().panel === 'prev', key: 'P', run: () => togglePanelT('prev') }
+                : { label: tr('NX風プレビュー（右のパネル）', 'NX-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
+            ]),
         { label: tr('NX風プレビュー（全画面）', 'NX-style preview (full screen)'), key: 'Shift+P', run: () => togglePreview('full') },
         '-',
         // 画面の言語。名前はその言語自身で書く（どちらの言語の画面でも見つけられるように）
@@ -217,7 +223,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
       label: tr('ツール', 'Tools'),
       items: () => [
         { label: tr('曲に合わせてクリックでBPMを測る', 'Tap along to measure the BPM'), key: 'T', run: () => openTap(true) },
-        { label: tr('テンポと開始位置を合わせる…', 'Match tempo and start position…'), run: openTempo },
+        { label: tr(`テンポと開始位置を合わせる…${landOnly()}`, `Match tempo and start position…${landOnly()}`), run: openTempo },
         { label: tr('ステムとミックス…', 'Stems and mix…'), run: () => openPage('stems') },
         { label: tr('音源ライブラリ…', 'Sound library…'), run: () => openPage('library') },
         { label: tr('前の小節をカーソルの小節に複製', 'Duplicate previous measure into cursor measure'), key: 'Ctrl+D', run: () => duplicatePrevMeasure(tempoOf(s().doc).locate(Math.max(0, s().cursorBeat)).m) },
@@ -227,7 +233,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         { label: tr('▶ の小節をAIで生成（小節線の ✨ と同じ）', 'Generate the ▶ measure with AI (same as ✨ on bar lines)'), key: 'Alt+G', run: openMeasureGenAtCursor },
         { label: tr('フレーズ候補（フィル・リズム）…', 'Phrase suggestions (fills, grooves)…'), run: openPhrase },
         { label: tr('AI難易度生成（BASIC〜EXTREME）…', 'AI difficulty generator (BASIC–EXTREME)…'), run: () => openPage('ai') },
-        { label: tr('難易度ガイドライン…', 'Difficulty guidelines…'), run: () => openPage('guideline') },
+        { label: tr(`難易度ガイドライン…${landOnly()}`, `Difficulty guidelines…${landOnly()}`), run: () => openPage('guideline') },
         '-',
         { label: tr('設定（電子ドラム・キー・遅延補正）…', 'Settings (e-drums, keys, latency)…'), run: () => openSettings() },
         { label: tr('AIの設定（OpenRouter）…', 'AI settings (OpenRouter)…'), run: () => openSettings('ai') },
@@ -238,9 +244,31 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
   return menus;
 }
 
-/** タブレット：表示メニューのパネルの項目（横はレールのパネル、縦は下のシート） */
+/** スマホの縦で、横向きでだけ開く画面の印 */
+function landOnly(): string {
+  const d = useDevice.getState();
+  return d.phone && d.portrait ? tr('（横向きで開く）', ' (landscape)') : '';
+}
+
+/** タブレット：表示メニューのパネルの項目（横はレールのパネル、縦は下のシート）。スマホは下のタブと原曲の打点の列 */
 function tabletPanelItems(): MenuEntry[] {
   const d = useDevice.getState();
+  if (d.phone) {
+    const tabs: [PhoneTab, string][] = [
+      ['pad', tr('パッド', 'Pads')],
+      ['trk', tr('トラック', 'Tracks')],
+      ['snd', tr('音', 'Sounds')],
+      ['src', tr('原曲', 'Original')],
+      ['asst', tr('耳コピ', 'Assist')],
+      ['chk', tr('確かめる', 'Check')],
+    ];
+    const cols = useAssist.getState().audioCols;
+    return [
+      ...tabs.map(([id, label]) => ({ label: tr(`パネル：${label}`, `Panel: ${label}`), checked: d.pTab === id, run: () => openPhoneTab(id, true) })),
+      '-',
+      { label: tr('原曲の打点の列', 'Original hits column'), checked: cols, run: () => useAssist.setState({ audioCols: !cols }) },
+    ];
+  }
   const isOn = (id: PanelId) => (d.portrait ? d.sheetSize !== 'tabs' && d.sheetTab === id : d.panel === id);
   return [
     ...tabletPanels().map((p) => ({ label: tr(`パネル：${p.label}`, `Panel: ${p.label}`), checked: isOn(p.id), run: () => togglePanelT(p.id) })),

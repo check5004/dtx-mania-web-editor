@@ -30,6 +30,7 @@ import {
   previewWav,
   relaneChips,
   resetSongEnd,
+  setCursorBeat,
   setKind,
   setView,
   songEndAtCursor,
@@ -38,11 +39,12 @@ import {
   useEditor,
 } from '../store/editor';
 import { openMeasureGen, useMeasureGen } from '../store/measureGen';
+import { openPhrase } from '../store/phrase';
 import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
 import { placeSongBpm } from '../store/songSync';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
-import { channelName, chipBpmLabel } from './format';
+import { channelName, chipBpmLabel, formatPosition, meterLabel } from './format';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
 import { currentTrackStop, setTrackStop, trackStopLabel, trackStopNote } from './Splitter';
@@ -62,10 +64,13 @@ export function ContextMenuHost() {
 function Frame({ menu }: { menu: CtxMenu }) {
   const ref = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  // スマホは下からのシート（指の右に出す場所が無い）
+  const sheet = useDevice((s) => s.phone);
+  const pressedIn = useRef(false);
   // 画面からはみ出さないように（右が足りなければマウスの左、下が足りなければ上へずらす）
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || sheet) return;
     const place = () => {
       const r = el.getBoundingClientRect();
       // 指の長押し：指で隠れないように指の右（右端なら左）に出す。真下には出さない
@@ -81,7 +86,7 @@ function Frame({ menu }: { menu: CtxMenu }) {
     const ro = new ResizeObserver(place);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [menu.x, menu.y, menu.touch]);
+  }, [menu.x, menu.y, menu.touch, sheet]);
   useEffect(() => {
     // 外を押したら閉じる。閉じるための押下は譜面に効かせない（ChartCanvas が dismissedBy で見分ける）
     const away = (e: PointerEvent) => {
@@ -105,6 +110,52 @@ function Frame({ menu }: { menu: CtxMenu }) {
       window.removeEventListener('blur', close);
     };
   }, []);
+  const body =
+    menu.kind === 'chips' ? (
+      <ChipMenu ids={menu.ids} anchor={menu.anchor} seq={menu.seq} />
+    ) : menu.kind === 'space' ? (
+      <SpaceMenu menu={menu} />
+    ) : menu.kind === 'measure' ? (
+      <MeasureMenu m={menu.m} />
+    ) : menu.kind === 'loop' ? (
+      <LoopMenu beat={menu.beat} />
+    ) : menu.kind === 'tracks' ? (
+      <TracksMenu rows={menu.rows} />
+    ) : (
+      <EndMenu />
+    );
+  if (sheet) {
+    // 下からのシート：後ろを暗くし（押すと閉じる）、つまみと ✕ を付ける。
+    // 長押しで開くと、離した指の下にシートの項目が来て、ブラウザがそこを「クリック」することがある。
+    // シートの中で押し始めたクリックだけを受ける（キーボードのクリックは detail が 0）
+    return (
+      <>
+        <div className="ctx-back" aria-hidden="true" />
+        <div
+          ref={ref}
+          className={`ctx-menu touch sheet k-${menu.kind}`}
+          role="menu"
+          onContextMenu={(e) => e.preventDefault()}
+          onPointerDownCapture={() => {
+            pressedIn.current = true;
+          }}
+          onClickCapture={(e) => {
+            if (pressedIn.current || e.detail === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <div className="ctx-grab">
+            <i />
+          </div>
+          <button className="ctx-x" onClick={() => closeCtxMenu()} aria-label={tr('閉じる', 'Close')}>
+            {Icon.close(20)}
+          </button>
+          <div className="ctx-sheet-body">{body}</div>
+        </div>
+      </>
+    );
+  }
   return (
     <div
       ref={ref}
@@ -113,31 +164,23 @@ function Frame({ menu }: { menu: CtxMenu }) {
       style={{ left: at?.left ?? menu.x, top: at?.top ?? menu.y, visibility: at ? 'visible' : 'hidden' }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {menu.kind === 'chips' ? (
-        <ChipMenu ids={menu.ids} anchor={menu.anchor} seq={menu.seq} />
-      ) : menu.kind === 'space' ? (
-        <SpaceMenu menu={menu} />
-      ) : menu.kind === 'measure' ? (
-        <MeasureMenu m={menu.m} />
-      ) : menu.kind === 'loop' ? (
-        <LoopMenu beat={menu.beat} />
-      ) : menu.kind === 'tracks' ? (
-        <TracksMenu rows={menu.rows} />
-      ) : (
-        <EndMenu />
-      )}
+      {body}
     </div>
   );
 }
 
 // ---- 部品 ---------------------------------------------------------------------
 
+/** キーボードのショートカットの文字か（スマホでは出さない） */
+const isKeyHint = (h: string) => /^(Ctrl|Alt|Shift|Delete|Esc|F\d|\[|\]|[A-Z]$|\/$)/.test(h);
+
 function Item({ icon, label, hint, onClick, disabled, danger, title }: { icon?: ReactNode; label: string; hint?: string; onClick: () => void; disabled?: boolean; danger?: boolean; title?: string }) {
+  const showHint = hint && !(useDevice.getState().phone && isKeyHint(hint));
   return (
     <button className={`ctx-item ${danger ? 'danger' : ''}`} role="menuitem" disabled={disabled} onClick={onClick} title={title}>
       <span className="ctx-ic">{icon}</span>
       <span className="ctx-label">{label}</span>
-      {hint && <span className="key">{hint}</span>}
+      {showHint && <span className="key">{hint}</span>}
     </button>
   );
 }
@@ -542,12 +585,20 @@ function GridPicker({ m }: { m: number }) {
 function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
   const doc = useEditor((s) => s.doc);
   const clip = useEditor((s) => s.clipboard.length);
+  // スマホ：BPM の列・ループの帯が無いので、BPM 変化と A・B もここから
+  const phone = useDevice((s) => s.phone);
   const m = menu.pos.m;
   const inMeasure = drumIdsIn(doc, m);
   const extras = menu.col === 'lane' && menu.lane !== undefined ? laneMenuExtras({ lane: menu.lane, alt: !!menu.alt, pos: menu.pos }) : [];
   return (
     <>
-      <GridPicker m={m} />
+      {phone && (
+        <div className="ctx-head">
+          <b className="mono">{formatPosition(tempoOf(doc), menu.beat)}</b>
+          <span className="ctx-head-sub">{tr('何もない所', 'Empty spot')}</span>
+        </div>
+      )}
+      {phone ? <PhoneGridPicker /> : <GridPicker m={m} />}
       {extras.length > 0 && (
         <>
           <Sep />
@@ -572,8 +623,64 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
         disabled={!inMeasure.length}
         onClick={then(() => useEditor.setState({ selection: inMeasure }))}
       />
-      {menu.col === 'bpm' && <Item label={tr('ここに BPM 変化を置く…', 'Place a BPM change here…')} hint={useDevice.getState().tablet ? tr('タップ', 'Tap') : dblHint()} onClick={then(() => void askBpm(menu.pos))} />}
+      {phone && (
+        <>
+          <Item icon={<b className="ctx-ab">A</b>} label={tr('ここを A（始まり）にする', 'Set A (start) here')} onClick={then(() => setLoopPoint('a', menu.beat))} />
+          <Item icon={<b className="ctx-ab">B</b>} label={tr('ここを B（終わり）にする', 'Set B (end) here')} onClick={then(() => setLoopPoint('b', menu.beat))} />
+        </>
+      )}
+      {(menu.col === 'bpm' || phone) && (
+        <Item
+          icon={phone ? Icon.metronome(18) : undefined}
+          label={tr('ここに BPM 変化を置く…', 'Place a BPM change here…')}
+          hint={phone ? undefined : useDevice.getState().tablet ? tr('タップ', 'Tap') : dblHint()}
+          onClick={then(() => void askBpm(menu.pos))}
+        />
+      )}
     </>
+  );
+}
+
+/** スマホのグリッド：4 列のボタン（1/4〜1/48 と任意） */
+function PhoneGridPicker() {
+  const div = useEditor((s) => s.view.div);
+  const divs = [4, 8, 12, 16, 24, 32, 48];
+  const custom = async () => {
+    closeCtxMenu();
+    const v = await promptDialog({
+      title: tr('グリッドの細かさ', 'Grid resolution'),
+      body: tr('全音符をいくつに分けるか（1〜192）。5連の16分なら 20、7連なら 28、6連なら 24。', 'How many parts to divide a whole note into (1–192). 16th-note quintuplets: 20, septuplets: 28, sextuplets: 24.'),
+      value: String(div),
+      ok: tr('決定', 'OK'),
+    });
+    const n = Math.round(Number(v));
+    if (v && n >= 1 && n <= 192) setView({ div: n });
+  };
+  return (
+    <div className="ctx-sec">
+      <div className="ctx-sec-title">
+        <span>
+          {tr('グリッド', 'Grid')} <b className="mono ctx-cur">1/{div}</b>
+        </span>
+      </div>
+      <div className="ctx-grid4">
+        {divs.map((d) => (
+          <button
+            key={d}
+            className={`ctx-grid-btn mono ${div === d ? 'on' : ''}`}
+            onClick={() => {
+              closeCtxMenu();
+              setView({ div: d });
+            }}
+          >
+            1/{d}
+          </button>
+        ))}
+        <button className={`ctx-grid-btn ${divs.includes(div) ? '' : 'on'}`} onClick={() => void custom()}>
+          {divs.includes(div) ? tr('任意…', 'Custom…') : tr(`任意 ${div}…`, `Custom ${div}…`)}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -594,15 +701,26 @@ function deleteMeasureWithToast(m: number) {
 function MeasureMenu({ m }: { m: number }) {
   const doc = useEditor((s) => s.doc);
   const genOpen = useMeasureGen((s) => s.open && s.from === m && s.to === m);
+  const phone = useDevice((s) => s.phone);
   const ids = drumIdsIn(doc, m);
   const tempo = tempoOf(doc);
+  const chipsText = ids.length ? tr(`チップ ${ids.length} 個`, `${ids.length} ${pl(ids.length, 'chip')}`) : tr('空の小節', 'Empty measure');
   return (
     <>
       <div className="ctx-head">
         <b>{tr(`小節 ${toMeasure(m)}`, `Measure ${toMeasure(m)}`)}</b>
-        <span className="ctx-head-sub">{ids.length ? tr(`チップ ${ids.length} 個`, `${ids.length} ${pl(ids.length, 'chip')}`) : tr('空の小節', 'Empty measure')}</span>
+        <span className="ctx-head-sub">{phone ? `${meterLabel(tempo.barLen(m))} · BPM ${chipBpmLabel(tempo.bpmAt(tempo.measureStart(m) + 1e-6))} · ${chipsText}` : chipsText}</span>
       </div>
-      <Item icon={Icon.sparkle(12)} label={genOpen ? tr('AI の生成をやめる', 'Stop AI generation') : tr('この小節を AI で生成', 'Generate this measure with AI')} hint="✨" onClick={then(() => openMeasureGen(m))} />
+      <Item icon={Icon.sparkle(phone ? 18 : 12)} label={genOpen ? tr('AI の生成をやめる', 'Stop AI generation') : tr('この小節を AI で生成', 'Generate this measure with AI')} hint={phone ? undefined : '✨'} onClick={then(() => openMeasureGen(m))} />
+      {phone && (
+        <Item
+          label={tr('フィル・リズムの候補…', 'Fill and groove ideas…')}
+          onClick={then(() => {
+            setCursorBeat(tempo.measureStart(m));
+            openPhrase();
+          })}
+        />
+      )}
       <Item icon={Icon.play(11)} label={tr('この小節から再生', 'Play from this measure')} onClick={then(() => void playFrom(tempo.measureStart(m)))} />
       <Item icon={Icon.loop(12)} label={tr('この小節をループ', 'Loop this measure')} onClick={then(() => loopMeasure(m))} />
       <Item label={tr('この小節のチップを選ぶ', 'Select chips in this measure')} hint={ids.length ? String(ids.length) : undefined} disabled={!ids.length} onClick={then(() => useEditor.setState({ selection: ids }))} />

@@ -48,7 +48,7 @@ function useKeyLabels(): Map<number, string> {
 }
 
 /** 1つのパッド。押した瞬間に鳴らして色を変え、離したら戻す（何本の指で押しているかを数える） */
-function Pad({ lane, alt, className = '', sub }: { lane: number; alt: boolean; className?: string; sub?: string }) {
+export function Pad({ lane, alt, className = '', sub }: { lane: number; alt: boolean; className?: string; sub?: string }) {
   const [hit, setHit] = useState(false);
   const fingers = useRef(new Set<number>());
   const up = (id: number) => {
@@ -82,7 +82,7 @@ function Pad({ lane, alt, className = '', sub }: { lane: number; alt: boolean; c
   );
 }
 
-function ModeSeg() {
+export function ModeSeg() {
   const mode = padModeOf(useAssist((s) => s.inputMode));
   const items: [PadMode, string][] = [
     ['aud', tr('試し打ち', 'Audition')],

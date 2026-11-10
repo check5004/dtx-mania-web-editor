@@ -7,6 +7,7 @@ import { toMeasure } from '../dtx/base36';
 import { findFile } from '../fs/folder';
 import { useAssist } from '../store/assist';
 import { bgmSource, wavPath } from '../store/derived';
+import { useDevice } from '../store/device';
 import { openPage, openTempo, useEditor } from '../store/editor';
 import { readyStems, useStems } from '../store/stems';
 import { useSidecar } from '../store/sidecar';
@@ -30,6 +31,8 @@ export function SourceCard() {
   const [over, setOver] = useState(false);
   useSeparate((s) => s.phase);
   const sepBusy = separating();
+  // スマホではステムの分解をしない（メモリが足りない）。PC・iPad で分けたステムを足すのはできる
+  const phone = useDevice((s) => s.phone);
   const bgm = bgmSource(doc);
   const path = bgm ? (wavPath(doc, bgm.wav) ?? '') : '';
   const name = path.split(/[\\/]/).pop() ?? '';
@@ -93,7 +96,7 @@ export function SourceCard() {
             </button>
           </div>
           {analysis && <div className="lbl" style={{ marginTop: 6 }}>{analysis}</div>}
-          {has && stems.length === 0 && (
+          {has && stems.length === 0 && !phone && (
             <div className="lbl" style={{ marginTop: 6, lineHeight: 1.6 }}>
               {sepBusy ? (
                 <>

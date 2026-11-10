@@ -1,6 +1,7 @@
 // アプリとして追加するやり方（ブラウザごと）。ホームの案内（InstallCard）と設定の「アプリとして使う」で使う。
 import { tr } from '../../i18n';
 import { IS_IOS } from '../../store/device';
+import { IS_IPHONE } from '../../platform';
 
 /**
  * - standalone: もうアプリとして開いている
@@ -54,10 +55,15 @@ export function IosSteps() {
           <ShareIcon size={18} />
         </span>
         <span>
-          {tr(
-            '共有ボタンをタップ（Safari はアドレスバーの右、見つからなければ「…」の中。Chrome もアドレスバーの右）',
-            'Tap the Share button (in Safari it is at the right of the address bar, or inside the "…" menu; in Chrome it is at the right of the address bar too)',
-          )}
+          {IS_IPHONE
+            ? tr(
+                '共有ボタンをタップ（Safari は下のバー、見つからなければ「…」の中。Chrome はアドレスバーの右）',
+                'Tap the Share button (in Safari it is in the bottom bar, or inside the "…" menu; in Chrome it is at the right of the address bar)',
+              )
+            : tr(
+                '共有ボタンをタップ（Safari はアドレスバーの右、見つからなければ「…」の中。Chrome もアドレスバーの右）',
+                'Tap the Share button (in Safari it is at the right of the address bar, or inside the "…" menu; in Chrome it is at the right of the address bar too)',
+              )}
         </span>
       </li>
       <li>

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { tr } from '../../i18n';
 import { buildExport, deliverExport, lastAutosaveAt, type ExportFile, type ExportWhat } from '../../app/fileActions';
 import { isLocalFolder } from '../../fs/folder';
-import { useDevice } from '../../store/device';
+import { iosName, useDevice } from '../../store/device';
 import { useEditor } from '../../store/editor';
 import { localPlace, useLocalSongs } from '../../store/localSongs';
 import { DriveSaveRow } from '../DriveUi';
@@ -169,9 +169,11 @@ function SaveSheetBody() {
               `「保存」は曲フォルダごと${localPlace()}の中に書きます。PC や NX へ渡すときは、ここから ZIP で書き出します（書き出した内容は${localPlace()}にも保存します）。`,
               `"Save" writes the whole song folder inside ${localPlace()}. To hand it to a PC or NX, export a ZIP here (the exported content is also saved in ${localPlace()}).`,
             )
-          : tr(
-              'iPad ではフォルダに直接書き込めないため、ZIP にまとめて渡します。PC では今までどおりフォルダに保存できます。',
-              'iPad cannot write into a folder directly, so the files go out as a ZIP. On a PC you can still save into the folder.',
+          : iosName(
+              tr(
+                'iPad ではフォルダに直接書き込めないため、ZIP にまとめて渡します。PC では今までどおりフォルダに保存できます。',
+                'iPad cannot write into a folder directly, so the files go out as a ZIP. On a PC you can still save into the folder.',
+              ),
             )}
       </p>
       <div className="t-save-foot">

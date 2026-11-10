@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { tr } from '../i18n';
 import { checkLocal, cleanupLocal, listLocalSongs, storageInfo, type LocalSong, type StorageInfo } from '../fs/local';
-import { IS_IOS } from './device';
+import { IS_IOS, iosName } from './device';
 
 export interface CopyProgress {
   name: string;
@@ -28,14 +28,14 @@ interface LocalSongsState {
 
 export const useLocalSongs = create<LocalSongsState>(() => ({ ready: false, checked: false, songs: [], storage: null, copying: null, savedAt: 0, ver: 0 }));
 
-/** 本体の呼び名（iPad は「iPad 本体」、ほかは「このブラウザ」） */
+/** 本体の呼び名（iPad は「iPad 本体」、iPhone は「iPhone 本体」、ほかは「このブラウザ」） */
 export function localPlace(): string {
-  return IS_IOS ? tr('iPad 本体', 'this iPad') : tr('このブラウザ', 'this browser');
+  return IS_IOS ? iosName(tr('iPad 本体', 'this iPad')) : tr('このブラウザ', 'this browser');
 }
 
 /** 一覧の印（短く） */
 export function localBadge(): string {
-  return IS_IOS ? tr('iPad 本体', 'On iPad') : tr('ブラウザ内', 'In browser');
+  return IS_IOS ? iosName(tr('iPad 本体', 'On iPad')) : tr('ブラウザ内', 'In browser');
 }
 
 export async function refreshLocalSongs(): Promise<void> {

@@ -2,16 +2,24 @@
 // - 指で使う端末（pointer: coarse、または iPad）ならタブレット版にする。設定で「タブレット・デスクトップ」に固定できる
 // - 横（幅 1024 以上）はパネルを右のレールから1枚だけ開き、下にトラックの帯。縦（幅 1024 未満）はパネルを下のシートに
 // - 高さは visualViewport で測り直す（Safari のバー・ホーム画面に追加したときの全画面）
+// - スマホ：指で使う端末で、画面の短い辺が 600 より狭い（html.phone）。タブレット版の決まり（tablet）の上に、スマホの画面を出す。
+//   縦はタブで下のシート（低い 270・高い 520）、横は右から重ねるパネル。どちらも同じタブを開いたまま回せる
 import { create } from 'zustand';
 import { IS_IOS } from '../platform';
 import { setView, useEditor } from './editor';
+import { usePreview } from './preview';
 import { isOpenSheetSize, type OpenSheetSize, type SheetSize } from './sheetSnap';
 
 export { IS_IOS };
+export { iosName } from '../platform';
 
 export type { OpenSheetSize, SheetSize } from './sheetSnap';
 
-export type UiMode = 'auto' | 'tablet' | 'desktop';
+export type UiMode = 'auto' | 'tablet' | 'desktop' | 'phone';
+/** スマホの下のタブ（縦は下のシート、横は右から重ねるパネル） */
+export type PhoneTab = 'pad' | 'trk' | 'snd' | 'src' | 'asst' | 'chk';
+/** スマホで置くとき：吹き出しで確かめてから離して置く（既定）・触れたらすぐ置く（タブレットと同じ） */
+export type PlaceMode = 'bubble' | 'instant';
 /** 横の右のレールから開くパネル（縦は下のシートのタブ） */
 export type PanelId = 'pad' | 'snd' | 'src' | 'asst' | 'chk' | 'prev';
 /** 縦のシートのタブ（パネル＋トラック） */
@@ -59,6 +67,8 @@ export interface TouchPrefs {
   tracksH: number;
   /** 縦のシート：タブごとに、最後に開いていた高さ（無ければ「半分」） */
   sheetSizes: Partial<Record<SheetTab, OpenSheetSize>>;
+  /** スマホ：レーンを触ったら吹き出しを出し、離して置く（instant ならタブレットと同じくすぐ置く） */
+  placeMode: PlaceMode;
 }
 
 /** キットの並びの初め：上段シンバル、中段は手、下段は足とフロアタム */
@@ -74,9 +84,13 @@ function validKit(v: unknown): string[] {
 export interface DeviceState extends TouchPrefs {
   /** 指で使う端末か（pointer: coarse・iPad） */
   touchDevice: boolean;
-  /** タブレット版の画面を出しているか */
+  /** タブレット版の画面を出しているか（スマホも true。スマホの画面は phone） */
   tablet: boolean;
-  /** 縦（幅 1024 未満）：パネルは下のシート */
+  /** スマホの画面を出しているか */
+  phone: boolean;
+  /** スマホの大きさの画面か（指で使う端末で、短い辺が 600 未満） */
+  phoneScreen: boolean;
+  /** 縦（タブレットは幅 1024 未満、スマホは縦長）：パネルは下のシート */
   portrait: boolean;
   vw: number;
   vh: number;
@@ -92,6 +106,10 @@ export interface DeviceState extends TouchPrefs {
   tracksOpen: boolean;
   /** ☰ のメニュー */
   drawer: boolean;
+  /** スマホ：開いている下のタブ（縦はシート、横は重ねるパネル）。無ければ閉じている */
+  pTab: PhoneTab | null;
+  /** スマホ：縦のシートを高く（520）しているか（低いは 270） */
+  pHigh: boolean;
 }
 
 const KEY = 'dtxe.touch.v1';
@@ -107,6 +125,16 @@ const coarseQuery = typeof window !== 'undefined' && window.matchMedia ? window.
 
 function isTouchDevice(): boolean {
   return !!coarseQuery?.matches || IS_IOS;
+}
+
+/** スマホの大きさか：画面の短い辺が 600 未満（キーボードで見える高さが縮んでも変わらないように、画面の大きさで見る） */
+const PHONE_SHORT_SIDE = 600;
+
+function isPhoneScreen(touch: boolean): boolean {
+  if (!touch || typeof window === 'undefined' || !window.screen) return false;
+  const w = window.screen.width;
+  const h = window.screen.height;
+  return w > 0 && h > 0 && Math.min(w, h) < PHONE_SHORT_SIDE;
 }
 
 const PREF_DEFAULT: TouchPrefs = {
@@ -128,6 +156,7 @@ const PREF_DEFAULT: TouchPrefs = {
   recOverdub: true,
   tracksH: 274,
   sheetSizes: {},
+  placeMode: 'bubble',
 };
 
 const SHEET_TABS: readonly SheetTab[] = ['pad', 'trk', 'snd', 'src', 'asst', 'chk', 'prev'];
@@ -151,7 +180,7 @@ function loadPrefs(): TouchPrefs {
   }
   const p = { ...PREF_DEFAULT, ...saved };
   return {
-    uiMode: p.uiMode === 'tablet' || p.uiMode === 'desktop' ? p.uiMode : 'auto',
+    uiMode: p.uiMode === 'tablet' || p.uiMode === 'desktop' || p.uiMode === 'phone' ? p.uiMode : 'auto',
     uiScale: p.uiScale === 'large' ? 'large' : 'normal',
     panelSide: p.panelSide === 'left' ? 'left' : 'right',
     oneFinger: p.oneFinger === 'select' ? 'select' : 'scroll',
@@ -169,6 +198,7 @@ function loadPrefs(): TouchPrefs {
     recOverdub: p.recOverdub !== false,
     tracksH: Math.max(80, Math.min(600, Number(p.tracksH) || PREF_DEFAULT.tracksH)),
     sheetSizes: validSheetSizes(p.sheetSizes),
+    placeMode: p.placeMode === 'instant' ? 'instant' : 'bubble',
   };
 }
 
@@ -179,18 +209,31 @@ function viewportSize(): { vw: number; vh: number } {
 }
 
 function effective(mode: UiMode, touch: boolean): boolean {
-  return mode === 'tablet' || (mode === 'auto' && touch);
+  return mode === 'tablet' || mode === 'phone' || (mode === 'auto' && touch);
+}
+
+function effectivePhone(mode: UiMode, phoneScreen: boolean): boolean {
+  return mode === 'phone' || (mode === 'auto' && phoneScreen);
+}
+
+/** 縦か：スマホは縦長なら、タブレットは幅 1024 未満なら */
+function isPortrait(phone: boolean, vw: number, vh: number): boolean {
+  return phone ? vh >= vw : vw < 1024;
 }
 
 const prefs = loadPrefs();
 const size = viewportSize();
 const touch0 = isTouchDevice();
+const phoneScreen0 = isPhoneScreen(touch0);
+const phone0 = effectivePhone(prefs.uiMode, phoneScreen0);
 
 export const useDevice = create<DeviceState>(() => ({
   ...prefs,
   touchDevice: touch0,
   tablet: effective(prefs.uiMode, touch0),
-  portrait: size.vw < 1024,
+  phone: phone0,
+  phoneScreen: phoneScreen0,
+  portrait: isPortrait(phone0, size.vw, size.vh),
   vw: size.vw,
   vh: size.vh,
   pen: false,
@@ -200,6 +243,8 @@ export const useDevice = create<DeviceState>(() => ({
   sheetSize: 'tabs',
   tracksOpen: false,
   drawer: false,
+  pTab: null,
+  pHigh: false,
 }));
 
 function savePrefs() {
@@ -223,6 +268,7 @@ function savePrefs() {
     recOverdub: s.recOverdub,
     tracksH: s.tracksH,
     sheetSizes: s.sheetSizes,
+    placeMode: s.placeMode,
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(p));
@@ -234,20 +280,29 @@ function savePrefs() {
 export function setTouchPrefs(p: Partial<TouchPrefs>) {
   const s = useDevice.getState();
   const next = { ...p };
-  if (p.uiMode !== undefined) Object.assign(next, { tablet: effective(p.uiMode, s.touchDevice) });
+  if (p.uiMode !== undefined) {
+    const phone = effectivePhone(p.uiMode, s.phoneScreen);
+    Object.assign(next, { tablet: effective(p.uiMode, s.touchDevice), phone, portrait: isPortrait(phone, s.vw, s.vh) });
+  }
   useDevice.setState(next);
   savePrefs();
 }
 
 export const isTablet = () => useDevice.getState().tablet;
+export const isPhone = () => useDevice.getState().phone;
 
 export function setTool(tool: Tool) {
   useDevice.setState({ tool });
 }
 
-/** 横のパネルを開く（同じボタンをもう一度押すと閉じる）。縦ならシートのそのタブを開く */
+/** 横のパネルを開く（同じボタンをもう一度押すと閉じる）。縦ならシートのそのタブを開く。スマホは下のタブ（プレビューは全画面） */
 export function togglePanelT(id: PanelId) {
   const s = useDevice.getState();
+  if (s.phone) {
+    if (id === 'prev') usePreview.setState({ mode: 'full' });
+    else openPhoneTab(id, true);
+    return;
+  }
   if (s.portrait) {
     openSheet(id);
     return;
@@ -257,8 +312,35 @@ export function togglePanelT(id: PanelId) {
 
 export function openPanelT(id: PanelId) {
   const s = useDevice.getState();
+  if (s.phone) {
+    if (id === 'prev') usePreview.setState({ mode: 'full' });
+    else openPhoneTab(id);
+    return;
+  }
   if (s.portrait) openSheet(id);
   else useDevice.setState({ panel: id });
+}
+
+/**
+ * スマホの下のタブを開く（縦は低いシート 270、横は右から重ねるパネル）。toggle なら、開いているタブをもう一度押すと閉じる。
+ * パッドは譜面を見ながら叩くので、いつも低いシート
+ */
+export function openPhoneTab(tab: PhoneTab, toggle = false) {
+  const s = useDevice.getState();
+  if (toggle && s.pTab === tab) {
+    useDevice.setState({ pTab: null, pHigh: false });
+    return;
+  }
+  useDevice.setState({ pTab: tab, pHigh: tab === 'pad' ? false : s.pTab === tab ? s.pHigh : false });
+}
+
+export function closePhoneTab() {
+  useDevice.setState({ pTab: null, pHigh: false });
+}
+
+/** スマホの縦のシートを高く（520）・低く（270） */
+export function setPhoneHigh(high: boolean) {
+  useDevice.setState({ pHigh: high });
 }
 
 /** タブを開くときの高さ：そのタブで最後に開いていた高さ（初めては「半分」） */
@@ -325,8 +407,12 @@ function applyHtml() {
   const s = useDevice.getState();
   const root = document.documentElement;
   root.classList.toggle('tablet', s.tablet);
-  root.classList.toggle('tablet-port', s.tablet && s.portrait);
-  root.classList.toggle('tablet-land', s.tablet && !s.portrait);
+  // スマホのほかの画面（曲情報・ステム・AI難易度生成など）は、横でも1列に並べる（タブレットの縦と同じ）
+  root.classList.toggle('tablet-port', s.tablet && (s.portrait || s.phone));
+  root.classList.toggle('tablet-land', s.tablet && !s.portrait && !s.phone);
+  root.classList.toggle('phone', s.phone);
+  root.classList.toggle('phone-port', s.phone && s.portrait);
+  root.classList.toggle('phone-land', s.phone && !s.portrait);
   root.classList.toggle('pen-mode', s.tablet && s.pen);
   root.classList.toggle('t-large', s.tablet && s.uiScale === 'large');
   root.classList.toggle('t-left', s.tablet && s.panelSide === 'left');
@@ -350,8 +436,13 @@ if (typeof window !== 'undefined') {
     const sz = viewportSize();
     const s = useDevice.getState();
     const touchDevice = isTouchDevice();
-    if (sz.vw === s.vw && sz.vh === s.vh && touchDevice === s.touchDevice) return;
-    useDevice.setState({ ...sz, portrait: sz.vw < 1024, touchDevice, tablet: effective(s.uiMode, touchDevice) });
+    const phoneScreen = isPhoneScreen(touchDevice);
+    if (sz.vw === s.vw && sz.vh === s.vh && touchDevice === s.touchDevice && phoneScreen === s.phoneScreen) return;
+    const phone = effectivePhone(s.uiMode, phoneScreen);
+    let portrait = isPortrait(phone, sz.vw, sz.vh);
+    // スマホ：入力欄のキーボードで見える高さが縮んでも、横向きにはしない（画面の向きで決める）
+    if (phone && s.phone && s.portrait && !portrait && sz.vw === s.vw && window.screen && window.screen.height >= window.screen.width) portrait = true;
+    useDevice.setState({ ...sz, portrait, touchDevice, phoneScreen, phone, tablet: effective(s.uiMode, touchDevice) });
   };
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', onResize);

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { tr } from '../../i18n';
 import { engine } from '../../audio/engine';
-import { IS_IOS, KIT_DEFAULT, setPenMode, setTouchPrefs, useDevice, type OneFinger, type PadLayout, type PanelSide, type UiMode, type UiScale } from '../../store/device';
+import { iosName, IS_IOS, KIT_DEFAULT, setPenMode, setTouchPrefs, useDevice, type OneFinger, type PadLayout, type PanelSide, type PlaceMode, type UiMode, type UiScale } from '../../store/device';
 import type { PadMode } from '../../store/pads';
 import { Icon } from '../icons';
 import { kitSlot, padColor, padKey, padName } from './Pads';
@@ -58,9 +58,11 @@ export function TouchSettings() {
         <Row
           title={tr('画面のモード', 'Layout mode')}
           sub={
-            d.touchDevice
-              ? tr('自動：指で使う端末ならタブレット用の画面にします（この端末は指で使う端末です）', 'Auto: use the tablet layout on touch-first devices (this is one)')
-              : tr('自動：指で使う端末ならタブレット用の画面にします（この端末はマウスで使う端末です）', 'Auto: use the tablet layout on touch-first devices (this one uses a mouse)')
+            d.phoneScreen
+              ? tr('自動：スマホならスマホ用、指で使うタブレットならタブレット用の画面にします（この端末はスマホです）', 'Auto: the phone layout on phones, the tablet layout on touch tablets (this is a phone)')
+              : d.touchDevice
+                ? tr('自動：指で使う端末ならタブレット用の画面にします（この端末は指で使う端末です）', 'Auto: use the tablet layout on touch-first devices (this is one)')
+                : tr('自動：指で使う端末ならタブレット用の画面にします（この端末はマウスで使う端末です）', 'Auto: use the tablet layout on touch-first devices (this one uses a mouse)')
           }
         >
           <Seg<UiMode>
@@ -68,13 +70,15 @@ export function TouchSettings() {
             label={tr('画面のモード', 'Layout mode')}
             items={[
               ['auto', tr('自動', 'Auto')],
+              // スマホの画面はスマホ（と、それを選んだとき）だけ出す。PC・iPad の設定の並びは変えない
+              ...(d.phoneScreen || d.uiMode === 'phone' ? ([['phone', tr('スマホ', 'Phone')]] as [UiMode, string][]) : []),
               ['tablet', tr('タブレット', 'Tablet')],
               ['desktop', tr('デスクトップ', 'Desktop')],
             ]}
             onChange={(v) => setTouchPrefs({ uiMode: v })}
           />
         </Row>
-        {d.tablet && (
+        {d.tablet && !d.phone && (
           <>
             <Row title={tr('文字とボタンの大きさ', 'Text and button size')}>
               <Seg<UiScale>
@@ -104,6 +108,26 @@ export function TouchSettings() {
       {d.tablet ? (
         <>
           <Block title={tr('指の操作', 'Fingers')}>
+            {d.phone && (
+              <Row
+                title={tr('置き方', 'How to place')}
+                sub={
+                  d.placeMode === 'bubble'
+                    ? tr('吹き出し：触れると指の上にレーンと位置が出て、動かして合わせ、離すと置く。触れてすぐなぞるとスクロール', 'Bubble: touch to see the lane and position above your finger, move to adjust, release to place. A quick swipe scrolls')
+                    : tr('すぐ置く：触れた所にすぐ置く（タブレットと同じ）', 'Instant: places right where you touch (same as on tablets)')
+                }
+              >
+                <Seg<PlaceMode>
+                  value={d.placeMode}
+                  label={tr('置き方', 'How to place')}
+                  items={[
+                    ['bubble', tr('吹き出し', 'Bubble')],
+                    ['instant', tr('すぐ置く', 'Instant')],
+                  ]}
+                  onChange={(v) => setTouchPrefs({ placeMode: v })}
+                />
+              </Row>
+            )}
             <Row title={tr('1本指でなぞったとき', 'One-finger drag')} sub={tr('「置く」のとき。2本指ならいつでもスクロール', 'With Place. Two fingers always scroll')}>
               <Seg<OneFinger>
                 value={d.oneFinger}
@@ -136,25 +160,27 @@ export function TouchSettings() {
               <Switch on={d.dblTapDelete} onChange={(v) => setTouchPrefs({ dblTapDelete: v })} label={tr('ダブルタップで消す', 'Double-tap to delete')} />
             </Row>
           </Block>
-          <Block title="Apple Pencil">
-            <Row
-              title={tr('ペンで置く・選ぶ、指はスクロールだけ', 'Pencil places and selects; fingers only scroll')}
-              sub={
-                d.pen
-                  ? tr('いまはオンです。誤タッチで置いてしまうのを防ぎます', "It's on now. Prevents accidental placing")
-                  : tr('ペンを使ったら自動でオン。誤タッチで置いてしまうのを防ぎます', 'Turns on when a Pencil is used. Prevents accidental placing')
-              }
-            >
-              <Switch
-                on={d.penAuto}
-                onChange={(v) => {
-                  setTouchPrefs({ penAuto: v });
-                  if (!v) setPenMode(false);
-                }}
-                label="Apple Pencil"
-              />
-            </Row>
-          </Block>
+          {!d.phone && (
+            <Block title="Apple Pencil">
+              <Row
+                title={tr('ペンで置く・選ぶ、指はスクロールだけ', 'Pencil places and selects; fingers only scroll')}
+                sub={
+                  d.pen
+                    ? tr('いまはオンです。誤タッチで置いてしまうのを防ぎます', "It's on now. Prevents accidental placing")
+                    : tr('ペンを使ったら自動でオン。誤タッチで置いてしまうのを防ぎます', 'Turns on when a Pencil is used. Prevents accidental placing')
+                }
+              >
+                <Switch
+                  on={d.penAuto}
+                  onChange={(v) => {
+                    setTouchPrefs({ penAuto: v });
+                    if (!v) setPenMode(false);
+                  }}
+                  label="Apple Pencil"
+                />
+              </Row>
+            </Block>
+          )}
         </>
       ) : (
         <p className="lbl" style={{ lineHeight: 1.7 }}>
@@ -338,12 +364,14 @@ export function MidiUnavailableNote() {
     <section className="set-warn">
       <span className="set-warn-icon">{Icon.info(20)}</span>
       <span className="set-warn-text">
-        <b>{IS_IOS ? tr('この iPad のブラウザでは電子ドラムをつなげません', "This iPad browser can't connect e-drums") : tr('このブラウザでは電子ドラムをつなげません', "This browser can't connect e-drums")}</b>
+        <b>{IS_IOS ? iosName(tr('この iPad のブラウザでは電子ドラムをつなげません', "This iPad browser can't connect e-drums")) : tr('このブラウザでは電子ドラムをつなげません', "This browser can't connect e-drums")}</b>
         <span className="lbl">
           {IS_IOS
-            ? tr(
-                'iPad の Safari（ほかのブラウザも同じ仕組み）は Web MIDI に対応していません。画面のパッドかキーボードで入力してください。PC の Chrome・Edge ならこのまま使えます。プロファイルはこのブラウザに残っています。',
-                'Safari on iPad (and other iPad browsers, which use the same engine) does not support Web MIDI. Use the on-screen pads or a keyboard. Chrome or Edge on a PC works as before. Your profiles stay saved in this browser.',
+            ? iosName(
+                tr(
+                  'iPad の Safari（ほかのブラウザも同じ仕組み）は Web MIDI に対応していません。画面のパッドかキーボードで入力してください。PC の Chrome・Edge ならこのまま使えます。プロファイルはこのブラウザに残っています。',
+                  'Safari on iPad (and other iPad browsers, which use the same engine) does not support Web MIDI. Use the on-screen pads or a keyboard. Chrome or Edge on a PC works as before. Your profiles stay saved in this browser.',
+                ),
               )
             : tr(
                 'このブラウザは Web MIDI に対応していません。画面のパッドかキーボードで入力してください。Chrome・Edge ならつなげます。',

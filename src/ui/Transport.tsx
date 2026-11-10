@@ -20,6 +20,25 @@ function showInChart(beat: number) {
   setView({ scrollBeat: Math.max(-0.5, beat - 2), follow: true });
 }
 
+/** 小節番号を聞いて ▶ をそこへ（再生中ならそこから鳴らし直す）。beat: 今の位置（入力欄の初めの値） */
+export async function askMeasureJump(beat: number, show: (beat: number) => void = showInChart) {
+  const tempo = tempoOf(useEditor.getState().doc);
+  const v = await promptDialog({
+    title: tr('再生を始める位置', 'Playback start position'),
+    body: tr('小節番号を入れてください（例: 012）。', 'Enter a measure number (e.g. 012).'),
+    value: toMeasure(tempo.locate(Math.max(0, beat)).m),
+    ok: tr('移動', 'Go'),
+  });
+  if (!v) return;
+  const t = v.trim().toUpperCase();
+  const m = /^[0-9A-Z]{3}$/.test(t) && /[A-Z]/.test(t) ? parseInt(t[0], 36) * 100 + parseInt(t.slice(1), 10) : parseInt(t, 10);
+  if (!Number.isFinite(m) || m < 0 || m >= 3600) return;
+  const b = tempo.measureStart(m);
+  setCursorBeat(b);
+  show(b);
+  if (useEditor.getState().playing) void playFrom(b);
+}
+
 /**
  * ⏮・▶/■・⏸・再生位置。エディタと AI難易度生成で共通（止めると ▶ に戻る・Shift+Space はここで止める）。
  * show: 小節番号を入れて移動したときに表示を動かす関数。where: ▶ をほかにどこで置けるか（位置の箱の説明）
@@ -58,22 +77,7 @@ export function PlayControls({ show = showInChart, where = tr('譜面の小節�
       <button
         className="pos-box"
         title={tr(`再生を始める位置（▶）。クリックで小節番号を入れて移動。${where}をクリックしても置けます`, `Playback start (▶). Click to jump to a measure number. You can also set it by clicking ${where}`)}
-        onClick={async () => {
-          const v = await promptDialog({
-            title: tr('再生を始める位置', 'Playback start position'),
-            body: tr('小節番号を入れてください（例: 012）。', 'Enter a measure number (e.g. 012).'),
-            value: toMeasure(tempo.locate(Math.max(0, beat)).m),
-            ok: tr('移動', 'Go'),
-          });
-          if (!v) return;
-          const t = v.trim().toUpperCase();
-          const m = /^[0-9A-Z]{3}$/.test(t) && /[A-Z]/.test(t) ? parseInt(t[0], 36) * 100 + parseInt(t.slice(1), 10) : parseInt(t, 10);
-          if (!Number.isFinite(m) || m < 0 || m >= 3600) return;
-          const b = tempo.measureStart(m);
-          setCursorBeat(b);
-          show(b);
-          if (playing) void playFrom(b);
-        }}
+        onClick={() => void askMeasureJump(beat, show)}
       >
         <span className="pos-main">{formatPosition(tempo, beat)}</span>
         <span className="pos-sub">{formatTime(tempo.beatToSec(Math.max(0, beat)))}</span>

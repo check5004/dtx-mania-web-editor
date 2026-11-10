@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectIos, detectSafari, detectWebkit, parseSafariVersion } from './platform';
+import { detectIos, detectSafari, detectWebkit, iosName, parseSafariVersion } from './platform';
 
 // 実機の UA（iPad の Safari は既定で Mac と名乗る。指で触れるか＝maxTouchPoints で見分ける）
 const UA = {
@@ -52,5 +52,12 @@ describe('ブラウザの判定（Safari 向けの分岐に使う）', () => {
     expect(parseSafariVersion(UA.iphoneSafari26)).toEqual([26, 0]);
     expect(parseSafariVersion(UA.ipadChrome)).toEqual([17, 4]);
     expect(parseSafariVersion(UA.winChrome)).toBeNull();
+  });
+
+  it('案内の文の iPad は iPhone では iPhone に（iPadOS は iOS）。PC・iPad ではそのまま', () => {
+    const ja = 'この iPad の Safari は（iPadOS 18.4 以降で読めます）';
+    expect(iosName(ja, true)).toBe('この iPhone の Safari は（iOS 18.4 以降で読めます）');
+    expect(iosName(ja, false)).toBe(ja);
+    expect(iosName("This iPad's Safari (iPadOS/Safari 18.4)", true)).toBe("This iPhone's Safari (iOS/Safari 18.4)");
   });
 });

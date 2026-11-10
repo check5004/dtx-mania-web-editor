@@ -11,7 +11,7 @@ import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
 import { bgaChannel, CH, chipColor, DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
-import { gridStep, posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
+import { gridLabel, gridStep, posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import {
   bandOnsets,
   beginLoopDrag,
@@ -37,6 +37,7 @@ import {
   placeChip,
   placeChips,
   playFrom,
+  previewWav,
   redo,
   resetSongEnd,
   setCursorBeat,
@@ -73,7 +74,8 @@ import { ADTOF } from '../transcribe/model';
 import type { OffsetReport } from '../assist/offsetCheck';
 import { promptDialog } from './dialogs';
 import { songEndM, songSpan } from './hooks';
-import { chipBpmLabel, formatTime, meterLabel } from './format';
+import { chipBpmLabel, formatPosition, formatTime, meterLabel } from './format';
+import { PlaceBubble, type AimInfo } from './phone/PlaceBubble';
 import { SectionPopover } from './SectionPopover';
 import { SPEC_ZONES, zoneLut, type SpecZone } from './specColors';
 import { pickBgmFile } from '../app/fileActions';
@@ -125,7 +127,27 @@ const GEN_HIT = 9;
  * 小節番号は押せるボタン（48×44）、チップの当たりは上下 ±11px、ループの A・B は 44px のつまみにする
  */
 let tabletGeo = false;
+/** スマホの寸法か（tabletGeo も true。小節の列に番号と BPM の札、BPM・BGM の列なし、全体の帯は細い 8） */
+let phoneGeo = false;
 let geoKey = '';
+
+/**
+ * スマホの寸法（承認されたデザインの「幅の内わけ」）。レーンは画面の幅から小節の列・原曲の列・全体の帯を引いた残りを 10 で割る：
+ * iPhone 17 の縦で 36（原曲の列を出すと 32＋打点 40）、横（左右の安全域と道具・再生の帯を除いた 618）で 48＋打点 36＋波形 60。
+ * 押し分け試験でレーンを広げるなら、ここの bar（小節の列）・mini（全体の帯）を細くする
+ */
+export const PHONE_GEO = {
+  head: 22,
+  bar: 34,
+  mini: 8,
+  /** 縦で原曲の列を出したときの打点の列（波形は横だけ） */
+  hits: 40,
+  hitsLand: 36,
+  waveLand: 60,
+  laneMin: 22,
+  laneMax: 64,
+  chipH: 10,
+};
 
 /** タブレット版の小節番号のボタンの高さ（小節線から上） */
 const MEASURE_BTN_H = 44;
@@ -144,16 +166,46 @@ export function tabletLaneW(w: number): number {
 }
 
 function applyGeo(w: number): boolean {
-  const tablet = useDevice.getState().tablet;
+  const dev = useDevice.getState();
+  const tablet = dev.tablet;
+  const phone = dev.phone;
+  const land = phone && !dev.portrait;
   const a = useAssist.getState();
   const v = useVel.getState();
   const bga = bgaVisible() ? bgaW() + 6 : 0;
-  const key = `${tablet}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}`;
+  const key = `${tablet}|${phone}|${land}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}`;
   if (key === geoKey) return false;
   geoKey = key;
   tabletGeo = tablet;
+  phoneGeo = phone;
   Object.assign(GEO, DESK_GEO);
-  if (tablet) {
+  if (phone) {
+    // スマホ：小節の列（番号・▶・BPM の札・ループの印）｜レーン×10｜（原曲の打点・横は波形も）｜全体の帯
+    const velW = v.mode ? DESK_GEO.velGap + v.lanes.length * DESK_GEO.velW : 0;
+    GEO.head = PHONE_GEO.head;
+    GEO.loopW = 0;
+    GEO.genW = 0;
+    GEO.miniW = PHONE_GEO.mini;
+    GEO.miniLoopW = 0;
+    const hitsW = a.audioCols ? (land ? PHONE_GEO.hitsLand : PHONE_GEO.hits) : 0;
+    const waveW = a.audioCols && land ? PHONE_GEO.waveLand : 0;
+    const room = w - GEO.miniW - hitsW - waveW - velW - bga;
+    GEO.laneW = Math.max(PHONE_GEO.laneMin, Math.min(PHONE_GEO.laneMax, Math.floor((room - PHONE_GEO.bar) / 10)));
+    GEO.bpmX = PHONE_GEO.bar;
+    GEO.bpmW = 0;
+    GEO.laneX = PHONE_GEO.bar;
+    const x = GEO.laneX + GEO.laneW * 10;
+    GEO.bgmX = x;
+    GEO.bgmW = 0;
+    GEO.hitsX = x;
+    GEO.hitsW = hitsW;
+    GEO.waveX = x + hitsW;
+    GEO.waveW = waveW;
+    const pad = GEO.laneW <= 32 ? 3 : 4;
+    GEO.chipHW = Math.max(8, Math.round((GEO.laneW - pad * 2) / 2));
+    GEO.graceHW = Math.max(6, Math.round(GEO.chipHW * 0.7));
+    GEO.chipH = PHONE_GEO.chipH;
+  } else if (tablet) {
     const velW = v.mode ? DESK_GEO.velGap + v.lanes.length * DESK_GEO.velW : 0;
     GEO.head = 34;
     GEO.loopW = 14;
@@ -255,7 +307,9 @@ type Drag =
   | { type: 'loop'; ld: LoopDrag; y0: number; where: 'chart' | 'mini' }
   | { type: 'mini' }
   /** 曲の終わり（END）の線。grab: 掴んだ所と線の差（拍） */
-  | { type: 'end'; group: string; grab: number };
+  | { type: 'end'; group: string; grab: number }
+  /** スマホ：吹き出しを見ながら置く所を狙っている（離すと置く。端に寄せるとスクロール） */
+  | { type: 'aim' };
 
 interface Hover {
   x: number;
@@ -337,7 +391,12 @@ interface TouchG {
   pts: Map<number, TouchPt>;
   /** この操作で同時に触れた指の最大数（2本指タップ・3本指タップ） */
   max: number;
-  mode: 'wait' | 'scroll' | 'drag' | 'mouse' | 'menu' | 'multi' | 'done';
+  /** aim: スマホの吹き出しで置く所を狙っている */
+  mode: 'wait' | 'scroll' | 'drag' | 'mouse' | 'menu' | 'multi' | 'done' | 'aim';
+  /** スマホの吹き出しで置く（触れてすぐなぞればスクロール、少し置いてから動かせば狙う） */
+  bubble: boolean;
+  /** 吹き出しを出すまでのタイマー */
+  aimTimer: number;
   t0: number;
   hit: Hit | null;
   /** 押した所の拍（範囲選択の角・置く位置） */
@@ -377,12 +436,19 @@ interface PenPress {
 
 /** 指を動かしたと見なす距離（これより小さければタップ） */
 const TOUCH_SLOP = 10;
+/** スマホ：触れてからこれより後に動かしたら（または動かさずにいたら）吹き出しで狙う。これより早く動かしたらスクロール */
+const AIM_MS = 120;
+/** スマホの吹き出しのとき、何もない所の長押しのメニューは、ふつうの長押しよりこれだけ長く待つ（狙っている間に出ないように） */
+const AIM_HOLD_EXTRA = 250;
 /** ダブルタップの間（ミリ秒）と、ずれてよい距離 */
 const DBL_TAP_MS = 350;
 const DBL_TAP_PX = 30;
 
 /** 右のパネルから「表示中の範囲」を知るための値 */
 const viewport = { h: 600, w: 1000, follow: null as number | null };
+
+/** スマホの吹き出し：譜面が動いたら（端での自動スクロール）、指の下の位置で狙い直す */
+let aimFollower: ((x: number, y: number) => void) | null = null;
 
 let sectionOpener: ((m: number) => void) | null = null;
 
@@ -677,6 +743,8 @@ export function ChartCanvas() {
   const [popover, setPopover] = useState<{ m: number; x: number; y: number } | null>(null);
   const [help, setHelp] = useState<{ x: number; y: number } | null>(null);
   const [tip, setTipState] = useState<Tip | null>(null);
+  /** スマホの吹き出し（置く所を指の上に出す） */
+  const [aim, setAim] = useState<AimInfo | null>(null);
   const tipRef = useRef<{ key: string | null; timer: number; next: Tip | null }>({ key: null, timer: 0, next: null });
   /** 説明を出す。警告はすぐ、操作のヒントは少し止まってから。同じ説明なら位置と中身だけ変える */
   const showTip = (t: Tip | null) => {
@@ -1547,8 +1615,10 @@ export function ChartCanvas() {
       cur.max = Math.max(cur.max, cur.pts.size);
       if (cur.mode !== 'multi') cur.tapOk = cur.mode === 'wait' && e.timeStamp - cur.t0 < 250;
       cancelPress(l, cur);
+      window.clearTimeout(cur.aimTimer);
       if (cur.mode === 'menu') closeCtxMenu();
-      if (cur.mode === 'drag' || cur.mode === 'mouse') l.drag = null;
+      if (cur.mode === 'drag' || cur.mode === 'mouse' || cur.mode === 'aim') l.drag = null;
+      if (cur.mode === 'aim') setAim(null);
       cur.mode = 'multi';
       l.hover = null;
       l.pressM = undefined;
@@ -1569,6 +1639,8 @@ export function ChartCanvas() {
       pts: new Map([[e.pointerId, pt]]),
       max: 1,
       mode: dismissed ? 'done' : 'wait',
+      bubble: false,
+      aimTimer: 0,
       t0: e.timeStamp,
       hit: h,
       b0: g.yToBeat(y),
@@ -1630,17 +1702,85 @@ export function ChartCanvas() {
         break;
       case 'lane':
         if (!t.fingerOnly && dev.tool === 'place') {
+          if (phoneGeo && dev.placeMode === 'bubble') {
+            // スマホ：少し置いたら吹き出しを出す（その前になぞればスクロール）
+            t.bubble = !stopper;
+            if (t.bubble) t.aimTimer = window.setTimeout(() => startAim(t), AIM_MS);
+            break;
+          }
           // 置く位置を先に見せる
           const pos = snapToGrid(tempoOf(s.doc), Math.max(0, t.b0), s.view.div);
           l.hover = { x, y, lane: h.lane, pos, alt: false, flam: wantFlam(false) };
           l.dirty = true;
         }
         break;
+      case 'chip':
+        // スマホ：チップから少し置いて動かしたら、吹き出しで置く所を狙う（動かさなければ長押しでメニュー）
+        if (phoneGeo && dev.placeMode === 'bubble' && !t.fingerOnly && dev.tool === 'place' && h.view.col >= 0) t.bubble = !stopper;
+        break;
     }
-    // 長押しでメニュー（指の周りの輪が閉じたら出す）
+    // 長押しでメニュー（指の周りの輪が閉じたら出す）。スマホの吹き出しのときの何もない所は、少し長く待ってから輪を出す
     if ((body && t.fingerOnly) || h.kind === 'header' || h.kind === 'section') return;
-    l.ring = { x, y, t0: performance.now(), ms: dev.longPressMs };
-    t.timer = window.setTimeout(() => longPress(t), dev.longPressMs);
+    const extra = t.bubble && h.kind === 'lane' ? AIM_HOLD_EXTRA : 0;
+    l.ring = { x, y, t0: performance.now() + extra, ms: dev.longPressMs };
+    t.timer = window.setTimeout(() => longPress(t), dev.longPressMs + extra);
+  };
+
+  /** スマホ：指の位置で、置く所（レーンとグリッドに吸着）と吹き出しの中身を決め直す */
+  const aimAt = (x: number, y: number) => {
+    const l = local();
+    const s = useEditor.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    const tempo = tempoOf(s.doc);
+    const t = aimTarget(l, g, x, y);
+    const pos = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
+    l.hover = t.kind === 'place' ? { x, y, lane: t.lane, pos, alt: false, flam: wantFlam(false) } : null;
+    l.dirty = true;
+    const lane = t.kind === 'chip' ? t.view.col : t.lane;
+    const at = t.kind === 'chip' ? t.view.beat : tempo.beatOf(pos.m, pos.f);
+    const next: AimInfo = {
+      x,
+      y,
+      lane,
+      alt: t.kind === 'chip' ? t.view.alt : false,
+      pos: formatPosition(tempo, at),
+      grid: gridLabel(s.view.div),
+      mode: t.kind,
+      w: l.w,
+      head: GEO.head,
+    };
+    setAim((cur) =>
+      cur && cur.x === next.x && cur.y === next.y && cur.lane === next.lane && cur.pos === next.pos && cur.mode === next.mode && cur.alt === next.alt && cur.grid === next.grid ? cur : next,
+    );
+  };
+
+  /** スマホ：吹き出しを出して狙い始める（動かさずに置いていたとき・少し置いてから動かしたとき） */
+  const startAim = (t: TouchG) => {
+    const l = local();
+    if (l.touch !== t || t.mode !== 'wait' || t.pts.size !== 1) return;
+    const p = [...t.pts.values()][0];
+    t.mode = 'aim';
+    l.drag = { type: 'aim' };
+    l.pressM = undefined;
+    armAutoScroll(p.x0, p.y0);
+    aimFollower = aimAt;
+    aimAt(p.x, p.y);
+  };
+
+  /** スマホ：狙っていた指を離した。譜面の外ならやめる、チップの上なら選んで鳴らす、ほかは置く */
+  const finishAim = (t: TouchG, p: TouchPt, now: number) => {
+    const l = local();
+    l.drag = null;
+    const s = useEditor.getState();
+    const g = geom(l, currentScroll(l), s.view.pxPerBeat);
+    const at = aimTarget(l, g, p.x, p.y);
+    if (at.kind === 'out') return;
+    if (at.kind === 'chip') {
+      touchTap({ ...t, hit: { kind: 'chip', view: at.view }, b0: at.view.beat, stopper: false }, { ...p, x0: p.x, y0: p.y }, now);
+      return;
+    }
+    l.lastTap = { t: now, x: p.x, y: p.y, id: null };
+    placeByTouch(at.lane, false, snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(p.y)), s.view.div), {});
   };
 
   /** 長押し：押した物のメニューを出す（指を離さずに動かせば、チップは動かす・何もない所は範囲選択・END はドラッグ） */
@@ -1648,8 +1788,14 @@ export function ChartCanvas() {
     const l = local();
     l.ring = null;
     l.dirty = true;
-    if (l.touch !== t || t.mode !== 'wait' || t.pts.size !== 1 || !t.hit) return;
+    if (l.touch !== t || (t.mode !== 'wait' && t.mode !== 'aim') || t.pts.size !== 1 || !t.hit) return;
     const p = [...t.pts.values()][0];
+    // スマホ：吹き出しで狙っていても、動かさずに長く押していればメニュー
+    if (t.mode === 'aim') {
+      l.drag = null;
+      setAim(null);
+    }
+    window.clearTimeout(t.aimTimer);
     t.mode = 'menu';
     l.hover = null;
     l.pressM = undefined;
@@ -1673,8 +1819,16 @@ export function ChartCanvas() {
       case 'wait': {
         if (!far) return;
         cancelPress(l, t);
+        window.clearTimeout(t.aimTimer);
         l.hover = null;
         l.pressM = undefined;
+        // スマホの吹き出し：触れてすぐ（0.12 秒以内）なぞったらスクロール、少し置いてから動かしたら置く所を狙う
+        if (t.bubble && e.timeStamp - t.t0 >= AIM_MS) {
+          startAim(t);
+          pointerMovedFromPress(x, y);
+          aimAt(x, y);
+          return;
+        }
         const h = t.hit;
         const dev = useDevice.getState();
         // 選ぶ道具（「置く」でも設定で範囲選択にしていれば）：なぞって範囲を選ぶ
@@ -1697,8 +1851,15 @@ export function ChartCanvas() {
       case 'scroll':
         scrollStep(l, t, y, e.timeStamp);
         return;
+      case 'aim':
+        // 動かしたら長押しのメニューは出さない
+        if (far) cancelPress(l, t);
+        pointerMovedFromPress(x, y);
+        aimAt(x, y);
+        return;
       case 'menu':
-        if (!far) return;
+        // スマホは指で引きずらない（動かすのは選択バーの矢印）。メニューはそのまま
+        if (!far || phoneGeo) return;
         closeCtxMenu();
         startHoldDrag(t, p, x, y);
         return;
@@ -1767,17 +1928,26 @@ export function ChartCanvas() {
     }
     l.touch = null;
     cancelPress(l, t);
+    window.clearTimeout(t.aimTimer);
     l.hover = null;
     l.pressM = undefined;
     l.dirty = true;
+    if (t.mode === 'aim') {
+      setAim(null);
+      aimFollower = null;
+    }
     if (cancel) {
-      if (t.mode === 'drag' || t.mode === 'mouse') l.drag = null;
+      if (t.mode === 'drag' || t.mode === 'mouse' || t.mode === 'aim') l.drag = null;
       return;
     }
     const now = e.timeStamp;
     switch (t.mode) {
       case 'wait':
         if (p && !t.stopper) touchTap(t, p, now);
+        return;
+      case 'aim':
+        if (p) finishAim(t, p, now);
+        else l.drag = null;
         return;
       case 'scroll':
         startFling(l, t, now);
@@ -1837,6 +2007,8 @@ export function ChartCanvas() {
           useEditor.setState({ selection: already ? s.selection.filter((i) => i !== id) : [...s.selection, id] });
         } else {
           useEditor.setState({ selection: [id] });
+          // スマホ：置かずに選んだことが分かるように鳴らす（「チップを置いたときに音を鳴らす」を切っていれば鳴らさない）
+          if (phoneGeo && h.view.col >= 0 && s.previewOnPlace) previewWav(h.view.c.v);
         }
         return;
       }
@@ -1929,6 +2101,7 @@ export function ChartCanvas() {
       <GenBadge anchor={ghostAnchor} sized={sized} />
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
       {tip && !popover && <ChartTip tip={tip} />}
+      {aim && <PlaceBubble aim={aim} />}
       <IssueBadge />
       {help && <OnsetHelp x={help.x} y={help.y} onClose={() => setHelp(null)} />}
     </div>
@@ -2304,6 +2477,24 @@ function drawMeasureButtons(ctx: CanvasRenderingContext2D, g: Geom, tempo: Tempo
     if (y < GEO.head + 20 || y - MEASURE_BTN_H > H) continue;
     const active = gs.open && m >= gs.from && m <= gs.to;
     const pressed = pressM === m;
+    if (phoneGeo) {
+      // スマホ：小節線のすぐ上に番号だけ（押すと下からのシートで、✨ 生成が先頭）。押している間は番号を青く
+      const label = toMeasure(m);
+      ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+      const tw = ctx.measureText(label).width + 6;
+      const ty = y - 11;
+      if (pressed || active) {
+        roundRect(ctx, g.ox + GEO.bpmX / 2 - tw / 2, ty - 8, tw, 16, 4);
+        ctx.fillStyle = pressed ? '#8AD8FF' : 'rgba(255,199,104,.22)';
+        ctx.fill();
+      }
+      ctx.fillStyle = pressed ? '#06121B' : active ? '#FFC768' : m === cursorM ? '#E7EBF1' : '#A3ADBB';
+      ctx.fillText(label, g.ox + GEO.bpmX / 2, ty + 0.5);
+      // 小節線の小節の列の中の印
+      ctx.fillStyle = C.measure;
+      ctx.fillRect(g.ox + GEO.bpmX - 10, Math.round(y) - 1, 10, 2);
+      continue;
+    }
     if (pressed || active) {
       roundRect(ctx, x, y - MEASURE_BTN_H + 2, w, MEASURE_BTN_H - 5, 8);
       ctx.fillStyle = pressed ? 'rgba(76,194,255,.2)' : 'rgba(255,199,104,.14)';
@@ -2454,7 +2645,7 @@ function currentScroll(l: Local): number {
 const FOLLOW_AT = 0.22;
 
 function geom(l: Local, scroll: number, px: number): Geom {
-  const ox = Math.max(tabletGeo ? 2 : 8, Math.floor((l.w - GEO.miniW - chartWidth()) / 2));
+  const ox = Math.max(phoneGeo ? 0 : tabletGeo ? 2 : 8, Math.floor((l.w - GEO.miniW - chartWidth()) / 2));
   const base = l.h - GEO.bottom;
   return {
     ox,
@@ -2573,6 +2764,12 @@ function genTargetAt(g: Geom, h: Hit | null, x: number, y: number, gv: GenView):
   return best ? { kind: 'note', id: best } : null;
 }
 
+/** スマホ：小節の列の左の A・B の印（ループの端・A だけ・B だけの印）の近く（上下 12px）か */
+function phoneLoopHandleAt(g: Geom, y: number): boolean {
+  const grab = loopGrab(Math.max(0, g.yToBeat(y)), 12 / g.px, 12 / g.px);
+  return grab === 'a' || grab === 'b' || grab === 'mark';
+}
+
 /** 曲の終わり（END の線）の拍。分からなければ null */
 function endBeatOf(doc: DtxDoc): number | null {
   const m = songEndM(doc);
@@ -2592,10 +2789,24 @@ function endHandleAt(g: Geom, x: number, y: number): boolean {
   return y >= ey - 5 && y <= ey + END_TAG_H + 2;
 }
 
+/** スマホの吹き出しで狙っている所：譜面の外（やめる）・チップの上（選ぶ）・レーン（置く。左右の端の外は端のレーン） */
+function aimTarget(l: Local, g: Geom, x: number, y: number): { kind: 'out'; lane: number } | { kind: 'chip'; view: ChipView; lane: number } | { kind: 'place'; lane: number } {
+  const left = g.ox + GEO.laneX;
+  const right = left + GEO.laneW * 10;
+  const slot = Math.max(0, Math.min(9, Math.floor((x - left) / GEO.laneW)));
+  const lane = laneAt(slot) ?? 0;
+  if (y < GEO.head || y > l.h || x < left - GEO.laneW / 2 || x >= right + GEO.laneW / 2) return { kind: 'out', lane };
+  const h = hitTest(l, g, Math.max(left, Math.min(right - 1, x)), y);
+  if (h?.kind === 'chip' && h.view.col >= 0) return { kind: 'chip', view: h.view, lane: h.view.col };
+  return { kind: 'place', lane };
+}
+
 function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   if (x >= l.w - GEO.miniW) return x < l.w - GEO.miniW + GEO.miniLoopW && y >= GEO.head ? { kind: 'miniLoop' } : { kind: 'mini' };
   if (y < GEO.head) return { kind: 'header' };
   if (endHandleAt(g, x, y)) return { kind: 'end' };
+  // スマホ：ループの帯は無く、小節の列の左に A・B の印だけ。印の近くなら掴める
+  if (phoneGeo && x - g.ox >= 0 && x - g.ox < 20 && phoneLoopHandleAt(g, y)) return { kind: 'loop' };
   const vs = useVel.getState();
   if (vs.mode) {
     const rx = x - g.ox;
@@ -2628,6 +2839,11 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
     return m === null ? { kind: 'gutter' } : { kind: 'genBtn', m };
   }
   if (col === 'gutter') {
+    if (phoneGeo) {
+      // スマホ：BPM 変化の札（押すと選ぶ・ダブルタップで値を変える・長押しでメニュー）
+      const bpm = phoneBpmTagAt(g, x, y);
+      if (bpm) return { kind: 'chip', view: bpm };
+    }
     const m = tabletGeo ? measureBtnAt(g, y) : null;
     return m === null ? { kind: 'gutter' } : { kind: 'measureBtn', m };
   }
@@ -2713,6 +2929,9 @@ function dragFollowsView(l: Local) {
     case 'velPencil':
       pencilApply(l, g, d.idx, g.beatToY(d.lastBeat), p.y, p.x, d.group);
       d.lastBeat = beat;
+      break;
+    case 'aim':
+      aimFollower?.(p.x, p.y);
       break;
   }
   l.dirty = true;
@@ -3073,6 +3292,7 @@ function autoScrollWhileDragging(l: Local, now: number) {
       d.type === 'end' ||
       d.type === 'velLine' ||
       d.type === 'velPencil' ||
+      d.type === 'aim' ||
       (d.type === 'loop' && d.where === 'chart'));
   let v = 0;
   if (on) {
@@ -3271,10 +3491,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     }
   }
 
-  // BPM（曲頭の #BPM と変化）
+  // BPM（曲頭の #BPM と変化）。スマホは BPM の列が無いので、変化のチップを小節の列の札にする（drawChip）
   ctx.textAlign = 'left';
   ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
-  for (const ev of tempo.events) {
+  for (const ev of phoneGeo ? [] : tempo.events) {
     const y = g.beatToY(ev.beat);
     if (y < GEO.head - 10 || y > H + 10) continue;
     ctx.fillStyle = C.amber;
@@ -3391,6 +3611,10 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
+      return;
+    }
+    if (phoneGeo && col === COL_BPM) {
+      drawBpmTag(ctx, ox, y, chipBpmLabel(tempo.bpmAt(beat + 1e-6)), alpha, selected);
       return;
     }
     const cx = ox + colCenter(col);
@@ -3565,11 +3789,17 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   if (velMode) drawVelLanes(ctx, g, H, sel, d);
   else drawVelBubble(ctx, g, sel, H);
 
-  // 置く位置のプレビュー（フラムなら2打）
+  // 置く位置のプレビュー（フラムなら2打）。スマホで狙っている間は、そのレーンを薄く光らせる
   const hv = l.hover;
-  if (hv && hv.pos && !d) {
+  if (hv && hv.pos && (!d || d.type === 'aim')) {
     const color = chipColor(hv.lane, hv.alt);
     const cx = ox + laneCX(hv.lane);
+    if (d?.type === 'aim') {
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - GEO.laneW / 2, GEO.head, GEO.laneW, H - GEO.head);
+      ctx.globalAlpha = 1;
+    }
     const spot = hv.flam ? flamSpot(tempo, hv.pos, flamOptions()) : null;
     const ghostAt = (p: Pos, alpha: number, edge: boolean, hw = GEO.chipHW) => {
       const y = g.beatToY(tempo.beatOf(p.m, p.f));
@@ -3637,8 +3867,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     if (y >= GEO.head && y <= H) {
       ctx.strokeStyle = C.accent;
       ctx.globalAlpha = playBeat !== null ? 0.5 : 0.9;
-      ctx.setLineDash([6, 3]);
-      ctx.lineWidth = 1.2;
+      // スマホは細い点線だと見つけにくいので、実線（デザインのとおり）
+      ctx.setLineDash(phoneGeo ? [] : [6, 3]);
+      ctx.lineWidth = phoneGeo ? 2 : 1.2;
       ctx.beginPath();
       ctx.moveTo(ox + GEO.bpmX, y);
       ctx.lineTo(ox + cw, y);
@@ -3668,12 +3899,20 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
   ctx.textAlign = 'center';
   ctx.fillStyle = C.text;
-  ctx.fillText('BPM', ox + GEO.bpmX + GEO.bpmW / 2, GEO.head / 2);
-  ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
-  ctx.fillStyle = a.loop?.on ? C.loop : '#8D7A55';
-  ctx.fillText('A', ox + GEO.loopW / 2, GEO.head / 2 + 6);
-  ctx.fillText('B', ox + GEO.loopW / 2, GEO.head / 2 - 5);
-  ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+  if (phoneGeo) {
+    // スマホ：小節の列の見出しと、レーン名（太く）
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillStyle = C.dim;
+    ctx.fillText(tr('小節', 'Bar'), ox + GEO.bpmX / 2, GEO.head / 2);
+    ctx.font = `700 ${GEO.laneW <= 32 ? 10.5 : 11}px "JetBrains Mono", ui-monospace, monospace`;
+  } else {
+    ctx.fillText('BPM', ox + GEO.bpmX + GEO.bpmW / 2, GEO.head / 2);
+    ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = a.loop?.on ? C.loop : '#8D7A55';
+    ctx.fillText('A', ox + GEO.loopW / 2, GEO.head / 2 + 6);
+    ctx.fillText('B', ox + GEO.loopW / 2, GEO.head / 2 - 5);
+    ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+  }
   ctx.fillStyle = C.text;
   const ms = new Set(a.mute);
   const ss = new Set(a.solo);
@@ -3700,7 +3939,13 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     ctx.fillStyle = '#4DD0C0';
     ctx.fillText('BGA', ox + bgaX() + bgaW() / 2, GEO.head / 2);
   }
-  if (a.audioCols) {
+  if (a.audioCols && phoneGeo) {
+    // スマホ：見出しは1段（打点・波形）。打点の5種は色で見分ける
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillStyle = '#A3ADBB';
+    ctx.fillText(tr('打点', 'Hits'), ox + GEO.hitsX + GEO.hitsW / 2, GEO.head / 2);
+    if (GEO.waveW > 0) ctx.fillText(a.waveMode === 'spec' ? tr('スペクトル', 'Spectrum') : tr('波形', 'Wave'), ox + GEO.waveX + GEO.waveW / 2, GEO.head / 2);
+  } else if (a.audioCols) {
     ctx.font = '9px system-ui, sans-serif';
     ctx.fillStyle = '#A3ADBB';
     // 譜面のチップと原曲の打点がずれていれば、見出しの代わりにずれを出す（クリックで直し方）
@@ -3767,7 +4012,8 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     });
   }
 
-  drawMinimap(ctx, l, g, playBeat, a);
+  if (phoneGeo) drawMiniStrip(ctx, l, g, playBeat);
+  else drawMinimap(ctx, l, g, playBeat, a);
 
   if (l.ring) drawPressRing(ctx, l.ring);
   // 入力パッドのレーンを譜面のレーンの真下にそろえる
@@ -3883,6 +4129,18 @@ function drawLoop(ctx: CanvasRenderingContext2D, g: Geom, H: number, cw: number,
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const tab = (y: number, label: string, below: boolean, col: string) => {
+    if (phoneGeo) {
+      // スマホ：小節の列の左に小さな丸（掴むのは上下 12px の帯）
+      if (y + 8 < GEO.head || y - 8 > H) return;
+      ctx.beginPath();
+      ctx.arc(ox + 7, y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace';
+      ctx.fillStyle = '#1B1407';
+      ctx.fillText(label, ox + 7, y + 0.5);
+      return;
+    }
     if (tabletGeo) {
       // タブレット版：線の上に丸いつまみ（指で掴みやすく）
       if (y + 12 < GEO.head || y - 12 > H) return;
@@ -3926,12 +4184,13 @@ function drawLoop(ctx: CanvasRenderingContext2D, g: Geom, H: number, cw: number,
   if (yA < GEO.head - 14 || yB > H + 14) return;
   const on = loop.on;
   const col = on ? C.loop : 'rgba(255,199,104,.45)';
-  // 帯の範囲
+  // 帯の範囲（スマホは小節の列の左の細い帯）
   const top = Math.max(GEO.head, yB);
   const bottom = Math.min(H, yA);
   if (bottom > top) {
-    ctx.fillStyle = on ? 'rgba(255,199,104,.35)' : 'rgba(255,199,104,.12)';
-    ctx.fillRect(ox + 2, top, GEO.loopW - 4, bottom - top);
+    ctx.fillStyle = phoneGeo ? (on ? 'rgba(255,199,104,.6)' : 'rgba(255,199,104,.25)') : on ? 'rgba(255,199,104,.35)' : 'rgba(255,199,104,.12)';
+    if (phoneGeo) ctx.fillRect(ox + 5, top, 4, bottom - top);
+    else ctx.fillRect(ox + 2, top, GEO.loopW - 4, bottom - top);
   }
   // 線
   ctx.fillStyle = col;
@@ -4094,6 +4353,26 @@ function drawAudioCols(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: 
   const spec = a.waveMode === 'spec' && a.spectro && bgm ? a.spectro : null;
   if ((!a.data && !spec) || !bgm) {
     ctx.save();
+    if (W < 40) {
+      // 波形の列が無い（スマホの縦）：打点の列に縦書きで
+      ctx.translate(hx + GEO.hitsW / 2, (GEO.head + H) / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = a.status === 'nosource' || a.status === 'none' ? C.accent : C.dim;
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const msg =
+        a.status === 'loading'
+          ? tr(`原曲を解析中… ${Math.round(a.progress * 100)}%`, `Analyzing… ${Math.round(a.progress * 100)}%`)
+          : a.status === 'error'
+            ? tr('解析できませんでした', "Couldn't analyze it")
+            : bgm
+              ? tr('原曲のファイルがありません', 'The original audio file is missing')
+              : tr('原曲がありません（タップで読み込む）', 'No original audio (tap to load)');
+      ctx.fillText(msg, 0, 0);
+      ctx.restore();
+      return;
+    }
     ctx.translate(wx + W / 2, (GEO.head + H) / 2);
     ctx.fillStyle = C.dim;
     ctx.font = '11px system-ui, sans-serif';
@@ -4414,6 +4693,105 @@ function drawSpectro(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: Te
 }
 
 // ---- 全体（ミニマップ） -------------------------------------------------------------
+
+/** スマホ：BPM 変化の札（小節の列、変わる所の線のすぐ下）。押すと選べる（ダブルタップで値を変える） */
+function drawBpmTag(ctx: CanvasRenderingContext2D, ox: number, y: number, label: string, alpha: number, selected: boolean) {
+  const x = ox + 2;
+  const w = GEO.bpmX - 4;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = C.amber;
+  ctx.fillRect(x, Math.round(y) - 1, w, 2);
+  roundRect(ctx, x, y + 2, w, BPM_TAG_H, 4);
+  ctx.fillStyle = '#1E1A12';
+  ctx.fill();
+  ctx.strokeStyle = selected ? '#FFFFFF' : '#6B5326';
+  ctx.lineWidth = selected ? 1.6 : 1;
+  ctx.stroke();
+  ctx.fillStyle = C.amber;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let size = 9;
+  ctx.font = `700 ${size}px "JetBrains Mono", ui-monospace, monospace`;
+  while (size > 6.5 && ctx.measureText(label).width > w - 3) {
+    size -= 0.5;
+    ctx.font = `700 ${size}px "JetBrains Mono", ui-monospace, monospace`;
+  }
+  ctx.fillText(label, x + w / 2, y + 2 + BPM_TAG_H / 2 + 0.5);
+  ctx.globalAlpha = 1;
+}
+
+/** スマホの BPM の札の高さ */
+const BPM_TAG_H = 15;
+
+/** スマホ：小節の列の BPM の札の上なら、その BPM 変化のチップ */
+function phoneBpmTagAt(g: Geom, x: number, y: number): ChipView | null {
+  const rx = x - g.ox;
+  if (rx < 0 || rx >= GEO.bpmX) return null;
+  const doc = useEditor.getState().doc;
+  const beat = g.yToBeat(y);
+  // 札は線の下（y が大きい＝前の拍）にあるので、少し前から探す
+  for (const v of viewsInRange(chipViews(doc), beat - 1, beat + 1)) {
+    if (v.col !== COL_BPM) continue;
+    const ty = g.beatToY(v.beat);
+    if (y >= ty - 4 && y <= ty + BPM_TAG_H + 4) return v;
+  }
+  return null;
+}
+
+/** スマホの全体の帯（右端の 8px）：曲全体のチップの詰まり具合と、いま見ている所。なぞると曲全体を動く */
+function drawMiniStrip(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat: number | null) {
+  const s = useEditor.getState();
+  const doc = s.doc;
+  const x = l.w - GEO.miniW;
+  const { top, bottom, end } = miniGeom(l);
+  const side = useSidecar.getState();
+  if (!l.mini || l.mini.doc !== doc || l.mini.h !== l.h || l.mini.endBeat !== end || l.mini.sections !== side.sections) {
+    const c = l.mini?.canvas ?? document.createElement('canvas');
+    c.width = Math.max(1, Math.floor(GEO.miniW * l.dpr));
+    c.height = Math.floor(l.h * l.dpr);
+    const m = c.getContext('2d')!;
+    m.setTransform(l.dpr, 0, 0, l.dpr, 0, 0);
+    m.fillStyle = '#0E1217';
+    m.fillRect(0, 0, GEO.miniW, l.h);
+    m.fillStyle = '#1E242D';
+    m.fillRect(0, 0, 1, l.h);
+    // 2px ごとの段に、チップの数で濃さを付ける
+    const rows = new Map<number, number>();
+    for (const v of chipViews(doc)) {
+      if (v.col < 0) continue;
+      const r = Math.round((bottom - (v.beat / end) * (bottom - top)) / 2);
+      rows.set(r, (rows.get(r) ?? 0) + 1);
+    }
+    m.fillStyle = '#6F7D90';
+    for (const [r, n] of rows) {
+      m.globalAlpha = Math.min(1, 0.3 + n * 0.12);
+      m.fillRect(2, r * 2, GEO.miniW - 3, 2);
+    }
+    m.globalAlpha = 1;
+    l.mini = { canvas: c, doc, h: l.h, endBeat: end, sections: side.sections };
+  }
+  ctx.drawImage(l.mini.canvas, x, 0, GEO.miniW, l.h);
+  const yOf = (b: number) => bottom - (b / end) * (bottom - top);
+  // 見えている範囲
+  const y0 = yOf(Math.max(0, g.maxBeat));
+  const y1 = yOf(Math.max(0, g.minBeat));
+  const vh = Math.max(10, y1 - y0);
+  roundRect(ctx, x + 0.75, Math.max(top - 4, y0) + 0.75, GEO.miniW - 1.5, vh - 1.5, 3);
+  ctx.fillStyle = 'rgba(76,194,255,.16)';
+  ctx.fill();
+  ctx.strokeStyle = C.accent;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // 再生を始める位置・再生位置
+  ctx.fillStyle = C.accent;
+  ctx.fillRect(x + 1, Math.round(yOf(s.cursorBeat)) - 1, GEO.miniW - 1, 2);
+  if (playBeat !== null) {
+    ctx.fillStyle = C.playhead;
+    ctx.fillRect(x + 1, Math.round(yOf(playBeat)) - 1, GEO.miniW - 1, 2);
+  }
+  ctx.fillStyle = '#0E1217';
+  ctx.fillRect(x, 0, GEO.miniW, GEO.head);
+}
 
 function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat: number | null, a: AssistState) {
   const s = useEditor.getState();

@@ -5,6 +5,7 @@ import { parseBase36x2, toBase36x2, toMeasure } from '../dtx/base36';
 import { bgaChannel, BGA_CHANNELS, type DtxDoc } from '../dtx/model';
 import { opPlace, setField, type Pos } from '../edit/ops';
 import { findFile, type FolderFile } from '../fs/folder';
+import { useDevice } from './device';
 import { edit, toast, useEditor } from './editor';
 
 export type MaterialKind = 'bmp' | 'avi';
@@ -50,7 +51,9 @@ export function hasBga(doc: DtxDoc): boolean {
   return v;
 }
 
+/** BGA の列を出すか。スマホは譜面の幅が足りないので、表示メニューで出したときだけ */
 export function bgaVisible(): boolean {
+  if (useDevice.getState().phone) return useBga.getState().show;
   return useBga.getState().show || hasBga(useEditor.getState().doc);
 }
 

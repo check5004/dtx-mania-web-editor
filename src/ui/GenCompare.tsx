@@ -575,12 +575,13 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
 }
 
 /** 並べた譜面（見出し＋キャンバス） */
-export function GenCompare() {
+/** only: その 1 つの譜面だけを大きく出す（スマホの縦。聴く譜面を切り替えると替わる） */
+export function GenCompare({ only }: { only?: Slot } = {}) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cols = useGen((s) => compareColumns(s).join(','))
     .split(',')
-    .filter(Boolean) as Slot[];
+    .filter((c) => c && (!only || c === only)) as Slot[];
   const [width, setWidth] = useState(0);
   const lay = useMemo(() => layoutColumns(width, cols.length), [width, cols.length]);
   const L = useRef<Local>({ w: 0, h: 0, dpr: 1, cols, lay, dirty: true, followScroll: null, hover: null, drag: null, downOnChip: false });

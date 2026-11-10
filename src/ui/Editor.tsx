@@ -59,6 +59,8 @@ import { PanelRail, VSplitter } from './Splitter';
 import { Transport } from './Transport';
 import { useDevice } from '../store/device';
 import { TabletEditor } from './tablet/TabletEditor';
+import { PhoneEditor } from './phone/PhoneEditor';
+import { LandscapeOnly } from './phone/LandscapeOnly';
 import { tabletSave } from './tablet/shared';
 import { hasUnsaved } from '../store/unsaved';
 
@@ -312,6 +314,8 @@ export function Editor() {
   const folderInput = useRef<HTMLInputElement>(null);
   const page = useEditor((s) => s.page);
   const tablet = useDevice((s) => s.tablet);
+  const phone = useDevice((s) => s.phone);
+  const portrait = useDevice((s) => s.portrait);
   const velMode = useVel((s) => s.mode);
   const findOpen = useFind((s) => s.open);
   const previewMode = usePreview((s) => s.mode);
@@ -354,7 +358,11 @@ export function Editor() {
         else void dropAudioInEditor(files);
       }}
     >
-      {page === 'tempo' ? (
+      {page === 'tempo' && phone && portrait ? (
+        <LandscapeOnly title={tr('テンポと開始位置', 'Tempo and start')} why={tr('波形と譜面を横に並べて合わせるので、横向きで使います。', 'It lines up the waveform and the chart side by side, so it is used in landscape.')} />
+      ) : page === 'guideline' && phone && portrait ? (
+        <LandscapeOnly title={tr('難易度ガイドライン', 'Difficulty guidelines')} why={tr('難易度ごとの表を横に並べるので、横向きで使います。', 'It shows the tables for each difficulty side by side, so it is used in landscape.')} />
+      ) : page === 'tempo' ? (
         <TempoPage />
       ) : page === 'settings' ? (
         <SettingsPage />
@@ -368,6 +376,8 @@ export function Editor() {
         <GuidelinePage />
       ) : page === 'ai' ? (
         <AiGenPage />
+      ) : phone ? (
+        <PhoneEditor folderInput={folderInput} />
       ) : tablet ? (
         <TabletEditor folderInput={folderInput} />
       ) : (

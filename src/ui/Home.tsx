@@ -14,6 +14,7 @@ import { Icon } from './icons';
 import { LangSwitch } from './LangSwitch';
 import { SafariNotice } from './SafariNotice';
 import { HomeTablet } from './tablet/HomeTablet';
+import { HomePhone } from './phone/HomePhone';
 import { InstallCard } from './pwa/InstallCard';
 
 function ago(t: number): string {
@@ -37,7 +38,8 @@ function ago(t: number): string {
 
 export function Home() {
   const tablet = useDevice((s) => s.tablet);
-  return tablet ? <HomeTablet /> : <HomeDesktop />;
+  const phone = useDevice((s) => s.phone);
+  return phone ? <HomePhone /> : tablet ? <HomeTablet /> : <HomeDesktop />;
 }
 
 function HomeDesktop() {

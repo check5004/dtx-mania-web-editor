@@ -59,7 +59,7 @@ const TRANSPORT_H = 60;
 const STRIP_H = 52;
 
 /** 外を押したら閉じる小窓 */
-function useOutside(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
+export function useOutside(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
   useEffect(() => {
     if (!open) return;
     const down = (e: PointerEvent) => {
@@ -492,7 +492,7 @@ function PanelHost({ overlay }: { overlay: boolean }) {
  * つまみのドラッグ：指に付いて高さを変え（set）、離したら onEnd(高さ, 離す直前の速さ px/ms。+ で高くする向き)。
  * ほとんど動かさずに短く離したら onTap（開け閉め）
  */
-function useDragHeight(get: () => number, set: (h: number) => void, onEnd: (h: number, v: number) => void, onTap?: () => void) {
+export function useDragHeight(get: () => number, set: (h: number) => void, onEnd: (h: number, v: number) => void, onTap?: () => void) {
   return (e: React.PointerEvent<HTMLElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
@@ -675,7 +675,7 @@ function SheetT() {
 
 // ---- ☰ のメニュー -----------------------------------------------------------------------
 
-function Drawer({ folderInput }: { folderInput: React.RefObject<HTMLInputElement | null> }) {
+export function Drawer({ folderInput }: { folderInput: React.RefObject<HTMLInputElement | null> }) {
   const open = useDevice((s) => s.drawer);
   const menus = useEditorMenus(folderInput, true);
   const [tab, setTab] = useState(0);

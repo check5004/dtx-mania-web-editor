@@ -2,7 +2,7 @@
 // - Chrome・Edge（インストールの案内を出せるとき）: 1行の知らせと「インストール」
 // - iPad・iPhone: ホーム画面に追加する手順（Safari のタブだと保存が消えることがあるので、ホーム画面のアプリをすすめる）
 import { tr } from '../../i18n';
-import { useDevice } from '../../store/device';
+import { iosName, useDevice } from '../../store/device';
 import { closeInstallHint, promptInstall, usePwa } from '../../store/pwa';
 import { Icon } from '../icons';
 import { AddToHomeIcon, installWay, IosSteps } from './installHelp';
@@ -70,9 +70,11 @@ export function InstallCard() {
       </div>
       <IosSteps />
       <p className="pwa-hint-foot lbl">
-        {tr(
-          'ホーム画面のアプリは Safari とは別に保存します。Safari で使っていた最近の曲・iPad 本体に保存した曲（音も）・音源ライブラリ・設定は移らないので、追加したらそちらで使い始めてください（曲は ZIP で書き出して開き直せます）。',
-          'The Home Screen app keeps its own storage, separate from Safari. Recent songs, songs kept on the iPad (with their audio), the sound library and settings from Safari do not carry over, so start using the app once it is added (export songs as ZIP to reopen them there).',
+        {iosName(
+          tr(
+            'ホーム画面のアプリは Safari とは別に保存します。Safari で使っていた最近の曲・iPad 本体に保存した曲（音も）・音源ライブラリ・設定は移らないので、追加したらそちらで使い始めてください（曲は ZIP で書き出して開き直せます）。',
+            'The Home Screen app keeps its own storage, separate from Safari. Recent songs, songs kept on the iPad (with their audio), the sound library and settings from Safari do not carry over, so start using the app once it is added (export songs as ZIP to reopen them there).',
+          ),
         )}
       </p>
     </section>

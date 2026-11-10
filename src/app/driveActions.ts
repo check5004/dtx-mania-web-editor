@@ -3,7 +3,7 @@
 // Drive の読み書きそのものは src/drive/、ログインは src/drive/auth.ts。
 import { create } from 'zustand';
 import { pl, tr, locale } from '../i18n';
-import { IS_IOS } from '../platform';
+import { IS_IOS, IS_IPHONE } from '../platform';
 import { DriveAuthError, DriveError } from '../drive/api';
 import { ensureToken, loadGis, setBeforeRedirect, signIn, takeRedirectResult, tokenValid, useDriveAuth, type Resume } from '../drive/auth';
 import { describeFiles, listDriveSongs, newLink, pullSong, pushSong, readAutosaves, readLink, remoteChanges, type DriveLink, type DriveSong, type SyncProgress } from '../drive/sync';
@@ -39,7 +39,7 @@ const ed = useEditor.getState;
 const set = useDriveSync.setState;
 
 function device(): string {
-  return IS_IOS ? 'iPad' : 'PC';
+  return IS_IPHONE ? 'iPhone' : IS_IOS ? 'iPad' : 'PC';
 }
 
 export function timeText(t: number): string {

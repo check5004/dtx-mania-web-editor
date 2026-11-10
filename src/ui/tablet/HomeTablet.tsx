@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { tr, pl, locale } from '../../i18n';
 import { listRecentSongs, newEmptySong, openFolderPicker, openPickedFiles, openRecent, removeRecentSong } from '../../app/fileActions';
 import type { RecentSong } from '../../fs/recent';
-import { IS_IOS, NO_FOLDER_PICK } from '../../store/device';
+import { iosName, IS_IOS, NO_FOLDER_PICK } from '../../store/device';
 import { useEditor } from '../../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../../store/localSongs';
 import { LocalStorageCard } from '../LocalStorage';
@@ -20,7 +20,7 @@ import { usePwa } from '../../store/pwa';
 
 const TIPS_KEY = 'dtxe.ipadTips.closed';
 
-function ago(t: number): string {
+export function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
   if (s < 60) return tr('たった今', 'just now');
   if (s < 3600) {
@@ -48,7 +48,7 @@ function tipsClosed(): boolean {
 }
 
 /** 曲名から決める、最近の曲のカードの色（同じ曲はいつも同じ色） */
-function artColor(title: string): string {
+export function artColor(title: string): string {
   const cols = ['#23415A', '#5A2A2E', '#3A3456', '#2B4A36', '#4A3A22', '#22424A'];
   let h = 0;
   for (const ch of title) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -111,7 +111,7 @@ export function HomeTablet() {
           <section className="th-tips">
             <div className="th-tips-head">
               <span className="th-tips-i">{Icon.info(20)}</span>
-              <b>{tr('iPad で使うとき', 'Using it on iPad')}</b>
+              <b>{iosName(tr('iPad で使うとき', 'Using it on iPad'))}</b>
               <span className="grow" />
               <button className="t-ib" onClick={closeTips} aria-label={tr('閉じる', 'Close')}>
                 {Icon.close(20)}
@@ -138,9 +138,11 @@ export function HomeTablet() {
                 </b>
                 <span className="lbl">
                   {local
-                    ? tr(
-                        'PC の曲フォルダをZIPにして AirDrop・iCloud Drive で送り、ここで開きます。開いた曲は音ごと iPad 本体に保存され、PC へはZIPで書き出します。',
-                        'Zip the song folder on your PC, send it with AirDrop or iCloud Drive, and open it here. Opened songs are kept on the iPad with their audio; export a ZIP to send them back.',
+                    ? iosName(
+                        tr(
+                          'PC の曲フォルダをZIPにして AirDrop・iCloud Drive で送り、ここで開きます。開いた曲は音ごと iPad 本体に保存され、PC へはZIPで書き出します。',
+                          'Zip the song folder on your PC, send it with AirDrop or iCloud Drive, and open it here. Opened songs are kept on the iPad with their audio; export a ZIP to send them back.',
+                        ),
                       )
                     : tr('PC の曲フォルダをZIPにして AirDrop・iCloud Drive で送り、ここで開きます。保存もZIPで書き出します。', 'Zip the song folder on your PC, send it with AirDrop or iCloud Drive, and open it here. Saving exports a ZIP too.')}
                 </span>
@@ -150,7 +152,7 @@ export function HomeTablet() {
                   {Icon.grid(16)}
                   {tr('入力は画面のパッドで', 'Enter notes with pads')}
                 </b>
-                <span className="lbl">{tr('iPad のブラウザは電子ドラム（USB MIDI）をつなげません。パッドかキーボードで叩きます。', 'iPad browsers cannot connect e-drums (USB MIDI). Use the on-screen pads or a keyboard.')}</span>
+                <span className="lbl">{iosName(tr('iPad のブラウザは電子ドラム（USB MIDI）をつなげません。パッドかキーボードで叩きます。', 'iPad browsers cannot connect e-drums (USB MIDI). Use the on-screen pads or a keyboard.'))}</span>
               </div>
             </div>
           </section>

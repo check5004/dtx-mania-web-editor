@@ -3,7 +3,7 @@ import { tr, pl, isJa } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { useAssist } from '../store/assist';
 import { bgmSource } from '../store/derived';
-import { IS_IOS, useDevice } from '../store/device';
+import { iosName, IS_IOS, useDevice } from '../store/device';
 import { useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { Icon } from './icons';
@@ -19,6 +19,7 @@ export function ReferenceCard() {
   const [url, setUrl] = useState('');
   const autoOnLoad = useYtAlign((a) => a.autoOnLoad);
   const tablet = useDevice((s) => s.tablet);
+  const phone = useDevice((s) => s.phone);
   const box = useRef<HTMLDivElement>(null);
   const id = yt ? youtubeId(yt.url) : null;
 
@@ -41,7 +42,7 @@ export function ReferenceCard() {
             if (!youtubeId(url)) return;
             setYoutube({ url: url.trim(), offset: 0 });
             // 原曲があれば、そのまま自動で合わせる（共有の確認は、押した直後でないと出せない）
-            if (autoOnLoad && !alignBlocker()) void startAutoAlign();
+            if (autoOnLoad && !phone && !alignBlocker()) void startAutoAlign();
           }}
         >
           <input className="field" style={{ height: 28 }} placeholder={tr('YouTubeのURL', 'YouTube URL')} value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -55,7 +56,7 @@ export function ReferenceCard() {
             'Plays a video (a drum cover, for example) in sync with the chart. You hear the original audio file and YouTube is muted (you can switch).',
           )}
         </p>
-        {canCaptureTab() && (
+        {canCaptureTab() && !phone && (
           <>
             <label className="row lbl" style={{ marginTop: 8, gap: 6, cursor: 'pointer' }}>
               <input type="checkbox" checked={autoOnLoad} onChange={(e) => setAutoOnLoad(e.target.checked)} />
@@ -227,13 +228,16 @@ function AutoAlign() {
   const st = useYtAlign();
   const ready = useYt((s) => s.ready);
   const hasBgm = useEditor((s) => bgmSource(s.doc) !== null);
+  const phone = useDevice((s) => s.phone);
   if (!yt) return null;
-  if (!canCaptureTab()) {
+  if (!canCaptureTab() || phone) {
     return (
       <div className="lbl" style={{ lineHeight: 1.6, color: 'var(--dim)' }}>
         {IS_IOS
-          ? tr('iPad では自動合わせ（タブの音の共有）が使えません。音を聞き比べて ± で合わせます。', 'Auto-sync (tab audio sharing) is not available on iPad. Match the offset by ear with ±.')
-          : tr('原曲とのずれを自動で合わせるのは Chrome・Edge で使えます（このタブの音を聞き取るため）。', 'Automatic sync with the original works in Chrome and Edge (it needs to listen to this tab).')}
+          ? iosName(tr('iPad では自動合わせ（タブの音の共有）が使えません。音を聞き比べて ± で合わせます。', 'Auto-sync (tab audio sharing) is not available on iPad. Match the offset by ear with ±.'))
+          : phone
+            ? tr('スマホでは自動合わせ（タブの音の共有）が使えません。音を聞き比べて ± で合わせます。', 'Auto-sync (tab audio sharing) is not available on phones. Match the offset by ear with ±.')
+            : tr('原曲とのずれを自動で合わせるのは Chrome・Edge で使えます（このタブの音を聞き取るため）。', 'Automatic sync with the original works in Chrome and Edge (it needs to listen to this tab).')}
       </div>
     );
   }

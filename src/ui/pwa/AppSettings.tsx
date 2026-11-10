@@ -1,7 +1,7 @@
 // 設定 › アプリ：アプリとして追加する（ホーム画面・インストール）、オフラインで開けるか、版と更新。
 import { useState } from 'react';
 import { locale, tr } from '../../i18n';
-import { IS_IOS } from '../../store/device';
+import { iosName, IS_IOS } from '../../store/device';
 import { APP_VERSION, applyUpdate, BUILD_TIME, checkForUpdate, promptInstall, usePwa } from '../../store/pwa';
 import { Icon } from '../icons';
 import { chromiumHelp, installWay, IosSteps, macSafariHelp, noInstallHelp } from './installHelp';
@@ -74,9 +74,11 @@ function InstallCardSection() {
           {Icon.info(14)}
           <span>
             {IS_IOS
-              ? tr(
-                  'ホーム画面のアプリと Safari は保存が別です（最近の曲・iPad 本体に保存した曲と音・音源ライブラリ・設定・AI のキー）。Safari で使っていた分は移らないので、どちらか一方で使ってください。',
-                  'The Home Screen app and Safari keep separate storage (recent songs, songs kept on the iPad with their audio, the sound library, settings, the AI key). Nothing carries over from Safari, so stick to one of them.',
+              ? iosName(
+                  tr(
+                    'ホーム画面のアプリと Safari は保存が別です（最近の曲・iPad 本体に保存した曲と音・音源ライブラリ・設定・AI のキー）。Safari で使っていた分は移らないので、どちらか一方で使ってください。',
+                    'The Home Screen app and Safari keep separate storage (recent songs, songs kept on the iPad with their audio, the sound library, settings, the AI key). Nothing carries over from Safari, so stick to one of them.',
+                  ),
                 )
               : tr(
                   'アプリの窓とブラウザのタブは、同じ保存（最近の曲・ブラウザ内に保存した曲・音源ライブラリ・設定）を使います。',

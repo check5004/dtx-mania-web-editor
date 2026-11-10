@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { engine, type OutputStatus } from '../audio/engine';
 import { probeFormats, type FormatResult } from '../audio/formatProbe';
 import { tr } from '../i18n';
-import { browserLabel, IS_IOS, IS_WEBKIT } from '../platform';
+import { browserLabel, IS_IOS, IS_WEBKIT, iosName } from '../platform';
 import { isStandalone } from '../pwa/display';
 
 function stateLabel(s: OutputStatus): { text: string; ok: boolean } {
@@ -136,7 +136,7 @@ export function AudioCheck() {
       {IS_WEBKIT && (
         <div className="card">
           <div className="section-title" style={{ marginBottom: 8 }}>
-            {IS_IOS ? tr('iPad で音が出ないとき', 'No sound on iPad') : tr('Safari で音が出ないとき', 'No sound in Safari')}
+            {IS_IOS ? iosName(tr('iPad で音が出ないとき', 'No sound on iPad')) : tr('Safari で音が出ないとき', 'No sound in Safari')}
           </div>
           <ul className="audio-check-tips">
             <li>{tr('もう一度 ▶ を押す（Safari はタップした瞬間にしか音を出し始められません）。', 'Press ▶ again (Safari can only start sound at the moment you tap).')}</li>
