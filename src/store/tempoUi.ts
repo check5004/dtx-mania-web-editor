@@ -12,7 +12,8 @@ import type { TempoMap } from '../dtx/timing';
 import { chooseDialog } from '../ui/dialogs';
 import { useAssist } from './assist';
 import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
-import { backToChart, contentEndSec, edit, lastHistory, OPEN_END_SEC, openedDocs, stop as stopChart, toast, undoIfLast, useEditor } from './editor';
+import { backToChart, contentEndSec, edit, OPEN_END_SEC, openedDocs, stop as stopChart, toast, undoIfLast, useEditor } from './editor';
+import { editSong, toastSongEdit } from './songSync';
 import { glowReflected } from './glow';
 import { setAnchors, useSidecar } from './sidecar';
 
@@ -112,6 +113,9 @@ export function initTempo() {
   let bpm = tempo.events[0]?.bpm ?? tempo.initialBpm;
   if (saved.length) {
     anchors = normalizeAnchors(saved);
+    // 作業ファイルのアンカーは、反映したときの案。そのあと譜面のテンポが変わっていれば（ほかの難易度で直したテンポが入った・
+    // BPM を書き換えたなど）、今の譜面から作り直す（古い案のまま反映して、テンポを戻してしまわないように）
+    if (bgm && tempoDiff(doc, evaluatePlan(doc, { bpm, anchors })).any) anchors = anchorsFromDoc(tempo, bgm.sec, contentEndSec(doc));
   } else if (bgm) {
     anchors = anchorsFromDoc(tempo, bgm.sec, contentEndSec(doc));
     // 新しい譜面（ドラムが無く、BPMも変わらない）なら推定から案を作る
@@ -425,15 +429,16 @@ export function applyTempo(): boolean {
     return false;
   }
   const d = tempoDiff(doc, r);
-  const ok = d.any && edit(tr('テンポ合わせを反映', 'Apply tempo map'), (dd) => applyPlan(dd, r, null));
+  // テンポは曲のものなので、同じテンポだったほかの難易度にも入れる（src/store/songSync.ts）
+  const res = d.any ? editSong(tr('テンポ合わせを反映', 'Apply tempo map'), (dd) => applyPlan(dd, r, null)) : null;
   setAnchors(anchors);
   set({ touched: false, fromEstimate: false, applied: true });
-  if (!ok) {
+  if (!res?.ok) {
     toast(tr('エディタの譜面は、もうこの案のとおりです', 'The editor’s chart already matches this plan'), 'ok');
     return true;
   }
-  const entry = lastHistory();
-  toast(tr(`エディタに反映しました（${diffParts(d).join('・')}）`, `Applied to the editor (${diffParts(d).join(', ')})`), 'ok', 9000, {
+  const entry = res.entry;
+  void toastSongEdit(res, tr(`エディタに反映しました（${diffParts(d).join('・')}）`, `Applied to the editor (${diffParts(d).join(', ')})`), 'ok', 9000, {
     label: tr('元に戻す', 'Undo'),
     run: () => void undoIfLast(entry),
   });

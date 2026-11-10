@@ -10,8 +10,10 @@ import { toMeasure } from '../dtx/base36';
 import { buildTempoMap } from '../dtx/timing';
 import { useInputSettings } from '../input/settings';
 import { bgmSource, tempoOf } from './derived';
-import { edit, playFrom, setCursorBeat, setInitialBpm, setView, stop, toast, useEditor } from './editor';
+import { setField } from '../edit/ops';
+import { playFrom, setCursorBeat, setView, stop, toast, useEditor } from './editor';
 import { setAnchors, setYoutube, useSidecar } from './sidecar';
+import { editSong, toastSongEdit, type SongEdit } from './songSync';
 import { useTempo } from './tempoUi';
 
 interface Tap {
@@ -108,16 +110,17 @@ function songTimeOf(ref: number): number {
 }
 
 /** 譜面を変える。再生中なら、聴いている音の同じ所から新しい譜面で再生し直す */
-function keepPlaying(change: () => void) {
+function keepPlaying<T>(change: () => T): T {
   const playing = useEditor.getState().playing;
   const sec = playing ? engine.heardSec() : null;
   const ref = sec === null ? null : refTime(sec);
   if (playing) stop();
-  change();
+  const out = change();
   if (ref !== null) {
     const doc = useEditor.getState().doc;
     void playFrom(Math.max(0, tempoOf(doc).secToBeat(songTimeOf(ref))), { keepStart: true });
   }
+  return out;
 }
 
 /** 今までのアンカーは使えなくなるので消し、テンポ合わせ画面は作り直す */
@@ -131,14 +134,17 @@ export function applyTapBpm() {
   if (bpm === null) return;
   const doc = useEditor.getState().doc;
   const changes = tempoOf(doc).events.length > 1;
-  keepPlaying(() => {
-    // 途中でBPMが変わる譜面は、最初のBPMだけ変える
-    if (changes) setInitialBpm(bpm, tr(`最初のBPMを ${bpm} にする（タップ）`, `Set the first BPM to ${bpm} (tap)`));
-    else edit(tr(`BPMを ${bpm} にする（タップ）`, `Set BPM to ${bpm} (tap)`), (d) => writeSegments(d, [{ m: 0, bpm, src: 'base' }]));
+  const r = keepPlaying(() => {
+    // 途中でBPMが変わる譜面は、最初のBPMだけ変える。テンポは曲のものなので、同じテンポだったほかの難易度にも入れる
+    const e = changes
+      ? editSong(tr(`最初のBPMを ${bpm} にする（タップ）`, `Set the first BPM to ${bpm} (tap)`), (d) => setField(d, 'BPM', String(bpm)))
+      : editSong(tr(`BPMを ${bpm} にする（タップ）`, `Set BPM to ${bpm} (tap)`), (d) => writeSegments(d, [{ m: 0, bpm, src: 'base' }]));
     setAnchors([]);
     resetTempoPage();
+    return e;
   });
-  toast(changes ? tr(`最初のBPMを ${bpm} にしました（途中のBPM変化はそのまま）`, `Set the first BPM to ${bpm} (later BPM changes are kept)`) : tr(`BPMを ${bpm} にしました`, `Set BPM to ${bpm}`), 'ok');
+  const text = changes ? tr(`最初のBPMを ${bpm} にしました（途中のBPM変化はそのまま）`, `Set the first BPM to ${bpm} (later BPM changes are kept)`) : tr(`BPMを ${bpm} にしました`, `Set BPM to ${bpm}`);
+  void toastSongEdit(r, text, 'ok', 4000);
 }
 
 /** BPMと小節の頭を合わせる（最初に叩いた拍が firstBeat 拍目） */
@@ -154,6 +160,7 @@ export function applyTapAlign() {
   const doc = useEditor.getState().doc;
   const bgm = bgmSource(doc);
   let m = 1;
+  let edited: SongEdit;
   if (bgm) {
     if (ref < 0) {
       toast(tr('原曲が始まる前を叩いています。曲が鳴っている所で叩いてください', 'Those taps are before the original starts. Tap while the song is playing'), 'warn');
@@ -170,10 +177,11 @@ export function applyTapAlign() {
       return;
     }
     m = plan.anchors[0].m;
-    keepPlaying(() => {
-      edit(tr(`BPM ${bpm}・小節の頭を合わせる（タップ）`, `BPM ${bpm}, line up downbeat (tap)`), (d) => applyPlan(d, r, null));
+    edited = keepPlaying(() => {
+      const e = editSong(tr(`BPM ${bpm}・小節の頭を合わせる（タップ）`, `BPM ${bpm}, line up downbeat (tap)`), (d) => applyPlan(d, r, null));
       setAnchors(plan.anchors);
       resetTempoPage();
+      return e;
     });
   } else {
     const yt = useSidecar.getState().youtube;
@@ -187,10 +195,11 @@ export function applyTapAlign() {
     });
     while (m < 999 && tempo.beatToSec(tempo.measureStart(m)) < ref - 1e-6) m++;
     const offset = Math.round((ref - tempo.beatToSec(tempo.measureStart(m))) * 1000) / 1000;
-    keepPlaying(() => {
-      edit(tr(`BPM ${bpm}・小節の頭を合わせる（タップ）`, `BPM ${bpm}, line up downbeat (tap)`), (d) => writeSegments(d, segs));
+    edited = keepPlaying(() => {
+      const e = editSong(tr(`BPM ${bpm}・小節の頭を合わせる（タップ）`, `BPM ${bpm}, line up downbeat (tap)`), (d) => writeSegments(d, segs));
       setYoutube({ ...yt, offset });
       resetTempoPage();
+      return e;
     });
   }
   if (!useEditor.getState().playing) {
@@ -199,11 +208,9 @@ export function applyTapAlign() {
     setView({ scrollBeat: Math.max(-1, tempo.measureStart(m) - 2) });
   }
   clearTaps();
-  toast(
-    isJa()
-      ? `BPM ${bpm}、${s.firstBeat === 1 ? '最初に叩いた拍' : `${s.firstBeat}拍目から数えた次の1拍目`}を小節 ${toMeasure(m)} の頭にしました`
-      : `BPM ${bpm}. ${s.firstBeat === 1 ? 'Your first tap' : `The next beat 1 after your first tap (beat ${s.firstBeat})`} is now the start of measure ${toMeasure(m)}`,
-    'ok',
-    6000,
-  );
+  const text = isJa()
+    ? `BPM ${bpm}、${s.firstBeat === 1 ? '最初に叩いた拍' : `${s.firstBeat}拍目から数えた次の1拍目`}を小節 ${toMeasure(m)} の頭にしました`
+    : `BPM ${bpm}. ${s.firstBeat === 1 ? 'Your first tap' : `The next beat 1 after your first tap (beat ${s.firstBeat})`} is now the start of measure ${toMeasure(m)}`;
+  // テンポは曲のものなので、同じテンポだったほかの難易度にも入れる（入れたら知らせに足す）
+  void toastSongEdit(edited, text, 'ok', 6000);
 }

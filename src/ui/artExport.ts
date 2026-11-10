@@ -1,8 +1,10 @@
 // 画像の候補を読み込み、切り取って曲フォルダに PNG で書き出し、#PREIMAGE などに設定する。
 import { tr, withTr } from '../i18n';
 import type { ArtCandidate } from '../ai/songInfo';
+import { setField } from '../edit/ops';
 import { downloadBytes, findFile, putFile } from '../fs/folder';
-import { setFieldValue, useEditor } from '../store/editor';
+import { useEditor } from '../store/editor';
+import { editSong, type SongEdit } from '../store/songSync';
 
 export interface ArtPreset {
   id: string;
@@ -63,10 +65,10 @@ export function coverRect(iw: number, ih: number, w: number, h: number): { x: nu
 }
 
 /**
- * 切り取って PNG にし、曲フォルダに書いて（無ければダウンロード）#キー に設定する。書いたファイル名と、どこに書いたかを返す。
+ * 切り取って PNG にし、曲フォルダに書く（無ければダウンロード）。#キー には設定しない。書いたファイル名と、どこに書いたかを返す。
  * 配信元が書き出しを許していなければ Error。
  */
-export async function saveArt(img: HTMLImageElement, rect: { x: number; y: number; w: number; h: number }, preset: ArtPreset): Promise<{ name: string; where: 'written' | 'memory' | 'download' }> {
+export async function writeArt(img: HTMLImageElement, rect: { x: number; y: number; w: number; h: number }, preset: ArtPreset): Promise<{ name: string; where: 'written' | 'memory' | 'download' }> {
   const c = document.createElement('canvas');
   c.width = preset.w;
   c.height = preset.h;
@@ -92,17 +94,24 @@ export async function saveArt(img: HTMLImageElement, rect: { x: number; y: numbe
   if (folder) {
     // 同じ名前があれば番号を付ける
     for (let i = 2; findFile(folder, name) && i < 50; i++) name = preset.file.replace('.png', `_${i}.png`);
-    const where = await putFile(folder, name, bytes);
-    setFieldValue(preset.key, name, tr(`#${preset.key} を ${name} にする`, `Set #${preset.key} to ${name}`));
-    return { name, where };
+    return { name, where: await putFile(folder, name, bytes) };
   }
   downloadBytes(name, bytes, 'image/png');
-  setFieldValue(preset.key, name, tr(`#${preset.key} を ${name} にする`, `Set #${preset.key} to ${name}`));
   return { name, where: 'download' };
 }
 
-/** 候補を読み込んで、真ん中を切り取って設定する */
-export async function saveArtCentered(cand: ArtCandidate, preset: ArtPreset) {
+/**
+ * 切り取って PNG にし、曲フォルダに書いて（無ければダウンロード）#キー に設定する（曲のものなので、同じだったほかの難易度にも入れる）。
+ * 書いたファイル名・どこに書いたか・譜面の変更を返す。配信元が書き出しを許していなければ Error。
+ */
+export async function saveArt(img: HTMLImageElement, rect: { x: number; y: number; w: number; h: number }, preset: ArtPreset): Promise<{ name: string; where: 'written' | 'memory' | 'download'; edit: SongEdit }> {
+  const r = await writeArt(img, rect, preset);
+  const edit = editSong(tr(`#${preset.key} を ${r.name} にする`, `Set #${preset.key} to ${r.name}`), (d) => setField(d, preset.key, r.name));
+  return { ...r, edit };
+}
+
+/** 候補を読み込んで、真ん中を切り取って書き出す（#キー には設定しない） */
+export async function writeArtCentered(cand: ArtCandidate, preset: ArtPreset) {
   const { img } = await loadArtImage(cand);
-  return saveArt(img, coverRect(img.naturalWidth, img.naturalHeight, preset.w, preset.h), preset);
+  return writeArt(img, coverRect(img.naturalWidth, img.naturalHeight, preset.w, preset.h), preset);
 }

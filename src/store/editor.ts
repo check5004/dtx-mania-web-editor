@@ -70,6 +70,8 @@ export interface Toast {
   level: 'info' | 'ok' | 'warn' | 'error';
   /** 押せるボタン（「元に戻す」など）。押したら消える */
   action?: { label: string; run: () => void };
+  /** 2つ目のボタン（「この難易度だけにする」など） */
+  action2?: { label: string; run: () => void };
 }
 
 export interface ViewState {
@@ -170,15 +172,30 @@ export function unsavedChart(s: Pick<EditorState, 'doc' | 'savedDoc' | 'past' | 
 // ---- 通知 ---------------------------------------------------------------------
 
 let toastId = 0;
-export function toast(text: string, level: Toast['level'] = 'info', ms = 4000, action?: Toast['action']): number {
+const toastTimers = new Map<number, number>();
+
+export function toast(text: string, level: Toast['level'] = 'info', ms = 4000, action?: Toast['action'], action2?: Toast['action2']): number {
   const id = ++toastId;
-  set((s) => ({ toasts: [...s.toasts, { id, text, level, action }] }));
-  window.setTimeout(() => dismissToast(id), ms);
+  set((s) => ({ toasts: [...s.toasts, { id, text, level, action, action2 }] }));
+  toastTimers.set(id, window.setTimeout(() => dismissToast(id), ms));
   return id;
 }
 
 export function dismissToast(id: number) {
+  clearTimeout(toastTimers.get(id));
+  toastTimers.delete(id);
   set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+}
+
+/** 出ている知らせを書き換える（ms があれば、今から ms で消す）。もう消えていれば何もしないで false */
+export function updateToast(id: number, patch: Partial<Omit<Toast, 'id'>>, ms?: number): boolean {
+  if (!get().toasts.some((t) => t.id === id)) return false;
+  set((s) => ({ toasts: s.toasts.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+  if (ms !== undefined) {
+    clearTimeout(toastTimers.get(id));
+    toastTimers.set(id, window.setTimeout(() => dismissToast(id), ms));
+  }
+  return true;
 }
 
 // ---- 読み込み -----------------------------------------------------------------
@@ -831,9 +848,16 @@ export function setMeasureLength(m: number, len: number) {
   });
 }
 
-/** BPM変化を置く（ch08 と #BPMzz を使う） */
+/** BPM変化を置く（ch08 と #BPMzz を使う）。テンポは曲のものなので、画面からは store/songSync の placeSongBpm で置く */
 export function placeBpmChange(pos: Pos, bpm: number) {
-  edit(tr(`BPM ${bpm} を置く`, `Place BPM ${bpm}`), (d) => {
+  edit(bpmChangeLabel(bpm), bpmChangeRecipe(pos, bpm));
+}
+
+export const bpmChangeLabel = (bpm: number) => tr(`BPM ${bpm} を置く`, `Place BPM ${bpm}`);
+
+/** BPM変化を置く書き換え（同じ位置の BPM のチップは置き換える） */
+export function bpmChangeRecipe(pos: Pos, bpm: number) {
+  return (d: Draft<DtxDoc>) => {
     let no = -1;
     for (const [k, v] of Object.entries(d.fields)) {
       if (/^BPM[0-9A-Z]{2}$/.test(k) && Number(v) === bpm) no = parseInt(k.slice(3), 36);
@@ -852,7 +876,7 @@ export function placeBpmChange(pos: Pos, bpm: number) {
       if ((c.ch === CH.BPM || c.ch === CH.BPM_EX) && c.m === pos.m && cmp(c.f, pos.f) === 0) d.chips.splice(i, 1);
     }
     d.chips.push({ id: d.nextId++, ch: CH.BPM_EX, m: pos.m, f: { n: pos.f.n, d: pos.f.d }, v: no });
-  });
+  };
 }
 
 // ---- 表示 ---------------------------------------------------------------------

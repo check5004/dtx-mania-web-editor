@@ -10,6 +10,7 @@ import { useAssist } from '../store/assist';
 import { bgmSource, wavPath } from '../store/derived';
 import { useDevice } from '../store/device';
 import { toast, useEditor } from '../store/editor';
+import { alignTempo, useOtherDiffs, useTempoSplits, type TempoSplit } from '../store/songSync';
 import { useCanvas } from './hooks';
 import {
   applyTempo,
@@ -253,6 +254,7 @@ export function TempoPage() {
             </section>
           </main>
           <aside className="tempo-side scroll">
+            <TempoSplitNotice />
             <section className="card">
               <div className="section-title" style={{ marginBottom: 8 }}>
                 {tr(`開始位置（${first ? toMeasure(first.m) : '001'}小節の頭）`, `Start position (start of measure ${first ? toMeasure(first.m) : '001'})`)}
@@ -384,11 +386,76 @@ export function TempoPage() {
                       '「エディタに反映」で、譜面の BPM と BGM の位置が変わります（BPM変化チップは置き直します。Ctrl+Z で戻せます）。アンカーは作業ファイル（.dtxe.json）に残ります。',
                       '“Apply to editor” changes the BPM and the BGM position in the chart (BPM change chips are placed again; Ctrl+Z undoes it). Anchors are kept in the work file (.dtxe.json).',
                     )}
+                <OtherDiffsNote />
               </p>
             </section>
           </aside>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 反映の説明に足す：テンポは曲のものなので、ほかの難易度にも入る */
+function OtherDiffsNote() {
+  const others = useOtherDiffs();
+  if (!others.length) return null;
+  const labels = others.map((o) => o.label).join(tr('・', ', '));
+  return (
+    <>
+      {' '}
+      {tr(
+        `テンポは曲のものなので、反映するとテンポが同じだったほかの難易度（${labels}）にも入ります（反映の知らせの「この難易度だけにする」で、ほかの難易度だけ戻せます）。`,
+        `Tempo belongs to the song, so applying it also updates the other difficulties (${labels}) that had the same tempo (“Only this difficulty” on the notice puts just those back).`,
+      )}
+    </>
+  );
+}
+
+/** 難易度によってテンポが違うことと、そろえるボタン */
+function TempoSplitNotice() {
+  const splits = useTempoSplits();
+  if (!splits.length) return null;
+  const canAlign = splits.some((x) => !x.bars);
+  const sec = (t: number) => tr(`${t.toFixed(3)} 秒`, `${t.toFixed(3)} s`);
+  const what = (x: TempoSplit) =>
+    x.bars
+      ? tr('小節の長さ（拍子）が違う', 'different measure lengths (meter)')
+      : [
+          `BPM ${bpmText(x.bpm)}`,
+          x.changes ? tr(`途中の変化 ${x.changes} か所`, `${x.changes} BPM ${x.changes === 1 ? 'change' : 'changes'}`) : '',
+          x.bgmSec !== null ? tr(`原曲 ${sec(x.bgmSec)}から`, `original from ${sec(x.bgmSec)}`) : '',
+        ]
+          .filter(Boolean)
+          .join(tr('・', ' · '));
+  return (
+    <div className="notice bgm-split">
+      <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>
+      <div style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>
+        <b>{tr('難易度によってテンポが違います', 'The tempo differs between difficulties')}</b>
+        <ul className="bgm-split-list">
+          {splits.map((x) => (
+            <li key={x.file}>
+              <span>{x.label}</span>
+              <span className="mono ellipsis" title={what(x)}>
+                {what(x)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          {canAlign && (
+            <button className="btn small" onClick={() => void alignTempo()} title={tr('ほかの難易度の BPM と原曲の位置を、この難易度と同じにします（先に確かめます。Ctrl+Z で戻せます）', 'Make the BPM and the start of the original in the other difficulties the same as here (asks first; Ctrl+Z undoes it)')}>
+              {tr('この難易度にそろえる…', 'Match this difficulty…')}
+            </button>
+          )}
+          <span className="lbl">
+            {canAlign
+              ? tr('NX は難易度ごとのテンポで鳴らします。わざと変えてあるのでなければ、そろえてください', 'NX plays each difficulty at its own tempo. Unless it is on purpose, match them')
+              : tr('小節の長さ（拍子）が違う難易度は、その難易度を開いて直してください', 'Open a difficulty with different measure lengths and fix it there')}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

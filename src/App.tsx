@@ -22,21 +22,25 @@ function Toasts() {
     <div className="toasts" aria-live="polite">
       <UpdateNotice />
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.level} ${t.action ? 'has-action' : ''}`}>
+        <div key={t.id} className={`toast ${t.level} ${t.action || t.action2 ? 'has-action' : ''} ${t.action && t.action2 ? 'two-actions' : ''}`}>
           <span>{t.text}</span>
-          {t.action && (
-            <button
-              className="toast-action"
-              onClick={() => {
-                dismissToast(t.id);
-                t.action?.run();
-              }}
-            >
-              {t.action.label}
-            </button>
+          {[t.action, t.action2].map(
+            (a, i) =>
+              a && (
+                <button
+                  key={i}
+                  className="toast-action"
+                  onClick={() => {
+                    dismissToast(t.id);
+                    a.run();
+                  }}
+                >
+                  {a.label}
+                </button>
+              ),
           )}
           {/* ボタンのある知らせは長めに出すので、× で閉じられるように */}
-          {t.action && (
+          {(t.action || t.action2) && (
             <button className="toast-close" onClick={() => dismissToast(t.id)} aria-label={tr('閉じる', 'Close')} title={tr('閉じる', 'Close')}>
               ×
             </button>

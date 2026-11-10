@@ -26,7 +26,6 @@ import {
   duplicatePrevMeasure,
   insertMeasures,
   paste,
-  placeBpmChange,
   playFrom,
   previewWav,
   relaneChips,
@@ -40,6 +39,7 @@ import {
 } from '../store/editor';
 import { openMeasureGen, useMeasureGen } from '../store/measureGen';
 import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
+import { placeSongBpm } from '../store/songSync';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
 import { channelName, chipBpmLabel } from './format';
@@ -195,7 +195,7 @@ async function askBpm(pos: Pos) {
     ok: tr('決定', 'OK'),
   });
   const bpm = v ? Number(v) : NaN;
-  if (Number.isFinite(bpm) && bpm > 0) placeBpmChange(pos, bpm);
+  if (Number.isFinite(bpm) && bpm > 0) placeSongBpm(pos, bpm);
 }
 
 // ---- チップ -------------------------------------------------------------------

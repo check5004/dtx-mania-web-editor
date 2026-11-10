@@ -6,10 +6,11 @@ import { itunesSearch, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type Sto
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { setField } from '../edit/ops';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
-import { edit, goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
+import { goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion, type SuggestSource } from '../store/songinfo';
-import { ART_PRESETS, artPreset, loadArtImage, saveArt, saveArtCentered, type ArtPreset } from './artExport';
+import { alignSongFields, editSong, setSongField, songFieldLabel, toastSongEdit, useOtherDiffs, useSongFieldSplits, type FieldSplit } from '../store/songSync';
+import { ART_PRESETS, artPreset, loadArtImage, saveArt, writeArtCentered, type ArtPreset } from './artExport';
 import { formatLevel } from './format';
 import { Icon } from './icons';
 import { CommitInput } from './LeftPanel';
@@ -88,6 +89,8 @@ export function SongInfoPage() {
   }, []);
   const others = Object.keys(fields).filter((k) => !KNOWN.has(k) && !SKIP.test(k) && !/^(GLEVEL|BLEVEL|BGMWAV)$/.test(k));
   const suggestion = (result?.fields ?? {}) as Partial<Record<string, Suggestion>>;
+  const splits = useSongFieldSplits();
+  const splitOf = (k: string) => splits.find((x) => x.key === k);
   return (
     <div className="info-page">
       <header className="tempo-head">
@@ -102,12 +105,13 @@ export function SongInfoPage() {
       </header>
       <div className="info-body">
         <main className="info-main scroll">
+          <SongSyncNotice splits={splits} />
           {groups().map((g) => (
             <section key={g.id} className="card info-group">
               <h3>{g.title}</h3>
               <div className="info-grid">
                 {g.fields.map((f) => (
-                  <FieldRow key={f.key} f={f} value={fields[f.key] ?? ''} suggestion={suggestion[f.key]} alt={f.key === 'TITLE' ? result?.titleAlt : undefined} />
+                  <FieldRow key={f.key} f={f} value={fields[f.key] ?? ''} suggestion={suggestion[f.key]} alt={f.key === 'TITLE' ? result?.titleAlt : undefined} split={splitOf(f.key)} />
                 ))}
               </div>
             </section>
@@ -133,7 +137,55 @@ export function SongInfoPage() {
   );
 }
 
-function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; suggestion?: Suggestion; alt?: string }) {
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/**
+ * 曲のもの（曲名・画像・試聴など）は、変えるとほかの難易度にも入ること。難易度によって違う欄があれば、それとそろえるボタン
+ */
+function SongSyncNotice({ splits }: { splits: FieldSplit[] }) {
+  const others = useOtherDiffs();
+  if (!others.length) return null;
+  const sep = tr('・', ', ');
+  if (!splits.length)
+    return (
+      <p className="lbl" style={{ margin: 0, lineHeight: 1.6 }}>
+        {tr(
+          `曲名・アーティスト・画像・試聴などは曲のものなので、変えると、同じだったほかの難易度（${others.map((o) => o.label).join(sep)}）にも入ります。レベルはこの難易度だけです。`,
+          `Title, artist, images, preview and so on belong to the song, so changing them also updates the other difficulties (${others.map((o) => o.label).join(sep)}) that had the same value. The level is for this difficulty only.`,
+        )}
+      </p>
+    );
+  const none = tr('（なし）', '(none)');
+  return (
+    <div className="notice bgm-split">
+      <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>
+      <div style={{ flex: 1, minWidth: 0, lineHeight: 1.6 }}>
+        <b>{tr('難易度によって曲情報が違います', 'Song info differs between difficulties')}</b>
+        <ul className="bgm-split-list">
+          {splits.map((x) => {
+            const text = x.others.map((o) => `${o.label}: ${o.value || none}`).join(' / ');
+            return (
+              <li key={x.key}>
+                <span>{cap(songFieldLabel(x.key))}</span>
+                <span className="ellipsis" title={text}>
+                  {text}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn small" onClick={() => void alignSongFields()} title={tr('ほかの難易度の、この欄を、この難易度の値にします（Ctrl+Z で戻せます）', 'Set these fields in the other difficulties to the values here (Ctrl+Z undoes it)')}>
+            {tr('この難易度にそろえる', 'Match this difficulty')}
+          </button>
+          <span className="lbl">{tr('NX の選曲画面で難易度を替えると、曲名や画像・試聴が変わってしまいます', 'On the NX song select screen, switching difficulty changes the title, images or preview')}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldRow({ f, value, suggestion, alt, split }: { f: FieldDef; value: string; suggestion?: Suggestion; alt?: string; split?: FieldSplit }) {
   const folder = useEditor((s) => s.folder);
   const options = f.files && folder ? [...folder.files.values()].filter((x) => f.files!.test(x.name)) : null;
   const differs = (v: string | undefined) => v !== undefined && v.trim() !== '' && v.trim() !== value.trim();
@@ -142,7 +194,7 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
   const isTaken = (v: string | undefined) => !!taken && v !== undefined && v.trim() === taken.value && value.trim() === taken.value;
   const take = (v: string, label: string) => {
     setTaken({ value: v.trim(), prev: value });
-    setFieldValue(f.key, v.trim(), label);
+    setSongField(f.key, v.trim(), label);
   };
   const reflected = () => (
     <>
@@ -150,7 +202,7 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
       <button
         className="link-btn"
         onClick={() => {
-          setFieldValue(f.key, taken!.prev.trim() === '' ? undefined : taken!.prev, tr(`${f.label}を元に戻す`, `Revert ${f.label}`));
+          setSongField(f.key, taken!.prev.trim() === '' ? undefined : taken!.prev, tr(`${f.label}を元に戻す`, `Revert ${f.label}`));
           setTaken(null);
         }}
         title={taken!.prev.trim() ? tr(`前の「${taken!.prev}」に戻します`, `Back to the previous “${taken!.prev}”`) : tr('前は空でした', 'It was empty before')}
@@ -164,6 +216,11 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
       <span className="lbl info-label">
         {f.label}
         {f.hint && <span className="info-hint">{f.hint}</span>}
+        {split && (
+          <span className="reflect-chip changed info-split" title={split.others.map((o) => `${o.label}: ${o.value || tr('（なし）', '(none)')}`).join('\n')}>
+            {tr('難易度で違う', 'Differs by difficulty')}
+          </span>
+        )}
       </span>
       <div>
         {f.key === 'HIDDENLEVEL' ? (
@@ -172,7 +229,7 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
             <span className="lbl">{/^on$/i.test(value.trim()) ? tr('ON（選曲画面で「?」）', 'ON ("?" on song select)') : 'OFF'}</span>
           </label>
         ) : options && options.length > 0 ? (
-          <select className="field" value={value} onChange={(e) => setFieldValue(f.key, e.target.value || undefined)}>
+          <select className="field" value={value} onChange={(e) => setSongField(f.key, e.target.value || undefined)}>
             <option value="">{tr('なし', 'None')}</option>
             {value && !options.some((o) => o.path === value) && <option value={value}>{tr(`${value}（見つかりません）`, `${value} (not found)`)}</option>}
             {options.map((o) => (
@@ -182,7 +239,7 @@ function FieldRow({ f, value, suggestion, alt }: { f: FieldDef; value: string; s
             ))}
           </select>
         ) : (
-          <CommitInput className={`field ${f.key === 'BPM' || f.key === 'DLEVEL' ? 'mono' : ''}`} value={value} onCommit={(v) => setFieldValue(f.key, v === '' ? undefined : v, tr(`${f.label}を変更`, `Change ${f.label}`))} />
+          <CommitInput className={`field ${f.key === 'BPM' || f.key === 'DLEVEL' ? 'mono' : ''}`} value={value} onCommit={(v) => setSongField(f.key, v === '' ? undefined : v, tr(`${f.label}を変更`, `Change ${f.label}`))} />
         )}
         {f.key === 'DLEVEL' && value && <span className="lbl"> {tr('表示', 'Shown as')} {formatLevel(value)}</span>}
         {suggestion && (differs(suggestion.value) || isTaken(suggestion.value)) && (
@@ -364,7 +421,7 @@ function LookupCard() {
             <span className="lbl"> {oe.author}</span>
             {!fields['TITLE'] && (
               <div className="row" style={{ gap: 8, marginTop: 4 }}>
-                <button className="link-btn" onClick={() => setFieldValue('TITLE', oe.title, tr('曲名を動画タイトルにする', 'Use the video title as the song title'))}>
+                <button className="link-btn" onClick={() => setSongField('TITLE', oe.title, tr('曲名を動画タイトルにする', 'Use the video title as the song title'))}>
                   {tr('動画タイトルを曲名にする', 'Use the video title as the song title')}
                 </button>
               </div>
@@ -434,11 +491,11 @@ function ResultView({ result }: { result: LookupResult }) {
     setBusy(true);
     const done: string[] = [];
     const failed: string[] = [];
+    // 譜面に入れる値（曲情報の欄と、書き出した画像のファイル名）。最後に1つの変更にまとめる（Ctrl+Z で一度に戻る）
+    const put: Record<string, string> = {};
     try {
       if (useFields && changes.length) {
-        edit(tr('曲情報をまとめて設定', 'Set song info in bulk'), (d) => {
-          for (const k of changes) setField(d, k, result.fields[k]!.value.trim());
-        });
+        for (const k of changes) put[k] = result.fields[k]!.value.trim();
         done.push(tr(`${changes.length}項目`, `${changes.length} ${pl(changes.length, 'field')}`));
       }
       if (useYt && canYt && firstYt) {
@@ -447,7 +504,7 @@ function ResultView({ result }: { result: LookupResult }) {
       }
       if (useJacket && result.jacket) {
         try {
-          await saveArtCentered(result.jacket, artPreset('pre-sq'));
+          put.PREIMAGE = (await writeArtCentered(result.jacket, artPreset('pre-sq'))).name;
           done.push('#PREIMAGE');
         } catch (e) {
           failed.push(tr(`ジャケット（${(e as Error).message}）`, `cover art (${(e as Error).message})`));
@@ -457,7 +514,7 @@ function ResultView({ result }: { result: LookupResult }) {
         const cand: ArtCandidate = { url: `https://i.ytimg.com/vi/${firstYt.id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${firstYt.id}/maxresdefault.jpg`, label: '', source: 'youtube' };
         for (const id of ['stage', 'bg']) {
           try {
-            await saveArtCentered(cand, artPreset(id));
+            put[artPreset(id).key] = (await writeArtCentered(cand, artPreset(id))).name;
             done.push(`#${artPreset(id).key}`);
           } catch (e) {
             failed.push(tr(`${artPreset(id).key}（${(e as Error).message}）`, `${artPreset(id).key} (${(e as Error).message})`));
@@ -468,6 +525,13 @@ function ResultView({ result }: { result: LookupResult }) {
     } finally {
       setBusy(false);
     }
+    // 曲のもの（曲名・画像など）なので、同じだったほかの難易度にも入れる
+    const keys = Object.keys(put);
+    const r = keys.length
+      ? editSong(tr('曲情報をまとめて設定', 'Set song info in bulk'), (d) => {
+          for (const k of keys) setField(d, k, put[k]);
+        })
+      : null;
     // 済んだものは外す（もう一度押して同じ画像を重ねて書き出さないように）
     setUseFields(false);
     setUseYt(false);
@@ -475,8 +539,11 @@ function ResultView({ result }: { result: LookupResult }) {
     if (done.includes('#BACKGROUND')) setUseBg(false);
     setApplied(done);
     if (failed.length) toast(tr(`設定できなかったもの: ${failed.join('、')}`, `Couldn't set: ${failed.join(', ')}`), 'warn', 8000);
-    if (done.length) toast(tr(`${done.join('・')} を設定しました（曲名などは Ctrl+Z で戻せます）`, `Set ${done.join(', ')} (Ctrl+Z undoes the title and other fields)`), 'ok', 6000);
-    else if (!failed.length) toast(tr('変わるものはありません', 'Nothing to change'), 'info');
+    if (done.length) {
+      const text = tr(`${done.join('・')} を設定しました（曲名などは Ctrl+Z で戻せます）`, `Set ${done.join(', ')} (Ctrl+Z undoes the title and other fields)`);
+      if (r) void toastSongEdit(r, text, 'ok', 6000);
+      else toast(text, 'ok', 6000);
+    } else if (!failed.length) toast(tr('変わるものはありません', 'Nothing to change'), 'info');
   };
 
   return (
@@ -752,8 +819,10 @@ function Cropper({ cand }: { cand: ArtCandidate }) {
     if (!img) return;
     setErr(null);
     try {
-      const { name, where } = await saveArt(img, { x: x0 * iw, y: y0 * ih, w: cw * iw, h: ch * ih }, preset);
-      toast(
+      const { name, where, edit } = await saveArt(img, { x: x0 * iw, y: y0 * ih, w: cw * iw, h: ch * ih }, preset);
+      // 画像は曲のものなので、同じだったほかの難易度にも入れる（入れたら知らせに足す）
+      void toastSongEdit(
+        edit,
         where === 'written'
           ? tr(`${name} を曲フォルダに書き出し、#${preset.key} に設定しました`, `Wrote ${name} to the song folder and set it as #${preset.key}`)
           : where === 'memory'

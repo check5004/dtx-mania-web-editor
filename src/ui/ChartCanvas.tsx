@@ -34,7 +34,6 @@ import {
   minSongEnd,
   moveSelection,
   openPage,
-  placeBpmChange,
   placeChip,
   placeChips,
   playFrom,
@@ -52,6 +51,7 @@ import { penUsed, setPenMode, setTouchPrefs, useDevice, type Tool } from '../sto
 import { setPadViewport } from '../store/pads';
 import { fixBpm, fixStart, fixStemLag, fmtMs, offsetBadge, offsetReport, stemLag, stemLagWarn, useOffset, STEM_LAG_LIMIT } from '../store/offset';
 import { chooseAnalysisStem } from '../store/stems';
+import { placeSongBpm } from '../store/songSync';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { flamModHeld, flamOptions, flamRoles, placeFlam, useFlam, wantFlam } from '../store/flam';
@@ -2964,7 +2964,7 @@ async function editBpmAt(pos: Pos) {
     ok: had ? tr('変える', 'Change') : tr('置く', 'Add'),
   });
   const bpm = v ? Number(v) : NaN;
-  if (Number.isFinite(bpm) && bpm > 0) placeBpmChange(pos, bpm);
+  if (Number.isFinite(bpm) && bpm > 0) placeSongBpm(pos, bpm);
 }
 
 const endHow = (why: 'set' | 'audio' | 'video' | 'chips'): string =>

@@ -10,7 +10,8 @@ import type { DtxDoc } from '../dtx/model';
 import { useAssist } from './assist';
 import { bgmSource, tempoOf } from './derived';
 import { drumHitsByClass, readyDrums, type DrumHitsByClass } from './drums';
-import { edit, toast, useEditor } from './editor';
+import { toast, useEditor } from './editor';
+import { editSong, toastSongEdit } from './songSync';
 import { setAnchors, useSidecar } from './sidecar';
 import { effectiveAnalysisStem, trackAudio, updateStem } from './stems';
 import { useTempo } from './tempoUi';
@@ -142,14 +143,15 @@ export function fixStart(): boolean {
   const after = before.map((a) => ({ ...a, t: a.t + d }));
   const res = { err: null as number | null };
   const side = anchorSide(before, after);
-  const ok = edit(
+  // 原曲の位置は曲のものなので、同じだったほかの難易度にも入れる（src/store/songSync.ts）
+  const edited = editSong(
     tr(`開始位置を ${fmtMs(d)} 直す`, `Shift the start by ${fmtMs(d)}`),
     (dr) => {
       res.err = shiftBgm(dr, tempo, d);
     },
     { side },
   );
-  if (!ok) {
+  if (!edited.ok) {
     toast(
       res.err === null
         ? tr(
@@ -163,7 +165,7 @@ export function fixStart(): boolean {
     return false;
   }
   side.redo();
-  toast(tr(`開始位置を ${fmtMs(d)} 直しました（原曲の BGM のチップを動かしました）。Ctrl+Z で戻せます`, `Shifted the start by ${fmtMs(d)} (moved the original's BGM chip). Ctrl+Z to undo`), 'ok');
+  void toastSongEdit(edited, tr(`開始位置を ${fmtMs(d)} 直しました（原曲の BGM のチップを動かしました）。Ctrl+Z で戻せます`, `Shifted the start by ${fmtMs(d)} (moved the original's BGM chip). Ctrl+Z to undo`), 'ok', 4000);
   return true;
 }
 
@@ -189,10 +191,11 @@ export function fixBpm(): boolean {
     return false;
   }
   const side = anchorSide(before, [anchor]);
-  const ok = edit(tr(`BPM を ${fit.bpm} に直す`, `Set BPM to ${fit.bpm}`), (d) => applyPlan(d, r, null), { side });
-  if (!ok) return false;
+  // テンポは曲のものなので、同じテンポだったほかの難易度にも入れる（src/store/songSync.ts）
+  const res = editSong(tr(`BPM を ${fit.bpm} に直す`, `Set BPM to ${fit.bpm}`), (d) => applyPlan(d, r, null), { side });
+  if (!res.ok) return false;
   side.redo();
-  toast(tr(`BPM を ${fit.from} から ${fit.bpm} に直し、原曲の位置も合わせました。Ctrl+Z で戻せます`, `Changed BPM from ${fit.from} to ${fit.bpm} and repositioned the original. Ctrl+Z to undo`), 'ok');
+  void toastSongEdit(res, tr(`BPM を ${fit.from} から ${fit.bpm} に直し、原曲の位置も合わせました。Ctrl+Z で戻せます`, `Changed BPM from ${fit.from} to ${fit.bpm} and repositioned the original. Ctrl+Z to undo`), 'ok', 4000);
   return true;
 }
 

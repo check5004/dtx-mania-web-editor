@@ -15,6 +15,7 @@ import { audioFiles, findFile } from '../fs/folder';
 import { wavPan, wavVolume } from '../store/derived';
 import { playAudition, useStopAuditionOnClose } from '../store/audition';
 import { edit, fileBuffer, openPage, prepareSounds, setFieldValue, setLaneWav, toast, useEditor, wavAuditionSound, type LeftTab } from '../store/editor';
+import { editSong, setSongField, toastSongEdit } from '../store/songSync';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
 import { AuditionButton, AuditionProgress } from './Audition';
@@ -423,7 +424,7 @@ function InfoTab() {
           return (
             <InfoRow key={f.key} label={f.label} hint={f.key === 'DLEVEL' ? tr(`表示 ${formatLevel(fields['DLEVEL'])}`, `Shown as ${formatLevel(fields['DLEVEL'])}`) : f.hint}>
               {options && options.length > 0 ? (
-                <select className="field" value={fields[f.key] ?? ''} onChange={(e) => setFieldValue(f.key, e.target.value || undefined)}>
+                <select className="field" value={fields[f.key] ?? ''} onChange={(e) => setSongField(f.key, e.target.value || undefined)}>
                   <option value="">{tr('なし', 'None')}</option>
                   {fields[f.key] && !options.some((o) => o.path === fields[f.key]) && (
                     <option value={fields[f.key]}>
@@ -441,7 +442,7 @@ function InfoTab() {
                 <CommitInput
                   className={`field ${f.key === 'BPM' || f.key === 'DLEVEL' ? 'mono' : ''}`}
                   value={fields[f.key] ?? ''}
-                  onCommit={(v) => setFieldValue(f.key, v === '' ? undefined : v, tr(`${f.label}を変更`, `Change ${f.label}`))}
+                  onCommit={(v) => setSongField(f.key, v === '' ? undefined : v, tr(`${f.label}を変更`, `Change ${f.label}`))}
                 />
               )}
             </InfoRow>
@@ -482,13 +483,14 @@ function HeaderTab() {
       toast(tr('チップの行（#00111: など）はヘッダには書けません。譜面で置いてください', "Chip lines (like #00111:) can't go in the header. Place them in the chart instead"), 'error', 6000);
       return;
     }
-    edit(tr('ヘッダを書き換え', 'Edit header'), (d) => {
+    // 曲のもの（曲名・試聴・BPM など）を変えたら、同じだったほかの難易度にも入れる
+    const r = editSong(tr('ヘッダを書き換え', 'Edit header'), (d) => {
       d.header = parsed.header;
       d.fields = parsed.fields;
     });
     void prepareSounds();
     setDraft(null);
-    toast(tr('ヘッダを反映しました（Ctrl+Z で戻せます）', 'Header applied (Ctrl+Z to undo)'), 'ok');
+    void toastSongEdit(r, tr('ヘッダを反映しました（Ctrl+Z で戻せます）', 'Header applied (Ctrl+Z to undo)'), 'ok', 4000);
   };
   return (
     <>

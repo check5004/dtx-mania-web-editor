@@ -15,6 +15,8 @@ import { edit, openedDocs, prepareSounds, restartIfPlaying, setMix, toast, useEd
 import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
 import { glowReflected } from './glow';
 import { editBgm, editBgmBack, siblingNote, type SiblingChange } from './songBgm';
+import { editBack } from './siblings';
+import { editSong, onlyThisAction, songSiblingNote } from './songSync';
 
 interface Loaded {
   key: string;
@@ -37,7 +39,7 @@ export interface AudioReflect {
   wav?: number;
   /** BGM のチップが無かったので置いたチップ（元に戻すときに消す） */
   chipId?: number;
-  /** 同じ原曲だったほかの難易度にも入れた変更（元に戻すと一緒に戻す） */
+  /** 同じ原曲（試聴なら同じ試聴）だったほかの難易度にも入れた変更（元に戻すと一緒に戻す） */
   siblings?: SiblingChange | null;
 }
 
@@ -767,22 +769,24 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
     sset({ busy: null });
   }
   const reflect = o.mode !== 'each' ? o.register : 'none';
-  const recBefore = sget().reflected.bgm;
+  const recBefore = sget().reflected[reflect === 'preview' ? 'preview' : 'bgm'];
   const prev = reflect !== 'none' ? registerExport(written[0], reflect, doc0) : undefined;
   if (reflect === 'none') void prepareSounds();
   const later = memory ? tr('。曲フォルダへは保存するときに書き出します', '. It is written to the song folder when you save') : '';
   const was = prev && prev !== written[0] ? (reflect === 'bgm' ? tr(`（前は ${prev}。元のファイルは残しています）`, ` (was ${prev}; the old file is kept)`) : tr(`（前は ${prev}）`, ` (was ${prev})`)) : '';
   // ほかの難易度にも入れたら、それも伝える（書き終わるのを待つ。同じファイルに書き出し直しただけなら、もう入っている）
-  const rec = sget().reflected.bgm;
-  const sib = reflect === 'bgm' && rec && rec !== recBefore ? await rec.siblings?.done : null;
+  const rec = reflect === 'none' ? null : sget().reflected[reflect];
+  const sib = rec && rec !== recBefore ? await rec.siblings?.done : null;
   toast(
     reflect === 'bgm'
       ? tr(`${written[0]} を書き出して、エディタの BGM に反映しました${was}${later}`, `Exported ${written[0]} and set it as the BGM in the editor${was}${later}`) + siblingNote(sib)
       : reflect === 'preview'
-        ? tr(`${written[0]} を書き出して、選曲画面の試聴（#PREVIEW）に反映しました${was}${later}`, `Exported ${written[0]} and set it as the song select preview (#PREVIEW)${was}${later}`)
+        ? tr(`${written[0]} を書き出して、選曲画面の試聴（#PREVIEW）に反映しました${was}${later}`, `Exported ${written[0]} and set it as the song select preview (#PREVIEW)${was}${later}`) + songSiblingNote(sib, tr('試聴', 'preview'))
         : tr(`${written.join('、')} を書き出しました（エディタには反映していません）${later}`, `Exported ${written.join(', ')} (not added to the editor)${later}`),
     'ok',
-    7000,
+    sib?.changed.length || sib?.kept.length ? 10000 : 7000,
+    undefined,
+    reflect === 'preview' && sib?.changed.length && rec?.siblings ? onlyThisAction(rec.siblings) : undefined,
   );
   return written;
 }
@@ -792,11 +796,13 @@ export function registerExport(file: string, how: 'bgm' | 'preview', doc0 = useE
   const before = sget().reflected[how];
   if (how === 'preview') {
     const cur = useEditor.getState().doc.fields['PREVIEW'] ?? null;
-    edit(tr('書き出した音を試聴（#PREVIEW）に反映', 'Set the exported audio as the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', file));
+    // 試聴は曲のものなので、同じ試聴だったほかの難易度にも入れる（src/store/songSync.ts）
+    const { siblings } = editSong(tr('書き出した音を試聴（#PREVIEW）に反映', 'Set the exported audio as the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', file));
     // 同じファイルに書き出し直したときは、最初の「前」を覚えておく
-    const prev = before && before.file === file && cur === file ? before.prev : cur;
-    sset((st) => ({ reflected: { ...st.reflected, preview: { file, prev } } }));
-    return prev;
+    const again = before && before.file === file && cur === file;
+    const r: AudioReflect = again ? before : { file, prev: cur, siblings };
+    sset((st) => ({ reflected: { ...st.reflected, preview: r } }));
+    return r.prev;
   }
   const bgm = bgmSource(doc0);
   const cur = bgm ? (doc0.fields['WAV' + toBase36x2(bgm.wav)] ?? null) : null;
@@ -836,7 +842,8 @@ export function undoAudioReflect(how: 'bgm' | 'preview') {
   const r = audioReflected(how);
   if (!r) return;
   if (how === 'preview') {
-    edit(tr('試聴（#PREVIEW）を元に戻す', 'Revert the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', r.prev ?? undefined));
+    // ほかの難易度に入れた分も一緒に戻す
+    editBack(tr('試聴（#PREVIEW）を元に戻す', 'Revert the preview (#PREVIEW)'), (d) => setField(d, 'PREVIEW', r.prev ?? undefined), r.siblings);
   } else {
     // ほかの難易度に入れた分も一緒に戻す
     editBgmBack(

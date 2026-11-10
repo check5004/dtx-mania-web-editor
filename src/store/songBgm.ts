@@ -8,17 +8,17 @@ import type { Draft } from 'immer';
 import { create } from 'zustand';
 import { tr, isJa, locale } from '../i18n';
 import { toBase36x2 } from '../dtx/base36';
-import { decodeDtx, encodeDtx } from '../dtx/encoding';
 import { cmp, type Frac } from '../dtx/fraction';
 import { CH, type Chip, type DtxDoc } from '../dtx/model';
-import { parseDtx } from '../dtx/parse';
-import { patchDtxText } from '../dtx/patchText';
 import { freeWavNumber, setField } from '../edit/ops';
-import { dtxFiles, findFile, joinPath, normPath, parseSetDef, putFile, type FolderFile, type SongFolder } from '../fs/folder';
-import { draftFor, putRecent } from '../fs/recent';
+import { findFile, joinPath, normPath, type SongFolder } from '../fs/folder';
 import { chooseDialog } from '../ui/dialogs';
 import { edit, lastHistory, prepareSounds, recordSide, toast, undoIfLast, useEditor, type HistoryEntry } from './editor';
 import { glowReflected } from './glow';
+import { editBack, emptyReport, otherCharts, readChart, siblingWrites, startSiblingChange, useSiblingWrites, type SiblingChange, type SiblingReport } from './siblings';
+
+// 書き換えの仕組みは store/siblings（曲情報・テンポと共通）。前からの呼び出し元のために、ここからも出す
+export { setAfterSiblingWrite, siblingWrites, type SiblingChange, type SiblingReport } from './siblings';
 
 // ---- 譜面の原曲 -------------------------------------------------------------------
 
@@ -133,193 +133,33 @@ export function redoBgmIn(d: Draft<DtxDoc> | DtxDoc, u: BgmUndo, path: string, a
 
 // ---- ほかの難易度 -----------------------------------------------------------------
 
-const base = (p: string) => p.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
-
-/** set.def に曲が2つ以上あるとき、開いている譜面とは別の曲の譜面（小文字のファイル名） */
-async function otherSongFiles(folder: SongFolder, current: string): Promise<Set<string>> {
-  const out = new Set<string>();
-  const sd = findFile(folder, 'set.def');
-  if (!sd) return out;
-  try {
-    const blocks = parseSetDef(decodeDtx(new Uint8Array(await (await sd.getFile()).arrayBuffer())).text);
-    const mine = blocks.find((b) => b.levels.some((l) => base(l.file) === current.toLowerCase()));
-    if (!mine) return out;
-    const keep = new Set(mine.levels.map((l) => base(l.file)));
-    for (const b of blocks) for (const l of b.levels) if (!keep.has(base(l.file))) out.add(base(l.file));
-  } catch {
-    // 読めない set.def は見ない
-  }
-  return out;
-}
-
-/** 同じ曲のほかの難易度の譜面（曲フォルダの DTX。開いている譜面と、set.def で別の曲になっている譜面は除く） */
-async function otherCharts(folder: SongFolder, current: string): Promise<{ file: FolderFile; label: string }[]> {
-  const labels = new Map(useEditor.getState().meta.siblings.map((x) => [x.file.toLowerCase(), x.label]));
-  const exclude = await otherSongFiles(folder, current);
-  return dtxFiles(folder)
-    .filter((f) => f.name.toLowerCase() !== current.toLowerCase() && !exclude.has(f.name.toLowerCase()))
-    .map((f) => ({ file: f, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, '') }));
-}
-
-/** 書き換えた結果（難易度のラベル） */
-export interface SiblingReport {
-  /** 書き換えた難易度 */
-  changed: string[];
-  /** 書き換えられなかった難易度（読めない・書けない・Shift_JIS で書けない・#PATH_WAV が違う） */
-  failed: string[];
-  /** 前から別の原曲なので、そのままにした難易度 */
-  kept: string[];
-  /** 書き換えた譜面のファイル名 */
-  files: string[];
-}
-
-const emptyReport = (): SiblingReport => ({ changed: [], failed: [], kept: [], files: [] });
-
-type Kind = 'file' | 'draft';
-
-/** fn の答え：変えた・変えない・前から別の原曲（そのまま）・書けない */
-type Verdict = 'changed' | 'same' | 'kept' | 'failed';
-
 /**
- * ほかの難易度の譜面を1つ書き換える。保存していない続き（自動保存の控え）があればそちらが今の中身なので、
- * 続きで決め（続きを変えないなら、ファイルにも触らない）、続きとファイルの両方に fn を当てる。
- * ファイルは開いたときの文字コードのまま、変わった行だけを書き換える（ほかの行・コメント・並びはそのまま。
- * Shift_JIS で書けない文字が出たら書かない）
+ * ほかの難易度の原曲を to にする（書き換えの仕組みは store/siblings）。match は、その難易度の今の原曲
+ * （鍵。原曲が無ければ null）を書き換えるか
  */
-async function patchChart(folder: SongFolder, file: FolderFile, fn: (d: DtxDoc, kind: Kind) => Verdict): Promise<Verdict> {
-  // 続きはファイルを書く前に見つける（書いたあとはファイルのほうが新しくなるため）
-  const draft = await draftFor(folder, file);
-  let draftDoc: DtxDoc | null = null;
-  let verdict: Verdict = 'same';
-  if (draft) {
-    try {
-      draftDoc = parseDtx(draft.text).doc;
-    } catch {
-      return 'failed';
-    }
-    verdict = fn(draftDoc, 'draft');
-    if (verdict !== 'changed') return verdict;
-  }
-  let wrote = false;
-  try {
-    const dec = decodeDtx(new Uint8Array(await (await file.getFile()).arrayBuffer()));
-    const doc = parseDtx(dec.text).doc;
-    const v = fn(doc, 'file');
-    if (v === 'changed') {
-      const enc = encodeDtx(patchDtxText(dec.text, parseDtx(dec.text).doc, doc), dec.encoding);
-      if (enc.lost.length) return 'failed';
-      await putFile(folder, file.path, enc.bytes);
-      wrote = true;
-    }
-    if (!draft) verdict = v;
-  } catch {
-    return 'failed';
-  }
-  if (draft && draftDoc) {
-    // ファイルを書き直したら、続きをそれより新しくしておく（切り替えたときに続きから開くように）
-    await putRecent({ ...draft, text: patchDtxText(draft.text, parseDtx(draft.text).doc, draftDoc), updatedAt: wrote ? Date.now() : draft.updatedAt });
-  }
-  return verdict;
-}
-
-// ほかの難易度の書き換えは1つずつ順に（元に戻す・やり直すを続けて押しても混ざらないように）
-let chain: Promise<unknown> = Promise.resolve();
-function queue<T>(job: () => Promise<T>): Promise<T> {
-  const p = chain.then(job, job);
-  chain = p.then(
-    () => undefined,
-    () => undefined,
-  );
-  return p;
-}
-
-/** ほかの難易度の書き換えが終わるまで待つ（難易度を切り替えて読む前に） */
-export function siblingWrites(): Promise<void> {
-  return chain.then(() => undefined);
-}
-
-let afterWrite: (() => void) | null = null;
-/**
- * ほかの難易度を書き換えたあとに呼ぶ（app/fileActions が、開いている難易度の自動保存を新しくする。
- * 書き換えた難易度の続きが「最近の曲」でいちばん新しくなり、曲を開き直すとそちらが開いてしまうのを防ぐ）
- */
-export function setAfterSiblingWrite(fn: (() => void) | null) {
-  afterWrite = fn;
-}
-
-/** ほかの難易度に入れた原曲の変更。done は最初の書き換え、revert・reapply は元に戻す・やり直す */
-export interface SiblingChange {
-  readonly done: Promise<SiblingReport>;
-  /** 書き換えた難易度のラベル（done のあとに入る。元に戻したら空） */
-  readonly labels: string[];
-  revert(): Promise<SiblingReport>;
-  reapply(): Promise<SiblingReport>;
-}
-
-/**
- * ほかの難易度の原曲を to にする。match は、その難易度の今の原曲（鍵。原曲が無ければ null）を書き換えるか
- */
-function startSiblingChange(folder: SongFolder, current: string, to: BgmTarget, match: (key: string | null) => boolean): SiblingChange {
-  const undos = new Map<string, { u: BgmUndo; path: string }>();
-  const labels: string[] = [];
-  const run = (fn: (d: DtxDoc, id: string) => Verdict, only?: Set<string>) =>
-    queue(async () => {
-      const rep = emptyReport();
-      for (const t of await otherCharts(folder, current)) {
-        const name = t.file.name.toLowerCase();
-        if (only && !only.has(name)) continue;
-        const v = await patchChart(folder, t.file, (d, kind) => fn(d, `${name}|${kind}`));
-        if (v === 'changed') {
-          rep.changed.push(t.label);
-          rep.files.push(t.file.name);
-        } else if (v === 'failed') rep.failed.push(t.label);
-        else if (v === 'kept') rep.kept.push(t.label);
-      }
-      if (rep.changed.length) {
-        afterWrite?.();
-        useSongBgm.setState((s) => ({ version: s.version + 1 }));
-        scheduleScan();
-      }
-      return rep;
-    });
-  const touched = () => new Set([...undos.keys()].map((k) => k.split('|')[0]));
-  const done = run((d, id) => {
-    const b = firstBgm(d);
-    if (!match(b ? bgmKey(folder, d, b.path) : null)) return 'kept';
-    const path = pathFor(to, d);
-    if (path === null) return 'failed';
-    const u = setBgmIn(d, path, to);
-    if (!u) return 'same';
-    undos.set(id, { u, path });
-    return 'changed';
-  }).then((rep) => {
-    labels.splice(0, labels.length, ...rep.changed);
-    return rep;
+function startBgmChange(folder: SongFolder, current: string, to: BgmTarget, match: (key: string | null) => boolean): SiblingChange {
+  return startSiblingChange<{ u: BgmUndo; path: string }>(folder, current, {
+    apply: (d) => {
+      const b = firstBgm(d);
+      if (!match(b ? bgmKey(folder, d, b.path) : null)) return 'kept';
+      const path = pathFor(to, d);
+      if (path === null) return 'failed';
+      const u = setBgmIn(d, path, to);
+      return u ? { undo: { u, path } } : 'same';
+    },
+    revert: (d, x) => restoreBgmIn(d, x.u, x.path),
+    reapply: (d, x) => {
+      const u = redoBgmIn(d, x.u, x.path, to);
+      return u ? { u, path: x.path } : null;
+    },
   });
-  return {
-    done,
-    labels,
-    revert: () =>
-      run((d, id) => {
-        const x = undos.get(id);
-        return x && restoreBgmIn(d, x.u, x.path) ? 'changed' : 'same';
-      }, touched()).then((rep) => {
-        labels.length = 0;
-        return rep;
-      }),
-    reapply: () =>
-      run((d, id) => {
-        const x = undos.get(id);
-        const u = x && redoBgmIn(d, x.u, x.path, to);
-        if (!x || !u) return 'same';
-        undos.set(id, { u, path: x.path });
-        return 'changed';
-      }, touched()).then((rep) => {
-        labels.splice(0, labels.length, ...rep.changed);
-        return rep;
-      }),
-  };
 }
+
+// ほかの難易度を書き換えたら（原曲・曲情報・テンポ）、反映済みの印を描き直し、原曲を読み直す
+useSiblingWrites.subscribe(() => {
+  useSongBgm.setState((s) => ({ version: s.version + 1 }));
+  scheduleScan();
+});
 
 // ---- 原曲を替える編集 ---------------------------------------------------------------
 
@@ -352,7 +192,7 @@ export function editBgm(label: string, recipe: (d: Draft<DtxDoc>) => void, scope
   if (!folder || !after) return { ok, entry, siblings: null };
   const toKey = bgmKey(folder, doc, after.path);
   if (scope === 'same' && toKey === fromKey) return { ok, entry, siblings: null };
-  change = startSiblingChange(folder, s.meta.fileName, targetOf(folder, doc, after), scope === 'same' ? (k) => k === fromKey : (k) => k !== toKey);
+  change = startBgmChange(folder, s.meta.fileName, targetOf(folder, doc, after), scope === 'same' ? (k) => k === fromKey : (k) => k !== toKey);
   return { ok, entry, siblings: change };
 }
 
@@ -361,9 +201,7 @@ export function editBgm(label: string, recipe: (d: Draft<DtxDoc>) => void, scope
  * （この編集を Ctrl+Z で戻すと、ほかの難易度もまた入れる）
  */
 export function editBgmBack(label: string, recipe: (d: Draft<DtxDoc>) => void, change: SiblingChange | null | undefined): boolean {
-  const ok = edit(label, recipe, change ? { side: { undo: () => void change.reapply(), redo: () => void change.revert() } } : {});
-  if (ok && change) void change.revert();
-  return ok;
+  return editBack(label, recipe, change);
 }
 
 /** 知らせに足す、ほかの難易度のこと（何も無ければ ''） */
@@ -423,14 +261,11 @@ export async function refreshSongBgms(): Promise<void> {
   await siblingWrites();
   const others: ChartBgm[] = [];
   for (const t of await otherCharts(folder, fileName)) {
-    try {
-      const draft = await draftFor(folder, t.file);
-      const doc = parseDtx(draft ? draft.text : decodeDtx(new Uint8Array(await (await t.file.getFile()).arrayBuffer())).text).doc;
-      const b = firstBgm(doc);
-      others.push({ file: t.file.name, label: t.label, key: b ? bgmKey(folder, doc, b.path) : null, target: b ? targetOf(folder, doc, b) : null });
-    } catch {
-      // 読めない譜面は数えない
-    }
+    // 読めない譜面は数えない
+    const doc = await readChart(folder, t.file);
+    if (!doc) continue;
+    const b = firstBgm(doc);
+    others.push({ file: t.file.name, label: t.label, key: b ? bgmKey(folder, doc, b.path) : null, target: b ? targetOf(folder, doc, b) : null });
   }
   const now = useEditor.getState();
   if (seq !== scanSeq || now.folder !== folder || now.meta.fileName !== fileName) return;
@@ -557,7 +392,7 @@ export async function alignBgm(): Promise<boolean> {
   let change: SiblingChange | null = null;
   let failedHere = false;
   if (pick.current) {
-    change = startSiblingChange(folder, now.meta.fileName, to, (k) => k !== pick.key);
+    change = startBgmChange(folder, now.meta.fileName, to, (k) => k !== pick.key);
     const c = change;
     entry = recordSide(label, { undo: () => void c.revert(), redo: () => void c.reapply() });
   } else {
