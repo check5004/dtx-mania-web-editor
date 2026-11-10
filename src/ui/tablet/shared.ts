@@ -64,7 +64,7 @@ export function openFilesPicker(kind: 'any' | 'zip' = 'any') {
   input.type = 'file';
   input.multiple = kind === 'any';
   if (kind === 'zip') input.accept = '.zip,application/zip';
-  else if (!IS_IOS) input.accept = '.zip,.dtx,audio/*,.ogg,.wav,.mp3,.m4a,.flac,.opus';
+  else if (!IS_IOS) input.accept = '.zip,.dtx,audio/*,.ogg,.wav,.mp3,.m4a,.flac,.opus,.mp4,.m4v,.mov,.webm,.mkv';
   input.style.display = 'none';
   input.onchange = () => {
     const files = [...(input.files ?? [])];

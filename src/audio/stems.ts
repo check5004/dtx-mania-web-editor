@@ -120,8 +120,8 @@ export function applyFadeAndPeak(buf: AudioBuffer, fade: number, peakDb: number 
 
 let oggEncoderUrl: Promise<string> | null = null;
 
-/** OGG Vorbis（品質6・約192 kbps）か WAV 16bit にする */
-export async function encodeAudio(buf: AudioBuffer, format: 'ogg' | 'wav', onProgress?: (p: number) => void): Promise<Uint8Array> {
+/** OGG Vorbis（品質6・約192 kbps）か WAV 16bit にする。every: 何ブロック（1ブロックは約1.4秒の音）ごとに進み具合を出して休むか */
+export async function encodeAudio(buf: AudioBuffer, format: 'ogg' | 'wav', onProgress?: (p: number) => void, every = 8): Promise<Uint8Array> {
   if (format === 'wav') return encodeWav(buf);
   oggEncoderUrl ??= import('wasm-media-encoders/wasm/ogg.wasm?url').then((m) => m.default as string);
   const { createEncoder } = await import('wasm-media-encoders');
@@ -134,7 +134,7 @@ export async function encodeAudio(buf: AudioBuffer, format: 'ogg' | 'wav', onPro
   for (let i = 0; i < buf.length; i += block) {
     const chunk = data.map((d) => d.subarray(i, Math.min(buf.length, i + block)));
     parts.push(enc.encode(chunk).slice());
-    if (onProgress && (i / block) % 8 === 0) {
+    if (onProgress && (i / block) % every === 0) {
       onProgress(i / buf.length);
       // 画面が固まらないように少し休む
       await new Promise((r) => setTimeout(r, 0));

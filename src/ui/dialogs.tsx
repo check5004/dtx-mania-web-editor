@@ -3,6 +3,7 @@ import { tr } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { NewSongInfo } from '../store/editor';
+import { audioNameFor, isVideoName, NX_MOVIE_EXT } from '../audio/videoAudio';
 
 export interface ChoiceOption<T> {
   label: string;
@@ -14,7 +15,7 @@ type Spec =
   | { kind: 'confirm'; title: string; body: string; ok: string; cancel?: string; danger?: boolean }
   | { kind: 'choose'; title: string; body?: string; options: ChoiceOption<unknown>[] }
   | { kind: 'prompt'; title: string; body?: string; value: string; ok: string }
-  | { kind: 'newSong'; title: string; audioFiles: string[]; defaults: Partial<NewSongInfo> };
+  | { kind: 'newSong'; title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> };
 
 interface DialogState {
   spec: Spec | null;
@@ -44,7 +45,8 @@ export const chooseDialog = <T,>(o: { title: string; body?: string; options: Cho
 export const promptDialog = (o: { title: string; body?: string; value: string; ok: string }) =>
   open<string | null>({ kind: 'prompt', ...o });
 
-export const newSongDialog = (o: { title: string; audioFiles: string[]; defaults: Partial<NewSongInfo> }) =>
+/** 新しい譜面の情報を聞く。audioFiles は原曲の候補（動画なら、作るときに音を取り出す）、movies は背景動画にできる動画 */
+export const newSongDialog = (o: { title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> }) =>
   open<NewSongInfo | null>({ kind: 'newSong', ...o });
 
 export function DialogHost() {
@@ -142,13 +144,19 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
   const [artist, setArtist] = useState(d.artist ?? '');
   const [bpm, setBpm] = useState(String(d.bpm ?? 120));
   const [bgm, setBgm] = useState(d.bgmFile ?? spec.audioFiles[0] ?? '');
+  // 背景動画にするか（触るまでは、NX で流れる形式ならオン）
+  const [movieOn, setMovieOn] = useState<boolean | null>(null);
   const bpmNum = Number(bpm);
   const valid = Number.isFinite(bpmNum) && bpmNum > 0 && bpmNum < 1000;
+  // 背景動画にできる動画：原曲に選んだ動画、無ければ最初の動画
+  const movie = bgm && isVideoName(bgm) ? bgm : spec.movies?.[0];
+  const nxMovie = !!movie && NX_MOVIE_EXT.test(movie);
+  const useMovie = movieOn ?? nxMovie;
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (valid) close({ title: title.trim(), artist: artist.trim(), bpm: bpmNum, bgmFile: bgm || undefined });
+        if (valid) close({ title: title.trim(), artist: artist.trim(), bpm: bpmNum, bgmFile: bgm || undefined, movieFile: movie && useMovie ? movie : undefined });
       }}
     >
       <h2>{spec.title}</h2>
@@ -170,10 +178,32 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
           <option value="">{tr('なし', 'None')}</option>
           {spec.audioFiles.map((f) => (
             <option key={f} value={f}>
-              {f}
+              {isVideoName(f) ? tr(`${f}（動画の音）`, `${f} (audio of the video)`) : f}
             </option>
           ))}
         </select>
+        {isVideoName(bgm) && (
+          <span className="lbl" style={{ gridColumn: 2, lineHeight: 1.5 }}>
+            {tr(
+              `作ると、動画から音だけを取り出して「${audioNameFor(bgm)}」（OGG）にし、原曲にします。ステム分解・スペクトル・耳コピにも使えます`,
+              `Creating takes the audio out of the video as "${audioNameFor(bgm)}" (OGG) and uses it as the original. Stem separation, the spectrum and transcription use it too`,
+            )}
+          </span>
+        )}
+        {movie && (
+          <>
+            <span className="lbl">{tr('背景動画', 'Background video')}</span>
+            <label className="row lbl" style={{ gap: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={useMovie} onChange={(e) => setMovieOn(e.target.checked)} />
+              {tr(`「${movie}」を BGA の動画（#AVI01）にする`, `Use "${movie}" as the BGA movie (#AVI01)`)}
+            </label>
+            <span className="lbl" style={{ gridColumn: 2, lineHeight: 1.5 }}>
+              {nxMovie
+                ? tr('NX で譜面の後ろに流れます。原曲と同じ所（001 小節の頭）から始めます', 'NX plays it behind the chart, starting together with the original (top of measure 001)')
+                : tr('この形式が NX で流れるかは確かめていません（NX の曲データの動画は MP4・AVI）', 'Not checked whether NX plays this format (NX song data uses MP4 or AVI movies)')}
+            </span>
+          </>
+        )}
       </div>
       <div className="modal-actions">
         <button type="button" className="btn ghost" onClick={() => close(null)}>

@@ -1563,6 +1563,8 @@ export interface NewSongInfo {
   artist: string;
   bpm: number;
   bgmFile?: string;
+  /** 背景動画（#AVI01）。原曲と同じ所（001 小節の頭）から流す（動画から原曲を取り出した曲） */
+  movieFile?: string;
   level?: number;
 }
 
@@ -1585,6 +1587,12 @@ export function createDoc(info: NewSongInfo): DtxDoc {
     add('WAV01', info.bgmFile);
     add('BGMWAV', '01');
     doc.chips.push({ id: doc.nextId++, ch: CH.BGM, m: 1, f: frac(0), v: 1 });
+  }
+  if (info.movieFile) {
+    // 曲の動画を BGA に流す曲（NX の曲データと同じく #AVI01 と、原曲と同じ所に動画のチップ 54）
+    if (!info.bgmFile) header.push({ kind: 'raw', text: '' });
+    add('AVI01', info.movieFile);
+    doc.chips.push({ id: doc.nextId++, ch: 0x54, m: 1, f: frac(0), v: 1 });
   }
   return doc;
 }

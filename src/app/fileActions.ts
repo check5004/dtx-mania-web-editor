@@ -5,6 +5,8 @@ import { readAudioTags } from '../fs/tags';
 import { virtualSound } from '../audio/sounds';
 import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
+import { isVideoName, VIDEO_ACCEPT } from '../audio/videoAudio';
+import { extractWithProgress } from '../store/videoExtract';
 import { decodeDtx, encodeDtx } from '../dtx/encoding';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { hasOriginLine, originOf, readOrigin, type ChartOrigin } from '../dtx/origin';
@@ -51,7 +53,7 @@ import { songDir, writeSongFile } from '../fs/opfs';
 import { deleteRecent, draftFor, getRecent, listRecent, listRecentSongs, putRecent, recentIdFor, trimRecent, type RecentEntry, type RecentSong } from '../fs/recent';
 import { bumpLocal, localPlace, refreshLocalSongs, setCopying, useLocalSongs } from '../store/localSongs';
 import { useDevice } from '../store/device';
-import { createDoc, dismissToast, isDirty, openDocument, prepareSounds, switchDocument, toast, undoIfLast, useEditor, withSongEnd, type DocMeta, type EditorState } from '../store/editor';
+import { createDoc, dismissToast, isDirty, openDocument, prepareSounds, switchDocument, toast, undoIfLast, useEditor, withSongEnd, type DocMeta, type EditorState, type NewSongInfo } from '../store/editor';
 import { glowReflected } from '../store/glow';
 import { prepareForNx } from '../store/nxNames';
 import { planBgmSwap, rememberFullMix } from '../store/fullMix';
@@ -456,11 +458,19 @@ export async function openFolder(folder: SongFolder, restore?: Map<string, { tex
   }
   const labels = await readSetDefLabels(folder);
   if (list.length === 0) {
-    const info = await newSongDialog({
+    // 動画も原曲の候補にする（作るときに音を取り出す）。背景動画にもできる
+    const videos = [...folder.files.values()]
+      .filter((f) => isVideoName(f.name))
+      .map((f) => f.path)
+      .sort((a, b) => a.localeCompare(b));
+    const asked = await newSongDialog({
       title: tr(`「${folder.name}」に新しい譜面を作る`, `Create a new chart in "${folder.name}"`),
-      audioFiles: audioFiles(folder).map((f) => f.path),
+      audioFiles: [...audioFiles(folder).map((f) => f.path), ...videos],
+      movies: videos,
       defaults: { title: folder.name },
     });
+    if (!asked) return;
+    const info = await audioFromVideo(asked, folder, false);
     if (!info) return;
     const doc = createDoc(info);
     const meta = newMeta('mstr.dtx', folder);
@@ -588,11 +598,11 @@ export async function switchDifficulty(fileName: string) {
 }
 
 /**
- * 新しい曲に置く音声ファイルを、NX（Shift_JIS）で読める名前にする（譜面に書く名前が「?」になって、NX が原曲・試聴を
- * 読めなくならないように）。同じ名前になったら番号を付ける
+ * 新しい曲に置く音声ファイル・動画を、NX（Shift_JIS）で読める名前にする（譜面に書く名前が「?」になって、NX が原曲・試聴・
+ * 背景動画を読めなくならないように）。同じ名前になったら番号を付ける
  */
 function nxSafeFiles(files: File[]): File[] {
-  const audio = (f: File) => AUDIO_EXT.test(f.name);
+  const audio = (f: File) => AUDIO_EXT.test(f.name) || isVideoName(f.name);
   // もう読める名前のファイルは、そのままの名前で先に取っておく
   const taken = new Set(files.filter((f) => !audio(f) || isNxSafeName(f.name)).map((f) => f.name.toLowerCase()));
   return files.map((f) => {
@@ -608,7 +618,7 @@ function nxSafeFiles(files: File[]): File[] {
   });
 }
 
-/** 落としたファイル（DTX・音声）から開く */
+/** 落としたファイル（DTX・音声・動画）から開く */
 export async function openDroppedFiles(files: File[]) {
   if (files.length === 0) return;
   if (!(await confirmDiscard())) return;
@@ -620,8 +630,10 @@ export async function openDroppedFiles(files: File[]) {
     return;
   }
   const audio = files.filter((f) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(f.name));
-  if (audio.length === 0) {
-    toast(tr('DTXか音声ファイル（WAV・OGG・MP3）を選んでください', 'Choose a DTX or an audio file (WAV, OGG, MP3)'), 'warn');
+  // 動画（MP4 など）は、音を取り出して原曲にする。背景動画にもできる
+  const videos = files.filter((f) => isVideoName(f.name));
+  if (audio.length === 0 && videos.length === 0) {
+    toast(tr('DTXか音声ファイル（WAV・OGG・MP3）か動画（MP4）を選んでください', 'Choose a DTX, an audio file (WAV, OGG, MP3) or a video (MP4)'), 'warn');
     return;
   }
   // ステム分離ソフトで分けたファイル（drums・bass…）をまとめて落としたら、ステムとして読み込む
@@ -651,26 +663,32 @@ export async function openDroppedFiles(files: File[]) {
       return;
     }
   }
-  // 音声ファイルのタグ（曲名・アーティスト・BPM）があれば最初から入れておく
-  const tags = await readAudioTags(audio[0]);
-  // 曲フォルダには NX で読める名前で置く
+  // 音声ファイルのタグ（曲名・アーティスト・BPM）があれば最初から入れておく（MP4 の動画のタグも読める）
+  const first = audio[0] ?? videos[0];
+  const tags = await readAudioTags(first);
+  // 曲フォルダには NX で読める名前で置く（背景動画にする動画も）
   const named = nxSafeFiles(files);
-  const pairs = files.map((f, i) => ({ from: f, to: named[i] })).filter((x) => audio.includes(x.from));
-  const namedAudio = pairs.map((x) => x.to);
-  const info = await newSongDialog({
+  const pairs = files.map((f, i) => ({ from: f, to: named[i] })).filter((x) => audio.includes(x.from) || videos.includes(x.from));
+  const namedAudio = pairs.filter((x) => audio.includes(x.from)).map((x) => x.to);
+  const namedVideos = pairs.filter((x) => videos.includes(x.from)).map((x) => x.to);
+  const asked = await newSongDialog({
     title: tr('新しい譜面をつくる', 'Create a new chart'),
-    audioFiles: namedAudio.map((f) => f.name),
+    audioFiles: [...namedAudio, ...namedVideos].map((f) => f.name),
+    movies: namedVideos.map((f) => f.name),
     defaults: {
-      title: tags?.title || audio[0].name.replace(/\.[^.]+$/, ''),
+      title: tags?.title || first.name.replace(/\.[^.]+$/, ''),
       artist: tags?.artist || tags?.albumArtist || undefined,
       bpm: tags?.bpm ? Math.round(tags.bpm * 100) / 100 : undefined,
-      bgmFile: namedAudio[0]?.name,
+      bgmFile: (namedAudio[0] ?? namedVideos[0])?.name,
     },
   });
-  if (!info) return;
+  if (!asked) return;
   const folder = folderFromFiles(named, files[0].name.replace(/\.[^.]+$/, ''));
+  const info = await audioFromVideo(asked, folder, true);
+  if (!info) return;
   openDocument(createDoc(info), newMeta('mstr.dtx', null), folder, { dirty: true });
-  const renamed = pairs.filter((x) => x.to.name !== x.from.name).map((x) => `${x.from.name} → ${x.to.name}`);
+  // 名前を変えたのは曲フォルダに置いたファイルだけ（背景動画にしない動画は置かない）
+  const renamed = pairs.filter((x) => x.to.name !== x.from.name && findFile(folder, x.to.name)).map((x) => `${x.from.name} → ${x.to.name}`);
   if (renamed.length)
     toast(
       tr(
@@ -682,11 +700,33 @@ export async function openDroppedFiles(files: File[]) {
     );
 }
 
-/** 原曲の音声ファイルを選ぶダイアログ（読み込むと原曲にする） */
+/**
+ * 新しい譜面の原曲に動画を選んだら、音だけを取り出した OGG を曲フォルダに置き、原曲をその OGG にする
+ * （ステム分解・スペクトル・耳コピもこの OGG を使う）。やめた・取り出せなければ null。
+ * dropped: 落としたファイルの仮の曲フォルダ。背景動画にしない動画は外す（本体に写さない）
+ */
+async function audioFromVideo(info: NewSongInfo, folder: SongFolder, dropped: boolean): Promise<NewSongInfo | null> {
+  let out = info;
+  const video = info.bgmFile && isVideoName(info.bgmFile) ? findFile(folder, info.bgmFile) : undefined;
+  if (video) {
+    const ogg = await extractWithProgress(await video.getFile());
+    if (!ogg) return null;
+    const path = freePath(folder, ogg.name);
+    await putFile(folder, path, ogg);
+    out = { ...info, bgmFile: path };
+  }
+  if (dropped) {
+    const keep = out.movieFile ? normPath(out.movieFile) : null;
+    for (const [key, f] of [...folder.files]) if (isVideoName(f.name) && key !== keep) folder.files.delete(key);
+  }
+  return out;
+}
+
+/** 原曲の音声ファイルを選ぶダイアログ（読み込むと原曲にする。動画なら音を取り出す） */
 export function pickBgmFile() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.ogg,.wav,.mp3,.m4a,.flac,.opus';
+  input.accept = `.ogg,.wav,.mp3,.m4a,.flac,.opus,${VIDEO_ACCEPT}`;
   input.onchange = () => {
     const f = input.files?.[0];
     if (f) void importBgmFile(f);
@@ -712,8 +752,14 @@ function freePath(folder: SongFolder, name: string): string {
  * BGMチップ（ch01）が無ければ 001 小節の頭に置く。あれば、その音を差し替える。
  */
 export async function importBgmFile(file: File) {
+  // 動画なら、音だけを取り出した OGG を原曲にする
+  if (isVideoName(file.name)) {
+    const ogg = await extractWithProgress(file);
+    if (ogg) await importBgmFile(ogg);
+    return;
+  }
   if (!/\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(file.name)) {
-    toast(tr('原曲は音声ファイル（WAV・OGG・MP3）を選んでください', 'For the original, choose an audio file (WAV, OGG, MP3)'), 'warn');
+    toast(tr('原曲は音声ファイル（WAV・OGG・MP3）か動画（MP4）を選んでください', 'For the original, choose an audio file (WAV, OGG, MP3) or a video (MP4)'), 'warn');
     return;
   }
   const s = get();
@@ -775,6 +821,8 @@ export async function importBgmFile(file: File) {
 /** 編集中に音声ファイルを落としたとき：原曲にするか、ステムにするか、新しい譜面にするかを選ぶ */
 export async function dropAudioInEditor(files: File[]) {
   const audio = files.filter((f) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(f.name));
+  const video = files.find((f) => isVideoName(f.name));
+  if (!audio.length && video) return dropVideoInEditor(video, files);
   if (!audio.length) return openDroppedFiles(files);
   const choice = await chooseDialog({
     title: audio.length === 1 ? tr(`「${audio[0].name}」をどうしますか？`, `What do you want to do with "${audio[0].name}"?`) : tr(`音声ファイルが ${audio.length} 個あります`, `${audio.length} audio files`),
@@ -802,6 +850,31 @@ export async function dropAudioInEditor(files: File[]) {
   });
   if (choice === 'bgm') await importBgmFile(audio[0]);
   else if (choice === 'stems') await importStems(audio);
+  else if (choice === 'new') await openDroppedFiles(files);
+}
+
+/** 編集中に動画を落としたとき：音を取り出して原曲にするか、新しい譜面にするかを選ぶ */
+async function dropVideoInEditor(video: File, files: File[]) {
+  const choice = await chooseDialog({
+    title: tr(`「${video.name}」をどうしますか？`, `What do you want to do with "${video.name}"?`),
+    body: tr('動画から音だけを取り出して使います。', 'Only the audio is taken out of the video.'),
+    options: [
+      {
+        label: bgmSource(get().doc) ? tr('音を取り出して原曲を差し替える', 'Replace the original with its audio') : tr('音を取り出して原曲にする（おすすめ）', 'Use its audio as the original (recommended)'),
+        sub: tr(
+          '音だけのファイル（OGG）を作って曲フォルダに置き、譜面の BGM（#WAV・ch01）にします。ステム分解・スペクトル・耳コピもこの音を使います',
+          'Makes an audio-only file (OGG) in the song folder and sets it as the chart’s BGM (#WAV, ch01). Stem separation, the spectrum and transcription use it too',
+        ),
+        value: 'bgm' as const,
+      },
+      {
+        label: tr('新しい譜面を作る', 'Create a new chart'),
+        sub: tr('いまの譜面を閉じて、この動画から新しい譜面を作ります（動画は BGA の動画にもできます）', 'Closes the current chart and starts a new one from this video (the video can be the BGA movie too)'),
+        value: 'new' as const,
+      },
+    ],
+  });
+  if (choice === 'bgm') await importBgmFile(video);
   else if (choice === 'new') await openDroppedFiles(files);
 }
 
@@ -1618,8 +1691,8 @@ export async function openZipFile(file: File) {
   }
   const folders = songFoldersOf(z);
   if (folders.length === 0) {
-    // DTX が無い：音声があれば、それで新しい譜面を作る
-    const audio = [...z.files].filter(([p]) => AUDIO_EXT.test(p)).map(([p, d]) => new File([d as Uint8Array<ArrayBuffer>], p.split('/').pop()!));
+    // DTX が無い：音声（か動画）があれば、それで新しい譜面を作る
+    const audio = [...z.files].filter(([p]) => AUDIO_EXT.test(p) || isVideoName(p)).map(([p, d]) => new File([d as Uint8Array<ArrayBuffer>], p.split('/').pop()!));
     if (audio.length) {
       await openDroppedFiles(audio);
       return;

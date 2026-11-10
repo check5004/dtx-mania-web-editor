@@ -15,6 +15,7 @@ import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
 import { UpdateNotice } from './ui/pwa/UpdateNotice';
+import { VideoExtractHost } from './ui/VideoExtract';
 
 function Toasts() {
   const toasts = useEditor((s) => s.toasts);
@@ -66,6 +67,7 @@ export function App() {
       {/* スマホの縦：画面の上端に上のバーと同じ色の帯（iOS の Safari が上端にかけるぼかしを消す。phone.css の .p-edge-top） */}
       {phone && <div className="p-edge-top" aria-hidden="true" />}
       <DialogHost />
+      <VideoExtractHost />
       <Toasts />
       <LocalCopyChip />
       <DriveProgressChip />

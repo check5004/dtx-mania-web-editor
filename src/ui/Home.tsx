@@ -118,8 +118,8 @@ function HomeDesktop() {
             <h3>{tr('原曲の音声ファイルから', 'From the song audio file')}</h3>
             <p>
               {tr(
-                '原曲（WAV・OGG・MP3）をここにドロップすると、その曲をBGMにした新しい譜面を作ります。DTXファイルを落とすとそのまま開きます。',
-                'Drop the original song (WAV, OGG or MP3) here to start a new chart with it as the BGM. Drop a DTX file to open it as is.',
+                '原曲（WAV・OGG・MP3）をここにドロップすると、その曲をBGMにした新しい譜面を作ります。動画（MP4）なら音を取り出して原曲にします。DTXファイルを落とすとそのまま開きます。',
+                'Drop the original song (WAV, OGG or MP3) here to start a new chart with it as the BGM. A video (MP4) gives its audio as the original. Drop a DTX file to open it as is.',
               )}
             </p>
             <div className="actions">
@@ -130,7 +130,7 @@ function HomeDesktop() {
             <input
               ref={audioInput}
               type="file"
-              accept=".ogg,.wav,.mp3,.m4a,.flac,.opus,.dtx,.zip"
+              accept=".ogg,.wav,.mp3,.m4a,.flac,.opus,.mp4,.m4v,.mov,.webm,.mkv,.dtx,.zip"
               hidden
               onChange={(e) => {
                 void openPickedFiles([...(e.target.files ?? [])]);

@@ -39,6 +39,7 @@ Safari（WebKit）のときだけ動きます。PC の Chrome・Edge の動き�
 
 - OGG（Vorbis・Opus）は Safari 18.4（iPadOS・iOS 18.4、macOS 15.4）から読める（[WebKit Features in Safari 18.4](https://webkit.org/blog/16574/webkit-features-in-safari-18-4/)）。DTX の音はほとんど OGG なので、それより前の Safari では鳴らない。読めなかった音があれば知らせる（`src/store/editor.ts` の `warnOldSafariOgg`、右の「お知らせ」）。
 - WAV・MP3 はどの版でも読める。
+- 動画（MP4 など）から原曲の音を取り出すのも `engine.decodeAudio()`（`src/audio/videoAudio.ts`）。Chrome・Edge は MP4・MOV・WebM の音を読める。Safari が動画の音を読めるかは確かめていないので、読めなければ「PC の Chrome・Edge で開くか、音声ファイルにしてから」と知らせる（`src/store/videoExtract.ts`）。
 - 書き出し（エンコード）は `wasm-media-encoders` で行うので、ブラウザに頼らない。
 
 ## 3. Safari に無い・違う API

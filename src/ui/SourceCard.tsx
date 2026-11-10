@@ -3,6 +3,7 @@ import { tr, pl } from '../i18n';
 import { useState } from 'react';
 import { importBgmFile, pickBgmFile } from '../app/fileActions';
 import { engine } from '../audio/engine';
+import { isVideoName } from '../audio/videoAudio';
 import { toMeasure } from '../dtx/base36';
 import { findFile } from '../fs/folder';
 import { useAssist } from '../store/assist';
@@ -54,7 +55,8 @@ export function SourceCard() {
       e.preventDefault();
       e.stopPropagation();
       setOver(false);
-      const f = [...e.dataTransfer.files].find((x) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(x.name));
+      // 動画は音を取り出して原曲にする
+      const f = [...e.dataTransfer.files].find((x) => /\.(ogg|wav|mp3|m4a|flac|opus)$/i.test(x.name) || isVideoName(x.name));
       if (f) void importBgmFile(f);
     },
   };
@@ -138,7 +140,7 @@ export function SourceCard() {
             <b>
               {Icon.folder(15)} {tr('原曲の音声ファイルを読み込む', 'Load the original audio file')}
             </b>
-            <span>{tr('ここにドロップするか、クリックして選ぶ（WAV・OGG・MP3）', 'Drop it here or click to choose (WAV, OGG, MP3)')}</span>
+            <span>{tr('ここにドロップするか、クリックして選ぶ（WAV・OGG・MP3。動画の MP4 は音を取り出す）', 'Drop it here or click to choose (WAV, OGG, MP3; for an MP4 video, its audio)')}</span>
           </button>
           <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.6 }}>
             {tr(
