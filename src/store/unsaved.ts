@@ -19,6 +19,7 @@ const WORK_LABEL: Record<keyof SidecarData, () => string> = {
   stems: () => tr('ステム', 'stems'),
   analysisStem: () => tr('ステム', 'stems'),
   mix: () => tr('聴く音量', 'listening volume'),
+  auto: () => tr('自動で入れた小節', 'auto-filled measures'),
 };
 
 export function unsavedOf(s: Pick<EditorState, 'doc' | 'savedDoc' | 'past' | 'savedHistory'>, side: { dirty: boolean; changed: readonly (keyof SidecarData)[] }): Unsaved | null {

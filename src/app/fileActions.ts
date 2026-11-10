@@ -543,8 +543,8 @@ export async function switchDifficulty(fileName: string) {
   const f = findFile(folder, fileName);
   if (!f) return;
   const seq = ++switchSeq;
-  // 保存していない変更は、いまの内容を「最近の曲」の自動保存に残してから切り替える（確認で伝えたとおりに）
-  if (isDirty(get())) await autosaveNow();
+  // 保存していない変更は、いまの内容を「最近の曲」の自動保存に残してから切り替える（確認で伝えたとおりに。作業ファイルだけの変更も）
+  if (hasUnsaved(get())) await autosaveNow(true);
   // 切り替える難易度に保存していない続き（自動保存）があれば、そこから開く（「最近の曲」は曲ごとに1つなので、ほかの難易度の続きはここで開く）
   const resume = await draftFor(folder, f);
   await openDtxFile(folder, f, undefined, resume?.text, resume?.sidecar, { stale: () => seq !== switchSeq || get().folder !== folder });
