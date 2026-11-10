@@ -218,7 +218,7 @@ function loopMeasure(m: number) {
   setLoop({ on: true, a: t.measureStart(m), b: t.measureStart(m + 1) });
 }
 
-/** チップの音を鳴らす（「チップを置いたときに音を鳴らす」を切っていれば鳴らさない） */
+/** チップの音を鳴らす（「チップを置いた・動かしたときに音を鳴らす」を切っていれば鳴らさない） */
 function hear(ids: readonly number[], anchor: number, force = false) {
   const s = useEditor.getState();
   if (!force && !s.previewOnPlace) return;

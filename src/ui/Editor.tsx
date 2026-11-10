@@ -296,7 +296,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     case 'ArrowRight':
       if (s.selection.length > 0) {
         e.preventDefault();
-        moveSelection(frac(0), k === 'ArrowLeft' ? -1 : 1);
+        moveSelection(frac(0), k === 'ArrowLeft' ? -1 : 1, { hear: true });
       }
       return;
     case '[':

@@ -23,7 +23,8 @@ const GATED = new Set(['ensure', 'play', 'preview', 'previewBuffer', 'audition',
  */
 export const GESTURE_OK = {
   'src/store/editor.ts#playFrom': '▶・Space・ダブルクリックなど。最初の await の前に ensure',
-  'src/store/editor.ts#previewWav': 'チップを置いた・WAV の試聴ボタン',
+  'src/store/editor.ts#previewWav': 'チップを置いた・動かした（ドラッグは動かしている間。出力は押したとき ChartCanvas>mouseDown で用意）・WAV の試聴ボタン',
+  'src/ui/ChartCanvas.tsx#ChartCanvas>mouseDown': 'チップを押したとき（動かすと移動先の音を鳴らすので、マウスのボタンを押した操作の中で出力を用意する）',
   'src/store/editor.ts#previewFile': 'previewWav（操作の中）から。頭で ensure してから読み込む',
   'src/store/hits.ts#previewLane': 'キー・パッド・試し打ち（パッドは指が触れたとき。Safari は指を離したときにも出力を起こす）',
   'src/store/hits.ts#previewLane>then': '内蔵キットの音の読み込みを待って鳴らす。出力は previewLane の頭（操作の中）で用意してある',

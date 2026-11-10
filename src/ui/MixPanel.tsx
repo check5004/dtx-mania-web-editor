@@ -192,7 +192,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
       </div>
       <label className="row lbl" style={{ marginTop: 8 }}>
         <input type="checkbox" checked={previewOnPlace} onChange={(e) => useEditor.setState({ previewOnPlace: e.target.checked })} />
-        {tr('チップを置いたときに音を鳴らす', 'Play the sound when placing a chip')}
+        {tr('チップを置いた・動かしたときに音を鳴らす', 'Play the sound when placing or moving a chip')}
       </label>
       <p className="mix-note">
         {tr(

@@ -14,6 +14,7 @@ import type { ChartOrigin } from '../dtx/origin';
 import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
 import { audibleEnd } from '../audio/dsp';
 import {
+  channelInLane,
   freeWavNumber,
   makeClip,
   mostUsedWav,
@@ -721,15 +722,43 @@ export function deleteSelection() {
   deleteChips(get().selection);
 }
 
-export function moveSelection(dBeat: Frac, dLane: number): boolean {
+/**
+ * 選んでいるチップを動かす（拍のずれ・画面の並びでのレーンのずれ）。別のレーンへ動かしたチップは、音もそのレーンの音にする
+ * （ベロシティは保つ。右クリックの「レーンを変える」と同じ）。
+ * hear: 別のレーンへ動かしたら、動かした先の音を鳴らす（矢印キー・選択バー。ドラッグは動かしている間に鳴らす）
+ */
+export function moveSelection(dBeat: Frac, dLane: number, opts: { hear?: boolean } = {}): boolean {
   const s = get();
   if (s.selection.length === 0) return false;
   const tempo = tempoOf(s.doc);
+  const ids = new Set(s.selection);
+  const before = new Map(s.doc.chips.filter((c) => ids.has(c.id)).map((c) => [c.id, c.ch]));
+  const hadKit = Object.keys(s.doc.fields).length;
   let ok = false;
   edit(tr('チップを動かす', 'Move chips'), (d) => {
-    ok = opMove(d, new Set(s.selection), tempo, dBeat, dLane, shiftLane);
+    ok = opMove(d, ids, tempo, dBeat, dLane, shiftLane);
+    if (ok && dLane !== 0) soundFollowsLane(d, before);
   });
+  if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
+  if (ok && dLane !== 0 && opts.hear) {
+    const first = s.selection.find((id) => drumChannel(before.get(id) ?? -1));
+    if (first !== undefined) previewChipMove(first);
+  }
   return ok;
+}
+
+/**
+ * レーンが変わったチップの音を、移った先のレーンの音にする（ベロシティは保つ）。before は変える前のチャンネル（id → ch）。
+ * 種類（通常・不可視・音だけ）だけが変わったチップは同じレーンの音なのでそのまま
+ */
+function soundFollowsLane(d: Draft<DtxDoc>, before: ReadonlyMap<number, number>) {
+  for (const c of d.chips) {
+    const was = before.get(c.id);
+    if (was === undefined || was === c.ch) continue;
+    const info = drumChannel(c.ch);
+    if (!info || drumChannel(was)?.base === info.base) continue;
+    c.v = wavVariant(d, wavForChannel(d, info.base), velOfWav(d.fields, c.v));
+  }
 }
 
 export function copySelection(): number {
@@ -786,12 +815,7 @@ export function relaneChips(ids0: readonly number[], lane: number, alt: AltMode 
   let n = 0;
   edit(tr(`${ids.size === 1 ? 'チップ' : `${ids.size}個のチップ`}を${name}にする`, `Change ${ids.size === 1 ? 'chip' : `${ids.size} chips`} to ${name}`), (d) => {
     n = opRelane(d, ids, lane, alt);
-    for (const c of d.chips) {
-      if (!ids.has(c.id) || before.get(c.id) === c.ch) continue;
-      const info = drumChannel(c.ch);
-      if (!info) continue;
-      c.v = wavVariant(d, wavForChannel(d, info.base), velOfWav(d.fields, c.v));
-    }
+    soundFollowsLane(d, before);
   });
   if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
   return n;
@@ -992,22 +1016,53 @@ engine.onStall = () => {
   );
 };
 
-export function previewWav(no: number) {
+/** WAV 番号の音を1回鳴らす。vel（1〜100）を渡すと、そのベロシティで鳴らす（そのベロシティ違いの番号がまだ無くても） */
+export function previewWav(no: number, vel?: number) {
   engine.ensure();
-  if (engine.preview(no)) return;
-  // 作ったばかりのベロシティ違いはまだ読み込まれていない：同じファイルの音をベロシティの比で鳴らす
   const fields = get().doc.fields;
+  if (engine.preview(no, vel === undefined ? 1 : vel / Math.max(1, velOfWav(fields, no)))) return;
+  // 作ったばかりのベロシティ違いはまだ読み込まれていない：同じファイルの音をベロシティの比で鳴らす
   const path = fields['WAV' + toBase36x2(no)];
   if (path === undefined) return;
   for (const [k, v] of Object.entries(fields)) {
     if (!/^WAV[0-9A-Z]{2}$/.test(k) || v.toLowerCase() !== path.toLowerCase()) continue;
     const other = parseInt(k.slice(3), 36);
     if (other === no || !engine.has(other)) continue;
-    engine.preview(other, velOfWav(fields, no) / Math.max(1, velOfWav(fields, other)));
+    engine.preview(other, (vel ?? velOfWav(fields, no)) / Math.max(1, velOfWav(fields, other)));
     return;
   }
   // 譜面でまだ使っていない音は再生用に読み込んでいないので、その場で読み込んで鳴らす
-  void previewFile(path, wavVolume(get().doc, no) / 100);
+  void previewFile(path, (vel ?? wavVolume(get().doc, no)) / 100);
+}
+
+/**
+ * チップを dLane レーン（画面の並びで）動かしたときに鳴る音を鳴らす。譜面は変えない。
+ * 別のレーンならそのレーンの音をチップのベロシティで（動かすと音もそのレーンの音になる）、同じレーンならそのチップの音。
+ * 「チップを置いた・動かしたときに音を鳴らす」を切っていれば鳴らさない
+ */
+export function previewChipMove(id: number, dLane = 0) {
+  const s = get();
+  if (!s.previewOnPlace) return;
+  const c = s.doc.chips.find((x) => x.id === id);
+  const info = c ? drumChannel(c.ch) : undefined;
+  if (!c || !info) return;
+  const lane = dLane ? shiftLane(info.lane, dLane) : info.lane;
+  const ch = lane === null ? null : channelInLane(c.ch, lane);
+  const to = ch === null ? undefined : drumChannel(ch);
+  if (!to) return;
+  if (to.base === info.base) {
+    previewWav(c.v);
+    return;
+  }
+  const vel = velOfWav(s.doc.fields, c.v);
+  const no = wavForLane(to.lane, to.alt);
+  if (no !== null) {
+    previewWav(no, vel);
+    return;
+  }
+  // そのレーンの音がまだ譜面に無い（動かすと今のキットの音を登録する）
+  const file = kitFileProvider(to.base);
+  if (file) void previewFile(file, vel / 100);
 }
 
 const previewCache = new Map<string, Promise<AudioBuffer | null>>();

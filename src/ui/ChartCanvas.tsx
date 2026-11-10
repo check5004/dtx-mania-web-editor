@@ -37,6 +37,7 @@ import {
   placeChip,
   placeChips,
   playFrom,
+  previewChipMove,
   previewWav,
   redo,
   resetSongEnd,
@@ -299,7 +300,8 @@ type Drag =
   | { type: 'velPencil'; idx: number; group: string; lastBeat: number }
   /** 直線。始め（b0）は拍で持ち、終わり（y1）はマウス */
   | { type: 'velLine'; idx: number; b0: number; v0: number; y1: number; v1: number }
-  | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean }
+  /** heard: 動かした先の音を鳴らしたときのレーンのずれ（まだ鳴らしていなければ null） */
+  | { type: 'move'; anchor: ChipView; anchorBeat: Frac; grab: number; x0: number; dBeat: Frac | null; dLane: number; moved: boolean; clickedSelected: boolean; heard: number | null }
   | { type: 'erase'; ids: Set<number> }
   /** 右ボタンを押している：動かさずに離せばメニュー、チップの上からなぞれば消す（erase へ） */
   | { type: 'rpress'; x0: number; y0: number; cx: number; cy: number; hit: Hit; beat: number; shift: boolean }
@@ -1102,6 +1104,8 @@ export function ChartCanvas() {
       } else if (!already) {
         useEditor.setState({ selection: additive ? [...s.selection, id] : [id] });
       }
+      // 動かすと動かした先の音を鳴らす（マウスを動かしている間）。音の出力は押した操作の中で用意しておく（Safari。docs/safari.md）
+      if (s.previewOnPlace && h.view.col >= 0) engine.ensure();
       const tempo = tempoOf(s.doc);
       l.drag = {
         type: 'move',
@@ -1113,6 +1117,7 @@ export function ChartCanvas() {
         dLane: 0,
         moved: false,
         clickedSelected: already && !additive,
+        heard: null,
       };
       return;
     }
@@ -1257,6 +1262,7 @@ export function ChartCanvas() {
     }
     if (d.type === 'move') {
       moveTo(d, g, x, y);
+      hearMove(d);
       canvasRef.current!.style.cursor = 'grabbing';
     }
   };
@@ -1894,9 +1900,11 @@ export function ChartCanvas() {
         dLane: 0,
         moved: false,
         clickedSelected: false,
+        heard: null,
       };
       l.drag = d;
       moveTo(d, g, x, y);
+      hearMove(d);
       t.mode = 'drag';
       l.dirty = true;
       return;
@@ -2007,7 +2015,7 @@ export function ChartCanvas() {
           useEditor.setState({ selection: already ? s.selection.filter((i) => i !== id) : [...s.selection, id] });
         } else {
           useEditor.setState({ selection: [id] });
-          // スマホ：置かずに選んだことが分かるように鳴らす（「チップを置いたときに音を鳴らす」を切っていれば鳴らさない）
+          // スマホ：置かずに選んだことが分かるように鳴らす（「チップを置いた・動かしたときに音を鳴らす」を切っていれば鳴らさない）
           if (phoneGeo && h.view.col >= 0 && s.previewOnPlace) previewWav(h.view.c.v);
         }
         return;
@@ -2891,6 +2899,16 @@ function moveTo(d: Extract<Drag, { type: 'move' }>, g: Geom, x: number, y: numbe
   d.dBeat = sub(posToBeatFrac(tempo, target), d.anchorBeat);
   d.dLane = d.anchor.col >= 0 ? Math.round((x - d.x0) / GEO.laneW) : 0;
   if (d.dBeat.n !== 0 || d.dLane !== 0) d.moved = true;
+}
+
+/**
+ * チップを動かすドラッグの音：動き出したときと、別のレーンに入ったときに、動かした先で鳴る音を鳴らす
+ * （別のレーンならそのレーンの音。間違えて触って動かしても気づける）。同じレーンの中で時刻だけ動かしている間は鳴らさない
+ */
+function hearMove(d: Extract<Drag, { type: 'move' }>) {
+  if (!d.moved || d.heard === d.dLane) return;
+  d.heard = d.dLane;
+  previewChipMove(d.anchor.c.id, d.dLane);
 }
 
 /**

@@ -322,7 +322,7 @@ function PTabs() {
 
 function nudge(dBeat: -1 | 0 | 1, dLane: -1 | 0 | 1) {
   const s = useEditor.getState();
-  const ok = moveSelection(dBeat ? mul(gridStep(s.view.div), frac(dBeat)) : frac(0), dLane);
+  const ok = moveSelection(dBeat ? mul(gridStep(s.view.div), frac(dBeat)) : frac(0), dLane, { hear: true });
   if (!ok) toast(dLane ? tr('これ以上レーンを動かせません', "Can't move the lanes any further") : tr('これ以上動かせません', "Can't move any further"), 'info', 1800);
 }
 
