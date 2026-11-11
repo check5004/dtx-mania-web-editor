@@ -327,6 +327,31 @@ function hitLanes(model: boolean): { n: number; w: number; x: (i: number) => num
   return { n, w, x: (i) => 2 + i * w };
 }
 
+/** 見出しの下の段（凡例・採譜の進み具合）を 1 段で書くときの高さ */
+const HIT_ROW_Y = 21;
+
+/**
+ * 見出しの下の段を 2 段に分けるときの上・下の段の高さ。
+ * 見出しが低くて「打点」の下に 2 段入らないとき（デスクトップの 30px）は null（列が広いので 1 段で入る）
+ */
+function hitRowsY(): [number, number] | null {
+  return GEO.head >= 34 ? [GEO.head - 15.5, GEO.head - 6.5] : null;
+}
+
+/**
+ * 「原曲の打点」の見出しの凡例（小さな列ごとの名前）。フォントは先に決めておく。
+ * 列が細くて隣の名前と重なるとき（タブレットの 40px に 5 種で、1 つが 7px）は、上下 2 段に互い違いに置く
+ */
+function drawHitLegend(ctx: CanvasRenderingContext2D, ox: number, hl: ReturnType<typeof hitLanes>, items: readonly { label: string; color: string }[]) {
+  const ws = items.map((it) => ctx.measureText(it.label).width);
+  // 隣との間が 1px 空くなら 1 段
+  const rows = ws.every((w, i) => i === 0 || (ws[i - 1] + w) / 2 + 1 <= hl.w) ? null : hitRowsY();
+  items.forEach((it, i) => {
+    ctx.fillStyle = it.color;
+    ctx.fillText(it.label, ox + GEO.hitsX + hl.x(i) + hl.w / 2, rows ? rows[i % 2] : HIT_ROW_Y);
+  });
+}
+
 type Drag =
   /** 押した所（x0・y0 は画面、b0 は譜面の拍）。動かさずに離せば置く、動かせば範囲選択 */
   | { type: 'pending'; x0: number; y0: number; b0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean; flam?: boolean; sp?: string }
@@ -4313,27 +4338,30 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     const dr = useDrums.getState();
     if (readyDrums()) {
       // ドラムの採譜モデルの5種
-      const hl = hitLanes(true);
       ctx.font = '600 8px "JetBrains Mono", ui-monospace, monospace';
-      DRUM_CLASSES.forEach((k, i) => {
-        ctx.fillStyle = DRUM_COL[k];
-        ctx.fillText(k, ox + GEO.hitsX + hl.x(i) + hl.w / 2, 21);
-      });
+      drawHitLegend(ctx, ox, hitLanes(true), DRUM_CLASSES.map((k) => ({ label: k, color: DRUM_COL[k] })));
     } else if (dr.enabled && dr.status === 'loading') {
       ctx.font = '9px system-ui, sans-serif';
       ctx.fillStyle = C.amber;
-      ctx.fillText(
-        dr.stage === 'run' ? tr(`採譜中 ${Math.round(dr.progress * 100)}%`, `Scanning ${Math.round(dr.progress * 100)}%`) : tr('採譜の準備…', 'Preparing…'),
-        ox + GEO.hitsX + GEO.hitsW / 2,
-        21,
-      );
+      const cx = ox + GEO.hitsX + GEO.hitsW / 2;
+      const pct = `${Math.round(dr.progress * 100)}%`;
+      const text = dr.stage === 'run' ? tr(`採譜中 ${pct}`, `Scanning ${pct}`) : tr('採譜の準備…', 'Preparing…');
+      const rows = ctx.measureText(text).width > GEO.hitsW - 2 ? hitRowsY() : null;
+      if (!rows) ctx.fillText(text, cx, HIT_ROW_Y);
+      else {
+        // 列が細い（タブレット）：2 段に分けて、列からはみ出さない
+        const [a, b] = dr.stage === 'run' ? [tr('採譜中', 'Scan'), pct] : [tr('採譜の', 'Getting'), tr('準備…', 'ready…')];
+        ctx.fillText(a, cx, rows[0]);
+        ctx.fillText(b, cx, rows[1]);
+      }
     } else {
-      const hl = hitLanes(false);
       ctx.font = '600 10px system-ui, sans-serif';
-      (['low', 'mid', 'high'] as const).forEach((b, i) => {
-        ctx.fillStyle = C[b];
-        ctx.fillText([tr('低', 'Lo'), tr('中', 'Mid'), tr('高', 'Hi')][i], ox + GEO.hitsX + hl.x(i) + hl.w / 2, 21);
-      });
+      drawHitLegend(
+        ctx,
+        ox,
+        hitLanes(false),
+        (['low', 'mid', 'high'] as const).map((b, i) => ({ label: [tr('低', 'Lo'), tr('中', 'Mid'), tr('高', 'Hi')][i], color: C[b] })),
+      );
     }
     ctx.font = '10px system-ui, sans-serif';
     ctx.fillStyle = C.text;
