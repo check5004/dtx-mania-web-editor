@@ -1402,19 +1402,445 @@ html.phone-port .p-edge-top {
   color: #8b95a4;
 }
 
-/* TAB補完のバーは選択バーの下へ */
-html.phone .p-chart .tab-ghost {
-  top: 28px !important;
-  bottom: auto !important;
-  left: 50% !important;
-  transform: translateX(-50%);
-  max-width: calc(100% - 12px) !important;
+/* ---- 候補（ui/phone/PhoneCands）：点線の候補を隠さないように、譜面の上には重ねない ----
+   TAB補完は譜面の下の端の細い帯（点線は置いた小節より先＝上に出るので、下の端なら隠れない。譜面の大きさは変えない）。
+   小節の生成・フレーズ候補は譜面の下に並べるパネル（道具の帯の代わり。譜面を縮める） */
+
+.p-tabbar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
   z-index: 24;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'info x'
+    'acts acts';
+  align-items: center;
+  gap: 2px 4px;
+  padding: 2px 3px 4px 8px;
   border-radius: 14px;
+  border: 1px solid #2b4b60;
+  background: rgba(11, 21, 29, 0.96);
+  box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.5);
 }
 
-html.phone .p-chart:has(.p-selbar) .tab-ghost {
-  top: 82px !important;
+/* 横は 1 段（譜面の高さが少ないので） */
+.p-tabbar.land {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: 'info acts x';
+  padding: 3px 3px 3px 10px;
+}
+
+.p-cand-info {
+  grid-area: info;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #a9b4c2;
+  font-size: 12px;
+  text-align: left;
+}
+
+.p-cand-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: #8ad8ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.p-cand-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p-cand-text > span + span::before,
+.p-dock-info > * + *::before {
+  content: ' · ';
+  color: #5f6978;
+}
+
+.p-cand-text b {
+  color: #8ad8ff;
+  font-weight: 600;
+}
+
+.p-cand-where {
+  color: #dfe6ee;
+}
+
+.p-cand-doubt {
+  color: #ff9f43;
+}
+
+.p-cand-err {
+  color: #ff8a8f;
+}
+
+.p-cand-warn {
+  color: var(--amber);
+}
+
+.p-cand-acts {
+  grid-area: acts;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.p-tabbar.land .p-cand-acts {
+  margin-left: 6px;
+}
+
+.p-cand .p-btn.sm,
+.p-dock .p-btn.sm {
+  min-height: 40px;
+  padding: 0 12px;
+  gap: 5px;
+}
+
+.p-cand-x {
+  grid-area: x;
+}
+
+.p-tabbar .p-cand-x {
+  width: 34px;
+  height: 30px;
+}
+
+.p-tabbar.land .p-cand-x {
+  height: 40px;
+}
+
+.p-cand-step {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: #c9d1dc;
+  font-size: 13px;
+}
+
+.p-cand-step .p-ib.sm {
+  width: 34px;
+  height: 40px;
+}
+
+.p-cand-ai {
+  color: #cdbcff;
+}
+
+.p-cand .p-cand-ai {
+  padding: 0 10px;
+}
+
+/* 譜面の下に並べるパネル（小節の生成・フレーズ候補） */
+.p-dock {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: none;
+  min-width: 0;
+  padding: 4px 6px 6px;
+  background: #10141a;
+  border-top: 1px solid #2a323e;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.p-dock-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+}
+
+.p-dock-head .p-btn.sm {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.p-dock-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.p-dock-title.gen {
+  color: var(--amber);
+}
+
+.p-dock-title.phrase {
+  color: #cdbcff;
+}
+
+.p-dock-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #a9b4c2;
+}
+
+.p-dock-info b {
+  color: #f2f5f9;
+  font-weight: 600;
+}
+
+.p-dock-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 横にはみ出す分は指で送る（案・レーンの並び） */
+.p-dock-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.p-dock-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.p-dock-scroll > * {
+  flex: none;
+}
+
+.p-dock .grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+html.tablet .p-dock-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+}
+
+.p-dock-note {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: #8b95a4;
+}
+
+.p-dock-note .link-btn {
+  font-size: 11.5px;
+}
+
+.p-dock-hint {
+  font-size: 11.5px;
+  color: #8b95a4;
+  white-space: nowrap;
+}
+
+.p-dock-hint.live {
+  color: var(--ok);
+}
+
+/* 小節の生成：案のタブ（選んでいるのは琥珀色）・入れるボタン・レーン */
+.p-gen-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #2c3440;
+  background: #151a21;
+  color: #c9d1dc;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.p-gen-tab.ai {
+  color: #d9ccff;
+}
+
+.p-gen-tab.on {
+  background: #3b2f12;
+  border-color: var(--amber);
+  color: #ffe6b3;
+}
+
+.p-gen-fit {
+  font-size: 11px;
+  font-weight: 400;
+  color: #8b95a4;
+}
+
+.p-gen-tab.on .p-gen-fit {
+  color: #e9cf96;
+}
+
+.p-gen-tab.loading {
+  border-style: dashed;
+  border-color: #6f5b9e;
+  color: #cdbcff;
+  animation: gen-pulse 1.2s ease-in-out infinite;
+}
+
+.p-gen .p-gen-acts .p-btn.primary {
+  background: #3b2f12;
+  border-color: #8f6d2b;
+  color: #ffe6b3;
+}
+
+.p-gen .p-gen-acts .p-btn.primary:disabled {
+  opacity: 0.5;
+}
+
+.p-gen-count {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.p-gen-count .minus {
+  color: #ff8a8f;
+}
+
+.p-gen-mode {
+  height: 40px;
+}
+
+.p-gen-lane {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 34px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--lane) 50%, transparent);
+  background: #151a21;
+  color: var(--lane);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.p-gen-lane.off {
+  border-color: #2c3440;
+  background: transparent;
+  color: #5f6978;
+  text-decoration: line-through;
+}
+
+/* フレーズ候補：範囲（− 小節 ＋）・選んでいる候補（‹ 名前 › 反映） */
+.p-phrase-range .p-ib.sm {
+  width: 34px;
+  height: 34px;
+}
+
+.p-phrase-m {
+  min-width: 30px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.p-phrase-n {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.p-phrase-pick .p-ib.sm {
+  width: 36px;
+  height: 44px;
+}
+
+.p-phrase-pick .p-btn.primary {
+  min-height: 44px;
+  padding: 0 16px;
+}
+
+.p-phrase-cur {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.p-phrase-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13.5px;
+}
+
+.p-phrase-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.p-phrase-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: #8b95a4;
+}
+
+/* 横：譜面の高さが少ないので段を減らす（見出しの下に、案とボタンを並べる） */
+.p-dock.land {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  padding: 3px 8px 5px;
+}
+
+.p-dock.land > * {
+  flex: 1 1 100%;
+}
+
+.p-gen.land > .p-dock-scroll:not(.p-gen-lanes) {
+  flex: 1 1 0;
+}
+
+.p-gen.land > .p-gen-acts {
+  flex: none;
+}
+
+.p-phrase.land > .p-phrase-range {
+  flex: none;
+}
+
+.p-phrase.land > .p-phrase-text {
+  flex: 1 1 160px;
 }
 
 /* ---- 横：左の道具（52）・右の再生（80）・重ねるパネル（320） ---- */
@@ -1440,6 +1866,7 @@ html.phone .p-chart:has(.p-selbar) .tab-ghost {
 .p-land-chart {
   position: relative;
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -1781,9 +2208,15 @@ html.phone-land .toasts {
   bottom: calc(12px + env(safe-area-inset-bottom));
 }
 
-/* 検索・フレーズ候補・AI の小節の生成は譜面の幅に収める */
-html.phone .p-chart .find-panel,
-html.phone .p-chart .phrase-panel {
+/* TAB補完の帯・小節の生成・フレーズ候補を出している間は、知らせを画面の上に（譜面の下の方の点線と帯のボタンを隠さない）。
+   p-cand-on は ui/phone/PhoneCands が付ける */
+html.phone.p-cand-on .toasts {
+  top: calc(env(safe-area-inset-top) + 6px);
+  bottom: auto;
+}
+
+/* 検索は譜面の幅に収める（フレーズ候補・小節の生成は譜面の下のパネル） */
+html.phone .p-chart .find-panel {
   left: 6px !important;
   right: 6px !important;
   width: auto !important;
@@ -1812,7 +2245,7 @@ html.phone .t-drawer-tabs button {
 /* 録音中の札は譜面の下に */
 html.phone .p-chart .rec-badge {
   top: auto;
-  bottom: 10px;
+  bottom: calc(10px + var(--p-tabbar-h, 0px));
   left: 50%;
   right: auto;
   transform: translateX(-50%);

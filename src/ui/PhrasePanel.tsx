@@ -10,24 +10,8 @@ import { applyCandidate, closePhrase, makeCandidates, setPhraseRange, stepCandid
 import { Icon } from './icons';
 import { openSettings } from '../store/editor';
 
-export function PhrasePanel() {
-  const p = usePhrase();
-  const doc = useEditor((s) => s.doc);
-  const hasKey = useHasAiKey();
-  const model = useAi((s) => modelLabel(s.tasks.phrase.model, s.models));
-  const cost = useAi(() => taskCostEstimate('phrase'));
-  const cand = p.cands[p.index] ?? null;
-  const stale = p.cands.length > 0 && p.madeFor !== doc;
-
-  // 範囲が見えるようにする
-  useEffect(() => {
-    const s = useEditor.getState();
-    const t = tempoOf(s.doc);
-    const b = t.measureStart(p.from);
-    const px = s.view.pxPerBeat;
-    if (b < s.view.scrollBeat || b > s.view.scrollBeat + 600 / px) setView({ scrollBeat: Math.max(-1, b - 80 / px), follow: false });
-  }, [p.from]);
-
+/** フレーズ候補のキー（Esc で閉じる・Tab と , . で候補・Enter で反映）。パネルを出している間だけ使う */
+export function usePhraseKeys() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (document.querySelector('.modal-back')) return;
@@ -49,6 +33,27 @@ export function PhrasePanel() {
     window.addEventListener('keydown', h, true);
     return () => window.removeEventListener('keydown', h, true);
   }, []);
+}
+
+export function PhrasePanel() {
+  const p = usePhrase();
+  const doc = useEditor((s) => s.doc);
+  const hasKey = useHasAiKey();
+  const model = useAi((s) => modelLabel(s.tasks.phrase.model, s.models));
+  const cost = useAi(() => taskCostEstimate('phrase'));
+  const cand = p.cands[p.index] ?? null;
+  const stale = p.cands.length > 0 && p.madeFor !== doc;
+
+  // 範囲が見えるようにする
+  useEffect(() => {
+    const s = useEditor.getState();
+    const t = tempoOf(s.doc);
+    const b = t.measureStart(p.from);
+    const px = s.view.pxPerBeat;
+    if (b < s.view.scrollBeat || b > s.view.scrollBeat + 600 / px) setView({ scrollBeat: Math.max(-1, b - 80 / px), follow: false });
+  }, [p.from]);
+
+  usePhraseKeys();
 
   return (
     <div className="find-panel phrase-panel">

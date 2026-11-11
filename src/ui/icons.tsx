@@ -277,6 +277,11 @@ export const Icon = {
       <path d="m6.5 4.5 3.5 3.5-3.5 3.5" />
     </Svg>
   ),
+  chevronLeft: (s?: number) => (
+    <Svg size={s}>
+      <path d="m9.5 4.5-3.5 3.5 3.5 3.5" />
+    </Svg>
+  ),
   layers: (s?: number) => (
     <Svg size={s}>
       <path d="M8 2.5 14 5.5 8 8.5 2 5.5z" />

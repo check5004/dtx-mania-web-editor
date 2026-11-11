@@ -13,7 +13,6 @@ import { closePhoneTab, openPhoneTab, setDrawer, setPhoneHigh, setTool, useDevic
 import { copySelection, deleteChips, goToStart, moveSelection, openPage, redo, setView, toast, togglePause, togglePlay, undo, useEditor } from '../../store/editor';
 import { toggleFlamMode, useFlam } from '../../store/flam';
 import { useFind } from '../../store/find';
-import { usePhrase } from '../../store/phrase';
 import { usePreview } from '../../store/preview';
 import { unsavedText, useUnsaved } from '../../store/unsaved';
 import { toggleVelMode, useVel } from '../../store/velocity';
@@ -25,12 +24,12 @@ import { formatTime } from '../format';
 import { useSongLength, useSoundsVersion } from '../hooks';
 import { Icon } from '../icons';
 import { NxPreview } from '../NxPreview';
-import { PhrasePanel } from '../PhrasePanel';
 import { usePreimage } from '../TopBar';
 import { PanelContent, panelIcon } from '../tablet/Panels';
 import { SaveSheet } from '../tablet/SaveSheet';
 import { tabletSave } from '../tablet/shared';
 import { Drawer } from '../tablet/TabletEditor';
+import { PhoneGenDock, PhonePhraseDock, PhoneTabBar, usePhoneDock } from './PhoneCands';
 import { DiffMenu, GridPick, MetronomeButton, PosBox, SpeedPick, StrengthPick, VolumeButton } from './PhoneParts';
 import { KIND_ROW_H, kindRows, PhonePads, PhoneTracks, PhoneVelocity, usePadKinds } from './PhoneSheets';
 
@@ -476,7 +475,7 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
   const tab = useDevice((s) => s.pTab);
   const velMode = useVel((s) => s.mode);
   const findOpen = useFind((s) => s.open);
-  const phraseOpen = usePhrase((s) => s.open);
+  const dock = usePhoneDock();
   const previewMode = usePreview((s) => s.mode);
   // レーンの幅を変えるもの（原曲の列・強さの列・BGA の列）が変わったら決め直す
   useAssist((s) => s.audioCols);
@@ -488,13 +487,20 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
   useEffect(() => {
     if (usePreview.getState().mode === 'side') usePreview.setState({ mode: 'off' });
   }, []);
+  // TAB補完は譜面の下の端に重ねる帯、小節の生成・フレーズ候補は譜面の下に並べるパネル（点線の候補を隠さない）
   const chart = (
     <section className="chart-area p-chart">
       <ChartCanvas />
       <PSelBar />
+      <PhoneTabBar />
       {findOpen && <FindPanel />}
-      {phraseOpen && !findOpen && <PhrasePanel />}
     </section>
+  );
+  const docks = (
+    <>
+      <PhoneGenDock />
+      {!findOpen && <PhonePhraseDock />}
+    </>
   );
   return (
     <div className={`p-editor ${portrait ? 'port' : 'land'}`}>
@@ -502,7 +508,8 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
         <>
           <PTop />
           {chart}
-          {!tab && !velMode && <PTools />}
+          {docks}
+          {!tab && !velMode && !dock && <PTools />}
           <PTransport />
           <PSheet />
           <PTabs />
@@ -512,6 +519,7 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
           <LLeft />
           <div className="p-land-chart">
             {chart}
+            {docks}
             <LPanel />
           </div>
           <LRight />

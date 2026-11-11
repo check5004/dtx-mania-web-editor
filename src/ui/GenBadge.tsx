@@ -32,13 +32,13 @@ function bracketDir(e: KeyboardEvent): 1 | -1 | 0 {
   return 0;
 }
 
-function tabLabel(c: GenCandidate, cands: readonly GenCandidate[]): string {
+export function tabLabel(c: GenCandidate, cands: readonly GenCandidate[]): string {
   if (c.source === 'ai') return `AI ${cands.filter((x) => x.source === 'ai').indexOf(c) + 1}`;
   if (c.source === 'draft') return tr('採譜', 'Detected');
   return `${tr('写す', 'Copy')} ${c.src !== undefined ? toMeasure(c.src) : ''}`;
 }
 
-const sourceTip = (k: GenCandidate['source']): string =>
+export const genSourceTip = (k: GenCandidate['source']): string =>
   ({
     ai: tr('AI が、原曲の打点と前後の小節（作者の書き方）から作った案', "Made by the AI from the original's hits and the measures around it (the charter's style)"),
     draft: tr(
@@ -47,6 +47,31 @@ const sourceTip = (k: GenCandidate['source']): string =>
     ),
     copy: tr('この曲でもう打った小節を写した案（TAB補完と同じ選び方）', 'A copy of a measure already charted in this song (picked the same way as Tab completion)'),
   })[k];
+
+/** 小節の生成のキー（Esc・Enter・Shift+Enter・Tab・Alt+] / Alt+[）。生成を開いている間だけ効く */
+export function useGenKeys() {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!useMeasureGen.getState().open) return;
+      if (document.querySelector('.modal-back')) return;
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
+      const mod = e.ctrlKey || e.metaKey;
+      let done = true;
+      if (e.key === 'Escape') closeMeasureGen();
+      else if (e.key === 'Enter' && !mod) applyMeasureGen({ next: e.shiftKey });
+      else if (e.key === 'Tab' && !mod && !e.altKey) stepMeasureGen(e.shiftKey ? -1 : 1);
+      else if (e.altKey && !mod && bracketDir(e) !== 0) stepMeasureGen(bracketDir(e) as 1 | -1);
+      else done = false;
+      if (done) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', h, true);
+    return () => window.removeEventListener('keydown', h, true);
+  }, []);
+}
 
 export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number) => GhostAnchor; sized: number }) {
   const gs = useMeasureGen();
@@ -71,28 +96,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
     if (h && Math.abs(h - boxH) > 1) setBoxH(h);
   });
   void sized;
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (!useMeasureGen.getState().open) return;
-      if (document.querySelector('.modal-back')) return;
-      const t = e.target as HTMLElement;
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
-      const mod = e.ctrlKey || e.metaKey;
-      let done = true;
-      if (e.key === 'Escape') closeMeasureGen();
-      else if (e.key === 'Enter' && !mod) applyMeasureGen({ next: e.shiftKey });
-      else if (e.key === 'Tab' && !mod && !e.altKey) stepMeasureGen(e.shiftKey ? -1 : 1);
-      else if (e.altKey && !mod && bracketDir(e) !== 0) stepMeasureGen(bracketDir(e) as 1 | -1);
-      else done = false;
-      if (done) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener('keydown', h, true);
-    return () => window.removeEventListener('keydown', h, true);
-  }, []);
+  useGenKeys();
 
   useEffect(() => {
     if (!gs.open) setNote(null);
@@ -157,7 +161,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
               aria-selected={i === gs.index}
               className={`gen-tab ${c.source} ${i === gs.index ? 'on' : ''}`}
               onClick={() => selectMeasureGen(i)}
-              title={`${c.name}\n${c.reason}\n\n${sourceTip(c.source)}${c.fit !== null && c.source !== 'draft' ? tr(`\n原曲で聞こえるドラム（BD・SD・タム）との合い方 ${Math.round(c.fit * 100)}%`, `\nMatch with the drums heard in the original (BD, SD, toms): ${Math.round(c.fit * 100)}%`) : ''}`}
+              title={`${c.name}\n${c.reason}\n\n${genSourceTip(c.source)}${c.fit !== null && c.source !== 'draft' ? tr(`\n原曲で聞こえるドラム（BD・SD・タム）との合い方 ${Math.round(c.fit * 100)}%`, `\nMatch with the drums heard in the original (BD, SD, toms): ${Math.round(c.fit * 100)}%`) : ''}`}
             >
               {tabLabel(c, gs.cands)}
               {c.fit !== null && c.source !== 'draft' && <span className="gen-fit mono">{Math.round(c.fit * 100)}</span>}
@@ -221,7 +225,7 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
       )}
       <div className="tg-info">
         {cand ? (
-          <span title={`${cand.reason}\n\n${sourceTip(cand.source)}`}>
+          <span title={`${cand.reason}\n\n${genSourceTip(cand.source)}`}>
             <b>{cand.name}</b>
             {cand.reason && <span className="gen-reason"> · {cand.reason}</span>}
             {cand.basis !== undefined && (

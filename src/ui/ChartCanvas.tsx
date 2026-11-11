@@ -530,27 +530,99 @@ export function openSectionEditor(m: number) {
   sectionOpener?.(m);
 }
 
+/**
+ * 譜面の下の端に重ねている帯の高さ（px。スマホの TAB補完の帯）。その下は見えていないとみなす
+ * （点線を見せるスクロール・パッドで ▶ を見える所に保つときに使う）。PC・iPad はいつも 0
+ */
+let bottomCover = 0;
+/** 最後に測った TAB補完の帯の高さ（縦・横）。帯を出す前に点線を見せるとき（呼び出したとき）に使う */
+const tabCover = { port: 0, land: 0 };
+export function setChartBottomCover(px: number) {
+  bottomCover = Math.max(0, px);
+  if (px > 0) tabCover[useDevice.getState().portrait ? 'port' : 'land'] = px;
+}
+
+/** 下の端に重ねている帯で隠れている拍の長さ（譜面の下の余白 GEO.bottom より上にはみ出した分） */
+function coverBeats(px: number, cover = bottomCover): number {
+  return Math.max(0, cover - GEO.bottom) / px;
+}
+
 /** 譜面で見えている拍の範囲 */
 /** TAB補完の点線（小節 from から len 小節）が見えていなければ、見える所までスクロールする */
 function revealMeasures(from: number, len: number) {
   const s = useEditor.getState();
+  const px = s.view.pxPerBeat;
   const tm = tempoOf(s.doc);
   const b0 = tm.measureStart(from);
   const b1 = tm.measureStart(from + len);
-  const vis = visibleBeats();
-  // 札の分（上に 40px ほど）も空ける
-  const pad = 44 / s.view.pxPerBeat;
+  // スマホは点線と一緒に下の端に TAB補完の帯が出る。まだ出ていなければ、前に測った高さ（初めは見込み）の分を空ける
+  const dev = useDevice.getState();
+  const cover = phoneGeo ? bottomCover || tabCover[dev.portrait ? 'port' : 'land'] || (dev.portrait ? 90 : 56) : bottomCover;
+  const vis = visibleBeatsFor(viewport.h, cover);
+  // 札の分（上に 40px ほど）も空ける。スマホは帯を下の端に出すので、上は少しだけ
+  const pad = (phoneGeo ? 12 : 44) / px;
   if (b0 >= vis.from && b1 + pad <= vis.to) return;
   const span = vis.to - vis.from;
-  // 点線が下から 3割の所から始まるように（長くて入らなければ点線の頭を見せる）
-  setView({ scrollBeat: Math.max(-1, b1 - b0 + pad > span * 0.7 ? b0 - span * 0.1 : b0 - span * 0.3), follow: false });
+  // 点線が下から 3割の所から始まるように（長くて入らなければ点線の頭を見せる）。下の帯で隠れている分は数えない
+  const at = b1 - b0 + pad > span * 0.7 ? b0 - span * 0.1 : b0 - span * 0.3;
+  setView({ scrollBeat: Math.max(-1, at - coverBeats(px, cover)), follow: false });
 }
 setGhostRevealer(revealMeasures);
 
+/** 点線（小節 from から len 小節）を見せる（スマホの TAB補完の帯の「↑ 小節 …」から） */
+export function revealGhost(from: number, len: number) {
+  revealMeasures(from, len);
+}
+
+/**
+ * 小節 from から len 小節が譜面に見えるようにする（スマホの小節の生成・フレーズ候補。譜面の下にパネルを出したあと）。
+ * もう全部見えていれば動かさない。入るなら真ん中に、入らなければ頭を下の端のすぐ上に（下の余白も使って、なるべく多く見せる）
+ */
+export function revealChartRange(from: number, len: number) {
+  const s = useEditor.getState();
+  const px = s.view.pxPerBeat;
+  const tm = tempoOf(s.doc);
+  const b0 = tm.measureStart(from);
+  const b1 = tm.measureStart(from + len);
+  // パネルを出した直後は譜面の枠の大きさがまだ伝わっていないことがあるので、今の高さで数える
+  const vis = visibleBeatsFor(liveChartH());
+  if (b0 >= vis.from && b1 <= vis.to) return;
+  const span = vis.to - vis.from;
+  const below = b1 - b0 + 28 / px <= span ? (span - (b1 - b0)) / 2 : -Math.max(0, GEO.bottom - 12) / px;
+  setView({ scrollBeat: Math.max(-1, b0 - below - coverBeats(px)), follow: false });
+}
+
+/**
+ * 拍 b が下の帯の陰（か譜面の下の外）にあるとき、帯の少し上に来るまでだけ上へ送る（スマホの TAB補完の帯）。動かしたら true
+ */
+export function liftAboveCover(b: number): boolean {
+  const s = useEditor.getState();
+  const px = s.view.pxPerBeat;
+  const vis = visibleBeats();
+  const want = vis.from + 16 / px;
+  if (b >= want || b > vis.to) return false;
+  setView({ scrollBeat: Math.max(-1, s.view.scrollBeat - (want - b)), follow: false });
+  return true;
+}
+
 export function visibleBeats(): { from: number; to: number } {
+  return visibleBeatsFor(viewport.h);
+}
+
+function visibleBeatsFor(h: number, cover = bottomCover): { from: number; to: number } {
   const s = useEditor.getState();
   const scroll = engine.playing && viewport.follow !== null ? viewport.follow : s.view.scrollBeat;
-  return { from: Math.max(0, scroll), to: Math.max(0, scroll + (viewport.h - GEO.head - GEO.bottom) / s.view.pxPerBeat) };
+  const low = cover ? coverBeats(s.view.pxPerBeat, cover) : 0;
+  return { from: Math.max(0, scroll + low), to: Math.max(0, scroll + (h - GEO.head - GEO.bottom) / s.view.pxPerBeat) };
+}
+
+/** 譜面の枠（いま出している ChartCanvas）。大きさを今の値で測るため */
+let chartWrap: HTMLDivElement | null = null;
+
+/** 譜面の枠の今の高さ（大きさが変わった知らせを待たずに測る） */
+function liveChartH(): number {
+  const h = chartWrap ? Math.floor(chartWrap.getBoundingClientRect().height) : 0;
+  return h > 0 ? h : viewport.h;
 }
 
 /** BGA 列の左端（譜面の左端から）。原曲の列の右に置く */
@@ -862,6 +934,7 @@ export function ChartCanvas() {
   const inputMode = useAssist((s) => s.inputMode);
   const playing = useEditor((s) => s.playing);
   const div = useEditor((s) => s.view.div);
+  const phone = useDevice((s) => s.phone);
   /** 譜面の枠の大きさが変わった回数（TAB補完の札の位置を直すため） */
   const [sized, setSized] = useState(0);
   /** TAB補完の点線の、画面の上での位置 */
@@ -906,6 +979,7 @@ export function ChartCanvas() {
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
+    chartWrap = wrap;
     sectionOpener = (m) => {
       const s = useEditor.getState();
       const g = geom(l, currentScroll(l), s.view.pxPerBeat);
@@ -1055,6 +1129,7 @@ export function ChartCanvas() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      if (chartWrap === wrap) chartWrap = null;
       unsubs.forEach((u) => u());
       canvas.removeEventListener('wheel', onWheel);
       sectionOpener = null;
@@ -2299,8 +2374,9 @@ export function ChartCanvas() {
         </div>
       )}
       {inputMode === 'key' && <div className="rec-badge key">{tr('キー入力: カーソル位置に置く（↑↓で移動）', 'Keys: place at the cursor (↑↓ to move)')}</div>}
-      <CompleteBadge anchor={ghostAnchor} sized={sized} />
-      <GenBadge anchor={ghostAnchor} sized={sized} />
+      {/* スマホは譜面に重ねず、譜面の下の端の帯・譜面の下のパネルに出す（ui/phone/PhoneCands） */}
+      {!phone && <CompleteBadge anchor={ghostAnchor} sized={sized} />}
+      {!phone && <GenBadge anchor={ghostAnchor} sized={sized} />}
       {popover && <SectionPopover m={popover.m} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />}
       {tip && !popover && <ChartTip tip={tip} />}
       {aim && <PlaceBubble aim={aim} />}
