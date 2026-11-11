@@ -73,7 +73,7 @@ function putDef(id: string, patch: Partial<SpecialDef> | null) {
 }
 
 function writeSide(side: SpecialSide) {
-  setSpecialSide(side.kinds.length || side.off ? side : null);
+  setSpecialSide(side.kinds.length || side.off || side.cuts?.length ? side : null);
 }
 
 /** 譜面を変える操作と一緒に、作業ファイルの決めも戻す・やり直す（Ctrl+Z） */

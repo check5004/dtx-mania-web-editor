@@ -18,6 +18,7 @@ import { edit, fileBuffer, openPage, prepareSounds, setFieldValue, setLaneWav, t
 import { editSong, setSongField, toastSongEdit } from '../store/songSync';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
+import { useSidecar } from '../store/sidecar';
 import { AuditionButton, AuditionProgress } from './Audition';
 import { SpecialKitSection } from './SpecialUi';
 import { chooseDialog, confirmDialog } from './dialogs';
@@ -243,6 +244,10 @@ function WavTab() {
   const wavs = wavList(doc.fields);
   const pathWav = doc.fields['PATH_WAV'] ?? '';
   const missSet = new Set(missing);
+  // ステム・原曲から切り出した音（作業ファイルの special.cuts）には印を付ける
+  const cuts = useSidecar((s) => s.special?.cuts);
+  const slash = (p: string) => p.trim().replace(/\\/g, '/').toLowerCase();
+  const cutSet = new Set((cuts ?? []).map(slash));
   const usage = new Map<number, number>();
   // 原曲（BGM レーン）・SE レーンで鳴らす音には印を付ける（ドラムの音と並んでいても分かるように）
   const bgmNos = new Set<number>();
@@ -350,6 +355,11 @@ function WavTab() {
                   <CommitInput value={w.path} onCommit={(v) => setFieldValue('WAV' + z, v || undefined)} />
                   <div className="wav-sub">
                     <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder={tr('ラベル', 'Label')} onCommit={(v) => setComment('WAV' + z, v)} />
+                    {cutSet.has(slash(w.path)) && (
+                      <span className="wav-cut" title={tr('ステム・原曲から切り出した音（ほかのキットに替えても残します）', 'Extracted from the stems or the original (kept when you switch kits)')}>
+                        {tr('切り出し', 'Extracted')}
+                      </span>
+                    )}
                     {long && (
                       <span className="wav-len mono" title={tr(`${formatDur(dur)} の長い音（試聴は ■ か Esc で止められます）`, `A long sound (${formatDur(dur)}). Stop the preview with ■ or Esc`)}>
                         {formatDur(dur)}

@@ -12,6 +12,7 @@ import { setFieldComment } from '../edit/ops';
 import { pruneUnusedCreated, velOfWav, wavVariant } from '../edit/velocity';
 import { edit, prepareSounds, setKitFileProvider, useEditor } from './editor';
 import { useLibrary } from './library';
+import { useSidecar } from './sidecar';
 
 const KEY = 'dtxe.kit.v1';
 
@@ -95,6 +96,12 @@ export function setKit(id: string) {
   useEditor.setState({ laneWav });
 }
 
+/** ステム・原曲から切り出して作った音のファイルか（作業ファイルの special.cuts） */
+export function isCutFile(path: string): boolean {
+  const p = path.trim().replace(/\\/g, '/').toLowerCase();
+  return !!useSidecar.getState().special?.cuts?.some((c) => c.replace(/\\/g, '/').toLowerCase() === p);
+}
+
 /** 置いてあるチップの音も、今のキットの音に替える（ベロシティは保つ。リムはキットのリムの音に。Ctrl+Z で戻せる） */
 export function applyKitToChips(kitId = useKit.getState().kitId): number {
   let n = 0;
@@ -144,7 +151,8 @@ export function applyKitToChips(kitId = useKit.getState().kitId): number {
         n++;
       }
     }
-    pruneUnusedCreated(d);
+    // ステムから切り出した音は、置いていなくても残す（WAV の一覧の「切り出し」）
+    pruneUnusedCreated(d, isCutFile);
   });
   useEditor.setState((s) => ({ laneWav: { ...s.laneWav, ...laneWav } }));
   void prepareSounds();

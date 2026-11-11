@@ -393,6 +393,13 @@ export const Icon = {
       <path d="M6 10 12 2.5M10 10 4 2.5" />
     </Svg>
   ),
+  /** 音を切り出す（波形の一部を括弧で取る。クリップボードの「切り取り」のはさみと分ける） */
+  extract: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4.2 2.8H2.5v10.4h1.7M11.8 2.8h1.7v10.4h-1.7" />
+      <path d="M5.8 8h.4M7.3 5.2v5.6M8.9 3.8v8.4M10.4 6.3v3.4" />
+    </Svg>
+  ),
   paste: (s?: number) => (
     <Svg size={s}>
       <rect x="3.5" y="3" width="9" height="11" rx="1.4" />

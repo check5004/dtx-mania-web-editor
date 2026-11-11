@@ -11,7 +11,7 @@ import { parseDtx } from '../dtx/parse';
 import { downloadBytes, folderFromFileList, folderFromHandle, normPath, type FolderFile, type SongFolder } from '../fs/folder';
 import { folderOf, readZip } from '../fs/zip';
 import * as db from '../library/db';
-import type { Inst, LibraryKit, RefFolder, SampleMeta } from '../library/db';
+import type { Inst, LibraryKit, RefFolder, SampleMeta, SampleSource } from '../library/db';
 import { classifyUsage, features, instOfChannel, miniPeaks, monoOf, similarity } from '../library/analyze';
 import { toggleAudition, type AuditionSound } from './audition';
 import { prepareSounds, toast, useEditor } from './editor';
@@ -67,7 +67,30 @@ const lset = useLibrary.setState;
 
 // 音色タグはサンプルに日本語のまま保存する（言語を切り替えても同じタグ）。表示だけ tagLabel で訳す i18n-ignore
 export const TAG_PRESETS = ['ロック', 'メタル', 'ジャズ', 'エレクトロ', '明るい', 'ドライ', '太い', 'ルーム', 'ゲート'];
-const TAG_EN: Record<string, string> = { ロック: 'Rock', メタル: 'Metal', ジャズ: 'Jazz', エレクトロ: 'Electro', 明るい: 'Bright', ドライ: 'Dry', 太い: 'Fat', ルーム: 'Room', ゲート: 'Gated' };
+const TAG_EN: Record<string, string> = {
+  ロック: 'Rock',
+  メタル: 'Metal',
+  ジャズ: 'Jazz',
+  エレクトロ: 'Electro',
+  明るい: 'Bright',
+  ドライ: 'Dry',
+  太い: 'Fat',
+  ルーム: 'Room',
+  ゲート: 'Gated',
+  // ステムから切り出した音に付けるタグ（store/cut）
+  切り出し: 'Extracted',
+  クラップ: 'Clap',
+  タンバリン: 'Tambourine',
+  カウベル: 'Cowbell',
+  シェイカー: 'Shaker',
+  スネア: 'Snare',
+  リム: 'Rim',
+  ハイハット: 'Hi-hat',
+  バスドラム: 'Bass drum',
+  タム: 'Tom',
+  シンバル: 'Cymbal',
+  ライド: 'Ride',
+};
 /** 音色タグの表示（自分で付けたタグはそのまま） */
 export const tagLabel = (t: string): string => (isJa() ? t : (TAG_EN[t] ?? t));
 
@@ -326,6 +349,63 @@ export async function removeKit(id: string) {
 }
 
 // ---- 取り込み -------------------------------------------------------------------
+
+/** ライブラリに入れる音（ステムから切り出した音など。中身は WAV のバイト列） */
+export interface NewSample {
+  name: string;
+  inst: Inst;
+  tags: string[];
+  source: SampleSource;
+  /** 左右を混ぜた音（波形と、似た音を探す特徴量に使う） */
+  mono: Float32Array;
+  sr: number;
+  channels: number;
+  /** 楽器を決めた理由（一覧に出す） */
+  reason: string;
+}
+
+/**
+ * 音をライブラリに入れる。同じ中身がもうあれば、出どころとタグを足すだけ。入れた音（足した音）を返す
+ */
+export async function addSampleBytes(bytes: Uint8Array, o: NewSample): Promise<SampleMeta | null> {
+  await loadLibrary();
+  const buf = bytes.slice().buffer as ArrayBuffer;
+  const id = await db.hashBytes(buf);
+  const old = lget().samples.find((x) => x.id === id);
+  if (old) {
+    const has = old.sources.some((x) => x.song === o.source.song && x.file === o.source.file);
+    const next = { ...old, tags: [...new Set([...old.tags, ...o.tags])], sources: has ? old.sources : [...old.sources, o.source] };
+    await db.putSample(next);
+    lset({ samples: lget().samples.map((x) => (x.id === id ? next : x)) });
+    return next;
+  }
+  const taken = new Set(lget().samples.map((x) => x.file.toLowerCase()));
+  const meta: SampleMeta = {
+    id,
+    name: o.name,
+    file: uniqueFile(o.name, taken),
+    size: bytes.byteLength,
+    inst: o.inst,
+    instAuto: false,
+    conf: 1,
+    reason: o.reason,
+    sources: [o.source],
+    tags: [...new Set(o.tags)],
+    fav: false,
+    dur: o.mono.length / o.sr,
+    sr: o.sr,
+    channels: o.channels,
+    peaks: miniPeaks(o.mono, o.sr),
+    feat: features(o.mono, o.sr),
+    addedAt: Date.now(),
+  };
+  await db.putAudio(id, buf);
+  await db.putSample(meta);
+  registerSample(meta);
+  lset({ samples: [meta, ...lget().samples] });
+  void refreshStorage();
+  return meta;
+}
 
 /** 長すぎる音（BGM など）は取り込まない */
 const MAX_SAMPLE_SEC = 8;

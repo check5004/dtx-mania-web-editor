@@ -3250,3 +3250,46 @@ html.tablet .safari-notice-x {
 .t-save-drive .lbl {
   font-size: 13px;
 }
+
+/* 音を切り出す（ui/CutDialog）：指で押しやすい大きさ */
+html.tablet .cut-cand {
+  padding: 8px;
+  grid-template-columns: 22px 64px minmax(0, 1fr) 36px;
+}
+
+html.tablet .cut-cand input[type='checkbox'],
+html.tablet .cut-ck input {
+  width: 20px;
+  height: 20px;
+}
+
+html.tablet .cut-cand-play {
+  width: 36px;
+  height: 36px;
+}
+
+html.tablet .cut-listen {
+  height: 46px;
+}
+
+html.tablet .cut-dlg .seg button {
+  height: 34px;
+  padding: 0 14px;
+}
+
+html.tablet .cut-dlg .btn {
+  height: 40px;
+}
+
+html.tablet .cut-dlg .field {
+  height: 38px;
+}
+
+html.tablet .cut-ck {
+  font-size: 13px;
+  align-items: center;
+}
+
+html.tablet .cut-ck input {
+  margin: 0;
+}

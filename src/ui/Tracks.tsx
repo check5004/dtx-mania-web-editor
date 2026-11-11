@@ -253,8 +253,8 @@ type SeekDrag =
   | { type: 'seek' }
   | { type: 'loop'; ld: LoopDrag; x0: number }
   | { type: 'end'; group: string }
-  /** 右ボタン：離したらループの帯・END のメニュー */
-  | { type: 'menu'; what: 'loop' | 'end'; beat: number; cx: number; cy: number }
+  /** 右ボタン：離したらループの帯・END・波形（音を切り出す）のメニュー */
+  | { type: 'menu'; what: 'loop' | 'end' | 'wave'; beat: number; cx: number; cy: number; src?: string; sec?: number; tol?: number }
   | null;
 
 /** 上の帯の「END」の札の幅 */
@@ -269,7 +269,7 @@ function endTabX(xe: number, W: number): number {
  * 上の帯とトラックの両方で使う、クリックで再生を始める位置・ループの端・曲の終わり（END）のドラッグ。
  * span: 横幅に入れる長さ（秒）
  */
-function useSeekPointer(span: number, ruler: boolean) {
+function useSeekPointer(span: number, ruler: boolean, waveAt?: (y: number) => string | null) {
   const drag = useRef<SeekDrag>(null);
   const geomAt = (c: HTMLCanvasElement, clientX: number, clientY: number) => {
     const r = c.getBoundingClientRect();
@@ -319,11 +319,17 @@ function useSeekPointer(span: number, ruler: boolean) {
       // 右クリックのメニューを閉じるための押下は、ここでは何もしない
       const dismissed = dismissedBy(e.timeStamp) || closeCtxMenu();
       if (e.button === 2) {
-        // 上の帯・END の線の右クリック：譜面の左端の帯と同じメニュー（離したときに出す）
-        const what = inBand(g.y) ? 'loop' : nearEnd(g.x, g.y, g.w) ? 'end' : null;
+        // 上の帯・END の線の右クリック：譜面の左端の帯と同じメニュー（離したときに出す）。
+        // 原曲・ステムの波形の右クリック：その時刻の音を切り出すメニュー
+        const src = !inBand(g.y) && !nearEnd(g.x, g.y, g.w) ? (waveAt?.(g.y) ?? null) : null;
+        const what = inBand(g.y) ? 'loop' : nearEnd(g.x, g.y, g.w) ? 'end' : src ? 'wave' : null;
         if (what) {
           c.setPointerCapture(e.pointerId);
-          drag.current = { type: 'menu', what, beat: g.beat, cx: e.clientX, cy: e.clientY };
+          const len = seekLength(span);
+          const sec = Math.max(0, Math.min(1, g.x / Math.max(1, g.w))) * len;
+          // 1 画素の秒の 4 倍まで（波形は曲全体を縮めて見せているので、少しずれた所でも近くのチップを拾う）
+          const tol = Math.max(0.06, (len / Math.max(1, g.w)) * 4);
+          drag.current = { type: 'menu', what, beat: g.beat, cx: e.clientX, cy: e.clientY, src: src ?? undefined, sec, tol };
         }
         return;
       }
@@ -368,7 +374,12 @@ function useSeekPointer(span: number, ruler: boolean) {
       if (!d) return;
       if (d.type === 'seek') seek(e.currentTarget, e.clientX, true);
       else if (d.type === 'loop') endLoopDrag(d.ld);
-      else if (d.type === 'menu') openCtxMenu(d.what === 'loop' ? { kind: 'loop', beat: d.beat } : { kind: 'end' }, d.cx, d.cy);
+      else if (d.type === 'menu')
+        openCtxMenu(
+          d.what === 'loop' ? { kind: 'loop', beat: d.beat } : d.what === 'wave' && d.src ? { kind: 'wave', src: d.src, sec: d.sec ?? 0, beat: d.beat, tol: d.tol ?? 0.06 } : { kind: 'end' },
+          d.cx,
+          d.cy,
+        );
     },
     onDoubleClick: (e: React.MouseEvent<HTMLCanvasElement>) => {
       const g = geomAt(e.currentTarget, e.clientX, e.clientY);
@@ -842,7 +853,11 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
   const version = useStems((s) => s.version);
   const sounds = useSoundsVersion();
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
-  const handlers = useSeekPointer(span, false);
+  // 原曲・ステムの波形の右クリックで、その時刻の音を切り出す（store/cut）
+  const handlers = useSeekPointer(span, false, (y) => {
+    const r = rows[Math.floor(y / Math.max(1, rowH))];
+    return r && (r.type === 'orig' || r.type === 'stem') && trackAudio(r.id) ? r.id : null;
+  });
   const lang = useLang();
   const H = rows.length * rowH;
   const audible = rows.map(rowAudible).join('');
@@ -947,12 +962,12 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
       style={{ height: H }}
       {...handlers}
       aria-label={tr(
-        'トラックの波形。クリックで再生を始める位置、A・B の線をドラッグでループの端、END の線のドラッグで曲の終わり',
-        'Track waveforms. Click to set the playback start, drag the A or B line for the loop ends, drag the END line for the song end',
+        'トラックの波形。クリックで再生を始める位置、A・B の線をドラッグでループの端、END の線のドラッグで曲の終わり、右クリックでその所の音を切り出す',
+        'Track waveforms. Click to set the playback start, drag the A or B line for the loop ends, drag the END line for the song end, right-click to extract the sound there',
       )}
       title={tr(
-        'クリック: 再生を始める位置（▶）/ A・B の線をドラッグ: ループの端を動かす / END（白い線）をドラッグ: 曲の終わりを動かす',
-        'Click: playback start (▶) / Drag the A or B line: move that loop end / Drag END (white line): move the song end',
+        'クリック: 再生を始める位置（▶）/ A・B の線をドラッグ: ループの端を動かす / END（白い線）をドラッグ: 曲の終わりを動かす / 右クリック: その所の音を切り出す',
+        'Click: playback start (▶) / Drag the A or B line: move that loop end / Drag END (white line): move the song end / Right-click: extract the sound there',
       )}
     />
   );

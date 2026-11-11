@@ -104,6 +104,8 @@ export interface SpecialSide {
   /** 開いたときに分けない（お知らせの「元に戻す」）。譜面の音の見分け（置く音・キット）は変わらない */
   off?: boolean;
   kinds: SpecialDef[];
+  /** ステム・原曲から切り出して曲フォルダに作った音（#WAV に書いたパス。WAV の一覧の「切り出し」の印、使っていなくても消さない） */
+  cuts?: string[];
 }
 
 export interface SidecarData {
@@ -453,6 +455,13 @@ function parseSpecial(j: Partial<SpecialSide>): SpecialSide | null {
       kinds.push(d);
     }
   }
-  if (!kinds.length && !j.off) return null;
-  return { ...(j.off ? { off: true } : {}), kinds };
+  const cuts: string[] = [];
+  if (Array.isArray(j.cuts)) {
+    for (const c of j.cuts as unknown[]) {
+      const path = str(c, 200);
+      if (path && !/[;\r\n]/.test(path) && !cuts.some((x) => x.toLowerCase() === path.toLowerCase()) && cuts.length < 500) cuts.push(path);
+    }
+  }
+  if (!kinds.length && !j.off && !cuts.length) return null;
+  return { ...(j.off ? { off: true } : {}), kinds, ...(cuts.length ? { cuts } : {}) };
 }

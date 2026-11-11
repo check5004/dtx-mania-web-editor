@@ -20,7 +20,9 @@ export type CtxTarget =
   /** 曲の終わり（END） */
   | { kind: 'end' }
   /** PC の下のトラックの高さ（上の境目・角）。rows: トラックの数 */
-  | { kind: 'tracks'; rows: number };
+  | { kind: 'tracks'; rows: number }
+  /** 下のトラックの波形（原曲・ステム）。src は 'orig' かステムのファイル、sec は譜面の秒、tol はその近くのチップを探す幅（秒） */
+  | { kind: 'wave'; src: string; sec: number; beat: number; tol: number };
 
 export type CtxMenu = CtxTarget & {
   /** 画面の座標（出す位置） */

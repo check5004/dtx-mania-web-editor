@@ -28,6 +28,7 @@ import {
   useSpecialUi,
 } from '../store/special';
 import { destCode, destName, SPECIAL_DESTS, specialKind, specialKinds, type SpecialKind } from '../store/specialLayout';
+import { openCutForKind } from '../store/cut';
 import { AuditionButton, AuditionProgress } from './Audition';
 import { Icon } from './icons';
 
@@ -352,6 +353,16 @@ function SoundSection({ k }: { k: SpecialKind }) {
         <AuditionButton k={`sp:${k.id}`} load={() => kindAudition(k)} label={tr(`${k.name}の音`, `${k.name} sound`)} size={14} idleIcon={Icon.speaker(14)} style={{ width: 30, height: 30 }} />
         <AuditionProgress k={`sp:${k.id}`} />
       </div>
+      <button
+        className="btn small sp-cut-btn"
+        onClick={() => {
+          closeKindSettings();
+          openCutForKind(k.id);
+        }}
+        title={tr(`ステム（無ければ原曲）から${k.name}の音を切り出して、この種類の音にします`, `Extract the ${k.name} sound from the stems (or the original) and use it for this kind`)}
+      >
+        {Icon.extract(13)} {tr('ステムから切り出す…', 'Extract from stems…')}
+      </button>
       <div className="lbl sp-note">
         {path === undefined
           ? tr(
@@ -570,6 +581,14 @@ function KitKindCard({ k }: { k: SpecialKind }) {
           </select>
           <AuditionButton k={`sp:${k.id}`} load={() => kindAudition(k)} label={tr(`${k.name}の音`, `${k.name} sound`)} size={13} idleIcon={Icon.speaker(13)} style={{ width: 26, height: 26 }} />
           <AuditionProgress k={`sp:${k.id}`} />
+          <button
+            className="ib tiny ghost"
+            onClick={() => openCutForKind(k.id)}
+            title={tr(`ステムから${k.name}の音を切り出す…`, `Extract the ${k.name} sound from the stems…`)}
+            aria-label={tr(`ステムから${k.name}の音を切り出す`, `Extract the ${k.name} sound from the stems`)}
+          >
+            {Icon.extract(13)}
+          </button>
         </div>
       </div>
       {k.dest !== 'auto' && (

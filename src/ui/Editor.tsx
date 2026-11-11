@@ -31,6 +31,7 @@ import {
 import { ChartCanvas } from './ChartCanvas';
 import { ContextMenuHost } from './ContextMenu';
 import { SpecialPopoverHost } from './SpecialUi';
+import { CutDialogHost } from './CutDialog';
 import { Footer } from './Footer';
 import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
@@ -422,6 +423,7 @@ export function Editor() {
         </>
       )}
       <FolderInput inputRef={folderInput} />
+      <CutDialogHost />
     </div>
   );
 }

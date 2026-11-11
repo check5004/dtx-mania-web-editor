@@ -46,9 +46,11 @@ import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
 import { placeSongBpm } from '../store/songSync';
 import { makeChipsSpecial, openKindSettings, pickNewKind, placeSpecial, setChipsAuto, unmakeSpecial } from '../store/special';
 import { chipSpecialKind, destCode, specialKind, specialKinds, specialLayout, type SpecialLayout } from '../store/specialLayout';
+import { canCutChip, cutSources, cutSpotAt, openCutAtChip, openCutAtSpot } from '../store/cut';
+import { useSidecar } from '../store/sidecar';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
-import { channelName, chipBpmLabel, chipName, formatPosition, meterLabel } from './format';
+import { channelName, chipBpmLabel, chipName, formatPosition, formatTime, meterLabel } from './format';
 import { songEndM } from './hooks';
 import { Icon } from './icons';
 import { currentTrackStop, setTrackStop, trackStopLabel, trackStopNote } from './Splitter';
@@ -125,6 +127,8 @@ function Frame({ menu }: { menu: CtxMenu }) {
       <LoopMenu beat={menu.beat} />
     ) : menu.kind === 'tracks' ? (
       <TracksMenu rows={menu.rows} />
+    ) : menu.kind === 'wave' ? (
+      <WaveMenu menu={menu} />
     ) : (
       <EndMenu />
     );
@@ -290,6 +294,9 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   const color = oneKind ? oneKind.color : oneInfo && one ? chipColor(oneInfo.lane, isAlt(one)) : one ? '#8B95A4' : 'var(--accent)';
   const isBpm = one && (one.ch === CH.BPM || one.ch === CH.BPM_EX);
   const extras = chipMenuExtras(ids);
+  // 音を切り出す（右クリックしたチップの所から。ドラムの通常チップ・特殊ノーツ）
+  const anchorChip = chips.find((c) => c.id === anchor) ?? one;
+  const cutAt = anchorChip && canCutChip(doc, anchorChip) ? anchorChip : null;
   // 特殊ノーツにできるチップ（ドラムの通常チップ・自動で鳴らす SE で、まだ特殊ノーツでないもの）
   const makeIds = chips.filter((c) => (drumChannel(c.ch)?.kind === 'normal' || isSeChannel(c.ch)) && spOf(c) === undefined).map((c) => c.id);
 
@@ -397,7 +404,16 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
         </>
       )}
       {makeIds.length > 0 && <MakeSpecialBlock ids={makeIds} doc={doc} />}
-      {(drums.length > 0 || makeIds.length > 0) && <Sep />}
+      {cutAt && (
+        <Item
+          icon={Icon.extract(12)}
+          label={tr('この所の音を切り出す…', 'Extract the sound here…')}
+          disabled={cutSources().length === 0}
+          title={cutSources().length === 0 ? tr('切り出す元（原曲・ステム）がありません', 'There is no audio to extract from (original or stems)') : tr('ステムや原曲から、この所の音を WAV にして使う', 'Make the sound here into a WAV from the stems or the original, and use it')}
+          onClick={then(() => openCutAtChip(cutAt.id))}
+        />
+      )}
+      {(drums.length > 0 || makeIds.length > 0 || cutAt) && <Sep />}
       {isBpm && <Item label={tr('BPM を変える…', 'Change BPM…')} hint={dblHint()} onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
       {extras.map((it, i) => (
         <ExtraItem key={i} it={it} />
@@ -989,6 +1005,31 @@ function EndMenu() {
       />
       <Item label={tr('最後のチップのすぐ後にする', 'Right after the last chip')} onClick={then(songEndAtLastChip)} />
       <Item label={tr('▶ の所にする', 'At ▶')} onClick={then(songEndAtCursor)} />
+    </>
+  );
+}
+
+// ---- 下のトラックの波形（原曲・ステム） ------------------------------------------------
+
+function WaveMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'wave' }> }) {
+  const stems = useSidecar((s) => s.stems);
+  const spot = cutSpotAt(menu.sec, menu.tol);
+  const name = menu.src === 'orig' ? tr('原曲', 'Original') : (stems.find((t) => t.file === menu.src)?.name ?? menu.src);
+  return (
+    <>
+      <div className="ctx-head">
+        <b className="ellipsis">{name}</b>
+        <span className="ctx-head-sub mono">{formatTime(spot.sec)}</span>
+      </div>
+      <Item icon={Icon.extract(12)} label={tr('ここの音を切り出す…', 'Extract the sound here…')} hint={spot.pos} onClick={then(() => openCutAtSpot(menu.src, spot, menu.tol))} />
+      <Item
+        icon={Icon.play(11)}
+        label={tr('ここから再生', 'Play from here')}
+        onClick={then(() => {
+          setCursorBeat(menu.beat);
+          void playFrom(menu.beat);
+        })}
+      />
     </>
   );
 }

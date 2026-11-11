@@ -166,8 +166,11 @@ export function pruneVariants(d: Draft<DtxDoc>): number {
   return n;
 }
 
-/** エディタが足した WAV 定義（読み込んだファイルに無かった行）で、どのチップも使っていないものを消す */
-export function pruneUnusedCreated(d: Draft<DtxDoc>): number {
+/**
+ * エディタが足した WAV 定義（読み込んだファイルに無かった行）で、どのチップも使っていないものを消す。
+ * keep はファイルのパスで残すもの（ステムから切り出した音など、まだ置いていなくても WAV の一覧に残しておく音）
+ */
+export function pruneUnusedCreated(d: Draft<DtxDoc>, keep?: (path: string) => boolean): number {
   const fields = d.fields as Fields;
   const used = usedWavs(d as DtxDoc);
   let n = 0;
@@ -175,6 +178,7 @@ export function pruneUnusedCreated(d: Draft<DtxDoc>): number {
     if (h.kind !== 'field' || h.orig || !/^WAV[0-9A-Z]{2}$/.test(h.key)) continue;
     const z = h.key.slice(3);
     if (used.has(parseInt(z, 36))) continue;
+    if (keep && fields[h.key] !== undefined && keep(fields[h.key])) continue;
     for (const k of ['WAV', 'VOLUME', 'WAVVOL', 'PAN', 'WAVPAN']) if (fields[k + z] !== undefined) setField(d, k + z, undefined);
     n++;
   }
