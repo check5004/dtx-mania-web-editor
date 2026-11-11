@@ -9,7 +9,7 @@ import { setSpeed, useAssist } from '../../store/assist';
 import { markDismissPress } from '../../store/ctxMenu';
 import { tempoOf } from '../../store/derived';
 import { openPhoneTab } from '../../store/device';
-import { currentBeat, openPage, playFrom, setMix, setView, useEditor } from '../../store/editor';
+import { currentBeat, openPage, playFrom, setMix, setView, toast, useEditor } from '../../store/editor';
 import { glowsDiff, useGlowDiffs } from '../../store/glow';
 import { useSidecar } from '../../store/sidecar';
 import { chooseAnalysisStem, effectiveAnalysisStem, soloOnly, useStems } from '../../store/stems';
@@ -370,21 +370,41 @@ export function TrackLine({ row, analysis = false, sub = true }: { row: TrackRow
   );
 }
 
-/** クリック（メトロノーム）の行。M で止める */
+/** メトロノームを鳴らす・止める（再生の帯・横の右の列）。音量は 🔊 の「メトロノーム」の行 */
+export function MetronomeButton({ boxed = false }: { boxed?: boolean }) {
+  const on = useEditor((s) => s.mix.metronome);
+  return (
+    <button
+      className={`p-ib p-metro ${boxed ? 'boxed sq' : ''} ${on ? 'on' : ''}`}
+      onClick={() => {
+        setMix({ metronome: !on });
+        // 止まっているときは鳴らないので、オンにしたことを知らせる
+        if (!on && !useEditor.getState().playing) toast(tr('メトロノームをオンにしました。再生すると鳴ります（音量は 🔊）', 'Metronome on. It plays with playback (volume in 🔊)'), 'info', 2200);
+      }}
+      aria-pressed={on}
+      aria-label={tr('メトロノーム', 'Metronome')}
+      title={on ? tr('メトロノームを止める', 'Turn the metronome off') : tr('メトロノームを鳴らす（譜面の拍に合わせてクリック）', 'Turn the metronome on (clicks on the beat)')}
+    >
+      {Icon.metronome(boxed ? 18 : 20)}
+    </button>
+  );
+}
+
+/** メトロノームの行（音量の小窓）。左のボタンで鳴らす・止める */
 function ClickLine() {
   const mix = useEditor((s) => s.mix);
-  const muted = !mix.metronome;
+  const on = mix.metronome;
   return (
-    <div className={`p-trk-row ${muted ? 'off' : ''}`} style={{ ['--c' as string]: '#5F6978' }}>
+    <div className={`p-trk-row p-metro-row ${on ? '' : 'off'}`} style={{ ['--c' as string]: '#5F6978' }}>
       <span className="p-trk-bar" />
       <span className="p-trk-name">
-        <b className="ellipsis">{tr('クリック', 'Click')}</b>
+        <b className="ellipsis">{tr('メトロノーム', 'Metronome')}</b>
       </span>
-      <button className={`p-ms m ${muted ? 'on' : ''}`} onClick={() => setMix({ metronome: muted })} aria-pressed={muted} aria-label={tr('クリックを止める', 'Mute the click')}>
-        M
+      <button className={`p-ms p-ms-onoff ${on ? 'on' : ''}`} onClick={() => setMix({ metronome: !on })} aria-pressed={on} aria-label={tr('メトロノームを鳴らす', 'Play the metronome')}>
+        {Icon.metronome(15)}
+        <span>{on ? tr('オン', 'On') : tr('オフ', 'Off')}</span>
       </button>
-      <span className="p-ms-pad" />
-      <PRange value={mix.click} max={1} color="#8B95A4" label={tr('クリックの音量', 'Click volume')} onChange={(v) => setMix({ click: v, metronome: true })} />
+      <PRange value={mix.click} max={1} color="#8B95A4" label={tr('メトロノームの音量', 'Metronome volume')} onChange={(v) => setMix({ click: v, metronome: true })} />
       <span className="p-trk-v mono">{pct(mix.click)}</span>
     </div>
   );

@@ -431,12 +431,37 @@ function onTabletChange() {
   else if (!s.tablet && !first && px === TABLET_PX_PER_BEAT) setView({ pxPerBeat: DESKTOP_PX_PER_BEAT });
 }
 
+/** キーボード（iPhone は選ぶ欄の回転も）が出る欄か */
+const NO_KEYBOARD = new Set(['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'file', 'color', 'image', 'hidden']);
+export function opensKeyboard(el: Element | null): boolean {
+  if (typeof HTMLElement === 'undefined' || !(el instanceof HTMLElement)) return false;
+  if (el instanceof HTMLInputElement) return !el.readOnly && !el.disabled && !NO_KEYBOARD.has(el.type);
+  if (el instanceof HTMLTextAreaElement) return !el.readOnly && !el.disabled;
+  if (el instanceof HTMLSelectElement) return !el.disabled;
+  return el.isContentEditable;
+}
+
+/**
+ * 指の端末で文字を打っている間の画面の高さ（0 は打っていない）。
+ * キーボードが出ると見える高さ（visualViewport）が縮むが、画面（--app-h）まで縮めると、横向きのスマホでは上の帯だけで
+ * 埋まって入力欄が見えなくなる。打っている間は打ち始めの高さのままにして、入力欄の所まではブラウザにずらしてもらう
+ */
+let typingVh = 0;
+
 if (typeof window !== 'undefined') {
   const onResize = () => {
     const sz = viewportSize();
     const s = useDevice.getState();
     const touchDevice = isTouchDevice();
     const phoneScreen = isPhoneScreen(touchDevice);
+    if (typingVh && s.tablet) {
+      // キーボードで縮んだだけ（幅は同じ）なら、高さは打ち始めのまま。打ちながら回したら、キーボードの分を含まない高さ（innerHeight）
+      if (sz.vw === s.vw) sz.vh = Math.max(sz.vh, typingVh);
+      else typingVh = sz.vh = Math.max(sz.vh, Math.round(window.innerHeight));
+    } else if (s.tablet && (window.scrollX || window.scrollY)) {
+      // キーボードを閉じたあとにページがずれたまま残ったら戻す（この画面はページ全体をスクロールしない）
+      window.scrollTo(0, 0);
+    }
     if (sz.vw === s.vw && sz.vh === s.vh && touchDevice === s.touchDevice && phoneScreen === s.phoneScreen) return;
     const phone = effectivePhone(s.uiMode, phoneScreen);
     let portrait = isPortrait(phone, sz.vw, sz.vh);
@@ -448,6 +473,20 @@ if (typeof window !== 'undefined') {
   window.addEventListener('orientationchange', onResize);
   window.visualViewport?.addEventListener('resize', onResize);
   coarseQuery?.addEventListener?.('change', onResize);
+  // 文字を打ち始めた・やめた（欄から欄へ移るあいだはキーボードが出たまま）
+  document.addEventListener('focusin', (e) => {
+    const s = useDevice.getState();
+    if (s.tablet && !typingVh && opensKeyboard(e.target as Element)) typingVh = s.vh;
+  });
+  document.addEventListener('focusout', () => {
+    if (!typingVh) return;
+    window.setTimeout(() => {
+      if (opensKeyboard(document.activeElement)) return;
+      typingVh = 0;
+      // キーボードが閉じきったら、見える高さに合わせ直す（閉じるときの visualViewport の resize でも合わせる）
+      window.setTimeout(onResize, 350);
+    }, 0);
+  });
   useDevice.subscribe(() => {
     applyHtml();
     onTabletChange();

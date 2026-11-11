@@ -31,7 +31,7 @@ import { PanelContent, panelIcon } from '../tablet/Panels';
 import { SaveSheet } from '../tablet/SaveSheet';
 import { tabletSave } from '../tablet/shared';
 import { Drawer } from '../tablet/TabletEditor';
-import { DiffMenu, GridPick, PosBox, SpeedPick, StrengthPick, VolumeButton } from './PhoneParts';
+import { DiffMenu, GridPick, MetronomeButton, PosBox, SpeedPick, StrengthPick, VolumeButton } from './PhoneParts';
 import { PhonePads, PhoneTracks, PhoneVelocity } from './PhoneSheets';
 
 /** 下のタブ（デザインの並び） */
@@ -204,6 +204,7 @@ function PTransport() {
       <LoopButton />
       <SpeedPick />
       <span className="grow" />
+      <MetronomeButton />
       <VolumeButton dir="up-end" />
     </div>
   );
@@ -431,12 +432,14 @@ function LRight() {
           {Icon.redo(18)}
         </button>
       </div>
+      {/* 音量の小窓は上へ開くので、音量は下の方に（保存のすぐ上） */}
       <div className="p-right-row">
+        <MetronomeButton boxed />
         <VolumeButton dir="left" boxed />
-        <button className="p-btn primary sq p-save" onClick={tabletSave} aria-label={tr('保存', 'Save')} title={tr('保存', 'Save')}>
-          {Icon.save(17)}
-        </button>
       </div>
+      <button className="p-btn primary p-save p-save-wide" onClick={tabletSave} aria-label={tr('保存', 'Save')} title={tr('保存', 'Save')}>
+        {Icon.save(17)}
+      </button>
     </div>
   );
 }

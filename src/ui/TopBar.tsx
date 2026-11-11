@@ -24,6 +24,7 @@ import {
   redo,
   resetSongEnd,
   selectAll,
+  setMix,
   setView,
   songEndAtCursor,
   songEndAtLastChip,
@@ -229,6 +230,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         { label: tr('ここで止める', 'Stop here'), key: 'Shift+Space', run: togglePause, disabled: !s().playing },
         '-',
         { label: tr('再生位置を追いかける', 'Follow playback'), checked: s().view.follow, run: () => setView({ follow: !s().view.follow }) },
+        { label: tr('メトロノーム（クリック）', 'Metronome (click)'), checked: s().mix.metronome, run: () => setMix({ metronome: !s().mix.metronome }) },
       ],
     },
     {

@@ -74,6 +74,7 @@ JavaScript の機能は `tsconfig.json` の `lib`（ES2023 = Safari 16.4 以降�
 - そのため、スマホの縦の全画面の画面は、上のバーの中身を上から 6px より下に置く（`.p-top`・`.ph-top` は `padding-top: max(env(safe-area-inset-top), 4px)`）。Safari のタブの縦では `env(safe-area-inset-top)` は 0 になる（ページはステータスバーの下から始まる）。
 - ホーム画面のアプリは `apple-mobile-web-app-status-bar-style` を `black` にしている（ステータスバーは黒で、ページはその下から始まる）。`black-translucent` にすると、iOS 26 以降はページの上の方に大きくぼかしがかかる報告があるので変えない。この設定はホーム画面に追加したときに読まれるので、変えたら追加し直してもらう必要がある。
 - 横向きでは左右に切り欠き（ノッチ・Dynamic Island）が来る。全画面の画面は `env(safe-area-inset-left)`・`env(safe-area-inset-right)` の内側に中身を置く（`src/phone.css` の `html.phone-land` の各ページの並び、ホームの `.ph-top`・`.ph-main`、譜面の `.p-editor.land`）。スマホの全画面の画面を足したら、ここに足す。
+- キーボード：iPhone・iPad の Safari は、キーボードが出てもページの高さ（レイアウトの viewport）を変えず、見える高さ（`visualViewport`）だけを縮めて、入力欄の所までページをずらして見せる。この画面の高さ `--app-h` は `visualViewport` で測っているので、そのまま縮めると横向きのスマホでは上の帯だけで埋まり、入力欄が見えなくなる（v0.44.0 で直した）。`src/store/device.ts` は、文字を打つ欄にフォーカスがある間（`opensKeyboard`）は高さを打ち始めのままにし、閉じたらずれたページを戻す。画面の高さを自分で測るときも `useDevice` の `vh` を使い、`visualViewport` を直接見ない。数字だけの欄は `inputMode="decimal"` と `font-size: 16px`（16px より小さいと Safari が拡大する）。
 - 確かめ方: Playwright（Chromium）で CDP の `Emulation.setSafeAreaInsetsOverride` を使い、iPhone 17 の縦（上 62・下 34）・横（左右 62・下 21）と、Safari のタブの縦（上 0）を入れて撮る。上端の真ん中・上から 4px で一番上にあるのが `.p-edge-top` かは、帯の `pointer-events` を一時的に戻して `document.elementFromPoint` で見る。ぼかしそのものは実機でしか見えない。
 
 ## 4. ブラウザの判定

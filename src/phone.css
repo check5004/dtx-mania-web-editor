@@ -682,6 +682,44 @@ html.phone-port .p-edge-top {
   font-size: 11.5px;
 }
 
+/*
+ * 縦の再生の帯：メトロノームのボタンも 1 行に入るように少しずつ詰める（iPhone 17 の幅 402 に 9 個）。
+ * 速さは ▼ を外して「100%」だけ（押すと選べるのは同じ）
+ */
+.p-transport {
+  padding: 0 4px;
+}
+
+.p-transport > .p-ib,
+.p-transport .p-popwrap > .p-ib {
+  width: 36px;
+}
+
+.p-transport .p-pos {
+  width: 66px;
+  padding-left: 4px;
+}
+
+.p-transport .p-pos-main {
+  font-size: 14px;
+}
+
+.p-transport .p-ab {
+  width: 32px;
+}
+
+.p-transport .p-loop {
+  width: 34px;
+}
+
+.p-transport .p-speed {
+  padding: 0 7px;
+}
+
+.p-transport .p-speed > svg {
+  display: none;
+}
+
 /* ---- 縦：下のタブ（50）とシート ---- */
 
 .p-tabs {
@@ -1095,6 +1133,32 @@ html.phone-port .p-edge-top {
   flex: none;
 }
 
+/* 音量の小窓のメトロノームの行：名前を少し広く、M・S の所に「♪ オン／オフ」（音量のつまみの位置はほかの行とそろえる） */
+.p-ms-onoff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 60px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.p-ms-onoff.on {
+  color: var(--accent);
+  border-color: #2b4b60;
+  background: #1a2a36;
+}
+
+.p-vol-pop .p-metro-row .p-trk-name {
+  width: 90px;
+}
+
+.p-vol-pop .p-metro-row .p-trk-name b {
+  font-size: 13px;
+}
+
 .p-trk-v {
   width: 26px;
   flex: none;
@@ -1375,6 +1439,14 @@ html.phone .p-chart:has(.p-selbar) .tab-ghost {
 
 .p-right .p-save {
   height: 36px;
+}
+
+/* 横の右の列：メトロノームと音量を 1 段にしたので、保存は下に幅いっぱい */
+.p-right .p-save-wide {
+  width: 76px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 9px;
 }
 
 .p-panel {
@@ -2521,6 +2593,138 @@ html.phone-port .gen-page.pg-one .gen-foot > span:not(.gen-legend):not(.pg-turn)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 元の譜面を見ているとき：まとめて作る（広く）・設定 */
+.pg-acts .pg-make-all {
+  flex: 2.2;
+}
+
+/* 縦：作る難易度と目標レベルの帯（譜面の上） */
+.pg-strip {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  margin: -4px -8px 8px;
+  padding: 0 0 2px;
+  overflow-x: auto;
+}
+
+.pg-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 0;
+  min-width: 118px;
+  padding: 5px 5px 6px 7px;
+  border: 1px solid var(--line3);
+  border-radius: 12px;
+  background: #11161c;
+  cursor: pointer;
+}
+
+.pg-chip.on {
+  border-color: var(--accent);
+  background: #121d27;
+}
+
+.pg-chip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+}
+
+.pg-chip-head input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+}
+
+.pg-chip-name {
+  font-size: 13px;
+}
+
+.pg-chip.off .pg-chip-name {
+  color: var(--mute);
+}
+
+.pg-chip-lv {
+  flex: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pg-chip-lv.ok {
+  color: var(--ok);
+}
+
+.pg-chip-lv.warn {
+  color: var(--amber);
+}
+
+.pg-chip-off {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
+/* めやすの「− 値 ＋」（帯と横の左の列のカード） */
+.pg-aim {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+.pg-aim-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid #2c3440;
+  background: #151a21;
+  color: var(--text);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.pg-aim-btn:active {
+  background: #24303e;
+}
+
+html.tablet input.pg-aim-input {
+  width: 46px;
+  height: 34px;
+  padding: 0 2px;
+  border: 1px solid var(--line3);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: center;
+  font-size: 16px;
+}
+
+html.tablet input.pg-aim-input.manual {
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.pg-chip .pg-aim {
+  justify-content: space-between;
+}
+
+.pg-chip .pg-aim-btn {
+  width: 32px;
 }
 
 /* ---- 曲情報（スマホ）：サムネイル・調べる・項目を 1 列に、項目の名前は上 ---- */

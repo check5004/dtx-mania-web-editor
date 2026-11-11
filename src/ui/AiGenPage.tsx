@@ -61,6 +61,7 @@ import { MasterMixer, TrackMixStrip } from './MixPanel';
 import { OriginBadge, originTitle } from './OriginBadge';
 import { FollowToggle, LoopControls, PlayControls, SpeedControl } from './Transport';
 import { PlayButtons } from './phone/PhoneEditor';
+import { AimStepper, TargetStrip } from './phone/PhoneGen';
 import { PosBox, VolumeButton } from './phone/PhoneParts';
 
 const keepItems = (): { k: keyof ReturnType<typeof useGen.getState>['keep']; label: string }[] => [
@@ -286,6 +287,31 @@ export function AiGenPage() {
   const selMade = below.includes(g.selected) && !selChart;
   const fills = selMade ? ds.result?.fills : undefined;
   const same = sameGroups(master);
+  // スマホの縦の下の操作は、見ている譜面（聴いている列）について。元の譜面を見ているときは「まとめて作る」
+  const focus = one && below.includes(g.listen as Difficulty) ? (g.listen as Difficulty) : null;
+  const focusKept = focus !== null && columnKind(g, focus) === 'existing';
+  const fds = focus ? g.diffs[focus] : null;
+  // 使う基準（ガイドライン）。スマホは作る難易度と目標を先に出し、これは後ろへ
+  const guideBlock = (
+    <>
+      <div className="lbl">{tr('使う基準', 'Reference')}</div>
+      <button className="card gen-guide" onClick={() => openPage('guideline')}>
+        <span className="gen-doc">{Icon.file(15)}</span>
+        <span className="grow" style={{ textAlign: 'left' }}>
+          <b>
+            {tr('難易度ガイドライン', 'Difficulty guidelines')} v{guide.version}
+          </b>
+          <span className="lbl" style={{ display: 'block' }}>
+            {charts ? tr(`手元 ${charts} 譜面から作成`, `Built from ${charts} local ${pl(charts, 'chart')}`) : tr('まだ集計していません', 'Not compiled yet')}
+          </span>
+        </span>
+        <span className="link-btn">{tr('開く', 'Open')}</span>
+      </button>
+      <p className="lbl" style={{ margin: '4px 0 12px' }}>
+        {tr('目標レベルの帯の基準文と集計をAIに渡します。', "The AI gets the guideline text and stats for the target level's band.")}
+      </p>
+    </>
+  );
 
   return (
     <div className={`gen-page ${one ? 'pg-one' : ''} ${one && setup ? 'pg-setup' : ''}`}>
@@ -305,8 +331,8 @@ export function AiGenPage() {
         </div>
         <span className="grow" />
         {one && (
-          <button className={`p-ib ${setup ? 'on' : ''}`} onClick={() => setSetup(!setup)} aria-pressed={setup} aria-label={tr('作る設定', 'Generation settings')} title={tr('作る設定（作る難易度・目標レベル・必ず残すもの）', 'Generation settings (which difficulties, target levels, what to keep)')}>
-            {Icon.sliders(20)}
+          <button className={`p-ib boxed ${setup ? 'on' : ''}`} onClick={() => setSetup(!setup)} aria-pressed={setup} aria-label={tr('作る設定', 'Generation settings')} title={tr('作る設定（作る難易度・目標レベル・必ず残すもの・AIへの指示）', 'Generation settings (which difficulties, target levels, what to keep, instructions for the AI)')}>
+            {Icon.sliders(19)}
           </button>
         )}
         {!phone && <MasterMixer />}
@@ -358,22 +384,7 @@ export function AiGenPage() {
               </button>
             </div>
           )}
-          <div className="lbl">{tr('使う基準', 'Reference')}</div>
-          <button className="card gen-guide" onClick={() => openPage('guideline')}>
-            <span className="gen-doc">{Icon.file(15)}</span>
-            <span className="grow" style={{ textAlign: 'left' }}>
-              <b>
-                {tr('難易度ガイドライン', 'Difficulty guidelines')} v{guide.version}
-              </b>
-              <span className="lbl" style={{ display: 'block' }}>
-                {charts ? tr(`手元 ${charts} 譜面から作成`, `Built from ${charts} local ${pl(charts, 'chart')}`) : tr('まだ集計していません', 'Not compiled yet')}
-              </span>
-            </span>
-            <span className="link-btn">{tr('開く', 'Open')}</span>
-          </button>
-          <p className="lbl" style={{ margin: '4px 0 12px' }}>
-            {tr('目標レベルの帯の基準文と集計をAIに渡します。', "The AI gets the guideline text and stats for the target level's band.")}
-          </p>
+          {!phone && guideBlock}
           <div className="row" style={{ gap: 6 }}>
             <span className="lbl">{tr('曲の難易度と目標レベル', 'Difficulties and target levels')}</span>
             <span className="grow" />
@@ -419,7 +430,9 @@ export function AiGenPage() {
               {it.label}
             </label>
           ))}
-          <div className="lbl" style={{ marginTop: 12 }}>
+          {phone && <div style={{ height: 12 }} />}
+          {phone && guideBlock}
+          <div className="lbl" style={{ marginTop: phone ? 0 : 12 }}>
             {tr('曲の解析結果', 'Song analysis')}
           </div>
           <div className="card gen-facts">
@@ -457,6 +470,7 @@ export function AiGenPage() {
           />
         </aside>
         <main className="gen-main">
+          {one && <TargetStrip />}
           <GenCompare only={one ? g.listen : undefined} />
           <div className="gen-foot">
             {selMade && ds.result ? (
@@ -501,42 +515,48 @@ export function AiGenPage() {
               </span>
             )}
           </div>
-          {one && (
+          {one && below.length > 0 && (
             <div className="pg-acts">
-              {selMade && (
-                <button className="p-btn" onClick={() => void generate(ds.diff)} disabled={g.busy}>
-                  <span>{ds.result ? tr('作り直す', 'Regenerate') : tr('作る', 'Generate')}</span>
+              {fds && !focusKept && (
+                <button className="p-btn" onClick={() => void generate(fds.diff)} disabled={g.busy}>
+                  <span>{fds.result ? tr('作り直す', 'Regenerate') : tr('作る', 'Generate')}</span>
                 </button>
               )}
-              {selChart && below.includes(g.selected) && (
-                <button className="p-btn" onClick={() => remake(g.selected)} disabled={g.busy} title={tr('この難易度も作り直す（エディタに反映するまで、曲フォルダの譜面は変わりません）', 'Make this difficulty again too (the chart in the song folder stays as it is until you add it to the editor)')}>
+              {focus && focusKept && (
+                <button className="p-btn" onClick={() => remake(focus)} disabled={g.busy} title={tr('この難易度も作り直す（エディタに反映するまで、曲フォルダの譜面は変わりません）', 'Make this difficulty again too (the chart in the song folder stays as it is until you add it to the editor)')}>
                   <span>{tr('作り直す', 'Remake')}</span>
                 </button>
               )}
-              {selMade && ds.result && (
-                <button className="p-btn" onClick={() => shiftRung(ds.diff, 1)} disabled={g.busy || ds.result.rung >= MAX_RUNG} title={tr('もっと簡単に（簡略化の段を上げる）', 'Make it easier (raise the simplification step)')}>
+              {fds && !focusKept && fds.result && (
+                <button className="p-btn" onClick={() => shiftRung(fds.diff, 1)} disabled={g.busy || fds.result.rung >= MAX_RUNG} title={tr('もっと簡単に（簡略化の段を上げる）', 'Make it easier (raise the simplification step)')}>
                   {Icon.arrowDown(14)}
                   <span>{tr('易しく', 'Easier')}</span>
                 </button>
               )}
-              {selMade && ds.result && (
+              {fds && !focusKept && fds.result && (
                 <button
                   className="p-btn"
-                  onClick={() => shiftRung(ds.diff, -1)}
-                  disabled={g.busy || (ds.result.rung <= 0 && ds.result.ease === 0)}
+                  onClick={() => shiftRung(fds.diff, -1)}
+                  disabled={g.busy || (fds.result.rung <= 0 && fds.result.ease === 0)}
                   title={tr('元の譜面に近づける（簡略化の段を下げる）', 'Closer to the original chart (lower the simplification step)')}
                 >
                   {Icon.arrowUp(14)}
                   <span>{tr('難しく', 'Harder')}</span>
                 </button>
               )}
-              {!selMade && !selChart && below.length > 0 && (
-                <button className="p-btn primary" onClick={() => void generateAll()} disabled={g.busy || g.chartsLoading || makes.length === 0}>
+              {!focus && (
+                <button className="p-btn primary pg-make-all" onClick={() => void generateAll()} disabled={g.busy || g.chartsLoading || makes.length === 0}>
                   {Icon.sparkle(14)}
                   <span>{anyResult ? tr(`まとめて作り直す（${makes.length}）`, `Regenerate all (${makes.length})`) : tr(`まとめて作る（${makes.length}）`, `Generate all (${makes.length})`)}</span>
                 </button>
               )}
-              {below.length > 0 && (
+              {!focus && (
+                <button className={`p-btn ${setup ? 'on' : ''}`} onClick={() => setSetup(true)} title={tr('作る設定（必ず残すもの・AIへの指示・使う基準）', 'Generation settings (what to keep, instructions for the AI, reference)')}>
+                  {Icon.sliders(15)}
+                  <span>{tr('設定', 'Settings')}</span>
+                </button>
+              )}
+              {focus && (
                 <button className={`p-btn ${detail ? 'on' : ''}`} onClick={() => setGenDetail((was) => !was)} aria-pressed={detail}>
                   {tr('判定と方針', 'Rating & plan')}
                 </button>
@@ -842,6 +862,8 @@ function stairTitle(g: GenState, st: StairIssues): string {
 /** 作る難易度（曲に既にある譜面を作り直すときも） */
 function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
   const g = useGen();
+  // スマホはめやすを「− 値 ＋」で（押して打つこともできる）
+  const phone = useDevice((s) => s.phone);
   const chart = g.charts[ds.diff];
   const src = sourceFor(g, ds.diff);
   const busy = ds.status === 'planning' || ds.status === 'building' || ds.status === 'judging';
@@ -882,17 +904,7 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
             </b>
             <span className="row gen-aim">
               <span>{tr('めやす', 'Aim')}</span>
-              <input
-                className="gen-target mono"
-                type="number"
-                step={0.1}
-                min={1}
-                max={9.9}
-                value={t.center.toFixed(1)}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => setTarget(ds.diff, e.target.value === '' ? null : Number(e.target.value))}
-                title={tr('めやすを手で決める（幅はその ±1。隣の難易度とは重ねません）', 'Set the aim by hand (the range is ±1 around it and never overlaps the neighbors)')}
-              />
+              {phone ? <AimStepper ds={ds} /> : <AimNumber ds={ds} />}
               {ds.manual !== null && (
                 <button
                   className="link-btn"
@@ -963,6 +975,40 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
       )}
       {on && ds.enabled && <DiffActions ds={ds} busy={busy || g.busy} />}
     </div>
+  );
+}
+
+/**
+ * めやすの数字の欄（PC・タブレット）。打っている間は打った文字のまま出す
+ * （「6」で 6.0 に書き換えると、続けて「.4」と打てなかった）。数として読めたらその都度決める
+ */
+function AimNumber({ ds }: { ds: DiffState }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = ds.target.center.toFixed(1);
+  return (
+    <input
+      className="gen-target mono"
+      type="number"
+      step={0.1}
+      min={1}
+      max={9.9}
+      value={draft ?? shown}
+      onClick={(e) => e.stopPropagation()}
+      onFocus={() => setDraft(shown)}
+      onChange={(e) => {
+        const text = e.target.value;
+        setDraft(text);
+        // 空は打っている途中（「6.」など）。自動に戻すのは「自動」で
+        if (text === '') return;
+        const v = Number(text);
+        if (Number.isFinite(v)) setTarget(ds.diff, v);
+      }}
+      onBlur={() => setDraft(null)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }}
+      title={tr('めやすを手で決める（幅はその ±1。隣の難易度とは重ねません）', 'Set the aim by hand (the range is ±1 around it and never overlaps the neighbors)')}
+    />
   );
 }
 
