@@ -55,6 +55,7 @@ import { PanelContent, panelIcon } from './Panels';
 import { SaveSheet } from './SaveSheet';
 import { SelectionBar } from './SelectionBar';
 import { tabletPanels, tabletSave } from './shared';
+import { LogoMark } from '../LogoMark';
 
 const TOP_H = 56;
 const TRANSPORT_H = 60;
@@ -730,7 +731,7 @@ export function Drawer({ folderInput }: { folderInput: React.RefObject<HTMLInput
     <div className="t-drawer-back" onPointerDown={(e) => e.target === e.currentTarget && close()}>
       <aside className="t-drawer" role="dialog" aria-label={tr('メニュー', 'Menu')}>
         <div className="t-drawer-head">
-          <span className="logo-mark">D</span>
+          <LogoMark />
           <b>DTX Web Editor</b>
           <span className="grow" />
           <button className="t-ib" onClick={close} aria-label={tr('閉じる', 'Close')}>

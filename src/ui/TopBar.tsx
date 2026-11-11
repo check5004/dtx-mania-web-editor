@@ -63,6 +63,7 @@ import { openFilesPicker, openSaveSheet, tabletPanels } from './tablet/shared';
 import { useLang } from '../i18n/useLang';
 import { ORIGIN_KEY, originOf } from '../dtx/origin';
 import { OriginBadge, originTitle } from './OriginBadge';
+import { LogoMark } from './LogoMark';
 
 const cursorM = () => {
   const s = useEditor.getState();
@@ -329,7 +330,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
   return (
     <header ref={barRef} className={`topbar ${fit >= 1 ? 'fit-logo' : ''} ${fit >= 2 ? 'fit-diff' : ''} ${fit >= 3 ? 'fit-ai' : ''} ${fit >= 4 ? 'fit-art' : ''} ${fit >= 5 ? 'fit-title' : ''} ${fit >= 6 ? 'fit-song' : ''} ${fit >= 7 ? 'fit-tools' : ''}`}>
       <button className="logo" onClick={goHome} title={tr('ホームに戻る（編集中の譜面は自動保存されています）', 'Back to home (the open chart is autosaved)')}>
-        <span className="logo-mark">D</span>
+        <LogoMark />
         <span className="hide-narrow logo-text">DTX Web Editor</span>
       </button>
       <MenuBar menus={menus} />

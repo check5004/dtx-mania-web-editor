@@ -16,6 +16,7 @@ import { SafariNotice } from './SafariNotice';
 import { HomeTablet } from './tablet/HomeTablet';
 import { HomePhone } from './phone/HomePhone';
 import { InstallCard } from './pwa/InstallCard';
+import { LogoMark } from './LogoMark';
 
 function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
@@ -61,7 +62,7 @@ function HomeDesktop() {
     <div className="home">
       <header className="topbar">
         <span className="logo">
-          <span className="logo-mark">D</span>
+          <LogoMark />
           DTX Web Editor
         </span>
         <span className="lbl hide-narrow">{tr('DTXManiaNX 向けのドラム譜面エディタ', 'Drum chart editor for DTXManiaNX')}</span>

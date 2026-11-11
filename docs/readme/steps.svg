@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="272" viewBox="0 0 960 272" role="img" aria-labelledby="title desc">
+<title id="title">はじめかた</title>
+<desc id="desc">1. ブラウザで開く 2. 曲（原曲の音声か DTX の曲フォルダ）を入れる 3. 書いて保存すると DTXManiaNX でそのまま遊べる。</desc>
+<style>
+text{font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Yu Gothic','Meiryo','Noto Sans JP','Noto Sans CJK JP',system-ui,sans-serif}
+.mono{font-family:'JetBrains Mono','SF Mono','Cascadia Mono',Consolas,Menlo,monospace}
+.fb{transform-box:fill-box;transform-origin:50% 50%}
+.fl{transform-box:fill-box;transform-origin:0 50%}
+@keyframes sh0{0%{opacity:1}32.778%{opacity:1}36.111%{opacity:0}96.667%{opacity:0}100%{opacity:1}}
+.sh0{opacity:0;animation:sh0 9s linear infinite}
+@keyframes sh1{0%{opacity:0}33.333%{opacity:0}36.667%{opacity:1}66.111%{opacity:1}69.444%{opacity:0}100%{opacity:0}}
+.sh1{opacity:0;animation:sh1 9s linear infinite}
+@keyframes sh2{0%{opacity:0}66.667%{opacity:0}70%{opacity:1}96.667%{opacity:1}100%{opacity:0}}
+.sh2{opacity:0;animation:sh2 9s linear infinite}
+@keyframes ptr{0%{transform:translate(150px,30px);opacity:0}3.333%{opacity:1}11.111%{transform:translate(0,0)}12.444%{transform:translate(0,0) scale(0.88)}14.444%{transform:translate(0,0) scale(1)}95.556%{transform:translate(0,0);opacity:1}98.889%{transform:translate(0,0);opacity:0}100%{transform:translate(150px,30px);opacity:0}}
+.ptr{animation:ptr 9s ease-out infinite;transform-box:fill-box;transform-origin:0 0}
+@keyframes rip{0%{transform:scale(0.3);opacity:0}12%{transform:scale(0.3);opacity:0.9}17.778%{transform:scale(1.9);opacity:0}100%{transform:scale(1.9);opacity:0}}
+.rip{opacity:0;animation:rip 9s ease-out infinite}
+@keyframes tsel{0%{opacity:0}12.222%{opacity:0}13.889%{opacity:1}96.667%{opacity:1}99.444%{opacity:0}100%{opacity:0}}
+.tsel{animation:tsel 9s linear infinite}
+@keyframes file{0%{transform:translate(110px,-64px);opacity:0}34.444%{transform:translate(110px,-64px);opacity:0}37.222%{opacity:1}44.444%{transform:translate(0,0) scale(1)}46.111%{transform:translate(0,0) scale(0.9);opacity:1}48.333%{transform:translate(0,0) scale(0.9);opacity:0}100%{transform:translate(0,0) scale(0.9);opacity:0}}
+.file{opacity:0;animation:file 9s ease-in-out infinite}
+@keyframes dlab{0%{opacity:1}44.444%{opacity:1}46.667%{opacity:0}97.778%{opacity:0}100%{opacity:1}}
+.dlab{opacity:0;animation:dlab 9s linear infinite}
+@keyframes dhov{0%{opacity:0}38.889%{opacity:0}42.222%{opacity:1}47.778%{opacity:1}51.111%{opacity:0.45}96.667%{opacity:0.45}100%{opacity:0}}
+.dhov{opacity:0.45;animation:dhov 9s linear infinite}
+@keyframes wv{0%{transform:scaleX(0);opacity:1}47.778%{transform:scaleX(0);opacity:1}56.667%{transform:scaleX(1)}94.444%{transform:scaleX(1);opacity:1}97.222%{transform:scaleX(1);opacity:0}100%{transform:scaleX(0);opacity:0}}
+.wv{animation:wv 9s ease-out infinite}
+@keyframes wcap{0%{opacity:0}50%{opacity:0}53.333%{opacity:1}94.444%{opacity:1}97.222%{opacity:0}100%{opacity:0}}
+.wcap{animation:wcap 9s linear infinite}
+@keyframes c30{0%{opacity:0}68%{opacity:0}68.667%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c31{0%{opacity:0}68.833%{opacity:0}69.5%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c32{0%{opacity:0}69.667%{opacity:0}70.333%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c33{0%{opacity:0}70.5%{opacity:0}71.167%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c34{0%{opacity:0}71.333%{opacity:0}72%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c35{0%{opacity:0}72.167%{opacity:0}72.833%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c36{0%{opacity:0}73%{opacity:0}73.667%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c37{0%{opacity:0}73.833%{opacity:0}74.5%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c38{0%{opacity:0}74.667%{opacity:0}75.333%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c39{0%{opacity:0}75.5%{opacity:0}76.167%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c310{0%{opacity:0}76.333%{opacity:0}77%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c311{0%{opacity:0}77.167%{opacity:0}77.833%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes c312{0%{opacity:0}78%{opacity:0}78.667%{opacity:1}97.222%{opacity:1}100%{opacity:0}}
+@keyframes kp3{0%{transform:translateY(0)}80.556%{transform:translateY(0)}81.333%{transform:translateY(3px)}83.889%{transform:translateY(3px)}85%{transform:translateY(0)}100%{transform:translateY(0)}}
+.kp3{animation:kp3 9s linear infinite}
+@keyframes fold{0%{transform:scale(0.6);opacity:0}83.889%{transform:scale(0.6);opacity:0}86.667%{transform:scale(1.08);opacity:1}88.333%{transform:scale(1);opacity:1}97.222%{transform:scale(1);opacity:1}100%{transform:scale(1);opacity:0}}
+.fold{animation:fold 9s ease-out infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B1018"/><stop offset="1" stop-color="#131C2A"/></linearGradient><linearGradient id="s2w" x1="0" x2="1"><stop offset="0" stop-color="#4CC2FF"/><stop offset="1" stop-color="#9C84E0"/></linearGradient></defs>
+<g transform="translate(20 20)">
+<rect width="296" height="232" rx="16" fill="url(#bg)" stroke="#223044"/>
+<rect class="sh0" x="1" y="1" width="294" height="230" rx="15" fill="none" stroke="#4CC2FF" stroke-width="2"/>
+<rect x="14" y="14" width="268" height="120" rx="12" fill="#0A0F16" stroke="#1B2636"/>
+<rect x="28" y="22" width="240" height="104" rx="8" fill="#0F1621" stroke="#2A3850"/>
+<path d="M28 30 a8 8 0 0 1 8 -8 h224 a8 8 0 0 1 8 8 v10 h-240 z" fill="#1A2434"/>
+<circle cx="38" cy="31" r="2.6" fill="#FF5F57"/><circle cx="47" cy="31" r="2.6" fill="#FEBC2E"/><circle cx="56" cy="31" r="2.6" fill="#28C840"/>
+<rect x="66" y="25.5" width="194" height="11" rx="5.5" fill="#0A0F16"/><text x="73" y="33.6" font-size="7.4" fill="#93A1B3" class="mono"><tspan x="73">check5004.github.io/dtx-mania-web-editor</tspan></text>
+<g transform="translate(37 46) scale(0.22)">
+<defs>
+  <linearGradient id="s1-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1D2839"/><stop offset="1" stop-color="#07090D"/></linearGradient>
+  <linearGradient id="s1-shell" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2C7FC4"/><stop offset="0.35" stop-color="#8FDBFF"/><stop offset="0.6" stop-color="#5B8DF0"/><stop offset="1" stop-color="#5A44B8"/></linearGradient>
+  <linearGradient id="s1-fade" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0.75"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <mask id="s1-m" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="url(#s1-fade)"/></mask>
+</defs>
+<rect width="64" height="64" rx="14" fill="url(#s1-bg)"/>
+<g mask="url(#s1-m)" opacity="0.7"><path d="M15 41 L24 41 L28 6 L25 6 Z" fill="#4FC3F7"/><path d="M27.5 41 L36.5 41 L33.5 6 L30.5 6 Z" fill="#FFD54F"/><path d="M40 41 L49 41 L39 6 L36 6 Z" fill="#9C84E0"/></g>
+<rect x="17.5" y="30" width="7" height="4" rx="1.2" fill="#4FC3F7"/>
+<rect x="28.5" y="19" width="6" height="3.5" rx="1.1" fill="#FFD54F"/>
+<rect x="39.5" y="24" width="6.5" height="3.6" rx="1.1" fill="#9C84E0"/>
+<rect x="22" y="14" width="5" height="3" rx="1" fill="#4FC3F7"/>
+<path d="M10 44 V52 A22 6.5 0 0 0 54 52 V44 Z" fill="url(#s1-shell)"/>
+<ellipse cx="32" cy="44" rx="22" ry="6.5" fill="#E9EEF4"/>
+<ellipse cx="32" cy="43.6" rx="19" ry="5" fill="#FFFFFF"/>
+<ellipse cx="32" cy="43.6" rx="7" ry="2" fill="#FFD54F"/>
+<rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.3" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.5"/>
+</g><text x="55" y="57" font-size="9" fill="#E8EEF6" font-weight="700"><tspan x="55">DTX Web Editor</tspan></text>
+<g transform="translate(37 70)"><rect width="66" height="44" rx="6" fill="#141E2C" stroke="#2A3850"/><path d="M30 8 v12.5 a3.6 3.6 0 1 1 -2 -3.2 V10 l9 -2.4 v3 z" fill="#4CC2FF"/><text x="33" y="37" font-size="9" fill="#93A1B3" text-anchor="middle"><tspan x="33">原曲から</tspan></text></g><g transform="translate(109 70)"><rect width="66" height="44" rx="6" fill="#141E2C" stroke="#2A3850"/><path d="M24 11 h6 l2 2.5 h10 v12 h-18 z" fill="#FFB547" fill-opacity="0.85"/><text x="33" y="37" font-size="9" fill="#93A1B3" text-anchor="middle"><tspan x="33">曲フォルダ</tspan></text></g><g transform="translate(181 70)"><rect width="66" height="44" rx="6" fill="#141E2C" stroke="#2A3850"/><path d="M27 8 h9 l4 4 v14 h-13 z" fill="none" stroke="#93A1B3" stroke-width="1.5"/><text x="33" y="37" font-size="9" fill="#93A1B3" text-anchor="middle"><tspan x="33">空の譜面</tspan></text></g>
+<rect class="tsel" x="37" y="70" width="66" height="44" rx="6" fill="#4CC2FF" fill-opacity="0.14" stroke="#4CC2FF" stroke-width="1.6"/>
+<g transform="translate(92 100)"><circle class="rip fb" r="12" fill="none" stroke="#4CC2FF" stroke-width="2"/></g>
+<g transform="translate(92 100)"><g class="ptr"><path d="M0 0 L0 15 L4 11.4 L6.8 17.6 L9.3 16.5 L6.6 10.4 L11.6 10.4 Z" fill="#fff" stroke="#0B0F15" stroke-width="1.2" stroke-linejoin="round"/></g></g>
+<circle cx="30" cy="165" r="13" fill="#4CC2FF" fill-opacity="0.16" stroke="#4CC2FF" stroke-opacity="0.7"/><text x="30" y="170.46" font-size="14.95" fill="#4CC2FF" font-weight="700" text-anchor="middle"><tspan x="30">1</tspan></text>
+<text x="52" y="171" font-size="18" fill="#E8EEF6" font-weight="700"><tspan x="52">ブラウザで開く</tspan></text>
+<text x="18" y="200" font-size="13" fill="#93A1B3"><tspan x="18">インストールも登録もいりません。</tspan><tspan x="18" dy="21.06">PC は Chrome か Edge がおすすめ。</tspan></text>
+</g>
+<g transform="translate(332 20)">
+<rect width="296" height="232" rx="16" fill="url(#bg)" stroke="#223044"/>
+<rect class="sh1" x="1" y="1" width="294" height="230" rx="15" fill="none" stroke="#4CC2FF" stroke-width="2"/>
+<rect x="14" y="14" width="268" height="120" rx="12" fill="#0A0F16" stroke="#1B2636"/>
+<rect x="30" y="22" width="236" height="104" rx="10" fill="#0D141E" stroke="#3A4A61" stroke-dasharray="5 4"/>
+<rect class="dhov" x="30" y="22" width="236" height="104" rx="10" fill="#4CC2FF" fill-opacity="0.06" stroke="#4CC2FF" stroke-width="1.6"/>
+<g class="dlab"><text x="148" y="82" font-size="12" fill="#5E6B7C" text-anchor="middle"><tspan x="148">ここにドロップ</tspan></text><path d="M148 50 v14 m-6 -6 l6 6 l6 -6" fill="none" stroke="#5E6B7C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g class="wv fl"><path d="M44 50.62 L44.95 56.96 L45.89 62.86 L46.84 67.18 L47.78 72.44 L48.73 69.2 L49.67 69.23 L50.62 71.05 L51.56 64.53 L52.51 67.82 L53.45 70.97 L54.4 69.65 L55.35 70.94 L56.29 70.01 L57.24 71.37 L58.18 69.2 L59.13 57.9 L60.07 64.05 L61.02 69.45 L61.96 69.93 L62.91 70.51 L63.85 71.7 L64.8 70.57 L65.75 71.53 L66.69 65.43 L67.64 70.85 L68.58 70.44 L69.53 71.3 L70.47 70.93 L71.42 71.74 L72.36 70.57 L73.31 72.01 L74.25 56.19 L75.2 63.8 L76.15 65.95 L77.09 69.99 L78.04 69.55 L78.98 71.2 L79.93 70.4 L80.87 70.87 L81.82 66.31 L82.76 71.05 L83.71 71.9 L84.65 71.66 L85.6 70.13 L86.55 72.44 L87.49 69.75 L88.44 71.89 L89.38 60.65 L90.33 66.78 L91.27 70.4 L92.22 69.59 L93.16 70.26 L94.11 71.09 L95.05 71.69 L96 64.78 L96.95 68.72 L97.89 70.01 L98.84 69.93 L99.78 70.23 L100.73 70.58 L101.67 70.04 L102.62 70.66 L103.56 52.7 L104.51 59.61 L105.45 63.3 L106.4 69.94 L107.35 69.67 L108.29 69.19 L109.24 72.52 L110.18 69.54 L111.13 63.88 L112.07 67.76 L113.02 70.37 L113.96 71.33 L114.91 72.53 L115.85 72.59 L116.8 69.96 L117.75 71.34 L118.69 57.06 L119.64 64.41 L120.58 68.57 L121.53 70.75 L122.47 70.26 L123.42 71.08 L124.36 70.02 L125.31 70.02 L126.25 68.08 L127.2 71.51 L128.15 72.09 L129.09 71.32 L130.04 71.01 L130.98 71.68 L131.93 70.25 L132.87 72.57 L133.82 56.02 L134.76 61.95 L135.71 67.29 L136.65 71.54 L137.6 69.87 L138.55 71.49 L139.49 72.41 L140.44 70.8 L141.38 68.08 L142.33 72.52 L143.27 71.77 L144.22 69.36 L145.16 72.15 L146.11 69.33 L147.05 71.47 L148 55.37 L148.95 61.74 L149.89 67.28 L150.84 71.81 L151.78 71.04 L152.73 70.83 L153.67 71.61 L154.62 70.64 L155.56 63.25 L156.51 68.37 L157.45 72.58 L158.4 69.35 L159.35 69.8 L160.29 70.07 L161.24 72.06 L162.18 71.84 L163.13 51.12 L164.07 60.79 L165.02 64.53 L165.96 69.1 L166.91 71.2 L167.85 69.45 L168.8 71.62 L169.75 72.62 L170.69 67.09 L171.64 69.57 L172.58 71.18 L173.53 70.09 L174.47 70.94 L175.42 71.71 L176.36 71.29 L177.31 70.13 L178.25 60.06 L179.2 64.49 L180.15 68.49 L181.09 69.82 L182.04 69.55 L182.98 71 L183.93 71.45 L184.87 71.54 L185.82 68.25 L186.76 69.77 L187.71 69.7 L188.65 70.16 L189.6 70.5 L190.55 72.01 L191.49 69.89 L192.44 71.4 L193.38 56.29 L194.33 65.31 L195.27 68.26 L196.22 70.9 L197.16 71.53 L198.11 72.35 L199.05 70.96 L200 65.28 L200.95 68.53 L201.89 69.46 L202.84 71.61 L203.78 71.99 L204.73 70.24 L205.67 69.65 L206.62 69.96 L207.56 57.91 L208.51 62.4 L209.45 68.63 L210.4 69.13 L211.35 70.93 L212.29 71.78 L213.24 72.46 L214.18 71.73 L215.13 67.21 L216.07 68.28 L217.02 70.97 L217.96 70.54 L218.91 71.97 L219.85 70.09 L220.8 72.51 L221.75 72.18 L222.69 53.04 L223.64 61.51 L224.58 65.08 L225.53 71.42 L226.47 71.62 L227.42 69.32 L228.36 71.53 L229.31 72.48 L230.25 66.27 L231.2 68.42 L232.15 71.26 L233.09 71.08 L234.04 69.62 L234.98 70.96 L235.93 72.08 L236.87 69.29 L237.82 61.5 L238.76 65.13 L239.71 69.53 L240.65 70.84 L241.6 71.81 L242.55 71.83 L243.49 69.4 L244.44 70.29 L245.38 69.17 L246.33 69.65 L247.27 71.42 L248.22 72.53 L249.16 70.66 L250.11 70.45 L251.05 71.98 L252 71.24 L252 86.76 L251.05 86.02 L250.11 87.55 L249.16 87.34 L248.22 85.47 L247.27 86.58 L246.33 88.35 L245.38 88.83 L244.44 87.71 L243.49 88.6 L242.55 86.17 L241.6 86.19 L240.65 87.16 L239.71 88.47 L238.76 92.87 L237.82 96.5 L236.87 88.71 L235.93 85.92 L234.98 87.04 L234.04 88.38 L233.09 86.92 L232.15 86.74 L231.2 89.58 L230.25 91.73 L229.31 85.52 L228.36 86.47 L227.42 88.68 L226.47 86.38 L225.53 86.58 L224.58 92.92 L223.64 96.49 L222.69 104.96 L221.75 85.82 L220.8 85.49 L219.85 87.91 L218.91 86.03 L217.96 87.46 L217.02 87.03 L216.07 89.72 L215.13 90.79 L214.18 86.27 L213.24 85.54 L212.29 86.22 L211.35 87.07 L210.4 88.87 L209.45 89.37 L208.51 95.6 L207.56 100.09 L206.62 88.04 L205.67 88.35 L204.73 87.76 L203.78 86.01 L202.84 86.39 L201.89 88.54 L200.95 89.47 L200 92.72 L199.05 87.04 L198.11 85.65 L197.16 86.47 L196.22 87.1 L195.27 89.74 L194.33 92.69 L193.38 101.71 L192.44 86.6 L191.49 88.11 L190.55 85.99 L189.6 87.5 L188.65 87.84 L187.71 88.3 L186.76 88.23 L185.82 89.75 L184.87 86.46 L183.93 86.55 L182.98 87 L182.04 88.45 L181.09 88.18 L180.15 89.51 L179.2 93.51 L178.25 97.94 L177.31 87.87 L176.36 86.71 L175.42 86.29 L174.47 87.06 L173.53 87.91 L172.58 86.82 L171.64 88.43 L170.69 90.91 L169.75 85.38 L168.8 86.38 L167.85 88.55 L166.91 86.8 L165.96 88.9 L165.02 93.47 L164.07 97.21 L163.13 106.88 L162.18 86.16 L161.24 85.94 L160.29 87.93 L159.35 88.2 L158.4 88.65 L157.45 85.42 L156.51 89.63 L155.56 94.75 L154.62 87.36 L153.67 86.39 L152.73 87.17 L151.78 86.96 L150.84 86.19 L149.89 90.72 L148.95 96.26 L148 102.63 L147.05 86.53 L146.11 88.67 L145.16 85.85 L144.22 88.64 L143.27 86.23 L142.33 85.48 L141.38 89.92 L140.44 87.2 L139.49 85.59 L138.55 86.51 L137.6 88.13 L136.65 86.46 L135.71 90.71 L134.76 96.05 L133.82 101.98 L132.87 85.43 L131.93 87.75 L130.98 86.32 L130.04 86.99 L129.09 86.68 L128.15 85.91 L127.2 86.49 L126.25 89.92 L125.31 87.98 L124.36 87.98 L123.42 86.92 L122.47 87.74 L121.53 87.25 L120.58 89.43 L119.64 93.59 L118.69 100.94 L117.75 86.66 L116.8 88.04 L115.85 85.41 L114.91 85.47 L113.96 86.67 L113.02 87.63 L112.07 90.24 L111.13 94.12 L110.18 88.46 L109.24 85.48 L108.29 88.81 L107.35 88.33 L106.4 88.06 L105.45 94.7 L104.51 98.39 L103.56 105.3 L102.62 87.34 L101.67 87.96 L100.73 87.42 L99.78 87.77 L98.84 88.07 L97.89 87.99 L96.95 89.28 L96 93.22 L95.05 86.31 L94.11 86.91 L93.16 87.74 L92.22 88.41 L91.27 87.6 L90.33 91.22 L89.38 97.35 L88.44 86.11 L87.49 88.25 L86.55 85.56 L85.6 87.87 L84.65 86.34 L83.71 86.1 L82.76 86.95 L81.82 91.69 L80.87 87.13 L79.93 87.6 L78.98 86.8 L78.04 88.45 L77.09 88.01 L76.15 92.05 L75.2 94.2 L74.25 101.81 L73.31 85.99 L72.36 87.43 L71.42 86.26 L70.47 87.07 L69.53 86.7 L68.58 87.56 L67.64 87.15 L66.69 92.57 L65.75 86.47 L64.8 87.43 L63.85 86.3 L62.91 87.49 L61.96 88.07 L61.02 88.55 L60.07 93.95 L59.13 100.1 L58.18 88.8 L57.24 86.63 L56.29 87.99 L55.35 87.06 L54.4 88.35 L53.45 87.03 L52.51 90.18 L51.56 93.47 L50.62 86.95 L49.67 88.77 L48.73 88.8 L47.78 85.56 L46.84 90.82 L45.89 95.14 L44.95 101.04 L44 107.38 Z" fill="url(#s2w)"/></g>
+<g class="wcap"><text x="44" y="40" font-size="9.5" fill="#93A1B3"><tspan x="44">BGM: song.mp3 → 新しい譜面</tspan></text></g>
+<g transform="translate(98 62)"><g class="file fb"><rect width="100" height="30" rx="6" fill="#1C2738" stroke="#4A5E7E"/><text x="16" y="21" font-size="15" fill="#4CC2FF" text-anchor="middle"><tspan x="16">♪</tspan></text><text x="28" y="19.5" font-size="11" fill="#E8EEF6" class="mono"><tspan x="28">song.mp3</tspan></text></g></g>
+<circle cx="30" cy="165" r="13" fill="#4CC2FF" fill-opacity="0.16" stroke="#4CC2FF" stroke-opacity="0.7"/><text x="30" y="170.46" font-size="14.95" fill="#4CC2FF" font-weight="700" text-anchor="middle"><tspan x="30">2</tspan></text>
+<text x="52" y="171" font-size="18" fill="#E8EEF6" font-weight="700"><tspan x="52">曲を入れる</tspan></text>
+<text x="18" y="200" font-size="13" fill="#93A1B3"><tspan x="18">原曲の MP3・WAV・動画をドロップ。</tspan><tspan x="18" dy="21.06">DTX の曲フォルダも開けます。</tspan></text>
+</g>
+<g transform="translate(644 20)">
+<rect width="296" height="232" rx="16" fill="url(#bg)" stroke="#223044"/>
+<rect class="sh2" x="1" y="1" width="294" height="230" rx="15" fill="none" stroke="#4CC2FF" stroke-width="2"/>
+<rect x="14" y="14" width="268" height="120" rx="12" fill="#0A0F16" stroke="#1B2636"/>
+<g><rect x="34" y="24" width="22" height="100" fill="#0C121B"/><rect x="56" y="24" width="22" height="100" fill="#0F1620"/><rect x="78" y="24" width="22" height="100" fill="#0C121B"/><rect x="100" y="24" width="22" height="100" fill="#0F1620"/><rect x="122" y="24" width="22" height="100" fill="#0C121B"/>
+<line x1="34" x2="144" y1="120" y2="120" stroke="#3A4A61"/><line x1="34" x2="144" y1="30.4" y2="30.4" stroke="#3A4A61"/>
+<line x1="34" x2="144" y1="97.6" y2="97.6" stroke="#1C2736"/><line x1="34" x2="144" y1="75.2" y2="75.2" stroke="#1C2736"/><line x1="34" x2="144" y1="52.8" y2="52.8" stroke="#1C2736"/></g>
+<rect x="124" y="113" width="18" height="6" rx="2.5" fill="#42A5F5" style="animation:c30 9s linear infinite"/><rect x="102" y="113" width="18" height="6" rx="2.5" fill="#9C84E0" style="animation:c31 9s linear infinite"/><rect x="36" y="101.8" width="18" height="6" rx="2.5" fill="#4FC3F7" style="animation:c32 9s linear infinite"/><rect x="36" y="90.6" width="18" height="6" rx="2.5" fill="#4FC3F7" style="animation:c33 9s linear infinite"/><rect x="58" y="90.6" width="18" height="6" rx="2.5" fill="#FFD54F" style="animation:c34 9s linear infinite"/><rect x="36" y="79.4" width="18" height="6" rx="2.5" fill="#4FC3F7" style="animation:c35 9s linear infinite"/><rect x="102" y="79.4" width="18" height="6" rx="2.5" fill="#9C84E0" style="animation:c36 9s linear infinite"/><rect x="36" y="68.2" width="18" height="6" rx="2.5" fill="#4FC3F7" style="animation:c37 9s linear infinite"/><rect x="102" y="68.2" width="18" height="6" rx="2.5" fill="#9C84E0" style="animation:c38 9s linear infinite"/><rect x="36" y="57" width="18" height="6" rx="2.5" fill="#4FC3F7" style="animation:c39 9s linear infinite"/><rect x="36" y="45.8" width="18" height="6" rx="2.5" fill="#4FC3F7" style="animation:c310 9s linear infinite"/><rect x="58" y="45.8" width="18" height="6" rx="2.5" fill="#FFD54F" style="animation:c311 9s linear infinite"/><rect x="80" y="34.6" width="18" height="6" rx="2.5" fill="#66BB6A" style="animation:c312 9s linear infinite"/>
+<text x="198" y="22" font-size="0.1" fill="none"><tspan x="198">保存</tspan></text>
+<g transform="translate(172 30)"><rect y="3.5" width="46" height="26" rx="7" fill="#04070B"/><g class="kp3"><rect width="46" height="26" rx="7" fill="#1E2A3C" stroke="#41536E"/><rect x="1.5" y="1.5" width="43" height="13" rx="6" fill="#fff" fill-opacity="0.05"/><text x="23" y="17.26" font-size="11.5" fill="#DCE7F3" font-weight="700" text-anchor="middle" class="mono"><tspan x="23">Ctrl</tspan></text></g></g><text x="226" y="47.5" font-size="13" fill="#93A1B3" text-anchor="middle"><tspan x="226">+</tspan></text><g transform="translate(236 30)"><rect y="3.5" width="28" height="26" rx="7" fill="#04070B"/><g class="kp3"><rect width="28" height="26" rx="7" fill="#1E2A3C" stroke="#41536E"/><rect x="1.5" y="1.5" width="25" height="13" rx="6" fill="#fff" fill-opacity="0.05"/><text x="14" y="17.26" font-size="11.5" fill="#DCE7F3" font-weight="700" text-anchor="middle" class="mono"><tspan x="14">S</tspan></text></g></g>
+<g transform="translate(188 74)"><g class="fold fb"><path d="M0 6 a4 4 0 0 1 4 -4 h14 l5 5 h25 a4 4 0 0 1 4 4 v23 a4 4 0 0 1 -4 4 h-44 a4 4 0 0 1 -4 -4 z" fill="#FFB547" fill-opacity="0.9"/><circle cx="50" cy="31" r="9" fill="#5BD69A"/><path d="M45.5 31 l3 3 l6 -6.5" fill="none" stroke="#06121B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><text x="25" y="54" font-size="9.5" fill="#93A1B3" text-anchor="middle"><tspan x="25">曲フォルダ</tspan></text></g></g>
+<circle cx="30" cy="165" r="13" fill="#4CC2FF" fill-opacity="0.16" stroke="#4CC2FF" stroke-opacity="0.7"/><text x="30" y="170.46" font-size="14.95" fill="#4CC2FF" font-weight="700" text-anchor="middle"><tspan x="30">3</tspan></text>
+<text x="52" y="171" font-size="18" fill="#E8EEF6" font-weight="700"><tspan x="52">書いて保存</tspan></text>
+<text x="18" y="200" font-size="13" fill="#93A1B3"><tspan x="18">Ctrl+S で曲フォルダへ。</tspan><tspan x="18" dy="21.06">DTXManiaNX でそのまま遊べます。</tspan></text>
+</g>
+</svg>

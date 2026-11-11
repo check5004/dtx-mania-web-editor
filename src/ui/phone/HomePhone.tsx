@@ -18,6 +18,7 @@ import { InstallCard } from '../pwa/InstallCard';
 import { SafariNotice } from '../SafariNotice';
 import { ago, artColor } from '../tablet/HomeTablet';
 import { openFilesPicker } from '../tablet/shared';
+import { LogoMark } from '../LogoMark';
 
 const TIPS_KEY = 'dtxe.phoneTips.closed';
 /** 最近の曲を、すべてを開くまでに出す数 */
@@ -223,7 +224,7 @@ export function HomePhone() {
     <div className="home th-home ph-home">
       <header className="th-top ph-top">
         <span className="logo">
-          <span className="logo-mark">D</span>
+          <LogoMark />
           DTX Web Editor
         </span>
         <span className="grow" />

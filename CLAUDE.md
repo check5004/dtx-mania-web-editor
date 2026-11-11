@@ -14,3 +14,9 @@
 - ブラウザの判定は `src/platform.ts`（動きの分岐は `IS_WEBKIT`、案内の文は `IS_SAFARI`）。
 - スマホの全画面の画面を足したら、横は中身を左右の切り欠きの内側（`env(safe-area-inset-left/right)`）に、縦は上のバーの中身を上から 6px より下に置く（上端の帯 `.p-edge-top` が Safari のぼかしを消している）。docs/safari.md の「画面（iPhone）」。
 - Safari のためだけに大きく作り直さない（Chrome で使えれば足りる要望。うまく動かないときは Chrome を案内する）。迷ったら docs/safari.md。
+
+## README と説明書
+
+- README.md は使う人向けの入口。図と画面写真が主で、開発者向けは最後に少しだけ。機能を足したら細かい説明は docs/manual.md に書き、README は大きな機能のときだけ足す。
+- README の図（docs/readme/*.svg）と画面写真（docs/readme/shots/）は scripts/readme/ で作り直す（make-svgs.mjs・demo-song.mjs・shots.mjs・devices.mjs・shrink.py。使い方は各ファイルの頭）。写真はオリジナルのデモ曲で撮り、実在の曲を写さない。
+- アプリのアイコンは scripts/icon-art.mjs（絵）と scripts/make-pwa-images.mjs（PWA の各サイズ・ファビコン・iPad の起動画面）。

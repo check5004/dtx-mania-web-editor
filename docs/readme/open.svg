@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="60" viewBox="0 0 300 60" role="img" aria-labelledby="title desc">
+<title id="title">ブラウザで開く（無料）</title>
+<desc id="desc">DTX Web Editor を開くボタン</desc>
+<style>
+text{font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Yu Gothic','Meiryo','Noto Sans JP','Noto Sans CJK JP',system-ui,sans-serif}
+.mono{font-family:'JetBrains Mono','SF Mono','Cascadia Mono',Consolas,Menlo,monospace}
+.fb{transform-box:fill-box;transform-origin:50% 50%}
+.fl{transform-box:fill-box;transform-origin:0 50%}
+@keyframes shine{0%,55%{transform:translateX(-140px)}85%,100%{transform:translateX(340px)}}.shine{animation:shine 4.5s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><linearGradient id="bt" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5CCBFF"/><stop offset="1" stop-color="#8E7CF0"/></linearGradient>
+<linearGradient id="sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<clipPath id="bc"><rect x="2" y="2" width="296" height="56" rx="28"/></clipPath></defs>
+<rect x="2" y="2" width="296" height="56" rx="28" fill="url(#bt)"/>
+<g clip-path="url(#bc)"><rect class="shine" x="0" y="0" width="90" height="60" fill="url(#sh)" transform="skewX(-20)"/></g>
+<circle cx="40" cy="30" r="15" fill="#07131D" fill-opacity="0.85"/><path d="M35.5 23 L47 30 L35.5 37 Z" fill="#7FD6FF"/>
+<text x="66" y="37.5" font-size="21" fill="#06121B" font-weight="700"><tspan x="66">ブラウザで開く</tspan></text>
+<rect x="228" y="18" width="48" height="24" rx="12" fill="#06121B" fill-opacity="0.82"/>
+<text x="252" y="34.6" font-size="13" fill="#8FDCFF" font-weight="700" text-anchor="middle"><tspan x="252">無料</tspan></text>
+</svg>

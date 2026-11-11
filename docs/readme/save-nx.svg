@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+<title id="title">DTXManiaNX へ保存</title>
+<desc id="desc">Ctrl+S で曲フォルダに set.def・4 難易度の DTX・原曲・試聴・ジャケット・使った音が並び、DTXManiaNX でそのまま遊べる。</desc>
+<style>
+text{font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Yu Gothic','Meiryo','Noto Sans JP','Noto Sans CJK JP',system-ui,sans-serif}
+.mono{font-family:'JetBrains Mono','SF Mono','Cascadia Mono',Consolas,Menlo,monospace}
+.fb{transform-box:fill-box;transform-origin:50% 50%}
+.fl{transform-box:fill-box;transform-origin:0 50%}
+@keyframes kps{0%{transform:translateY(0)}6.75%{transform:translateY(0)}7.5%{transform:translateY(3.5px)}10.625%{transform:translateY(3.5px)}11.875%{transform:translateY(0)}100%{transform:translateY(0)}}
+.kps{animation:kps 8s linear infinite}
+@keyframes kgs{0%{opacity:0}6.75%{opacity:0}7.5%{opacity:1}16.25%{opacity:0}100%{opacity:0}}
+.kgs{opacity:0;animation:kgs 8s linear infinite}
+@keyframes f0{0%{transform:translateX(-14px);opacity:0}12.5%{transform:translateX(-14px);opacity:0}15.625%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f0{animation:f0 8s ease-out infinite}
+@keyframes f1{0%{transform:translateX(-14px);opacity:0}14.625%{transform:translateX(-14px);opacity:0}17.75%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f1{animation:f1 8s ease-out infinite}
+@keyframes f2{0%{transform:translateX(-14px);opacity:0}16.75%{transform:translateX(-14px);opacity:0}19.875%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f2{animation:f2 8s ease-out infinite}
+@keyframes f3{0%{transform:translateX(-14px);opacity:0}18.875%{transform:translateX(-14px);opacity:0}22%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f3{animation:f3 8s ease-out infinite}
+@keyframes f4{0%{transform:translateX(-14px);opacity:0}21%{transform:translateX(-14px);opacity:0}24.125%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f4{animation:f4 8s ease-out infinite}
+@keyframes f5{0%{transform:translateX(-14px);opacity:0}23.125%{transform:translateX(-14px);opacity:0}26.25%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f5{animation:f5 8s ease-out infinite}
+@keyframes f6{0%{transform:translateX(-14px);opacity:0}25.25%{transform:translateX(-14px);opacity:0}28.375%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f6{animation:f6 8s ease-out infinite}
+@keyframes f7{0%{transform:translateX(-14px);opacity:0}27.375%{transform:translateX(-14px);opacity:0}30.5%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f7{animation:f7 8s ease-out infinite}
+@keyframes f8{0%{transform:translateX(-14px);opacity:0}29.5%{transform:translateX(-14px);opacity:0}32.625%{transform:translateX(0);opacity:1}92.5%{transform:translateX(0);opacity:1}97.5%{transform:translateX(0);opacity:0}100%{transform:translateX(-14px);opacity:0}}
+.f8{animation:f8 8s ease-out infinite}
+@keyframes card{0%{transform:translateY(14px);opacity:0}37.5%{transform:translateY(14px);opacity:0}43.125%{transform:translateY(0);opacity:1}92.5%{transform:translateY(0);opacity:1}97.5%{transform:translateY(0);opacity:0}100%{transform:translateY(14px);opacity:0}}
+.card{animation:card 8s ease-out infinite}
+@keyframes arw{0%{opacity:0}32.5%{opacity:0}37.5%{opacity:1}92.5%{opacity:1}97.5%{opacity:0}100%{opacity:0}}
+.arw{animation:arw 8s linear infinite}
+@keyframes dp0{0%{opacity:0}43.75%{opacity:0}46.25%{opacity:1}92.5%{opacity:1}97.5%{opacity:0}100%{opacity:0}}
+.dp0{animation:dp0 8s linear infinite}
+@keyframes dp1{0%{opacity:0}45.625%{opacity:0}48.125%{opacity:1}92.5%{opacity:1}97.5%{opacity:0}100%{opacity:0}}
+.dp1{animation:dp1 8s linear infinite}
+@keyframes dp2{0%{opacity:0}47.5%{opacity:0}50%{opacity:1}92.5%{opacity:1}97.5%{opacity:0}100%{opacity:0}}
+.dp2{animation:dp2 8s linear infinite}
+@keyframes dp3{0%{opacity:0}49.375%{opacity:0}51.875%{opacity:1}92.5%{opacity:1}97.5%{opacity:0}100%{opacity:0}}
+.dp3{animation:dp3 8s linear infinite}
+@keyframes sel{0%{opacity:0}55%{opacity:0}58.75%{opacity:1}66.25%{opacity:0.4}73.75%{opacity:1}92.5%{opacity:1}97.5%{opacity:0}100%{opacity:0}}
+.sel{animation:sel 8s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B1018"/><stop offset="1" stop-color="#131C2A"/></linearGradient><filter id="sv-blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter>
+<linearGradient id="jk-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2A0F55"/><stop offset="0.6" stop-color="#9B2A8A"/><stop offset="1" stop-color="#FF7A59"/></linearGradient>
+<linearGradient id="jk-sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE27A"/><stop offset="1" stop-color="#FF4F9A"/></linearGradient></defs>
+<rect x="0.5" y="0.5" width="959" height="359" rx="20" fill="url(#bg)" stroke="#223044"/>
+<text x="44" y="70" font-size="20" fill="#E8EEF6" font-weight="700"><tspan x="44">保存</tspan></text>
+<text x="44" y="98" font-size="13" fill="#93A1B3"><tspan x="44">曲フォルダに、NX が</tspan><tspan x="44" dy="20.8">そのまま読める形で</tspan></text>
+<rect class="kgs" x="38" y="142" width="152" height="54" rx="12" fill="#4CC2FF" fill-opacity="0.28" filter="url(#sv-blur)"/>
+<g transform="translate(44 148)"><rect y="3.5" width="70" height="40" rx="7" fill="#04070B"/><g class="kps"><rect width="70" height="40" rx="7" fill="#1E2A3C" stroke="#41536E"/><rect x="1.5" y="1.5" width="67" height="20" rx="6" fill="#fff" fill-opacity="0.05"/><text x="35" y="25.55" font-size="15" fill="#DCE7F3" font-weight="700" text-anchor="middle" class="mono"><tspan x="35">Ctrl</tspan></text></g></g><text x="127" y="175" font-size="16" fill="#93A1B3" text-anchor="middle"><tspan x="127">+</tspan></text><g transform="translate(140 148)"><rect y="3.5" width="44" height="40" rx="7" fill="#04070B"/><g class="kps"><rect width="44" height="40" rx="7" fill="#1E2A3C" stroke="#41536E"/><rect x="1.5" y="1.5" width="41" height="20" rx="6" fill="#fff" fill-opacity="0.05"/><text x="22" y="25.55" font-size="15" fill="#DCE7F3" font-weight="700" text-anchor="middle" class="mono"><tspan x="22">S</tspan></text></g></g>
+<text x="44" y="236" font-size="12" fill="#5E6B7C"><tspan x="44">Shift_JIS・CRLF</tspan><tspan x="44" dy="19.8">Chrome・Edge は曲フォルダへ</tspan><tspan x="44" dy="19.8">じかに、ほかは ZIP で</tspan></text>
+<rect x="236" y="30" width="330" height="300" rx="14" fill="#0F1622" stroke="#1E2A3B"/>
+<g transform="translate(254 44)"><path d="M0 5 a3 3 0 0 1 3 -3 h9 l3.5 3.5 h15 a3 3 0 0 1 3 3 v13 a3 3 0 0 1 -3 3 h-27.5 a3 3 0 0 1 -3 -3 z" fill="#FFB547" fill-opacity="0.9"/></g>
+<text x="296" y="62" font-size="13.5" fill="#E8EEF6" font-weight="700" class="mono"><tspan x="296">DTXFiles / Neon Skyline</tspan></text>
+<g class="f0"><rect x="266" y="84" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="95" r="3" fill="#93A1B3"/><text x="290" y="99.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">set.def</tspan></text><text x="540" y="99.5" font-size="11" fill="#5E6B7C" text-anchor="end"><tspan x="540">難易度の一覧</tspan></text></g><g class="f1"><rect x="266" y="110" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="121" r="3" fill="#C77DFF"/><text x="290" y="125.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">mstr.dtx</tspan></text><text x="540" y="125.5" font-size="11" fill="#C77DFF" text-anchor="end"><tspan x="540">MASTER</tspan></text></g><g class="f2"><rect x="266" y="136" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="147" r="3" fill="#FF6B6B"/><text x="290" y="151.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">ext.dtx</tspan></text><text x="540" y="151.5" font-size="11" fill="#FF6B6B" text-anchor="end"><tspan x="540">EXTREME</tspan></text></g><g class="f3"><rect x="266" y="162" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="173" r="3" fill="#FFB547"/><text x="290" y="177.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">adv.dtx</tspan></text><text x="540" y="177.5" font-size="11" fill="#FFB547" text-anchor="end"><tspan x="540">ADVANCED</tspan></text></g><g class="f4"><rect x="266" y="188" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="199" r="3" fill="#4CC2FF"/><text x="290" y="203.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">bsc.dtx</tspan></text><text x="540" y="203.5" font-size="11" fill="#4CC2FF" text-anchor="end"><tspan x="540">BASIC</tspan></text></g><g class="f5"><rect x="266" y="214" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="225" r="3" fill="#93A1B3"/><text x="290" y="229.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">bgm.ogg</tspan></text><text x="540" y="229.5" font-size="11" fill="#5E6B7C" text-anchor="end"><tspan x="540">原曲</tspan></text></g><g class="f6"><rect x="266" y="240" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="251" r="3" fill="#93A1B3"/><text x="290" y="255.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">preview.ogg</tspan></text><text x="540" y="255.5" font-size="11" fill="#5E6B7C" text-anchor="end"><tspan x="540">選曲の試聴</tspan></text></g><g class="f7"><rect x="266" y="266" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="277" r="3" fill="#93A1B3"/><text x="290" y="281.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">jacket.png</tspan></text><text x="540" y="281.5" font-size="11" fill="#5E6B7C" text-anchor="end"><tspan x="540">ジャケット</tspan></text></g><g class="f8"><rect x="266" y="292" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="278" cy="303" r="3" fill="#93A1B3"/><text x="290" y="307.5" font-size="12" fill="#E8EEF6" class="mono"><tspan x="290">dtxweb_rock_*.wav</tspan></text><text x="540" y="307.5" font-size="11" fill="#5E6B7C" text-anchor="end"><tspan x="540">使った音だけ</tspan></text></g>
+<g class="arw"><path d="M580 180 H602" stroke="#4CC2FF" stroke-width="2.4"/><path d="M596 173 L608 180 L596 187 Z" fill="#4CC2FF"/></g>
+<g class="card"><rect x="612" y="48" width="320" height="270" rx="16" fill="#120C22" stroke="#3A2F55"/>
+<text x="630" y="76" font-size="13" fill="#D9C9FF" font-weight="700" letter-spacing="0.5"><tspan x="630">DTXManiaNX</tspan></text><text x="914" y="76" font-size="11" fill="#5E6B7C" text-anchor="end"><tspan x="914">曲を選ぶ</tspan></text>
+<g transform="translate(630 92)"><rect width="84" height="84" rx="8" fill="url(#jk-sky)"/><circle cx="42" cy="54" r="20" fill="url(#jk-sun)"/>
+<rect x="0" y="60" width="10" height="24" fill="#140A2A"/><rect x="12" y="50" width="9" height="34" fill="#140A2A"/><rect x="23" y="64" width="11" height="20" fill="#140A2A"/><rect x="36" y="46" width="8" height="38" fill="#140A2A"/><rect x="46" y="58" width="12" height="26" fill="#140A2A"/><rect x="60" y="52" width="9" height="32" fill="#140A2A"/><rect x="71" y="62" width="13" height="22" fill="#140A2A"/>
+<rect y="74" width="84" height="10" fill="#0A0518"/><path d="M0 76 H84" stroke="#FF5CA8" stroke-opacity="0.8"/><text x="42" y="20" font-size="11" fill="#FFE3F6" font-weight="700" text-anchor="middle" letter-spacing="1.5"><tspan x="42">NEON</tspan></text><text x="42" y="31" font-size="7.5" fill="#BFE8FF" font-weight="700" text-anchor="middle" letter-spacing="1.2"><tspan x="42">SKYLINE</tspan></text></g>
+<text x="728" y="116" font-size="18" fill="#E8EEF6" font-weight="700"><tspan x="728">Neon Skyline</tspan></text><text x="728" y="138" font-size="11.5" fill="#93A1B3"><tspan x="728">DTX Web Editor demo</tspan></text><text x="728" y="160" font-size="11.5" fill="#5E6B7C" class="mono"><tspan x="728">172 BPM</tspan></text>
+<g class="dp0"><rect x="630" y="196" width="284" height="23" rx="6" fill="#4CC2FF" fill-opacity="0.1" stroke="#4CC2FF" stroke-opacity="0.45"/><text x="642" y="212" font-size="12" fill="#4CC2FF" font-weight="700"><tspan x="642">BASIC</tspan></text><text x="902" y="212.5" font-size="13" fill="#E8EEF6" font-weight="700" text-anchor="end" class="mono"><tspan x="902">5.17</tspan></text></g><g class="dp1"><rect x="630" y="224" width="284" height="23" rx="6" fill="#FFB547" fill-opacity="0.1" stroke="#FFB547" stroke-opacity="0.45"/><text x="642" y="240" font-size="12" fill="#FFB547" font-weight="700"><tspan x="642">ADVANCED</tspan></text><text x="902" y="240.5" font-size="13" fill="#E8EEF6" font-weight="700" text-anchor="end" class="mono"><tspan x="902">5.70</tspan></text></g><g class="dp2"><rect x="630" y="252" width="284" height="23" rx="6" fill="#FF6B6B" fill-opacity="0.1" stroke="#FF6B6B" stroke-opacity="0.45"/><text x="642" y="268" font-size="12" fill="#FF6B6B" font-weight="700"><tspan x="642">EXTREME</tspan></text><text x="902" y="268.5" font-size="13" fill="#E8EEF6" font-weight="700" text-anchor="end" class="mono"><tspan x="902">6.19</tspan></text></g><g class="dp3"><rect x="630" y="280" width="284" height="23" rx="6" fill="#C77DFF" fill-opacity="0.1" stroke="#C77DFF" stroke-opacity="0.45"/><text x="642" y="296" font-size="12" fill="#C77DFF" font-weight="700"><tspan x="642">MASTER</tspan></text><text x="902" y="296.5" font-size="13" fill="#E8EEF6" font-weight="700" text-anchor="end" class="mono"><tspan x="902">7.45</tspan></text></g>
+<rect class="sel" x="628" y="278" width="288" height="27" rx="7" fill="none" stroke="#fff" stroke-width="2"/>
+</g>
+
+</svg>

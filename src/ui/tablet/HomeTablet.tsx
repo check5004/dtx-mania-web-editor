@@ -17,6 +17,7 @@ import { SafariNotice } from '../SafariNotice';
 import { openFilesPicker } from './shared';
 import { InstallCard, useInstallHint } from '../pwa/InstallCard';
 import { usePwa } from '../../store/pwa';
+import { LogoMark } from '../LogoMark';
 
 const TIPS_KEY = 'dtxe.ipadTips.closed';
 
@@ -85,7 +86,7 @@ export function HomeTablet() {
     <div className="home th-home">
       <header className="th-top">
         <span className="logo">
-          <span className="logo-mark">D</span>
+          <LogoMark />
           DTX Web Editor
         </span>
         <span className="grow" />
