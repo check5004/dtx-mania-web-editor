@@ -35,6 +35,7 @@ import { setPreset, toggleVelMode, useVel, velPresetNames } from '../../store/ve
 import { useInputSettings } from '../../input/settings';
 import { ChartCanvas, tabletLaneW, zoomChart } from '../ChartCanvas';
 import { ContextMenuHost } from '../ContextMenu';
+import { SpecialPopoverHost } from '../SpecialUi';
 import { promptDialog } from '../dialogs';
 import { FindPanel } from '../FindPanel';
 import { chipBpmLabel, formatLevel, formatTime, meterLabel } from '../format';
@@ -775,6 +776,7 @@ export function TabletEditor({ folderInput }: { folderInput: React.RefObject<HTM
       {portrait && <SheetT />}
       <Drawer folderInput={folderInput} />
       <ContextMenuHost />
+      <SpecialPopoverHost />
       <SaveSheet />
       {previewMode === 'full' && (
         <div className="nx-overlay">

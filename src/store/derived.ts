@@ -6,6 +6,7 @@ import { bgaChannel, CH, drumChannel, isSeChannel, type Chip, type ChipKind, typ
 import { rimWavs } from '../dtx/rim';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { findFile, type SongFolder } from '../fs/folder';
+import { specialLayout } from './specialLayout';
 
 let lastTempo: { barLengths: object; fields: object; sig: string; map: TempoMap } | null = null;
 const tempoCache = new WeakMap<DtxDoc, TempoMap>();
@@ -35,6 +36,15 @@ export const COL_BPM = -1;
 export const COL_BGM = -2;
 /** BGA・動画の列 */
 export const COL_BGA = -3;
+/** 特殊ノーツ（クラップなど）の列。種類ごとに左から COL_SP0、COL_SP0 - 1、… */
+export const COL_SP0 = -10;
+
+/** 特殊ノーツの i 番目の種類の列 */
+export const spCol = (i: number): number => COL_SP0 - i;
+/** 特殊ノーツの列か */
+export const isSpCol = (col: number): boolean => col <= COL_SP0;
+/** 特殊ノーツの列の、種類の並びの番号 */
+export const spIndex = (col: number): number => COL_SP0 - col;
 
 export interface ChipView {
   c: Chip;
@@ -43,19 +53,38 @@ export interface ChipView {
   kind: ChipKind;
   /** 2種目（HHオープン・左バスドラム・スネアのリム） */
   alt: boolean;
+  /** 特殊ノーツの種類の id（クラップなど。分けて見せないときは無し） */
+  sp?: string;
+  /** 自動で鳴らす特殊ノーツ（SE のチップ。叩かない） */
+  auto?: boolean;
 }
 
-const viewCache = new WeakMap<DtxDoc, ChipView[]>();
+const viewCache = new WeakMap<DtxDoc, { key: string; v: ChipView[] }>();
 
+/**
+ * 表示用のチップの一覧（拍の順）。特殊ノーツは、種類ごとの列に分けるときはその列（COL_SP0 から）、
+ * 行き先のレーンに重ねるときはチップのレーン（自動で鳴らすチップは BGM・SE の列）
+ */
 export function chipViews(doc: DtxDoc): ChipView[] {
-  let v = viewCache.get(doc);
-  if (v) return v;
+  const lay = specialLayout(doc);
+  const hit = viewCache.get(doc);
+  if (hit && hit.key === lay.key) return hit.v;
   const t = tempoOf(doc);
   // スネアのリムは、チャンネルはスネアのまま音で見分ける（2種目として描く）
   const rims = rimWavs(doc);
-  v = [];
+  const v: ChipView[] = [];
   for (const c of doc.chips) {
     const d = drumChannel(c.ch);
+    if (lay.on) {
+      const se = isSeChannel(c.ch);
+      const kind = (d && d.kind === 'normal') || se ? lay.wav.get(c.v) : undefined;
+      const ci = kind === undefined ? undefined : lay.col.get(kind);
+      if (ci !== undefined) {
+        const col = lay.cols ? spCol(ci) : d ? d.lane : COL_BGM;
+        v.push({ c, beat: t.beatOf(c.m, c.f), col, kind: 'normal', alt: false, sp: kind, auto: se || undefined });
+        continue;
+      }
+    }
     let col: number;
     if (d) col = d.lane;
     else if (c.ch === CH.BPM || c.ch === CH.BPM_EX) col = COL_BPM;
@@ -65,7 +94,7 @@ export function chipViews(doc: DtxDoc): ChipView[] {
     v.push({ c, beat: t.beatOf(c.m, c.f), col, kind: d?.kind ?? 'normal', alt: d ? d.alt || (d.base === CH.SD && rims.has(c.v)) : false });
   }
   v.sort((a, b) => a.beat - b.beat);
-  viewCache.set(doc, v);
+  viewCache.set(doc, { key: lay.key, v });
   return v;
 }
 

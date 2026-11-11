@@ -10,6 +10,8 @@ import { localPlace, useLocalSongs } from '../store/localSongs';
 import { DriveFooterChip } from './DriveUi';
 import { songEndM, useSongLength, useSongSpan, useSoundsVersion } from './hooks';
 import { TrackPanel, useTrackRows } from './Tracks';
+import { useSidecar } from '../store/sidecar';
+import { openSpecialSettings, specialCount } from '../store/special';
 
 /** 下のトラック（原曲・ステム・譜面の音。上の帯はループとセクション）と状態の表示 */
 export function Footer() {
@@ -26,6 +28,9 @@ export function Footer() {
   const anchor = stemsActive() ? bgmSource(doc)?.wav : undefined;
   const missing = missingAll.filter((n) => n !== anchor);
   const stats = docStats(doc);
+  // 特殊ノーツ（クラップなど）の数。分け方は作業ファイルの決めで変わる
+  useSidecar((s) => s.special);
+  const spCount = specialCount(doc);
   const length = useSongLength(doc);
   const span = useSongSpan(doc);
   // 上の境目の止まる高さ（細く・標準・ゆったり）はトラックの数で決まる
@@ -58,6 +63,11 @@ export function Footer() {
         <span>
           WAV <b>{stats.wavCount}</b>
         </span>
+        {spCount > 0 && (
+          <button className="status-link" onClick={openSpecialSettings} title={tr('特殊ノーツ（クラップなど）の設定を開く', 'Open the special note (claps etc.) settings')}>
+            {tr('特殊ノーツ', 'Special notes')} <b>{spCount.toLocaleString(locale())}</b>
+          </button>
+        )}
         <span>
           {tr('長さ', 'Length')} <b>{formatTime(length, false)}</b>
         </span>

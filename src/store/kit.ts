@@ -6,7 +6,9 @@ import { builtinFile, builtinKitById, KIT_LANES, laneByKey, virtualSound, type K
 import { toBase36x2 } from '../dtx/base36';
 import { drumChannel, SD_RIM } from '../dtx/model';
 import { chipVoice, rimWavsOf } from '../dtx/rim';
+import { kindLabel, specialWavsOf, voiceKind } from '../dtx/kinds';
 import { addWav } from '../edit/rim';
+import { setFieldComment } from '../edit/ops';
 import { pruneUnusedCreated, velOfWav, wavVariant } from '../edit/velocity';
 import { edit, prepareSounds, setKitFileProvider, useEditor } from './editor';
 import { useLibrary } from './library';
@@ -102,8 +104,9 @@ export function applyKitToChips(kitId = useKit.getState().kitId): number {
     // どのチップがリムかは、替える前の音で決める（替えたあともリムの音にする）
     const voices = new Map<number, number>();
     const rims = rimWavsOf(d);
+    const sp = specialWavsOf(d);
     for (const c of d.chips) {
-      const v = chipVoice(d, c, rims);
+      const v = chipVoice(d, c, rims, sp);
       if (v !== null) voices.set(c.id, v);
     }
     const baseNo = new Map<number, number>();
@@ -120,6 +123,10 @@ export function applyKitToChips(kitId = useKit.getState().kitId): number {
       if (no === null) {
         no = addWav(d, file, rim);
         if (no === null) return null;
+        // 特殊ノーツ（クラップなど）の音は種類のラベルを付ける（ファイル名で分からない音でも、その種類のままにする）
+        const kind = voiceKind(voice);
+        const label = kind ? kindLabel(kind) : null;
+        if (label) setFieldComment(d, 'WAV' + toBase36x2(no), label);
       }
       baseNo.set(voice, no);
       laneWav[voice] = no;

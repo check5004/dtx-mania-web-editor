@@ -3,7 +3,7 @@ import { tr } from '../i18n';
 import { create } from 'zustand';
 import { sameMeasures } from '../assist/similar';
 import { drumChannel, DRUM_LANES, type Chip, type DtxDoc } from '../dtx/model';
-import { chipVel, clampVel, opSetVelocity, velOfWav } from '../edit/velocity';
+import { chipVel, clampVel, opSetVelocity, velChannel, velOfWav } from '../edit/velocity';
 import { useInputSettings } from '../input/settings';
 import { useAssist } from './assist';
 import { bgmSource, chipViews, tempoOf } from './derived';
@@ -108,7 +108,7 @@ export function applyVel(label: string, ids: readonly number[], fn: (cur: number
   const s = useEditor.getState();
   const step = velStep();
   const idSet = new Set(ids);
-  const chips = s.doc.chips.filter((c) => idSet.has(c.id) && drumChannel(c.ch));
+  const chips = s.doc.chips.filter((c) => idSet.has(c.id) && velChannel(c.ch));
   // 先に新しいベロシティを決めておく（ゆらぎなどで双子のチップも同じ値にするため）
   const next = new Map<number, number>();
   for (const c of chips) {
@@ -150,7 +150,7 @@ export function nudgeSelection(delta: number): boolean {
 export function nudgeVel(ids0: readonly number[], delta: number, group = 'vel-nudge'): boolean {
   const s = useEditor.getState();
   const want = new Set(ids0);
-  const ids = s.doc.chips.filter((c) => want.has(c.id) && drumChannel(c.ch)).map((c) => c.id);
+  const ids = s.doc.chips.filter((c) => want.has(c.id) && velChannel(c.ch)).map((c) => c.id);
   if (ids.length === 0) return false;
   // 1刻みで動かすときは刻みを無視する
   const step = Math.abs(delta) < velStep() ? 1 : velStep();

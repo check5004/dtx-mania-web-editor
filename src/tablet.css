@@ -2022,6 +2022,36 @@ html.tablet .toast-close {
   font-size: 12px;
 }
 
+.ctx-menu.touch .ctx-kinds {
+  gap: 6px;
+}
+
+.ctx-menu.touch .ctx-kind {
+  height: 44px;
+  border-radius: 9px;
+  font-size: 14px;
+  padding: 0 10px;
+}
+
+.ctx-menu.touch .ctx-kind .sp {
+  width: 18px;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.ctx-menu.touch .ctx-kind.add {
+  width: 44px;
+}
+
+.ctx-menu.touch .ctx-kind.add.wide {
+  width: auto;
+}
+
+.ctx-menu.touch .ctx-row-label.wide {
+  width: auto;
+  min-width: 64px;
+}
+
 /* ---- 文字とボタンの大きさ「大きめ」 ---- */
 
 html.t-large .t-pane,

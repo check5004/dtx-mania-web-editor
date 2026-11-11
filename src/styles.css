@@ -1370,6 +1370,19 @@ body.resizing-y * {
   font-family: var(--mono);
 }
 
+.status-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-link:hover {
+  color: var(--text);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -6732,6 +6745,100 @@ button.gen-plan {
   color: #0b0e13;
 }
 
+/* 特殊ノーツ（クラップなど）：種類のボタン・見出しの丸い印・行き先 */
+
+.ctx-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.ctx-kind {
+  --c: var(--mute);
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.ctx-kind:hover:not(:disabled) {
+  background: #222a35;
+  border-color: #3a4554;
+  color: var(--text);
+}
+
+.ctx-kind:disabled {
+  opacity: 0.45;
+}
+
+.ctx-kind .sp {
+  flex: none;
+  width: 14px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--c);
+  border: 1.2px solid rgba(255, 255, 255, 0.9);
+}
+
+.ctx-kind.on {
+  background: color-mix(in srgb, var(--c) 18%, var(--raise));
+  border-color: var(--c);
+  color: var(--text);
+}
+
+.ctx-kind.some {
+  border-color: color-mix(in srgb, var(--c) 60%, var(--line3));
+}
+
+.ctx-kind.add {
+  flex: none;
+  width: 26px;
+  padding: 0;
+  color: var(--accent);
+}
+
+.ctx-kind.add.wide {
+  width: auto;
+  padding: 0 9px;
+}
+
+.ctx-sp-pill {
+  --c: var(--mute);
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--c);
+  border: 1.5px solid rgba(255, 255, 255, 0.92);
+}
+
+.ctx-sp-dest {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+}
+
+.ctx-row-label.wide {
+  width: auto;
+  min-width: 52px;
+}
+
+.ctx-tri.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .ctx-grid-row {
   display: flex;
   align-items: center;
@@ -7207,4 +7314,312 @@ button.drive-pill:hover {
   display: block;
   width: fit-content;
   margin-top: 3px;
+}
+
+/* ---- 特殊ノーツ（ui/SpecialUi）：種類の設定・左のキットの欄 ---- */
+
+.sp-pill {
+  --c: var(--mute);
+  display: inline-block;
+  flex: none;
+  width: 20px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--c);
+  border: 1.5px solid rgba(255, 255, 255, 0.92);
+}
+
+.sp-pill.big {
+  width: 26px;
+  height: 13px;
+  border-radius: 7px;
+}
+
+.sp-pop {
+  position: fixed;
+  z-index: 92;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  background: #151a22;
+  border: 1px solid var(--line3);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.sp-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 10px 10px 14px;
+}
+
+.sp-pop-head .sp-name {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sp-pop-head .sp-code {
+  flex: none;
+  width: 58px;
+  height: 30px;
+  text-align: center;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.sp-name-text {
+  min-width: 0;
+  font-size: 14px;
+}
+
+.sp-code-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-pop-colors {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px 12px;
+}
+
+.sp-lbl {
+  flex: none;
+  width: 40px;
+}
+
+.sp-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 9px;
+  border: 2px solid transparent;
+  flex: none;
+}
+
+.sp-swatch.on {
+  border-color: #fff;
+}
+
+.sp-pop-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid #232a34;
+}
+
+.sp-sec-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.sp-dests {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.sp-dest {
+  --c: var(--mute);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 4px;
+  border-radius: 6px;
+  border: 1px solid #232a34;
+  background: #12161d;
+  color: var(--c);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.sp-dest:hover {
+  border-color: var(--c);
+}
+
+.sp-dest.on {
+  background: var(--c);
+  border-color: var(--c);
+  color: #0b0e13;
+}
+
+.sp-dest.auto {
+  --c: #c9d1dc;
+  width: 100%;
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--text2);
+  border-color: var(--line3);
+}
+
+.sp-dest.auto.on {
+  background: #1a2a36;
+  border-color: #2b4b60;
+  color: var(--accent);
+}
+
+.sp-note {
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.sp-note.warn {
+  color: var(--amber);
+}
+
+.sp-in {
+  gap: 8px;
+  align-items: center;
+}
+
+.sp-key {
+  min-width: 34px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--text);
+  background: #151a21;
+  border-color: #3a4554;
+  cursor: pointer;
+}
+
+.sp-key.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sp-pop-foot {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sp-pop-foot .sub {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 狭いとき（スマホ）とボタンが大きいとき（iPad）は、数を 1 行目、ボタンを 2 行目に */
+.sp-pop.sheet .sp-pop-foot .sub,
+html.tablet .sp-pop-foot .sub {
+  flex: 1 1 100%;
+}
+
+/* 指で押すので大きく（iPad・スマホ） */
+html.tablet .sp-pop .sp-dest,
+html.tablet .sp-pop .sp-key {
+  height: 40px;
+}
+
+html.tablet .sp-pop .field,
+html.tablet .sp-pop .btn.small {
+  height: 36px;
+}
+
+html.tablet .sp-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+}
+
+.sp-pop-foot .sub b {
+  color: var(--text);
+}
+
+.sp-pop.sheet {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-width: none;
+  max-height: calc(100% - 60px - env(safe-area-inset-top));
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  border-radius: 20px 20px 0 0;
+  border-bottom: 0;
+  background: #10141a;
+  font-size: 14px;
+}
+
+.sp-back {
+  z-index: 91;
+}
+
+
+/* 左のキットの欄 */
+
+.sp-kit {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  scroll-margin-top: 8px;
+}
+
+.sp-add {
+  height: 24px;
+  color: var(--accent);
+}
+
+.sp-add-wide {
+  justify-content: flex-start;
+  border-style: dashed;
+}
+
+.sp-card {
+  --c: var(--mute);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--c) 22%, var(--line2));
+}
+
+.sp-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sp-card-head b {
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.sp-card-grid {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 5px 6px;
+  align-items: center;
+}
+
+.sp-card-grid .field {
+  height: 26px;
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.sp-card-note {
+  font-size: 10.5px;
+  line-height: 1.5;
 }

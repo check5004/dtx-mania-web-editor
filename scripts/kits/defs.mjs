@@ -21,6 +21,13 @@
 export const LANE_LEN = { lc: 3.2, hhc: 0.6, hho: 1.6, lp: 0.6, lbd: 0.9, sd: 1.0, rim: 0.6, ht: 1.5, bd: 0.9, lt: 1.6, ft: 1.8, cy: 3.2, rd: 2.6 };
 export const LANES = Object.keys(LANE_LEN);
 
+/**
+ * 特殊ノーツ（クラップ・タンバリン・カウベル・シェイカー。NX にレーンの無い音）の長さの上限（秒）。
+ * 作るのは special を書いたキットだけ。ほかのキットは src/audio/sounds.ts の SPECIAL_FROM のキットの音を借りる
+ */
+export const SP_LEN = { clap: 0.9, tamb: 1.0, cowbell: 0.9, shaker: 0.6 };
+export const SP_LANES = Object.keys(SP_LEN);
+
 // ---- 音源（どれも CC0。GeneralUser GS だけは独自の許諾で、前の版から使っているもの） ----
 const BR = 'karoryfer.big-rusty-drums/Programs/01-full.sfz';
 const UR = 'karoryfer.unruly-drums/Programs/01-kit-sticks.sfz';
@@ -42,6 +49,12 @@ function guKit(program, vel, notes = {}) {
   return Object.fromEntries(LANES.map((l) => [l, { sf2: GU, program, note: gm[l], vel }]));
 }
 
+/** GeneralUser GS のドラムセットの特殊ノーツ（GM の 39 Hand Clap・54 Tambourine・56 Cowbell・70 Maracas） */
+function guSpecial(program, vel) {
+  const gm = { clap: 39, tamb: 54, cowbell: 56, shaker: 70 };
+  return Object.fromEntries(SP_LANES.map((l) => [l, { sf2: GU, program, note: gm[l], vel }]));
+}
+
 const br = sfz(BR);
 const ur = sfz(UR);
 const vd = sfz(VD);
@@ -60,13 +73,14 @@ const HALL = ['verb', { size: 0.86, damp: 0.35, predelay: 0.02, wet: 0.32, dry: 
 export const KITS = [
   // ---- 前の版から（GeneralUser GS） ----
   // keepLevel: 前の版と同じ作り方（音量をそろえず、ピークを -1 dB にするだけ）
-  { id: 'std', keepLevel: true, lanes: guKit(0, 112) },
-  { id: 'rock', keepLevel: true, lanes: guKit(16, 116) },
-  { id: 'room', keepLevel: true, lanes: guKit(8, 112) },
-  { id: 'jazz', keepLevel: true, lanes: guKit(40, 104) },
+  // special: 特殊ノーツの音（このキットの音を持つのは、この6キットだけ）
+  { id: 'std', keepLevel: true, lanes: guKit(0, 112), special: guSpecial(0, 112) },
+  { id: 'rock', keepLevel: true, lanes: guKit(16, 116), special: guSpecial(16, 116) },
+  { id: 'room', keepLevel: true, lanes: guKit(8, 112), special: guSpecial(8, 112) },
+  { id: 'jazz', keepLevel: true, lanes: guKit(40, 104), special: guSpecial(40, 104) },
   // 808/909 は左右のシンバルが同じ音（TR-808 Cymbal）なので、右は少し高くして聞き分けられるようにする
-  { id: 'elec', keepLevel: true, lanes: { ...guKit(25, 112), cy: { sf2: GU, program: 25, note: 57, vel: 112, pitch: 3 } } },
-  { id: 'metal', keepLevel: true, lanes: guKit(16, 120, { cy: 52, lbd: 35, bd: 35 }) },
+  { id: 'elec', keepLevel: true, lanes: { ...guKit(25, 112), cy: { sf2: GU, program: 25, note: 57, vel: 112, pitch: 3 } }, special: guSpecial(25, 112) },
+  { id: 'metal', keepLevel: true, lanes: guKit(16, 120, { cy: 52, lbd: 35, bd: 35 }), special: guSpecial(16, 120) },
 
   // ---- ロック（Big Rusty Drums: 24 インチのキック・14 インチのスネア・14/15/18/22 インチのタム） ----
   {

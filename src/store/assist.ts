@@ -519,9 +519,13 @@ export function applySimilar(targets?: number[]): number {
   let n = 0;
   applyingSimilar = true;
   try {
-    const ok = edit(tr(`似た小節 ${to.length} 個にまとめて反映`, `Apply to ${to.length} similar ${pl(to.length, 'measure')}`), (d) => {
-      n = copyMeasureInto(d, pin.base, to);
-    });
+    const ok = edit(
+      tr(`似た小節 ${to.length} 個にまとめて反映`, `Apply to ${to.length} similar ${pl(to.length, 'measure')}`),
+      (d) => {
+        n = copyMeasureInto(d, pin.base, to);
+      },
+      { replace: true },
+    );
     // 写した先は自動で入れた小節として覚える（直した元の小節は作者のもの）
     if (ok) markAuto(useEditor.getState().doc, to.filter((m) => m !== pin.base));
   } finally {

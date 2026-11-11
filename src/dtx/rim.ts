@@ -5,9 +5,10 @@
 // リムの音か: #WAV のラベル（「;」の後ろ。DTXCreator のラベル）があればラベルで、無ければファイル名で決める。
 // 楯さんのテンプレートは「#WAV0W: 038_Snare_rimclick.ogg ;Snare Rim」。エディタがリムの音を登録するときも
 // ラベル「Snare Rim」を付ける（ファイル名にリムと無い音でも、読み直したときにリムと分かるように）。
-import { CH, drumChannel, SD_RIM, voiceName, type Chip, type DtxDoc } from './model';
+import { CH, drumChannel, isSeChannel, SD_RIM, voiceName, type Chip, type DtxDoc } from './model';
 import { tr } from '../i18n';
 import { toBase36x2 } from './base36';
+import { kindVoice, specialWavs } from './kinds';
 
 /** エディタがリムの音に付けるラベル */
 export const RIM_LABEL = 'Snare Rim';
@@ -95,9 +96,22 @@ export function chipAlt(doc: Pick<DtxDoc, 'header' | 'fields'>, c: Pick<Chip, 'c
   return d.alt || (d.base === CH.SD && rims.has(c.v));
 }
 
-/** チップの音の番号（キット・置く音の表のキー。リムは SD_RIM、ほかは通常チップのチャンネル）。ドラムでなければ null */
-export function chipVoice(doc: Pick<DtxDoc, 'header' | 'fields'>, c: Pick<Chip, 'ch' | 'v'>, rims: ReadonlySet<number> = rimWavs(doc)): number | null {
+/**
+ * チップの音の番号（キット・置く音の表のキー。リムは SD_RIM、特殊ノーツ（クラップなど）はその種類の番号、ほかは通常チップのチャンネル）。
+ * 特殊ノーツは SE（自動で鳴らす）のチップも数える。ドラムでも特殊ノーツでもなければ null。sp は特殊ノーツの音（dtx/kinds）
+ */
+export function chipVoice(
+  doc: Pick<DtxDoc, 'header' | 'fields'>,
+  c: Pick<Chip, 'ch' | 'v'>,
+  rims: ReadonlySet<number> = rimWavs(doc),
+  sp: ReadonlyMap<number, string> = specialWavs(doc),
+): number | null {
   const d = drumChannel(c.ch);
+  const kind = sp.get(c.v);
+  if (kind !== undefined && (d || isSeChannel(c.ch))) {
+    const v = kindVoice(kind);
+    if (v !== null) return v;
+  }
   if (!d) return null;
   return d.base === CH.SD && rims.has(c.v) ? SD_RIM : d.base;
 }

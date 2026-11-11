@@ -2,8 +2,8 @@
 import { create } from 'zustand';
 import type { Pos } from '../edit/ops';
 
-/** 何もない所の列 */
-export type SpaceCol = 'lane' | 'bgm' | 'bpm' | 'bga' | 'audio';
+/** 何もない所の列（sp は特殊ノーツの列） */
+export type SpaceCol = 'lane' | 'sp' | 'bgm' | 'bpm' | 'bga' | 'audio';
 
 export type CtxTarget =
   /** チップ（選んでいるチップを右クリックしたら選んでいるもの全部）。anchor は右クリックしたチップ */
@@ -12,7 +12,7 @@ export type CtxTarget =
    * 何もない所（レーン・BGM・BPM・BGA・原曲の列）。pos はグリッドに吸着した位置、beat はその拍。
    * レーンなら lane（DRUM_LANES の番号）と alt（Shift を押していた＝HHオープン・左バスドラム）
    */
-  | { kind: 'space'; pos: Pos; beat: number; col: SpaceCol; lane?: number; alt?: boolean }
+  | { kind: 'space'; pos: Pos; beat: number; col: SpaceCol; lane?: number; alt?: boolean; sp?: string }
   /** 小節番号・✨ の列 */
   | { kind: 'measure'; m: number }
   /** ループの帯（譜面の左端・全体図・下の帯） */

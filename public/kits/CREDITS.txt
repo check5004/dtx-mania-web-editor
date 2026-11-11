@@ -19,6 +19,8 @@ trimmed, level-matched, and for some kits processed with reverb, gate, saturatio
   License: GeneralUser GS License v2.0 (LICENSE-GeneralUser-GS.txt)
   https://www.schristiancollins.com/generaluser.php
   Kits: std, room, rock, metal, jazz, elec, dance, eighties
+  特殊ノーツの音（clap・tamb・cowbell・shaker）も。ほかのキットは std か elec の音を使います。
+  Also the special-note sounds (clap, tamb, cowbell, shaker); other kits use those of std or elec.
 
 [bigrusty] Big Rusty Drums - Karoryfer Samples
   License: CC0 1.0 Universal

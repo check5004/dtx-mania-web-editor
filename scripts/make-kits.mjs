@@ -2,7 +2,7 @@
 // 使い方: node scripts/make-kits.mjs --src <音源のフォルダ> [--only キット,…] [--lanes レーン,…] [--wav <確かめ用のフォルダ>]
 //   音源のフォルダの中身と取り方は scripts/kits/SOURCES.md（どれも再配布してよいもの）。
 //   --only を書かないと全部のキットを作り直す。前の版の6キット（std など）は GeneralUser GS だけで作れる
-//   --lanes を書くと、その音だけ作る（ほかの音のファイルは変えない）
+//   --lanes を書くと、その音だけ作る（ほかの音のファイルは変えない）。特殊ノーツの音（clap・tamb・cowbell・shaker）は、defs.mjs で special を書いたキットだけ
 //   --wav を書くと、同じ音を 16bit の WAV でも書く（耳や道具で確かめる用。リポジトリには入れない）
 // 出力: public/kits/<キット>/<レーン>.ogg（モノラル・44.1kHz・Vorbis q6。ピークを -1 dB にそろえる）
 // 読むのに ffmpeg を使う（FLAC・WAV など）。
@@ -11,7 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { SoundBankLoader, SpessaSynthProcessor } from 'spessasynth_core';
 import { clearDecodeCache, decodeFile, encodeOgg, encodeWav16, SR } from './kits/audio-io.mjs';
-import { KITS, LANE_LEN, LANES } from './kits/defs.mjs';
+import { KITS, LANE_LEN, LANES, SP_LANES, SP_LEN } from './kits/defs.mjs';
 import { biquad, compress, crush, decay, gate, limit, loudness, mix, peak, resample, reverb, saturate, scale, transient } from './kits/dsp.mjs';
 import { loadSfz, pickRegions, renderHit } from './kits/sfz.mjs';
 import { SYNTH } from './kits/synth.mjs';
@@ -164,6 +164,7 @@ const normalize = (y) => scale(y, 10 ** (-1 / 20) / peak(y));
  */
 function level(s, lane) {
   const target = TARGET[lane];
+  if (target === undefined) return s;
   const L = loudness(s, SR);
   if (L > target + 1.5) return scale(s, 10 ** ((target - L) / 20));
   if (L >= target - 1.5) return s;
@@ -188,13 +189,14 @@ for (const kit of KITS) {
   fs.mkdirSync(dir, { recursive: true });
   if (wavDir) fs.mkdirSync(path.join(wavDir, kit.id), { recursive: true });
   let kitBytes = 0;
-  for (const lane of LANES) {
+  // 特殊ノーツ（クラップなど）は special を書いたキットだけ
+  for (const lane of [...LANES, ...SP_LANES.filter((l) => kit.special?.[l])]) {
     if (onlyLanes && !onlyLanes.has(lane)) continue;
-    const src = kit.lanes[lane] ?? (lane === 'lbd' ? kit.lanes.bd : undefined);
+    const src = kit.lanes[lane] ?? kit.special?.[lane] ?? (lane === 'lbd' ? kit.lanes.bd : undefined);
     if (!src) throw new Error(`${kit.id} に ${lane} の音がありません`);
-    const len = kit.len?.[lane] ?? (lane === 'lbd' ? kit.len?.bd : undefined) ?? LANE_LEN[lane];
+    const len = kit.len?.[lane] ?? (lane === 'lbd' ? kit.len?.bd : undefined) ?? LANE_LEN[lane] ?? SP_LEN[lane];
     // lbd を書かないキットは bd と同じ音（合成の音も bd の作り方で）
-    let y = render(src, kit.lanes[lane] ? lane : 'bd', len + 0.5);
+    let y = render(src, kit.lanes[lane] || kit.special?.[lane] ? lane : 'bd', len + 0.5);
     const fx = [...(kit.fx?.['*'] ?? []), ...(kit.fx?.[lane] ?? [])];
     if (fx.length) y = applyFx(y, fx);
     // 前の版のキット（keepLevel）は前と同じ作り方。ほかは、ペダルのハイハットの踏む前の音を削り、音量をそろえる

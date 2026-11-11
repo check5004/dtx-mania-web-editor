@@ -9,7 +9,7 @@ import { SPEC_F_HI, SPEC_F_LO, specFreq, specPos, type SpectroData } from '../au
 import { sameMeasures } from '../assist/similar';
 import { toMeasure } from '../dtx/base36';
 import { sub, type Frac } from '../dtx/fraction';
-import { bgaChannel, CH, chipColor, DRUM_LANES, drumChannel, type DtxDoc } from '../dtx/model';
+import { bgaChannel, CH, chipColor, DRUM_LANES, drumChannel, voiceColor, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { gridLabel, gridStep, posToBeatFrac, snapToGrid, type Pos } from '../edit/ops';
 import {
@@ -25,7 +25,9 @@ import {
   type AssistState,
   type LoopDrag,
 } from '../store/assist';
-import { bgmSource, COL_BGA, COL_BGM, COL_BPM, chipViews, docStats, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
+import { bgmSource, COL_BGA, COL_BGM, COL_BPM, chipViews, docStats, isSpCol, spCol, spIndex, tempoOf, viewsInRange, wavVel, type ChipView } from '../store/derived';
+import { destCode, destName, specialColumns, specialLayout, useSpecialView, type SpecialKind } from '../store/specialLayout';
+import { openKindSettings, placeSpecial } from '../store/special';
 import {
   autoEndMeasure,
   deleteChips,
@@ -58,7 +60,7 @@ import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
 import { flamModHeld, flamOptions, flamRoles, placeFlam, useFlam, wantFlam } from '../store/flam';
 import { flamSpot } from '../edit/flam';
-import { laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
+import { keyLabel, laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
 import { useFind } from '../store/find';
 import { usePhrase } from '../store/phrase';
 import { doubtKey, setGhostRevealer, useComplete, visibleGhost, type Ghost } from '../store/complete';
@@ -97,6 +99,9 @@ export const GEO = {
   laneW: 40,
   bgmX: 520,
   bgmW: 28,
+  /** 特殊ノーツの列（種類ごと。RD の右、BGM・SE の左）。列が無ければ幅 0 */
+  spX: 520,
+  spW: 0,
   hitsX: 552,
   hitsW: 64,
   waveX: 620,
@@ -129,6 +134,8 @@ const GEN_HIT = 9;
  * 小節番号は押せるボタン（48×44）、チップの当たりは上下 ±11px、ループの A・B は 44px のつまみにする
  */
 let tabletGeo = false;
+/** 特殊ノーツの列に出す種類（左から。列に分けないときは空） */
+let spKinds: SpecialKind[] = [];
 /** スマホの寸法か（tabletGeo も true。小節の列に番号と BPM の札、BPM・BGM の列なし、全体の帯は細い 8） */
 let phoneGeo = false;
 let geoKey = '';
@@ -164,7 +171,8 @@ export function tabletLaneW(w: number): number {
   const bga = bgaVisible() ? bgaW() + 6 : 0;
   const velW = v.mode ? DESK_GEO.velGap + v.lanes.length * DESK_GEO.velW : 0;
   const audio = a.audioCols ? 4 + 40 + 4 + 38 : 0;
-  return Math.floor((w - 54 - 6 - 98 - audio - velW - bga) / 10);
+  const n = specialColumns(useEditor.getState().doc).length;
+  return Math.floor((w - 54 - 6 - 98 - audio - velW - bga - (n ? 4 : 0)) / (10 + n));
 }
 
 function applyGeo(w: number): boolean {
@@ -175,11 +183,16 @@ function applyGeo(w: number): boolean {
   const a = useAssist.getState();
   const v = useVel.getState();
   const bga = bgaVisible() ? bgaW() + 6 : 0;
-  const key = `${tablet}|${phone}|${land}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}`;
+  // 特殊ノーツの列（種類ごと。列に分けないときは無し）
+  const doc = useEditor.getState().doc;
+  const sp = specialColumns(doc);
+  const n = sp.length;
+  const key = `${tablet}|${phone}|${land}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}|${specialLayout(doc).key}|${sp.map((k) => k.id + k.dest + k.color + k.code).join(',')}`;
   if (key === geoKey) return false;
   geoKey = key;
   tabletGeo = tablet;
   phoneGeo = phone;
+  spKinds = sp;
   Object.assign(GEO, DESK_GEO);
   if (phone) {
     // スマホ：小節の列（番号・▶・BPM の札・ループの印）｜レーン×10｜（原曲の打点・横は波形も）｜全体の帯
@@ -192,11 +205,14 @@ function applyGeo(w: number): boolean {
     const hitsW = a.audioCols ? (land ? PHONE_GEO.hitsLand : PHONE_GEO.hits) : 0;
     const waveW = a.audioCols && land ? PHONE_GEO.waveLand : 0;
     const room = w - GEO.miniW - hitsW - waveW - velW - bga;
-    GEO.laneW = Math.max(PHONE_GEO.laneMin, Math.min(PHONE_GEO.laneMax, Math.floor((room - PHONE_GEO.bar) / 10)));
+    const spGap = n ? 3 : 0;
+    GEO.laneW = Math.max(PHONE_GEO.laneMin, Math.min(PHONE_GEO.laneMax, Math.floor((room - PHONE_GEO.bar - spGap) / (10 + n))));
     GEO.bpmX = PHONE_GEO.bar;
     GEO.bpmW = 0;
     GEO.laneX = PHONE_GEO.bar;
-    const x = GEO.laneX + GEO.laneW * 10;
+    GEO.spX = GEO.laneX + GEO.laneW * 10 + spGap;
+    GEO.spW = n ? GEO.laneW : 0;
+    const x = GEO.spX + GEO.spW * n;
     GEO.bgmX = x;
     GEO.bgmW = 0;
     GEO.hitsX = x;
@@ -217,11 +233,14 @@ function applyGeo(w: number): boolean {
     GEO.laneX = 98;
     GEO.miniW = 54;
     const audio = a.audioCols ? 4 + 40 + 4 + 38 : 0;
-    const room = w - GEO.miniW - 6 - GEO.laneX - audio - velW - bga;
-    GEO.laneW = Math.max(22, Math.min(64, Math.floor(room / 10)));
-    let x = GEO.laneX + GEO.laneW * 10;
+    const spGap = n ? 4 : 0;
+    const room = w - GEO.miniW - 6 - GEO.laneX - audio - velW - bga - spGap;
+    GEO.laneW = Math.max(22, Math.min(64, Math.floor(room / (10 + n))));
+    GEO.spX = GEO.laneX + GEO.laneW * 10 + spGap;
+    GEO.spW = n ? GEO.laneW : 0;
+    let x = GEO.spX + GEO.spW * n;
     // 余れば BGM・SE の列を出す（足りなければ出さない。BGM の開始はテンポ合わせの画面でも決められる）
-    const spare = room - GEO.laneW * 10;
+    const spare = room - GEO.laneW * (10 + n);
     GEO.bgmX = spare >= 34 ? x + 4 : x;
     GEO.bgmW = spare >= 34 ? 28 : 0;
     x = GEO.bgmX + GEO.bgmW;
@@ -232,6 +251,14 @@ function applyGeo(w: number): boolean {
     GEO.chipHW = Math.max(8, Math.round((GEO.laneW - 10) / 2));
     GEO.graceHW = Math.max(6, Math.round(GEO.chipHW * 0.7));
     GEO.chipH = 12;
+  } else if (n) {
+    // デスクトップ：RD の右に種類ごとの列（レーンと同じ幅）。BGM・SE から右をその分ずらす
+    GEO.spX = GEO.laneX + GEO.laneW * 10 + 4;
+    GEO.spW = GEO.laneW;
+    const shift = GEO.spW * n + 4;
+    GEO.bgmX += shift;
+    GEO.hitsX += shift;
+    GEO.waveX += shift;
   }
   BASE_W = GEO.bgmX + GEO.bgmW;
   GUT_X = GEO.loopW + GEO.genW;
@@ -291,7 +318,7 @@ function hitLanes(model: boolean): { n: number; w: number; x: (i: number) => num
 
 type Drag =
   /** 押した所（x0・y0 は画面、b0 は譜面の拍）。動かさずに離せば置く、動かせば範囲選択 */
-  | { type: 'pending'; x0: number; y0: number; b0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean; flam?: boolean }
+  | { type: 'pending'; x0: number; y0: number; b0: number; lane: number; alt: boolean; pos: Pos; weak: boolean; bga?: boolean; flam?: boolean; sp?: string }
   /**
    * 範囲選択。押した角は譜面の上の位置（rx0: 譜面の左端からの x、b0: 拍）で持ち、スクロールしても譜面に付いてくる。
    * もう一方の角（x1・y1）はマウス（画面）
@@ -320,6 +347,8 @@ interface Hover {
   lane: number;
   pos: Pos | null;
   alt: boolean;
+  /** 特殊ノーツの列の上（種類の id） */
+  sp?: string;
   /** クリックするとフラムで置く */
   flam?: boolean;
   /** 小節番号の列・波形の上：クリックで再生を始める位置（拍） */
@@ -550,7 +579,7 @@ export function zoomChart(factor: number) {
 
 /** 譜面の中身（チップ・レーン・BPM・BGM・BGA・原曲の列）。「ペンで書く」の指はここではスクロールとピンチだけ */
 function isChartBody(h: Hit): boolean {
-  return h.kind === 'chip' || h.kind === 'lane' || h.kind === 'bpm' || h.kind === 'bgm' || h.kind === 'bga' || h.kind === 'audio';
+  return h.kind === 'chip' || h.kind === 'lane' || h.kind === 'sp' || h.kind === 'bpm' || h.kind === 'bgm' || h.kind === 'bga' || h.kind === 'audio';
 }
 
 /** 再生中に触ったら追従をやめる（今の表示のまま。▶ の追従ボタンで戻る） */
@@ -702,6 +731,25 @@ function placeByTouch(lane: number, alt: boolean, pos: Pos, o: { pen?: boolean; 
   if (o.flam ?? wantFlam(false)) placeFlam(lane, alt, pos, { select: false });
   else placeChips([{ lane, alt, pos }], { select: false, preview: s.previewOnPlace });
   return true;
+}
+
+/** 指・ペンで特殊ノーツを置く（グリッドが狭すぎるときは placeByTouch と同じく拡大を勧める） */
+function placeSpByTouch(sp: string, pos: Pos, o: { pen?: boolean }): boolean {
+  const s = useEditor.getState();
+  const st = gridStep(s.view.div);
+  const gap = (st.n / st.d) * s.view.pxPerBeat;
+  const need = o.pen ? 10 : 22;
+  if (gap < need - 0.01) {
+    toast(
+      tr(`1/${s.view.div} のグリッドは間が狭くて置きにくいので、拡大してから置いてください`, `The 1/${s.view.div} grid is too tight to tap accurately. Zoom in, then place.`),
+      'info',
+      4500,
+      { label: tr('拡大する', 'Zoom in'), run: () => zoomChart(need / gap) },
+    );
+    return false;
+  }
+  if (s.selection.length) useEditor.setState({ selection: [] });
+  return placeSpecial(sp, pos, { preview: s.previewOnPlace }) !== null;
 }
 
 // タブレット版：レーンの何もない所の長押しメニューに「置く」（HHオープン・左バスドラムも）と「フラムで置く」
@@ -867,6 +915,11 @@ export function ChartCanvas() {
       useFlam.subscribe(() => {
         if (l.hover?.pos) l.hover = { ...l.hover, flam: wantFlam(l.mod) };
         l.dirty = true;
+      }),
+      // 特殊ノーツの見せ方（列に分ける・重ねる）
+      useSpecialView.subscribe(() => {
+        l.dirty = true;
+        l.mini = null;
       }),
       // 言語を切り替えたら、譜面に描いた文字も描き直す
       subscribeLang(() => {
@@ -1122,7 +1175,7 @@ export function ChartCanvas() {
       };
       return;
     }
-    if (h.kind === 'lane' || h.kind === 'bgm' || h.kind === 'bpm' || h.kind === 'bga') {
+    if (h.kind === 'lane' || h.kind === 'sp' || h.kind === 'bgm' || h.kind === 'bpm' || h.kind === 'bga') {
       const beat = Math.max(0, g.yToBeat(y));
       const pos = snapToGrid(tempoOf(s.doc), beat, s.view.div);
       l.drag = {
@@ -1137,6 +1190,7 @@ export function ChartCanvas() {
         weak: e.altKey,
         bga: h.kind === 'bga',
         flam: h.kind === 'lane' && wantFlam(flamModHeld(e)),
+        sp: h.kind === 'sp' ? h.sp : undefined,
       };
     }
   };
@@ -1157,6 +1211,9 @@ export function ChartCanvas() {
         const pos = snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div);
         l.mod = flamModHeld(e);
         l.hover = { x, y, lane: h.lane, pos, alt: e.shiftKey, flam: wantFlam(l.mod) };
+      } else if (h && h.kind === 'sp') {
+        const pos = snapToGrid(tempoOf(s.doc), Math.max(0, g.yToBeat(y)), s.view.div);
+        l.hover = { x, y, lane: -1, pos, alt: false, sp: h.sp };
       } else if (h && (h.kind === 'gutter' || h.kind === 'audio')) {
         const tempo = tempoOf(s.doc);
         const p = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
@@ -1191,7 +1248,7 @@ export function ChartCanvas() {
                 ? 'pointer'
                 : h?.kind === 'mini'
                   ? 'ns-resize'
-                  : h?.kind === 'header' && x - g.ox >= GEO.hitsX
+                  : h?.kind === 'header' && (x - g.ox >= GEO.hitsX || spHeaderAt(g, x) !== null)
                     ? 'pointer'
                     : 'default';
       canvasRef.current!.style.cursor = cur;
@@ -1224,7 +1281,7 @@ export function ChartCanvas() {
       if (Math.hypot(x - d.x0, y - d.y0) <= 5) return;
       // 動かした：チップ・レーンの上から押していれば、なぞったチップを消す。それ以外はメニューを出さずに終わる
       const k = d.hit.kind;
-      if (k === 'chip' || k === 'lane' || k === 'bgm' || k === 'bpm' || k === 'bga') {
+      if (k === 'chip' || k === 'lane' || k === 'sp' || k === 'bgm' || k === 'bpm' || k === 'bga') {
         const ids = new Set<number>();
         if (d.hit.kind === 'chip') ids.add(d.hit.view.c.id);
         const h = hitTest(l, g, x, y);
@@ -1281,11 +1338,16 @@ export function ChartCanvas() {
         if (s.selection.length) useEditor.setState({ selection: [] });
         return;
       }
+      if (l.penTool === 'place' && d.sp !== undefined) {
+        placeSpByTouch(d.sp, d.pos, { pen: true });
+        return;
+      }
       if (l.penTool === 'place' && d.lane >= 0) {
         placeByTouch(d.lane, d.alt, d.pos, { pen: true, flam: d.flam });
         return;
       }
-      if (d.lane >= 0 && d.flam) placeFlam(d.lane, d.alt, d.pos, { vel: d.weak ? weakVel() : undefined });
+      if (d.sp !== undefined) placeSpecial(d.sp, d.pos, { vel: d.weak ? weakVel() : undefined, select: true, preview: s.previewOnPlace });
+      else if (d.lane >= 0 && d.flam) placeFlam(d.lane, d.alt, d.pos, { vel: d.weak ? weakVel() : undefined });
       else if (d.lane >= 0) placeChip(d.lane, d.alt, d.pos, d.weak ? weakVel() : undefined);
       else if (d.bga) placeBga(d.pos);
       else useEditor.setState({ selection: [] });
@@ -1367,12 +1429,21 @@ export function ChartCanvas() {
         return;
       }
       case 'lane':
+      case 'sp':
       case 'bgm':
       case 'bpm':
       case 'bga':
       case 'audio': {
         const pos = snapToGrid(tempo, d.beat, s.view.div);
-        open({ kind: 'space', pos, beat: tempo.beatOf(pos.m, pos.f), col: h.kind, lane: h.kind === 'lane' ? h.lane : undefined, alt: h.kind === 'lane' && d.shift });
+        open({
+          kind: 'space',
+          pos,
+          beat: tempo.beatOf(pos.m, pos.f),
+          col: h.kind,
+          lane: h.kind === 'lane' ? h.lane : undefined,
+          alt: h.kind === 'lane' && d.shift,
+          sp: h.kind === 'sp' ? h.sp : undefined,
+        });
         return;
       }
       case 'gutter':
@@ -1442,6 +1513,13 @@ export function ChartCanvas() {
 
   /** 見出しのボタン（原曲の打点の説明・波形とスペクトルの切り替え・帯域だけ聴く）。押したら true */
   const headerButton = (g: Geom, x: number, y: number): boolean => {
+    // 特殊ノーツの列の見出し：種類の設定（行き先・音・キー・MIDI）
+    const spi = spHeaderAt(g, x);
+    if (spi !== null) {
+      const r = canvasRef.current!.getBoundingClientRect();
+      openKindSettings(spKinds[spi].id, r.left + g.ox + GEO.spX + spi * GEO.spW, r.top + GEO.head + 4);
+      return true;
+    }
     const a = useAssist.getState();
     if (!a.audioCols) return false;
     const rx = x - g.ox;
@@ -1721,6 +1799,14 @@ export function ChartCanvas() {
           l.dirty = true;
         }
         break;
+      case 'sp':
+        if (!t.fingerOnly && dev.tool === 'place') {
+          // 置く位置を先に見せる（特殊ノーツの列は吹き出しを使わない）
+          const pos = snapToGrid(tempoOf(s.doc), Math.max(0, t.b0), s.view.div);
+          l.hover = { x, y, lane: -1, pos, alt: false, sp: h.sp };
+          l.dirty = true;
+        }
+        break;
       case 'chip':
         // スマホ：チップから少し置いて動かしたら、吹き出しで置く所を狙う（動かさなければ長押しでメニュー）
         if (phoneGeo && dev.placeMode === 'bubble' && !t.fingerOnly && dev.tool === 'place' && h.view.col >= 0) t.bubble = !stopper;
@@ -1839,7 +1925,7 @@ export function ChartCanvas() {
         const h = t.hit;
         const dev = useDevice.getState();
         // 選ぶ道具（「置く」でも設定で範囲選択にしていれば）：なぞって範囲を選ぶ
-        if (h && (h.kind === 'lane' || h.kind === 'chip') && !t.fingerOnly && (dev.tool === 'select' || dev.oneFinger === 'select')) {
+        if (h && (h.kind === 'lane' || h.kind === 'sp' || h.kind === 'chip') && !t.fingerOnly && (dev.tool === 'select' || dev.oneFinger === 'select')) {
           const s = useEditor.getState();
           const g = geom(l, currentScroll(l), s.view.pxPerBeat);
           l.drag = { type: 'rubber', rx0: p.x0 - g.ox, b0: t.b0, x1: x, y1: y, additive: false, base: [] };
@@ -1910,7 +1996,7 @@ export function ChartCanvas() {
       l.dirty = true;
       return;
     }
-    if (h && (h.kind === 'lane' || h.kind === 'bpm' || h.kind === 'bgm' || h.kind === 'bga')) {
+    if (h && (h.kind === 'lane' || h.kind === 'sp' || h.kind === 'bpm' || h.kind === 'bgm' || h.kind === 'bga')) {
       l.drag = { type: 'rubber', rx0: p.x0 - g.ox, b0: t.b0, x1: x, y1: y, additive: false, base: [] };
       t.mode = 'drag';
       l.dirty = true;
@@ -2028,6 +2114,14 @@ export function ChartCanvas() {
           return;
         }
         placeByTouch(h.lane, false, pos(), {});
+        return;
+      case 'sp':
+        l.lastTap = { t: now, x, y, id: null };
+        if (dev.tool === 'select') {
+          if (s.selection.length) useEditor.setState({ selection: [] });
+          return;
+        }
+        placeSpByTouch(h.sp, pos(), {});
         return;
       case 'bpm':
         if (dev.tool === 'place') void editBpmAt(pos());
@@ -2689,7 +2783,9 @@ type Hit =
   /** 曲の終わり（END）の札 */
   | { kind: 'end' }
   /** タブレット版：小節番号のボタン（押すと小節のメニュー） */
-  | { kind: 'measureBtn'; m: number };
+  | { kind: 'measureBtn'; m: number }
+  /** 特殊ノーツの列の何もない所（種類の id） */
+  | { kind: 'sp'; sp: string };
 
 function colAt(g: Geom, x: number): number | 'gutter' | 'gen' | 'audio' | 'loop' | null {
   const rx = x - g.ox;
@@ -2699,10 +2795,18 @@ function colAt(g: Geom, x: number): number | 'gutter' | 'gen' | 'audio' | 'loop'
   if (rx < GEO.bpmX) return 'gutter';
   if (rx < GEO.laneX) return COL_BPM;
   if (rx < GEO.laneX + GEO.laneW * 10) return laneAt(Math.floor((rx - GEO.laneX) / GEO.laneW)) ?? null;
+  if (spKinds.length && rx >= GEO.spX && rx < GEO.spX + GEO.spW * spKinds.length) return spCol(Math.floor((rx - GEO.spX) / GEO.spW));
   if (rx >= GEO.bgmX - 2 && rx < GEO.bgmX + GEO.bgmW) return COL_BGM;
   if (bgaVisible() && rx >= bgaX() && rx < bgaX() + bgaW()) return COL_BGA;
   if (useAssist.getState().audioCols && rx >= GEO.hitsX && rx < fullW()) return 'audio';
   return null;
+}
+
+/** 特殊ノーツの列の見出しの上なら、その種類の並びの番号 */
+function spHeaderAt(g: Geom, x: number): number | null {
+  const rx = x - g.ox;
+  if (!spKinds.length || rx < GEO.spX || rx >= GEO.spX + GEO.spW * spKinds.length) return null;
+  return Math.floor((rx - GEO.spX) / GEO.spW);
 }
 
 /** セクション名の札（小節番号の右）の当たり判定 */
@@ -2878,6 +2982,10 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   if (col === COL_BPM) return { kind: 'bpm' };
   if (col === COL_BGM) return { kind: 'bgm' };
   if (col === COL_BGA) return { kind: 'bga' };
+  if (isSpCol(col)) {
+    const k = spKinds[spIndex(col)];
+    return k ? { kind: 'sp', sp: k.id } : null;
+  }
   return { kind: 'lane', lane: col };
 }
 
@@ -2901,7 +3009,8 @@ function moveTo(d: Extract<Drag, { type: 'move' }>, g: Geom, x: number, y: numbe
   const tempo = tempoOf(s.doc);
   const target = snapToGrid(tempo, Math.max(0, g.yToBeat(y) - d.grab), s.view.div);
   d.dBeat = sub(posToBeatFrac(tempo, target), d.anchorBeat);
-  d.dLane = d.anchor.col >= 0 ? Math.round((x - d.x0) / GEO.laneW) : 0;
+  // 特殊ノーツは時刻だけ動かす（レーンは行き先のまま）
+  d.dLane = d.anchor.col >= 0 && d.anchor.sp === undefined ? Math.round((x - d.x0) / GEO.laneW) : 0;
   if (d.dBeat.n !== 0 || d.dLane !== 0) d.moved = true;
 }
 
@@ -3007,6 +3116,7 @@ function laneCX(lane: number): number {
 
 function colCenter(col: number): number {
   if (col >= 0) return laneCX(col);
+  if (isSpCol(col)) return GEO.spX + spIndex(col) * GEO.spW + GEO.spW / 2;
   if (col === COL_BPM) return GEO.bpmX + GEO.bpmW / 2;
   if (col === COL_BGA) return bgaX() + bgaW() / 2;
   return GEO.bgmX + GEO.bgmW / 2;
@@ -3108,6 +3218,24 @@ function tipFor(l: Local, g: Geom, h: Hit | null, x: number, y: number): Tip | n
         ]);
   }
   if (h.kind === 'end') return endTip(x, y, false);
+  // 特殊ノーツ（クラップなど）の列：見出し・何もない所
+  {
+    const spi = h.kind === 'header' ? spHeaderAt(g, x) : null;
+    const sk = spi !== null ? spKinds[spi] : h.kind === 'sp' ? spKinds.find((k) => k.id === h.sp) : undefined;
+    if (sk) {
+      const dest = sk.dest === 'auto' ? tr('ゲームでは自動で鳴らします（叩かない）', 'Plays automatically in the game (not hit)') : tr(`ゲームでは${destName(sk.dest)}のチップ（行き先）`, `A ${destName(sk.dest)} chip in the game (destination)`);
+      return h.kind === 'header'
+        ? at(`sphead:${sk.id}:${sk.dest}`, 'hint', tr(`${sk.name}の列`, `${sk.name} column`), [
+            dest,
+            tr('クリック: 種類の設定（行き先・音・キー）', 'Click: kind settings (destination, sound, key)'),
+          ])
+        : at(`sp:${sk.id}:${sk.dest}`, 'hint', tr(`${sk.name}の列`, `${sk.name} column`), [
+            dest,
+            tabletGeo ? tr(`タップ: ${sk.name}を置く`, `Tap: place ${sk.name}`) : tr(`クリック: ${sk.name}を置く${sk.key ? `（キー ${keyLabel(sk.key)}）` : ''}`, `Click: place ${sk.name}${sk.key ? ` (key ${keyLabel(sk.key)})` : ''}`),
+            tr('右クリック: メニュー（自動で鳴らして置く・設定）', 'Right-click: menu (place as auto-play, settings)'),
+          ]);
+    }
+  }
   if (h.kind === 'gutter') {
     return at('gutter', 'hint', tr('小節番号の列', 'Measure numbers'), [
       tr('クリック・ドラッグ: 再生を始める位置（▶）を置く', 'Click or drag: set where playback starts (▶)'),
@@ -3404,6 +3532,18 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   }
   ctx.fillStyle = '#0D1116';
   ctx.fillRect(ox + GEO.bgmX, GEO.head, GEO.bgmW, H);
+  // 特殊ノーツの列（種類ごと。少し明るい帯と縁で、ドラムのレーンと分ける）
+  if (spKinds.length) {
+    const bx = ox + GEO.spX;
+    const bw = GEO.spW * spKinds.length;
+    ctx.fillStyle = '#121620';
+    ctx.fillRect(bx, GEO.head, bw, H);
+    ctx.fillStyle = C.sep;
+    for (let i = 1; i < spKinds.length; i++) ctx.fillRect(bx + i * GEO.spW - 0.5, GEO.head, 1, H);
+    ctx.fillStyle = '#3A4554';
+    ctx.fillRect(bx - 0.5, GEO.head, 1, H);
+    ctx.fillRect(bx + bw - 0.5, GEO.head, 1, H);
+  }
   ctx.fillStyle = C.sep;
   for (let i = 0; i <= 10; i++) ctx.fillRect(ox + GEO.laneX + i * GEO.laneW - 0.5, GEO.head, 1, H);
   ctx.fillRect(ox + GEO.bpmX - 0.5, GEO.head, 1, H);
@@ -3564,8 +3704,62 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   const current = fs.open && fs.index >= 0 ? fs.results[fs.index] : null;
   // フラム（同じレーンのすばやい2打）：先に鳴る1打目は細く描き、2打目には境目の線を引く
   const flams = flamRoles(doc);
+  const spLay = specialLayout(doc);
   const drawChip = (v: ChipView, beat: number, col: number, alpha: number, selected: boolean) => {
     const y = g.beatToY(beat);
+    if (v.sp !== undefined) {
+      // 特殊ノーツ：種類の色に白い縁と丸い角。自動で鳴らすチップは白抜き（点線の縁）
+      const k = spLay.kinds[spLay.col.get(v.sp) ?? -1];
+      const color = k?.color ?? '#D7DCE3';
+      const cx = ox + colCenter(col);
+      const small = col === COL_BGM;
+      if (small && GEO.bgmW === 0) return;
+      const hw = small ? 11 : GEO.chipHW;
+      const ch = small ? 8 : GEO.chipH;
+      ctx.globalAlpha = alpha;
+      roundRect(ctx, cx - hw, y - ch / 2, hw * 2, ch, ch / 2);
+      if (v.auto) {
+        ctx.fillStyle = color + '1F';
+        ctx.fill();
+        ctx.setLineDash([3, 2]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = shade(color, wavVel(doc, v.c.v));
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,.92)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // 列に分けているとき、行き先と違うレーンのチップには、そのレーンを小さく出す
+        const lane = drumChannel(v.c.ch);
+        if (isSpCol(col) && lane && k && k.dest !== v.c.ch && hw >= 12) {
+          ctx.fillStyle = 'rgba(11,14,19,.85)';
+          ctx.font = '700 8px "JetBrains Mono", ui-monospace, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(DRUM_LANES[lane.lane].key, cx, y + 0.5);
+        }
+      }
+      if (selected || issueIds.has(v.c.id) || found?.has(v.c.id)) {
+        roundRect(ctx, cx - hw - 2.5, y - ch / 2 - 2.5, hw * 2 + 5, ch + 5, ch / 2 + 2);
+        if (selected) {
+          ctx.strokeStyle = '#4CC2FF';
+          ctx.lineWidth = 2;
+        } else if (issueIds.has(v.c.id)) {
+          ctx.setLineDash([3, 2]);
+          ctx.strokeStyle = issueIds.get(v.c.id) === 'error' ? '#FF5A61' : '#FFB547';
+          ctx.lineWidth = 1.5;
+        } else {
+          ctx.strokeStyle = C.amber;
+          ctx.lineWidth = current === v.c.id ? 2.4 : 1.4;
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
     if (col >= 0) {
       const color = chipColor(col, v.alt);
       const cx = ox + laneCX(col);
@@ -3802,7 +3996,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     const dB = moving.dBeat!.n / moving.dBeat!.d;
     for (const v of views) {
       if (!sel.has(v.c.id)) continue;
-      const col = v.col >= 0 ? (shiftLane(v.col, moving.dLane) ?? -99) : v.col;
+      const col = v.col >= 0 && v.sp === undefined ? (shiftLane(v.col, moving.dLane) ?? -99) : v.col;
       if (col === -99) continue;
       drawChip(v, v.beat + dB, col, 0.9, true);
     }
@@ -3814,7 +4008,19 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
 
   // 置く位置のプレビュー（フラムなら2打）。スマホで狙っている間は、そのレーンを薄く光らせる
   const hv = l.hover;
-  if (hv && hv.pos && (!d || d.type === 'aim')) {
+  if (hv && hv.pos && hv.sp !== undefined && !d) {
+    // 特殊ノーツの列：置く位置（種類の色の丸いチップ）
+    const i = spKinds.findIndex((k) => k.id === hv.sp);
+    if (i >= 0) {
+      const cx = ox + GEO.spX + i * GEO.spW + GEO.spW / 2;
+      const y = g.beatToY(tempo.beatOf(hv.pos.m, hv.pos.f));
+      ctx.globalAlpha = 0.4;
+      roundRect(ctx, cx - GEO.chipHW, y - GEO.chipH / 2, GEO.chipHW * 2, GEO.chipH, GEO.chipH / 2);
+      ctx.fillStyle = spKinds[i].color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  } else if (hv && hv.pos && hv.lane >= 0 && (!d || d.type === 'aim')) {
     const color = chipColor(hv.lane, hv.alt);
     const cx = ox + laneCX(hv.lane);
     if (d?.type === 'aim') {
@@ -3949,6 +4155,25 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     if (ss.has(i)) {
       ctx.fillStyle = C.amber;
       ctx.fillRect(cx - 8, GEO.head - 4, 16, 2);
+    }
+  });
+  // 特殊ノーツの列：種類のコード（色）と行き先（→HT）。押すと種類の設定
+  spKinds.forEach((k, i) => {
+    const cx = ox + GEO.spX + i * GEO.spW + GEO.spW / 2;
+    const two = GEO.head >= 28;
+    ctx.font = `700 ${GEO.spW < 32 ? 9.5 : 11}px "JetBrains Mono", ui-monospace, monospace`;
+    ctx.fillStyle = k.color;
+    ctx.fillText(k.code, cx, two ? GEO.head / 2 - 5 : GEO.head / 2);
+    if (two) {
+      const t = `→${destCode(k.dest)}`;
+      const dc = k.dest === 'auto' ? C.se : voiceColor(k.dest);
+      ctx.font = '600 8.5px "JetBrains Mono", ui-monospace, monospace';
+      const tw = ctx.measureText(t).width;
+      roundRect(ctx, cx - tw / 2 - 3, GEO.head / 2 + 1.5, tw + 6, 11, 3);
+      ctx.fillStyle = dc + '2E';
+      ctx.fill();
+      ctx.fillStyle = dc;
+      ctx.fillText(t, cx, GEO.head / 2 + 7.5);
     }
   });
   ctx.font = '600 8px "JetBrains Mono", ui-monospace, monospace';
@@ -4781,7 +5006,7 @@ function drawMiniStrip(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBea
     // 2px ごとの段に、チップの数で濃さを付ける
     const rows = new Map<number, number>();
     for (const v of chipViews(doc)) {
-      if (v.col < 0) continue;
+      if (v.col < 0 && v.sp === undefined) continue;
       const r = Math.round((bottom - (v.beat / end) * (bottom - top)) / 2);
       rows.set(r, (rows.get(r) ?? 0) + 1);
     }
@@ -4853,10 +5078,22 @@ function drawMinimap(ctx: CanvasRenderingContext2D, l: Local, g: Geom, playBeat:
       const y = yOf(tempo.measureStart(mm));
       m.fillRect(ML + 6, Math.round(y), GEO.miniW - ML - 12, 1);
     }
+    // レーン（特殊ノーツの列があれば、その分だけ細く並べて右に種類の列。重ねるときは行き先のレーンに種類の色）
+    const nSp = spKinds.length;
+    const pitch = nSp ? Math.max(3, Math.min(6, Math.floor((GEO.miniW - ML - 14) / (10 + nSp)))) : 6;
+    const spX0 = ML + 6 + pitch * 10 + 2;
+    const spColor = new Map(specialLayout(doc).kinds.map((k) => [k.id, k.color]));
     for (const v of chipViews(doc)) {
+      if (v.sp !== undefined) {
+        if (v.auto && !isSpCol(v.col)) continue;
+        m.fillStyle = spColor.get(v.sp) ?? '#D7DCE3';
+        const x = isSpCol(v.col) ? spX0 + spIndex(v.col) * pitch : ML + 6 + slotOf(v.col) * pitch;
+        m.fillRect(x, Math.round(yOf(v.beat)), pitch - 1, 1);
+        continue;
+      }
       if (v.col < 0) continue;
       m.fillStyle = chipColor(v.col, v.alt);
-      m.fillRect(ML + 6 + slotOf(v.col) * 6, Math.round(yOf(v.beat)), 5, 1);
+      m.fillRect(ML + 6 + slotOf(v.col) * pitch, Math.round(yOf(v.beat)), pitch - 1, 1);
     }
     // BPM の変化
     m.fillStyle = C.amber;

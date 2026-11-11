@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { parseBase36x2, parseMeasure, toBase36x2 } from '../dtx/base36';
 import { DRUM_LANES, drumChannel, laneVoice, SD_RIM, type ChipKind, type DtxDoc } from '../dtx/model';
 import { chipAlt, chipVoice, rimWavs, rimWavsOf } from '../dtx/rim';
+import { specialWavsOf } from '../dtx/kinds';
 import { opSetKind } from '../edit/ops';
 import { opMapLanes, opRelane, opReplaceWav, opSwapLanes, type AltMode } from '../edit/transform';
 import { velOfWav, wavVariant } from '../edit/velocity';
@@ -165,12 +166,13 @@ export function relaneResults(lane: number, alt: AltMode, resound: boolean) {
   edit(tr(`${ids.size}個のチップを${laneName(lane)}へ移す`, `Move ${ids.size} ${pl(ids.size, 'chip')} to ${laneName(lane)}`), (d) => {
     n = opRelane(d, ids, lane, alt);
     const rims = rimWavsOf(d);
+    const sp = specialWavsOf(d);
     for (const c of d.chips) {
       if (!ids.has(c.id)) continue;
       const info = drumChannel(c.ch);
       if (!info) continue;
       const voice = laneVoice(info.lane, alt === 'keep' ? (wasAlt.get(c.id) ?? false) : alt === 'alt');
-      const now = chipVoice(d, c, rims);
+      const now = chipVoice(d, c, rims, sp);
       if (!resound && (voice === now || (voice !== SD_RIM && now !== SD_RIM))) continue;
       const vel = velOfWav(d.fields, c.v);
       c.v = wavVariant(d, wavForVoice(d, voice), vel);
@@ -206,9 +208,13 @@ export function setKindResults(kind: ChipKind) {
 export function deleteResults() {
   const ids = targets();
   if (!ids.size) return;
-  edit(tr(`見つかった${ids.size}個のチップを消す`, `Delete ${ids.size} found ${pl(ids.size, 'chip')}`), (d) => {
-    for (let i = d.chips.length - 1; i >= 0; i--) if (ids.has(d.chips[i].id)) d.chips.splice(i, 1);
-  });
+  edit(
+    tr(`見つかった${ids.size}個のチップを消す`, `Delete ${ids.size} found ${pl(ids.size, 'chip')}`),
+    (d) => {
+      for (let i = d.chips.length - 1; i >= 0; i--) if (ids.has(d.chips[i].id)) d.chips.splice(i, 1);
+    },
+    { replace: true },
+  );
 }
 
 /** 小節の範囲（検索の範囲）で2つのレーンを入れ替える */

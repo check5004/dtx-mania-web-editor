@@ -119,6 +119,8 @@ export function opMove(
   dBeat: Frac,
   dLane: number,
   shift: (lane: number, d: number) => number | null = (l, n) => l + n,
+  /** レーンは変えずに時刻だけ動かすチップ（特殊ノーツ） */
+  keepLane?: ReadonlySet<number>,
 ): boolean {
   const moves: { index: number; ch: number; p: Pos }[] = [];
   for (let i = 0; i < d.chips.length; i++) {
@@ -129,7 +131,7 @@ export function opMove(
     const p = tempo.locateFrac(beat);
     if (p.m >= MAX_MEASURES) return false;
     let ch: number | null = c.ch;
-    if (dLane !== 0) {
+    if (dLane !== 0 && !keepLane?.has(c.id)) {
       const info = drumChannel(c.ch);
       if (info) {
         const to = shift(info.lane, dLane);

@@ -36,6 +36,8 @@ import {
 import { unsavedText, useUnsaved } from '../store/unsaved';
 import { glowsDiff, useGlowDiffs } from '../store/glow';
 import { bgmSource, tempoOf } from '../store/derived';
+import { openSpecialSettings, setSpecialOff, specialOff } from '../store/special';
+import { setSpecialCols, specialColsMode } from '../store/specialLayout';
 import { useSongLength, useSoundsVersion } from './hooks';
 import { Icon } from './icons';
 import { formatLevel, formatTime } from './format';
@@ -198,6 +200,11 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         '-',
         { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) && !useDevice.getState().phone },
         { label: tr('BGA の列を広げてサムネイルを出す', 'Widen BGA columns to show thumbnails'), checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
+        '-',
+        // 特殊ノーツ（クラップなど）：分けて見せるか、種類ごとの列にするか（重ねるときは行き先のレーンに描く）
+        { label: tr('特殊ノーツ（クラップなど）を分けて見せる', 'Show special notes (claps etc.) separately'), checked: !specialOff(), run: () => setSpecialOff(!specialOff()) },
+        { label: tr('特殊ノーツを種類ごとの列に分ける（切ると行き先のレーンに重ねる）', 'Give special notes their own columns (off: draw them on their lanes)'), checked: specialColsMode(), disabled: specialOff(), run: () => setSpecialCols(!specialColsMode()) },
+        { label: tr('特殊ノーツの設定…', 'Special note settings…'), run: openSpecialSettings },
         '-',
         // スマホのプレビューは全画面だけ
         ...(useDevice.getState().phone

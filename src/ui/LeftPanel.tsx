@@ -19,6 +19,7 @@ import { editSong, setSongField, toastSongEdit } from '../store/songSync';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
 import { AuditionButton, AuditionProgress } from './Audition';
+import { SpecialKitSection } from './SpecialUi';
 import { chooseDialog, confirmDialog } from './dialogs';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -228,6 +229,7 @@ function KitTab() {
           </>
         )}
       </p>
+      <SpecialKitSection />
     </>
   );
 }

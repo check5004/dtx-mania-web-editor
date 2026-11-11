@@ -11,6 +11,8 @@ import { cmp, frac, type Frac } from '../dtx/fraction';
 import { endMeasureOf, moveEndDecorations, naturalEndMeasure, solidEndMeasure } from '../dtx/end';
 import { CH, DRUM_LANES, drumChannel, emptyDoc, laneChannel, laneVoice, SD_RIM, type DtxDoc, type HeaderLine, type ParseWarning } from '../dtx/model';
 import { chipAlt, chipVoice, rimWavs } from '../dtx/rim';
+import { kindName, voiceKind } from '../dtx/kinds';
+import { addKindWav, findKindWav, kindWavFor } from '../edit/kinds';
 import { addWav, findWavByFile, rimWavFor } from '../edit/rim';
 import type { ChartOrigin } from '../dtx/origin';
 import { MAX_MEASURES, type TempoMap } from '../dtx/timing';
@@ -37,6 +39,8 @@ import { applyLoopToEngine, carryAssistToDoc, loopSec, prepareStretch, resetAssi
 import { bgmSource, chipViews, clickTimes, playbackEvents, tempoOf, wavPan, wavSources, wavVolume } from './derived';
 import { loadSidecar, sameSongSidecar, sameStemFiles, updateSidecar, useSidecar, withListening, type SidecarData } from './sidecar';
 import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } from '../edit/measures';
+import { keepSpecials } from './specialKeep';
+import { specialLayout } from './specialLayout';
 import { isDrumlessName } from '../separate/names';
 
 enablePatches();
@@ -393,11 +397,25 @@ export function goHome() {
 export function edit(
   label: string,
   recipe: (d: Draft<DtxDoc>) => void,
-  opts: { group?: string; side?: HistoryEntry['side'] } = {},
+  opts: {
+    group?: string;
+    side?: HistoryEntry['side'];
+    /**
+     * チップを消すための操作（Delete・小節の削除・写して置き換える）。省くと、ほかのチップが来て消えた特殊ノーツ（クラップなど）を
+     * 元の所か自動で鳴らす（SE）に戻す（store/specialKeep）
+     */
+    replace?: boolean;
+  } = {},
 ): boolean {
   const s = get();
-  const [next, redo, undo] = produceWithPatches(s.doc, recipe);
+  let [next, redo, undo] = produceWithPatches(s.doc, recipe);
   if (redo.length === 0) return false;
+  const kept = opts.replace ? null : keepSpecials(s.doc, next);
+  if (kept) {
+    next = kept.doc;
+    redo = [...redo, ...kept.redo];
+    undo = [...kept.undo, ...undo];
+  }
   const last = s.past[s.past.length - 1];
   let past: HistoryEntry[];
   const at = Date.now();
@@ -407,6 +425,18 @@ export function edit(
     past = [...s.past, { label, redo, undo, group: opts.group, side: opts.side, at }];
   }
   set({ doc: next, past, future: [] });
+  if (kept?.auto.size) {
+    const list = [...kept.auto].map(([id, n]) => ({ name: kindName(id), n }));
+    const n = list.reduce((a, x) => a + x.n, 0);
+    toast(
+      tr(
+        `同じレーンの同じ時刻に来たので、${list.map((x) => `${x.name}（${x.n} 個）`).join('、')}を自動で鳴らすにしました（音は消えません）`,
+        `${list.map((x) => `${x.name} (${x.n})`).join(', ')} overlapped another chip on the lane, so ${n === 1 ? 'it now plays' : 'they now play'} automatically (the sound is kept)`,
+      ),
+      'info',
+      5000,
+    );
+  }
   return true;
 }
 
@@ -565,15 +595,31 @@ export function wavForChannel(d: Draft<DtxDoc>, ch: number): number {
  */
 export function wavForVoice(d: Draft<DtxDoc>, voice: number): number {
   const rim = voice === SD_RIM;
+  // 特殊ノーツ（クラップなど）の音は、その種類と読める番号（ラベルを付けた番号）にする
+  const kind = voiceKind(voice);
   const assigned = get().laneWav[voice];
   if (assigned !== undefined && d.fields['WAV' + toBase36x2(assigned)] !== undefined) {
-    if (!rim) return assigned;
-    const no = rimWavFor(d, assigned);
-    if (no !== assigned) set((s) => ({ laneWav: { ...s.laneWav, [voice]: no } }));
-    return no;
+    if (kind) {
+      const no = kindWavFor(d, assigned, kind);
+      if (no !== null) {
+        if (no !== assigned) set((s) => ({ laneWav: { ...s.laneWav, [voice]: no } }));
+        return no;
+      }
+    } else if (!rim) return assigned;
+    else {
+      const no = rimWavFor(d, assigned);
+      if (no !== assigned) set((s) => ({ laneWav: { ...s.laneWav, [voice]: no } }));
+      return no;
+    }
   }
   const file = kitFileProvider(voice);
   if (!file) return assigned ?? 1;
+  if (kind) {
+    const no = findKindWav(d as DtxDoc, file, kind) ?? addKindWav(d, file, kind);
+    if (no === null) return assigned ?? 1;
+    set((s) => ({ laneWav: { ...s.laneWav, [voice]: no } }));
+    return no;
+  }
   // 同じキットの音がもう登録されていれば使う（リムはリムの音、ほかはリムでない音から）
   const had = findWavByFile(d as DtxDoc, file, rim);
   if (had !== null) {
@@ -652,11 +698,15 @@ export function wavForLane(lane: number, alt: boolean): number | null {
 /** 前の小節のドラムをこの小節に写す（Ctrl+D） */
 export function duplicatePrevMeasure(m: number) {
   if (m <= 0) return;
-  edit(tr(`小節 ${toMeasure(m - 1)} を ${toMeasure(m)} に複製`, `Copy measure ${toMeasure(m - 1)} to ${toMeasure(m)}`), (d) => {
-    const src = d.chips.filter((c) => c.m === m - 1 && drumChannel(c.ch)).map((c) => ({ ch: c.ch, f: { ...c.f }, v: c.v }));
-    for (let i = d.chips.length - 1; i >= 0; i--) if (d.chips[i].m === m && drumChannel(d.chips[i].ch)) d.chips.splice(i, 1);
-    for (const c of src) d.chips.push({ id: d.nextId++, ch: c.ch, m, f: c.f, v: c.v });
-  });
+  edit(
+    tr(`小節 ${toMeasure(m - 1)} を ${toMeasure(m)} に複製`, `Copy measure ${toMeasure(m - 1)} to ${toMeasure(m)}`),
+    (d) => {
+      const src = d.chips.filter((c) => c.m === m - 1 && drumChannel(c.ch)).map((c) => ({ ch: c.ch, f: { ...c.f }, v: c.v }));
+      for (let i = d.chips.length - 1; i >= 0; i--) if (d.chips[i].m === m && drumChannel(d.chips[i].ch)) d.chips.splice(i, 1);
+      for (const c of src) d.chips.push({ id: d.nextId++, ch: c.ch, m, f: c.f, v: c.v });
+    },
+    { replace: true },
+  );
 }
 
 /** m 小節目の前に n 小節の空の小節を入れる（セクション・テンポのアンカー・自動で入れた小節の印もずらす） */
@@ -694,7 +744,7 @@ export function deleteMeasures(m: number, n = 1): DeleteResult {
   const side = sideForMeasures(before, { sections, anchors, auto });
   const changed = edit(tr(`小節 ${toMeasure(m)}${n > 1 ? `〜${toMeasure(m + n - 1)}` : ''} を削除`, `Delete measure${n > 1 ? 's' : ''} ${toMeasure(m)}${n > 1 ? `–${toMeasure(m + n - 1)}` : ''}`), (d) => {
     res = opDeleteMeasures(d, m, n);
-  }, { side });
+  }, { side, replace: true });
   if (changed) side.redo();
   return res;
 }
@@ -719,8 +769,10 @@ export function chipAt(lane: number, alt: boolean, pos: Pos): number | null {
   const doc = get().doc;
   const ch = laneChannel(lane, alt);
   const rims = DRUM_LANES[lane].altVoice !== undefined ? rimWavs(doc) : null;
+  // 特殊ノーツ（クラップなど）はそのレーンのチップとしては数えない（キー入力で消さない）
+  const lay = specialLayout(doc);
   for (const c of doc.chips) {
-    if (c.ch === ch && c.m === pos.m && cmp(c.f, pos.f) === 0 && (!rims || rims.has(c.v) === alt)) return c.id;
+    if (c.ch === ch && c.m === pos.m && cmp(c.f, pos.f) === 0 && (!rims || rims.has(c.v) === alt) && !(lay.on && lay.col.has(lay.wav.get(c.v) ?? ''))) return c.id;
   }
   return null;
 }
@@ -762,9 +814,13 @@ export function goBack() {
 export function deleteChips(ids: readonly number[]) {
   if (ids.length === 0) return;
   const set_ = new Set(ids);
-  edit(tr(`${ids.length}個のチップを消す`, `Delete ${ids.length} ${pl(ids.length, 'chip')}`), (d) => {
-    opDelete(d, set_);
-  });
+  edit(
+    tr(`${ids.length}個のチップを消す`, `Delete ${ids.length} ${pl(ids.length, 'chip')}`),
+    (d) => {
+      opDelete(d, set_);
+    },
+    { replace: true },
+  );
   set((s) => ({ selection: s.selection.filter((id) => !set_.has(id)) }));
 }
 
@@ -783,15 +839,18 @@ export function moveSelection(dBeat: Frac, dLane: number, opts: { hear?: boolean
   const tempo = tempoOf(s.doc);
   const ids = new Set(s.selection);
   const before = new Map(s.doc.chips.filter((c) => ids.has(c.id)).map((c) => [c.id, c.ch]));
+  // 特殊ノーツ（クラップなど）は時刻だけ動かす（レーンは行き先のまま）
+  const lay = specialLayout(s.doc);
+  const keep = lay.on ? new Set(chipViews(s.doc).filter((v) => v.sp !== undefined && ids.has(v.c.id)).map((v) => v.c.id)) : undefined;
   const hadKit = Object.keys(s.doc.fields).length;
   let ok = false;
   edit(tr('チップを動かす', 'Move chips'), (d) => {
-    ok = opMove(d, ids, tempo, dBeat, dLane, shiftLane);
+    ok = opMove(d, ids, tempo, dBeat, dLane, shiftLane, keep);
     if (ok && dLane !== 0) soundFollowsLane(d, before);
   });
   if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
   if (ok && dLane !== 0 && opts.hear) {
-    const first = s.selection.find((id) => drumChannel(before.get(id) ?? -1));
+    const first = s.selection.find((id) => drumChannel(before.get(id) ?? -1) && !keep?.has(id));
     if (first !== undefined) previewChipMove(first);
   }
   return ok;
@@ -839,7 +898,8 @@ export function paste(atBeat0?: number) {
 }
 
 export function selectAll() {
-  set((s) => ({ selection: chipViews(s.doc).filter((v) => v.col >= 0).map((v) => v.c.id) }));
+  // ドラムのチップと特殊ノーツ（自動で鳴らすものも）
+  set((s) => ({ selection: chipViews(s.doc).filter((v) => v.col >= 0 || v.sp !== undefined).map((v) => v.c.id) }));
 }
 
 export function setKind(kind: 'normal' | 'hidden' | 'nochip', ids0: readonly number[] = get().selection) {

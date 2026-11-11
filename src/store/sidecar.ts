@@ -3,6 +3,7 @@
 import { withTr } from '../i18n';
 import { create } from 'zustand';
 import { renameOldOtherStems } from '../audio/stemNames';
+import { drumChannel, isSeChannel } from '../dtx/model';
 
 export interface SectionMark {
   /** この小節から始まる */
@@ -77,6 +78,34 @@ export interface AutoMark {
   sig: string;
 }
 
+/**
+ * 特殊ノーツ（クラップ・タンバリンなど）の種類の決め。決まった種類（id が clap など）は行き先・キーなどだけ、
+ * 自分で作った種類は名前・3 文字・色・ラベルも持つ（見分けるのはラベルが同じ音だけ。dtx/kinds）
+ */
+export interface SpecialDef {
+  id: string;
+  name?: string;
+  code?: string;
+  color?: string;
+  label?: string;
+  /** 行き先（ドラムのチャンネル）か「自動で鳴らす」。無ければ置いてあるチップから決める */
+  dest?: number | 'auto';
+  /** 自動で鳴らすときの SE のチャンネル */
+  se?: number;
+  /** 置くキー（KeyboardEvent.code。null は割り当てない） */
+  key?: string | null;
+  /** 電子ドラムのノート（null は割り当てない） */
+  midi?: number | null;
+  /** 決まった種類を特殊ノーツにしない（種類の設定の「特殊ノーツをやめる」） */
+  off?: boolean;
+}
+
+export interface SpecialSide {
+  /** 開いたときに分けない（お知らせの「元に戻す」）。譜面の音の見分け（置く音・キット）は変わらない */
+  off?: boolean;
+  kinds: SpecialDef[];
+}
+
 export interface SidecarData {
   sections: SectionMark[];
   /** セクション名 → 色（同じ名前は同じ色） */
@@ -95,6 +124,8 @@ export interface SidecarData {
    * 分け直す・試聴にする・曲を直すときのために覚えておく（無ければ null）
    */
   fullMix: string | null;
+  /** 特殊ノーツの種類の決め（無ければ null。曲の音のものなので、同じ曲の別の難易度へも持っていく） */
+  special: SpecialSide | null;
 }
 
 export interface SidecarState extends SidecarData {
@@ -106,7 +137,7 @@ export interface SidecarState extends SidecarData {
   loadSeq: number;
 }
 
-export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [], fullMix: null });
+export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [], fullMix: null, special: null });
 
 export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, changed: [], loadSeq: 0 }));
 
@@ -207,6 +238,7 @@ export function sameSongSidecar(next: SidecarData | null): SidecarData {
   }
   if (!out.youtube && cur.youtube) out.youtube = cur.youtube;
   if (!out.fullMix && cur.fullMix) out.fullMix = cur.fullMix;
+  if (!out.special && cur.special) out.special = cur.special;
   return out;
 }
 
@@ -234,12 +266,17 @@ export function markSidecarSaved() {
 
 export function sidecarData(): SidecarData {
   const s = get();
-  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto, fullMix: s.fullMix };
+  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto, fullMix: s.fullMix, special: s.special };
 }
 
 /** 書く中身が無いか（聴く音量だけなら、作業ファイルを新しく作るほどではない） */
 export function sidecarIsEmpty(d: SidecarData = sidecarData()): boolean {
-  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0 && !d.fullMix;
+  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0 && !d.fullMix && !d.special;
+}
+
+/** 特殊ノーツの種類の決めを書き換える */
+export function setSpecialSide(special: SpecialSide | null) {
+  touch({ special });
 }
 
 /** 自動で入れた小節の印を書き換える */
@@ -349,6 +386,7 @@ export function parseSidecar(text: string): SidecarData | null {
     }
     if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
     if (typeof j.fullMix === 'string' && j.fullMix.trim()) out.fullMix = j.fullMix;
+    if (j.special && typeof j.special === 'object') out.special = parseSpecial(j.special);
     if (Array.isArray(j.auto)) {
       const seen = new Set<number>();
       for (const a of j.auto) {
@@ -386,4 +424,35 @@ export function parseSidecar(text: string): SidecarData | null {
   } catch {
     return null;
   }
+}
+
+/** 作業ファイルの特殊ノーツの決め（読めない欄は捨てる） */
+function parseSpecial(j: Partial<SpecialSide>): SpecialSide | null {
+  const kinds: SpecialDef[] = [];
+  const seen = new Set<string>();
+  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined);
+  if (Array.isArray(j.kinds)) {
+    for (const k of j.kinds as Partial<SpecialDef>[]) {
+      const id = k && str(k.id, 40);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const d: SpecialDef = { id };
+      const name = str(k.name, 60);
+      if (name) d.name = name;
+      const code = str(k.code, 3);
+      if (code) d.code = code.toUpperCase();
+      if (typeof k.color === 'string' && /^#[0-9a-f]{6}$/i.test(k.color)) d.color = k.color;
+      const label = str(k.label, 60);
+      if (label && !/[;\r\n]/.test(label)) d.label = label;
+      // 行き先はドラムの通常チャンネル、自動で鳴らすのは SE のチャンネルだけ
+      if (k.dest === 'auto' || (typeof k.dest === 'number' && drumChannel(k.dest)?.kind === 'normal')) d.dest = k.dest;
+      if (typeof k.se === 'number' && isSeChannel(k.se)) d.se = k.se;
+      if (k.key === null || (typeof k.key === 'string' && /^[A-Za-z0-9]{1,20}$/.test(k.key))) d.key = k.key;
+      if (k.midi === null || (typeof k.midi === 'number' && Number.isInteger(k.midi) && k.midi >= 0 && k.midi < 128)) d.midi = k.midi;
+      if (k.off === true) d.off = true;
+      kinds.push(d);
+    }
+  }
+  if (!kinds.length && !j.off) return null;
+  return { ...(j.off ? { off: true } : {}), kinds };
 }

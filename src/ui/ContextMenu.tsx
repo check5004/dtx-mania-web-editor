@@ -8,10 +8,11 @@ import { tr, pl } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
-import { CH, chipColor, DRUM_LANES, drumChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
+import { CH, chipColor, DRUM_LANES, drumChannel, isSeChannel, voiceName, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
+import { kindCode, SPECIAL_PRESETS } from '../dtx/kinds';
 import { chipAlt, rimWavs } from '../dtx/rim';
 import { fittingGrid, GRID_DIVS, onGrid, type Pos } from '../edit/ops';
-import { useInputSettings } from '../input/settings';
+import { keyLabel, useInputSettings } from '../input/settings';
 import { useDevice } from '../store/device';
 import { maxTracksH, SEEK_CLOSED_H, useLayout } from '../store/layout';
 import { DESK_TRACK_STOPS, deskStopHeight } from '../store/sheetSnap';
@@ -43,6 +44,8 @@ import { openMeasureGen, useMeasureGen } from '../store/measureGen';
 import { openPhrase } from '../store/phrase';
 import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
 import { placeSongBpm } from '../store/songSync';
+import { makeChipsSpecial, openKindSettings, pickNewKind, placeSpecial, setChipsAuto, unmakeSpecial } from '../store/special';
+import { chipSpecialKind, destCode, specialKind, specialKinds, specialLayout, type SpecialLayout } from '../store/specialLayout';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
 import { channelName, chipBpmLabel, chipName, formatPosition, meterLabel } from './format';
@@ -208,9 +211,10 @@ const then = (fn: () => void) => () => {
   fn();
 };
 
+/** 小節のドラムのチップ（特殊ノーツも） */
 function drumIdsIn(doc: DtxDoc, m: number): number[] {
   return chipViews(doc)
-    .filter((v) => v.col >= 0 && v.c.m === m)
+    .filter((v) => (v.col >= 0 || v.sp !== undefined) && v.c.m === m)
     .map((v) => v.c.id);
 }
 
@@ -219,12 +223,15 @@ function loopMeasure(m: number) {
   setLoop({ on: true, a: t.measureStart(m), b: t.measureStart(m + 1) });
 }
 
+/** 鳴らして聴けるチップか（ドラムと、自動で鳴らす SE） */
+const audible = (ch: number) => !!drumChannel(ch) || isSeChannel(ch);
+
 /** チップの音を鳴らす（「チップを置いた・動かしたときに音を鳴らす」を切っていれば鳴らさない） */
 function hear(ids: readonly number[], anchor: number, force = false) {
   const s = useEditor.getState();
   if (!force && !s.previewOnPlace) return;
   const want = new Set(ids);
-  const c = s.doc.chips.find((x) => x.id === anchor && drumChannel(x.ch)) ?? s.doc.chips.find((x) => want.has(x.id) && drumChannel(x.ch));
+  const c = s.doc.chips.find((x) => x.id === anchor && want.has(x.id) && audible(x.ch)) ?? s.doc.chips.find((x) => want.has(x.id) && audible(x.ch));
   if (c) previewWav(c.v);
 }
 
@@ -261,9 +268,18 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
     if (gone) closeCtxMenu();
   }, [gone]);
   if (gone) return null;
-  const drums = chips.filter((c) => drumChannel(c.ch));
+  // 特殊ノーツ（クラップなど）のチップは、レーン・HHオープン・種類（不可視など）の操作の代わりに特殊ノーツの操作を出す
+  const lay = specialLayout(doc);
+  const spOf = (c: Chip) => chipSpecialKind(lay, c);
+  const spChips = chips.filter((c) => spOf(c) !== undefined);
+  const spIds = spChips.map((c) => c.id);
+  const drums = chips.filter((c) => drumChannel(c.ch) && spOf(c) === undefined);
   const drumIds = drums.map((c) => c.id);
+  // ベロシティ・試聴はドラムと特殊ノーツ（自動で鳴らすチップも）
+  const velIds = chips.filter((c) => drumChannel(c.ch) || spOf(c) !== undefined).map((c) => c.id);
   const one = chips.length === 1 ? chips[0] : null;
+  const oneSp = one ? spOf(one) : undefined;
+  const oneKind = oneSp ? lay.kinds.find((k) => k.id === oneSp) : undefined;
   const lanes = new Set(drums.map((c) => drumChannel(c.ch)!.lane));
   const kinds = new Set(drums.map((c) => drumChannel(c.ch)!.kind));
   const altLanes = [...lanes].filter((l) => DRUM_LANES[l].alt !== undefined).sort((a, b) => order.indexOf(a) - order.indexOf(b));
@@ -271,9 +287,11 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   // 2種目（HHオープン・左バスドラム・スネアのリム。リムは音で見分ける）
   const rims = rimWavs(doc);
   const isAlt = (c: Chip) => chipAlt(doc, c, rims);
-  const color = oneInfo && one ? chipColor(oneInfo.lane, isAlt(one)) : one ? '#8B95A4' : 'var(--accent)';
+  const color = oneKind ? oneKind.color : oneInfo && one ? chipColor(oneInfo.lane, isAlt(one)) : one ? '#8B95A4' : 'var(--accent)';
   const isBpm = one && (one.ch === CH.BPM || one.ch === CH.BPM_EX);
   const extras = chipMenuExtras(ids);
+  // 特殊ノーツにできるチップ（ドラムの通常チップ・自動で鳴らす SE で、まだ特殊ノーツでないもの）
+  const makeIds = chips.filter((c) => (drumChannel(c.ch)?.kind === 'normal' || isSeChannel(c.ch)) && spOf(c) === undefined).map((c) => c.id);
 
   const moveTo = (lane: number) => {
     const moving = drums.filter((c) => drumChannel(c.ch)!.lane !== lane).map((c) => c.id);
@@ -286,19 +304,29 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   return (
     <>
       <div className="ctx-head">
-        <span className="dot" style={{ background: color, width: 10, height: 10, flex: 'none' }} />
-        <b className="ellipsis">{one ? chipName(doc, one) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</b>
-        <span className="ctx-head-sub mono ellipsis">{one ? `${toMeasure(one.m)} · ${fracToString(one.f)}` : laneSummary(chips)}</span>
-        {drums.length > 0 && (
-          <button className="ib tiny" onClick={() => hear(drumIds, anchor, true)} title={tr('音を聴く', 'Listen')} aria-label={tr('音を聴く', 'Listen')}>
+        {oneKind ? <span className="ctx-sp-pill" style={{ ['--c' as string]: oneKind.color }} /> : <span className="dot" style={{ background: color, width: 10, height: 10, flex: 'none' }} />}
+        <b className="ellipsis">{oneKind ? oneKind.name : one ? chipName(doc, one) : tr(`${chips.length} 個のチップ`, `${chips.length} ${pl(chips.length, 'chip')}`)}</b>
+        {oneKind && one && (
+          <span className="ctx-sp-dest mono" title={isSeChannel(one.ch) ? tr('自動で鳴らす（叩かない）', 'Plays automatically (not hit)') : tr(`ゲームでは${voiceName(one.ch)}のチップ`, `A ${voiceName(one.ch)} chip in the game`)}>
+              →{isSeChannel(one.ch) ? destCode('auto') : destCode(one.ch)}
+          </span>
+        )}
+        <span className="ctx-head-sub mono ellipsis">{one ? `${toMeasure(one.m)} · ${fracToString(one.f)}` : laneSummary(chips, lay)}</span>
+        {velIds.length > 0 && (
+          <button className="ib tiny" onClick={() => hear(velIds, anchor, true)} title={tr('音を聴く', 'Listen')} aria-label={tr('音を聴く', 'Listen')}>
             {Icon.speaker(13)}
           </button>
         )}
       </div>
+      {velIds.length > 0 && (
+        <>
+          <VelBlock ids={velIds} anchor={anchor} group={`ctx-vel-${seq}`} />
+          <Sep />
+        </>
+      )}
+      {spChips.length > 0 && <SpecialChipBlock chips={spChips} ids={spIds} lay={lay} anchor={anchor} />}
       {drums.length > 0 && (
         <>
-          <VelBlock ids={drumIds} anchor={anchor} group={`ctx-vel-${seq}`} />
-          <Sep />
           {altLanes.map((lane) => {
             const def = DRUM_LANES[lane];
             const inLane = drums.filter((c) => drumChannel(c.ch)!.lane === lane);
@@ -366,9 +394,10 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
               ))}
             </div>
           </div>
-          <Sep />
         </>
       )}
+      {makeIds.length > 0 && <MakeSpecialBlock ids={makeIds} doc={doc} />}
+      {(drums.length > 0 || makeIds.length > 0) && <Sep />}
       {isBpm && <Item label={tr('BPM を変える…', 'Change BPM…')} hint={dblHint()} onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
       {extras.map((it, i) => (
         <ExtraItem key={i} it={it} />
@@ -401,12 +430,145 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   );
 }
 
-/** 何個のチップか（レーンごと。多い順に3つまで） */
-function laneSummary(chips: Chip[]): string {
+/**
+ * 特殊ノーツのチップの操作：種類を変える（いちばん左はふつうのチップに戻す）・＋で種類を足す、
+ * このチップを叩く（行き先のレーン）か自動で鳴らすか
+ */
+function SpecialChipBlock({ chips, ids, lay, anchor }: { chips: Chip[]; ids: number[]; lay: SpecialLayout; anchor: number }) {
+  const kindIds = new Set(chips.map((c) => chipSpecialKind(lay, c)!));
+  const kinds = lay.kinds;
+  const oneKind = kindIds.size === 1 ? kinds.find((k) => kindIds.has(k.id)) : undefined;
+  const autoN = chips.filter((c) => isSeChannel(c.ch)).length;
+  // ふつうのチップに戻すときのレーン：レーンのチップはそのレーン、自動のチップは行き先のレーン
+  const backCh = new Set(
+    chips.map((c) => {
+      if (!isSeChannel(c.ch)) return c.ch;
+      const k = kinds.find((x) => x.id === chipSpecialKind(lay, c));
+      return k && k.dest !== 'auto' ? k.dest : -1;
+    }),
+  );
+  const noLane = backCh.has(-1);
+  const backName = backCh.size === 1 && !noLane ? voiceName([...backCh][0]) : tr('ふつうのチップ', 'Normal chip');
+  const destLess = [...kindIds].every((id) => kinds.find((k) => k.id === id)?.dest === 'auto');
+  const hitLabel = oneKind && oneKind.dest !== 'auto' ? tr(`叩く（${destCode(oneKind.dest)}）`, `Hit (${destCode(oneKind.dest)})`) : tr('叩く', 'Hit');
+  const toKind = (id: string) => {
+    closeCtxMenu();
+    if (kindIds.size === 1 && kindIds.has(id)) return;
+    if (makeChipsSpecial(ids, id)) hear(ids, anchor);
+  };
+  const toPlain = () => {
+    closeCtxMenu();
+    if (unmakeSpecial(ids)) hear(ids, anchor);
+  };
+  const addKind = async () => {
+    closeCtxMenu();
+    const id = await pickNewKind();
+    if (id) makeChipsSpecial(ids, id);
+  };
+  const setAuto = (auto: boolean) => {
+    closeCtxMenu();
+    setChipsAuto(ids, auto);
+  };
+  return (
+    <>
+      <div className="ctx-sec">
+        <div className="ctx-sec-title">
+          <span>{tr('特殊ノーツ', 'Special note')}</span>
+          <span className="ctx-dim">{tr('同じ時刻のまま・音もその種類に', 'Same timing · uses that kind\'s sound')}</span>
+        </div>
+        <div className="ctx-kinds">
+          <button
+            className="ctx-kind plain"
+            disabled={noLane}
+            onClick={toPlain}
+            title={
+              noLane
+                ? tr('行き先が「自動で鳴らす」の種類は、ふつうのチップに戻すレーンがありません（種類の設定で行き先を選んでください）', 'Kinds that play automatically have no lane to go back to (choose a destination in the kind settings)')
+                : tr(`特殊ノーツをやめて、ふつうの${backName}のチップにする（音も${backName}の音に）`, `Stop being a special note and become a normal ${backName} chip (with the ${backName} sound)`)
+            }
+          >
+            {backName}
+          </button>
+          {kinds.map((k) => (
+            <button
+              key={k.id}
+              className={`ctx-kind ${kindIds.size === 1 && kindIds.has(k.id) ? 'on' : kindIds.has(k.id) ? 'some' : ''}`}
+              style={{ ['--c' as string]: k.color }}
+              onClick={() => toKind(k.id)}
+              title={k.dest === 'auto' ? tr(`${k.name}にする（自動で鳴らす）`, `Make it ${k.name} (plays automatically)`) : tr(`${k.name}にする（${voiceName(k.dest)}へ）`, `Make it ${k.name} (to ${voiceName(k.dest)})`)}
+            >
+              <span className="sp" />
+              {k.name}
+            </button>
+          ))}
+          <button className="ctx-kind add" onClick={() => void addKind()} title={tr('特殊ノーツの種類を足す', 'Add a kind of special note')} aria-label={tr('特殊ノーツの種類を足す', 'Add a kind of special note')}>
+            {Icon.plus(12)}
+          </button>
+        </div>
+      </div>
+      <div className="ctx-row">
+        <span className="ctx-row-label wide">{chips.length === 1 ? tr('このチップ', 'This chip') : tr('選んだチップ', 'Selected')}</span>
+        <div className="ctx-tri two">
+          <button
+            className={autoN === 0 ? 'on' : ''}
+            disabled={destLess && autoN === chips.length}
+            title={destLess ? tr('行き先が「自動で鳴らす」の種類です。叩くには種類の設定で行き先のレーンを選んでください', 'This kind plays automatically. Choose a lane in its settings to make it playable') : tr('ゲームで行き先のレーンのチップとして叩く', 'Hit it in the game as a chip on the destination lane')}
+            onClick={() => setAuto(false)}
+          >
+            {hitLabel}
+          </button>
+          <button className={autoN === chips.length ? 'on' : ''} title={tr('叩かずに、BGM と同じように自動で鳴らす', 'Plays automatically like the BGM; not hit')} onClick={() => setAuto(true)}>
+            {tr('自動で鳴らす', 'Auto-play')}
+          </button>
+        </div>
+      </div>
+      <Sep />
+    </>
+  );
+}
+
+/** ふつうのチップを特殊ノーツにする（行き先のレーンへ動く）。＋ 新しく… で種類を足して、それにする */
+function MakeSpecialBlock({ ids, doc }: { ids: number[]; doc: DtxDoc }) {
+  const have = specialKinds(doc);
+  // まだ種類が無い譜面では、決まった種類（クラップ・タンバリン・カウベル・シェイカー）を並べる
+  const list = have.length ? have.map((k) => ({ id: k.id, name: k.name, color: k.color })) : SPECIAL_PRESETS.map((p) => ({ id: p.id, name: p.name, color: p.color }));
+  const make = (id: string) => {
+    closeCtxMenu();
+    if (makeChipsSpecial(ids, id)) hear(ids, ids[0]);
+  };
+  const makeNew = async () => {
+    closeCtxMenu();
+    const id = await pickNewKind();
+    if (id) makeChipsSpecial(ids, id);
+  };
+  return (
+    <div className="ctx-sec">
+      <div className="ctx-sec-title">
+        <span>{tr('特殊ノーツにする', 'Make it a special note')}</span>
+        <span className="ctx-dim">{tr('行き先のレーンへ動く', 'Moves to its destination lane')}</span>
+      </div>
+      <div className="ctx-kinds">
+        {list.map((k) => (
+          <button key={k.id} className="ctx-kind" style={{ ['--c' as string]: k.color }} onClick={() => make(k.id)} title={tr(`${k.name}にする（同じ時刻のまま）`, `Make it ${k.name} (same timing)`)}>
+            <span className="sp" />
+            {k.name}
+          </button>
+        ))}
+        <button className="ctx-kind add wide" onClick={() => void makeNew()}>
+          {tr('＋ 新しく…', '+ New…')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 何個のチップか（レーンごと。特殊ノーツは種類ごと。多い順に3つまで） */
+function laneSummary(chips: Chip[], lay: SpecialLayout): string {
   const count = new Map<string, number>();
   for (const c of chips) {
     const d = drumChannel(c.ch);
-    const k = d ? DRUM_LANES[d.lane].key : channelName(c.ch);
+    const sp = chipSpecialKind(lay, c);
+    const k = sp ? kindCode(sp) : d ? DRUM_LANES[d.lane].key : channelName(c.ch);
     count.set(k, (count.get(k) ?? 0) + 1);
   }
   const top = [...count.entries()].sort((a, b) => b[1] - a[1]);
@@ -591,26 +753,56 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
   const clip = useEditor((s) => s.clipboard.length);
   // スマホ：BPM の列・ループの帯が無いので、BPM 変化と A・B もここから
   const phone = useDevice((s) => s.phone);
+  const tablet = useDevice((s) => s.tablet);
   const m = menu.pos.m;
   const inMeasure = drumIdsIn(doc, m);
   const extras = menu.col === 'lane' && menu.lane !== undefined ? laneMenuExtras({ lane: menu.lane, alt: !!menu.alt, pos: menu.pos }) : [];
+  // 特殊ノーツ：種類の列ならその種類、行き先のレーンに重ねて見せているときは、そのレーン（自動の種類は BGM の列）が行き先の種類
+  const lay = specialLayout(doc);
+  const spHere = menu.col === 'sp' && menu.sp ? specialKind(doc, menu.sp) : undefined;
+  const spOver =
+    lay.on && !lay.cols
+      ? lay.kinds.filter((k) => (menu.col === 'lane' && menu.lane !== undefined && k.dest !== 'auto' && drumChannel(k.dest)?.lane === menu.lane) || (menu.col === 'bgm' && k.dest === 'auto'))
+      : [];
+  const spList = spHere ? [spHere] : spOver;
+  const place = (id: string, auto = false) => () => {
+    closeCtxMenu();
+    placeSpecial(id, menu.pos, { auto, select: true, preview: true });
+  };
   return (
     <>
-      {phone && (
+      {(phone || spHere) && (
         <div className="ctx-head">
+          {spHere && <span className="ctx-sp-pill" style={{ ['--c' as string]: spHere.color }} />}
           <b className="mono">{formatPosition(tempoOf(doc), menu.beat)}</b>
-          <span className="ctx-head-sub">{tr('何もない所', 'Empty spot')}</span>
+          <span className="ctx-head-sub">{spHere ? tr(`${spHere.name}の列`, `${spHere.name} column`) : tr('何もない所', 'Empty spot')}</span>
         </div>
       )}
       {phone ? <PhoneGridPicker /> : <GridPicker m={m} />}
-      {extras.length > 0 && (
+      {(extras.length > 0 || spList.length > 0) && <Sep />}
+      {spHere && (
         <>
-          <Sep />
-          {extras.map((it, i) => (
-            <ExtraItem key={i} it={it} />
-          ))}
+          <Item
+            icon={<span className="ctx-sp-pill" style={{ ['--c' as string]: spHere.color }} />}
+            label={tr(`ここに${spHere.name}を置く`, `Place ${spHere.name} here`)}
+            hint={tablet ? tr('タップ', 'Tap') : tr('クリック', 'Click')}
+            onClick={place(spHere.id)}
+          />
+          {spHere.dest !== 'auto' && <Item label={tr('自動で鳴らして置く', 'Place as auto-play')} hint={tr('叩かない', 'Not hit')} onClick={place(spHere.id, true)} />}
         </>
       )}
+      {extras.map((it, i) => (
+        <ExtraItem key={i} it={it} />
+      ))}
+      {spOver.map((k) => (
+        <Item
+          key={k.id}
+          icon={<span className="ctx-sp-pill" style={{ ['--c' as string]: k.color }} />}
+          label={tr(`ここに${k.name}を置く`, `Place ${k.name} here`)}
+          hint={k.key && !phone ? keyLabel(k.key) : undefined}
+          onClick={place(k.id)}
+        />
+      ))}
       <Sep />
       <Item icon={Icon.play(11)} label={tr('ここから再生', 'Play from here')} hint={tr('▶ をここに', 'Moves ▶ here')} onClick={then(() => void playFrom(menu.beat))} />
       <Item icon={Icon.loop(12)} label={tr(`小節 ${toMeasure(m)} をループ`, `Loop measure ${toMeasure(m)}`)} onClick={then(() => loopMeasure(m))} />
@@ -641,6 +833,10 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
           onClick={then(() => void askBpm(menu.pos))}
         />
       )}
+      {spList.length > 0 && <Sep />}
+      {spList.map((k) => (
+        <Item key={k.id} icon={Icon.gear(13)} label={tr(`${k.name}の設定…`, `${k.name} settings…`)} onClick={then(() => openKindSettings(k.id, menu.x, menu.y))} />
+      ))}
     </>
   );
 }

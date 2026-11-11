@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_KITS, KIT_GENRES, KIT_LANES, kitSourceById, parseBuiltinFile, builtinFile } from './sounds';
+import { BUILTIN_KITS, KIT_GENRES, KIT_LANES, kitSourceById, parseBuiltinFile, builtinFile, SPECIAL_KIT_LANES, SPECIAL_SOUND_KITS, specialKitOf } from './sounds';
 
 const file = (kit: string, lane: string) => new URL(`../../public/kits/${kit}/${lane}.ogg`, import.meta.url);
 const hash = (kit: string, lane: string) => createHash('sha256').update(readFileSync(file(kit, lane))).digest('hex');
@@ -38,5 +38,22 @@ describe('標準キット', () => {
       const lanes = ['lc', 'cy', 'rd', 'hhc', 'hho', 'lp', 'sd', 'rim'];
       expect(new Set(lanes.map((l) => hash(k.id, l))).size, k.id).toBe(lanes.length);
     }
+  });
+
+  it('特殊ノーツ（クラップなど）の音: 持っていないキットは借りる。借りる先には全部の音があり、ファイル名から読み戻せる', () => {
+    for (const k of SPECIAL_SOUND_KITS) for (const l of SPECIAL_KIT_LANES) expect(existsSync(file(k, l.key)), `${k}/${l.key}.ogg`).toBe(true);
+    for (const k of BUILTIN_KITS) {
+      const from = specialKitOf(k.id);
+      expect(SPECIAL_SOUND_KITS).toContain(from);
+      for (const l of SPECIAL_KIT_LANES) {
+        const f = builtinFile(k.id, l.ch)!;
+        expect(f).toBe(`dtxweb_${from}_${l.key}.wav`);
+        expect(parseBuiltinFile(f)).toEqual({ kit: from, lane: l });
+      }
+    }
+    // 電子音のキットはエレクトロ（808・909）の音、生のキットはスタンダードの音
+    expect(specialKitOf('house')).toBe('elec');
+    expect(specialKitOf('vintage')).toBe('std');
+    expect(specialKitOf('jazz')).toBe('jazz');
   });
 });

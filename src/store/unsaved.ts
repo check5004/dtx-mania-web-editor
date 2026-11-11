@@ -21,6 +21,7 @@ const WORK_LABEL: Record<keyof SidecarData, () => string> = {
   mix: () => tr('聴く音量', 'listening volume'),
   auto: () => tr('自動で入れた小節', 'auto-filled measures'),
   fullMix: () => tr('完全な原曲', 'full original'),
+  special: () => tr('特殊ノーツの決め', 'special note settings'),
 };
 
 export function unsavedOf(s: Pick<EditorState, 'doc' | 'savedDoc' | 'past' | 'savedHistory'>, side: { dirty: boolean; changed: readonly (keyof SidecarData)[] }): Unsaved | null {

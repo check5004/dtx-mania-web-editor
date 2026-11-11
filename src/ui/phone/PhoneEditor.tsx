@@ -19,6 +19,7 @@ import { unsavedText, useUnsaved } from '../../store/unsaved';
 import { toggleVelMode, useVel } from '../../store/velocity';
 import { ChartCanvas } from '../ChartCanvas';
 import { ContextMenuHost } from '../ContextMenu';
+import { SpecialPopoverHost } from '../SpecialUi';
 import { FindPanel } from '../FindPanel';
 import { formatTime } from '../format';
 import { useSongLength, useSoundsVersion } from '../hooks';
@@ -513,6 +514,7 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
       )}
       <Drawer folderInput={folderInput} />
       <ContextMenuHost />
+      <SpecialPopoverHost />
       <SaveSheet />
       {previewMode === 'full' && (
         <div className="nx-overlay">

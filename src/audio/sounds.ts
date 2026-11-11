@@ -2,6 +2,7 @@
 // 譜面の #WAV に書かれたファイルが曲フォルダに無いとき、ここから鳴らし、保存するときに曲フォルダへ書き出す。
 import { tr, withTr } from '../i18n';
 import { CH, SD_RIM, voiceName } from '../dtx/model';
+import { SPECIAL_PRESETS } from '../dtx/kinds';
 import { encodeWav, loadKit as loadSynthKit } from './kit';
 
 export interface KitLane {
@@ -31,8 +32,16 @@ export const KIT_LANES: readonly KitLane[] = [
   kitLane('rd', CH.RD),
 ];
 
-export const laneByCh = new Map(KIT_LANES.map((l) => [l.ch, l]));
-export const laneByKey = new Map(KIT_LANES.map((l) => [l.key, l]));
+/**
+ * 特殊ノーツ（クラップ・タンバリン・カウベル・シェイカー）の音。音の番号は種類の番号（dtx/kinds）。
+ * キットのレーンとは別（NX にレーンの無い音）。持っているキットは少しだけで、ほかのキットは SPECIAL_FROM のキットの音を使う
+ */
+export const SPECIAL_KIT_LANES: readonly KitLane[] = SPECIAL_PRESETS.map((p) => withTr({ key: p.id, ch: p.voice } as KitLane, { label: () => p.name }));
+
+const specialKeys = new Set(SPECIAL_KIT_LANES.map((l) => l.key));
+
+export const laneByCh = new Map([...KIT_LANES, ...SPECIAL_KIT_LANES].map((l) => [l.ch, l]));
+export const laneByKey = new Map([...KIT_LANES, ...SPECIAL_KIT_LANES].map((l) => [l.key, l]));
 
 /** キットのジャンル（並べる順） */
 export type KitGenre = 'basic' | 'rock' | 'pop' | 'jazz' | 'electro' | 'game';
@@ -133,10 +142,39 @@ export const BUILTIN_KITS: readonly BuiltinKit[] = [
 
 export const builtinKitById = new Map(BUILTIN_KITS.map((k) => [k.id, k]));
 
+/**
+ * 特殊ノーツの音を持っているキット（GeneralUser GS の6キット）と、その音を借りるキット。
+ * 電子音のキットはエレクトロ（808・909 のクラップ・カウベル）、書いていないキットはスタンダードの音
+ */
+const SPECIAL_FROM: Readonly<Record<string, string>> = {
+  std: 'std',
+  room: 'room',
+  rock: 'rock',
+  metal: 'metal',
+  jazz: 'jazz',
+  elec: 'elec',
+  dance: 'elec',
+  eighties: 'elec',
+  analog: 'elec',
+  house: 'elec',
+  trap: 'elec',
+  chip: 'elec',
+  fm: 'elec',
+  synth: 'elec',
+};
+
+/** 特殊ノーツの音をどのキットから取るか */
+export const specialKitOf = (kit: string): string => SPECIAL_FROM[kit] ?? 'std';
+
+/** 特殊ノーツの音を持っているキット（public/kits/<キット>/clap.ogg などがある） */
+export const SPECIAL_SOUND_KITS: readonly string[] = [...new Set(Object.values(SPECIAL_FROM))];
+
 /** 標準キットの音を曲フォルダに置くときのファイル名（dtxweb_std_sd.wav など。合成音は以前の名前のまま） */
 export function builtinFile(kit: string, ch: number): string | null {
   const lane = laneByCh.get(ch);
   if (!lane || !builtinKitById.has(kit)) return null;
+  // 特殊ノーツの音は、持っているキットの音（ファイル名もそのキットの名前）
+  if (specialKeys.has(lane.key)) kit = specialKitOf(kit);
   return kit === 'synth' ? `dtxweb_kit_${lane.key}.wav` : `dtxweb_${kit}_${lane.key}.wav`;
 }
 
@@ -165,6 +203,8 @@ export async function decodeBytes(bytes: ArrayBuffer): Promise<AudioBuffer | nul
 const builtinCache = new Map<string, Promise<AudioBuffer | null>>();
 
 async function fetchBuiltin(kit: string, laneKey: string): Promise<AudioBuffer | null> {
+  // 特殊ノーツの音を持っていないキットの名前で書かれていても、借りるキットの音を鳴らす
+  if (specialKeys.has(laneKey)) kit = specialKitOf(kit);
   if (kit === 'synth') return (await loadSynthKit()).get(`dtxweb_kit_${laneKey}.wav`) ?? null;
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}kits/${kit}/${laneKey}.ogg`);
