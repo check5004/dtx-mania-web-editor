@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { setLang } from '../i18n';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { DEFAULT_KEEP, simplify, type ChipFate, type SectionPlan } from './simplify';
+import { rungOf } from './reduce';
 import { alignPlan, chartProfile, clampRange, fillHabit, keptIds, matchIds, measureCounts, measureList, profileLine, stairCheck, stepRange } from './stairs';
 
 const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
@@ -64,20 +65,16 @@ describe('小節ごとの段階の確かめ', () => {
 
   it('上の難易度に残した音だけで作れば、どの小節も上より濃くならない', () => {
     const root = song(16);
-    const sections: SectionPlan[] = [
-      { name: 'A', from: 0, to: 7, shift: 1 },
+    // 上の難易度：A を静か（先にやさしく）にして、刻みを4分まで。下の難易度：それより手前の段で、A を山場（元に近く）に。食い違う方針でも
+    const upper = simplify({ doc: root, rung: rungOf('time8', true) - 1, ease: 1, sections: [{ name: 'A', from: 0, to: 7, shift: 1 }, { name: 'B', from: 8, to: 15, shift: 0 }], keep: DEFAULT_KEEP });
+    const lowerPlan: SectionPlan[] = [
+      { name: 'A', from: 0, to: 7, shift: -1 },
       { name: 'B', from: 8, to: 15, shift: 0 },
     ];
-    // 上の難易度：A を薄くしてフィルは残す。下の難易度：A を元に近く（-2）・フィルを短く。食い違う方針でも
-    const upper = simplify({ doc: root, rung: 6, sections, keep: DEFAULT_KEEP });
-    const lowerPlan: SectionPlan[] = [
-      { name: 'A', from: 0, to: 7, shift: -2, fill: 'short' },
-      { name: 'B', from: 8, to: 15, shift: 0, fill: 'short' },
-    ];
-    const free = simplify({ doc: root, rung: 4, sections: lowerPlan, keep: DEFAULT_KEEP });
+    const free = simplify({ doc: root, rung: 4, ease: 2, sections: lowerPlan, keep: DEFAULT_KEEP });
     expect(stairCheck(free.doc, upper.doc).denser.length).toBeGreaterThan(0);
     const within = keptIds(upper.fate);
-    const lower = simplify({ doc: root, rung: 4, sections: lowerPlan, keep: DEFAULT_KEEP, within });
+    const lower = simplify({ doc: root, rung: 4, ease: 2, sections: lowerPlan, keep: DEFAULT_KEEP, within });
     expect(stairCheck(lower.doc, upper.doc).denser).toEqual([]);
     for (const id of keptIds(lower.fate)) expect(within.has(id)).toBe(true);
   });
@@ -87,37 +84,35 @@ describe('小節ごとの段階の確かめ', () => {
     const sections: SectionPlan[] = [{ name: 'A', from: 0, to: 7, shift: 0 }];
     const lower = simplify({ doc: root, rung: 4, sections, keep: DEFAULT_KEEP });
     const atLeast = keptIds(lower.fate);
-    const upper = simplify({ doc: root, rung: 9, sections, keep: DEFAULT_KEEP, atLeast });
+    const upper = simplify({ doc: root, rung: rungOf('time24', true), sections, keep: DEFAULT_KEEP, atLeast });
     for (const id of atLeast) expect(keptIds(upper.fate).has(id)).toBe(true);
     expect(stairCheck(upper.doc, null, lower.doc).thinner).toEqual([]);
     // 上に無い音（within の外）は、下にあっても置かない
     const someId = [...atLeast][0];
-    const capped = simplify({ doc: root, rung: 9, sections, keep: DEFAULT_KEEP, atLeast, within: new Set([...atLeast].filter((x) => x !== someId)) });
+    const capped = simplify({ doc: root, rung: rungOf('time24', true), sections, keep: DEFAULT_KEEP, atLeast, within: new Set([...atLeast].filter((x) => x !== someId)) });
     expect(keptIds(capped.fate).has(someId)).toBe(false);
     // 手で「削る」にした音は、下にあっても削る
-    const dropped = simplify({ doc: root, rung: 9, sections, keep: DEFAULT_KEEP, atLeast, overrides: new Map([[someId, 'drop' as const]]) });
+    const dropped = simplify({ doc: root, rung: rungOf('time24', true), sections, keep: DEFAULT_KEEP, atLeast, overrides: new Map([[someId, 'drop' as const]]) });
     expect(keptIds(dropped.fate).has(someId)).toBe(false);
   });
 });
 
 describe('上の難易度の方針に合わせる', () => {
-  it('上の難易度が薄くした区間（shift が +）は、こちらも同じだけ薄くする。濃く残した区間はこちらの判断のまま', () => {
+  it('上の難易度が静か（shift が +）にした区間は、こちらも静かにする。山場にした区間はこちらの判断のまま', () => {
     const mine: SectionPlan[] = [
-      { name: 'A', from: 0, to: 7, shift: -1, fill: 'thin' },
+      { name: 'A', from: 0, to: 7, shift: -1 },
       { name: 'B', from: 8, to: 15, shift: 1 },
       { name: 'C', from: 16, to: 23, shift: 0 },
     ];
     const upper: SectionPlan[] = [
-      { name: 'A', from: 0, to: 7, shift: 1, fill: 'keep' },
-      { name: 'B', from: 8, to: 15, shift: -2 },
-      { name: 'C', from: 16, to: 23, shift: 2 },
+      { name: 'A', from: 0, to: 7, shift: 1 },
+      { name: 'B', from: 8, to: 15, shift: -1 },
+      { name: 'C', from: 16, to: 23, shift: 1 },
     ];
     const out = alignPlan(mine, upper, 'EXTREME');
-    expect(out.map((s) => s.shift)).toEqual([1, 1, 2]);
+    expect(out.map((s) => s.shift)).toEqual([1, 1, 1]);
     expect(out.map((s) => s.alignedTo ?? null)).toEqual(['EXTREME', null, 'EXTREME']);
     expect(out.map((s) => s.ownShift ?? null)).toEqual([-1, null, 0]);
-    // フィルの扱いはこちらのまま（下の難易度は上に残した音しか使わないので、上より細かいフィルにはならない）
-    expect(out[0].fill).toBe('thin');
   });
 
   it('区間の分け方が違うときは、頭を含む上の区間に合わせる', () => {
@@ -182,14 +177,14 @@ describe('AI に渡す、ほかの難易度の作り方', () => {
       level: 6.7,
       profile: chartProfile(root, preThin, spans),
       plan: [
-        { name: 'A', from: 0, to: 3, shift: 1, fill: 'keep' },
+        { name: 'A', from: 0, to: 3, shift: 1 },
         { name: 'B', from: 4, to: 7, shift: 0 },
       ],
       rung: 5,
     });
     expect(line).toContain('EXTREME（作りたて・AI の方針・Lv6.70・全体の段 5）');
     expect(line).toContain('0〜3 ');
-    expect(line).toContain('（+1・keep）');
+    expect(line).toContain('（+1 静か）');
     expect(line).toContain('フィルの前の小節 0%');
     expect(line).toContain('（フィルを残して、その手前の小節を薄くしている）');
   });

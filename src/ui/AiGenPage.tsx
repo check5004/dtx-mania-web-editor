@@ -9,7 +9,7 @@ import { frac } from '../dtx/fraction';
 import { drumChannel, type DtxDoc } from '../dtx/model';
 import { gridStep, snapToGrid } from '../edit/ops';
 import { chartFeatures, FEATURE_DEFS, lastMeasure } from '../gen/features';
-import { DEFAULT_RUNG, describePolicy, FILL_STYLES, MAX_RUNG, policyFor, type Difficulty } from '../gen/simplify';
+import { describeEase, describePolicy, MAX_RUNG, policyFor, type Difficulty } from '../gen/simplify';
 import { measureList, STEP_GAP } from '../gen/stairs';
 import { MAX_DROP, SLOTS, type Slot } from '../gen/targets';
 import { originOf } from '../dtx/origin';
@@ -481,9 +481,9 @@ export function AiGenPage() {
                   {ds.result.rung}
                 </b>
                 <span>/ {MAX_RUNG}</span>
-                {ds.result.ease > 0 && <span>{tr(`（4小節のうち${ds.result.ease}小節は次の段）`, `(${ds.result.ease} of every 4 measures use the next step)`)}</span>}
-                <span className="ellipsis gen-foot-policy" title={describePolicy(policyFor(ds.result.rung))}>
-                  {describePolicy(policyFor(ds.result.rung))}
+                {ds.result.ease > 0 && <span>{describeEase(ds.result.ease)}</span>}
+                <span className="ellipsis gen-foot-policy" title={describePolicy(policyFor(ds.result.rung, ds.result.slow))}>
+                  {describePolicy(policyFor(ds.result.rung, ds.result.slow))}
                 </span>
               </>
             ) : (
@@ -593,18 +593,18 @@ export function AiGenPage() {
                     </span>
                   </div>
                   <div>{ds.plan.summary}</div>
-                  {ds.result && ds.result.rung !== DEFAULT_RUNG[ds.diff] && (
+                  {ds.result && (
                     <div className="lbl" style={{ marginTop: 6 }}>
                       {tr(
-                        `方針は段 ${DEFAULT_RUNG[ds.diff]} を基準に書かれています。目標のレベルに合わせて、全体を段 ${ds.result.rung} に変えて作りました（セクションごとの差はそのまま）。`,
-                        `The plan was written for step ${DEFAULT_RUNG[ds.diff]}. To hit the target level, the whole chart was built at step ${ds.result.rung} (differences between sections stay the same).`,
+                        `省く順番は曲全体で同じです（同じ役割の音は、どこでも同じ扱い）。目標のレベルに合わせて段 ${ds.result.rung} まで当てました${ds.result.ease ? '。セクションの役割（静か・山場）で、次の段を静かな所から先に当てています' : ''}。`,
+                        `The order of what to drop is the same for the whole song (notes with the same role are treated the same everywhere). It goes up to step ${ds.result.rung} to hit the target level${ds.result.ease ? '; the next step is applied to the calm sections first, by section role (calm / high point)' : ''}.`,
                       )}
                     </div>
                   )}
                 </div>
               )}
               {ds.plan.sections
-                .filter((s) => s.comment || s.shift || s.fill)
+                .filter((s) => s.comment || s.shift)
                 .map((s) => (
                   <button
                     key={s.from}
@@ -620,10 +620,9 @@ export function AiGenPage() {
                       </span>
                     </div>
                     <div>
-                      {s.comment ||
-                        [s.shift ? shiftText(s.shift) : '', s.fill ? FILL_STYLES[s.fill].label : '']
-                          .filter(Boolean)
-                          .join(tr('。', '. '))}
+                      {s.shift ? <b className="gen-role">{shiftText(s.shift)}</b> : null}
+                      {s.shift && s.comment ? ' ' : null}
+                      {s.comment}
                     </div>
                     {s.alignedTo && s.shift > 0 && (
                       <div className="lbl gen-aligned">
@@ -633,8 +632,8 @@ export function AiGenPage() {
                             `${ds.planSource === 'ai' ? "The AI's plan" : 'The plan'} said “${shiftText(s.ownShift)}”, but `,
                           )}
                         {tr(
-                          `${s.alignedTo} がここを全体より${s.shift}段やさしくしているので、こちらも同じだけやさしくしました（難しさの段階をそろえるため）`,
-                          `${s.alignedTo} makes this section ${s.shift} ${pl(s.shift, 'step')} easier than overall, so this one is too (to keep the difficulties in step)`,
+                          `${s.alignedTo} がここを静かな所（先にやさしくする）にしているので、こちらも合わせました（難しさの段階をそろえるため）`,
+                          `${s.alignedTo} treats this section as calm (simplified first), so this one does too (to keep the difficulties in step)`,
                         )}
                       </div>
                     )}
@@ -645,8 +644,8 @@ export function AiGenPage() {
           {selMade && <Verdict ds={ds} />}
           <p className="lbl" style={{ marginTop: 12 }}>
             {tr(
-              'ノーツの配置はAIではなくルールエンジンが行います。AIは「どこをどう簡略化するか」とレベルの判定だけを担当します。中央の譜面のチップを押すと、残す・削るを手直しできます。',
-              'Notes are placed by a rule engine, not the AI. The AI only decides where and how to simplify, and judges the level. Click chips in the charts in the middle to keep or remove them by hand.',
+              'ノーツの配置はAIではなくルールエンジンが行います。音の役割と拍の強さで決めた「省く順番」を曲全体に同じに当てるので、同じ形の所はどこでも同じに易しくなります。AIは方針の説明とレベルの判定を担当し、「AIへの追加の指示」でセクションごとの違いを頼んだときだけ、セクションの役割（静か・山場）を付けます。中央の譜面のチップを押すと、残す・削るを手直しできます。',
+              'Notes are placed by a rule engine, not the AI. It applies one order of what to drop, based on each note’s role and the strength of the beat, to the whole song, so the same pattern is simplified the same way everywhere. The AI explains the plan and judges the level, and gives sections a role (calm / high point) only when you ask for differences between sections in the extra instructions. Click chips in the charts in the middle to keep or remove them by hand.',
             )}
           </p>
           {!hasKey && (
@@ -829,11 +828,11 @@ function bandTitle(g: GenState, ds: DiffState): string {
   return parts.join('\n');
 }
 
-/** 方針の shift をことばに（+ でやさしく、− で元に近く） */
+/** セクションの役割（方針の shift の向き。+ は静か、− は山場） */
 function shiftText(n: number): string {
-  if (n > 0) return tr(`全体より${n}段やさしく`, `${n} ${pl(n, 'step')} easier than overall`);
-  if (n < 0) return tr(`全体より${-n}段元に近く`, `${-n} ${pl(-n, 'step')} closer to the original than overall`);
-  return tr('全体と同じ', 'same as overall');
+  if (n > 0) return tr('静か：先にやさしく', 'Calm: simplified first');
+  if (n < 0) return tr('山場：最後まで元に近く', 'High point: kept closest to the original');
+  return tr('ふつう', 'Normal');
 }
 
 /** 「要確認」のわけ：叩けない所・目標の幅から外れ・段階の逆転（上の譜面より濃い・下の譜面より薄い小節） */
@@ -1024,7 +1023,7 @@ function DiffActions({ ds, busy }: { ds: DiffState; busy: boolean }) {
             {r.rung}
           </b>
           <span>/ {MAX_RUNG}</span>
-          {r.ease > 0 && <span>{tr(`（4小節のうち${r.ease}小節は次の段）`, `(${r.ease} of every 4 measures use the next step)`)}</span>}
+          {r.ease > 0 && <span>{describeEase(r.ease)}</span>}
         </div>
       )}
       <div className="row gen-diff-btns">
@@ -1147,7 +1146,10 @@ function JudgeCard({ ds }: { ds: DiffState }) {
         </div>
         <div className="lbl">
           {tr('試した段: ', 'Steps tried: ')}
-          {r.tries.map((t) => `${t.rung}${t.ease ? `+${t.ease}/4` : ''}→${(t.level * calib).toFixed(2)}`).join(tr('、', ', '))}
+          {[...r.tries]
+            .sort((a, b) => a.rung - b.rung || (a.ease ?? 0) - (b.ease ?? 0))
+            .map((t) => `${t.rung}${t.ease ? `+${t.ease}/3` : ''}→${(t.level * calib).toFixed(2)}`)
+            .join(tr('、', ', '))}
         </div>
         {Math.abs(calib - 1) > 0.02 && (
           <div className="lbl">

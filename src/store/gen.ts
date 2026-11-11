@@ -23,7 +23,7 @@ import { dtxFiles, findFile, parseSetDef, putFile, type FolderFile, type SongFol
 import { stepIn } from '../gen/compareView';
 import { lastMeasure } from '../gen/features';
 import { projectCharts } from '../gen/project';
-import { DEFAULT_KEEP, DEFAULT_RUNG, DIFFICULTIES, generateToTarget, levelOfDoc, MAX_EASE, MAX_RUNG, simplify, type Difficulty, type Generated, type MustKeep, type SectionPlan } from '../gen/simplify';
+import { DEFAULT_KEEP, DIFFICULTIES, easeSteps, generateToTarget, levelOfDoc, MAX_RUNG, simplify, type Difficulty, type Generated, type MustKeep, type SectionPlan } from '../gen/simplify';
 import { alignPlan, chartProfile, clampRange, keptIds, matchIds, profileLine, stairCheck, stepRange, type StairCheck } from '../gen/stairs';
 import { aimOf, isAbove, SLOTS, slotOf, slotRank, targetBands, type Slot, type TargetBand } from '../gen/targets';
 import { chooseDialog, confirmDialog } from '../ui/dialogs';
@@ -484,23 +484,10 @@ export function setEnabled(d: Difficulty, on: boolean) {
 function defaultPlan(spans: SectionSpan[]): DifficultyPlan {
   return {
     summary: tr(
-      '標準の方針です。機械的な推定が目標のめやすの近くに入るまで簡略化の段を上げ下げし、段のあいだは4小節のうち何小節かだけ次の段にして合わせます。',
-      'Standard plan: the simplification step goes up or down until the computed estimate lands near the target; between two steps, only some of every 4 measures use the next step to fine-tune.',
+      '標準の方針です。音の役割と拍の強さで決めた「省く順番」を曲全体に同じに当て、機械的な推定が目標のめやすの近くに入る段で止めます。同じ役割の音は、曲のどこでも同じ扱いです。',
+      'Standard plan: one fixed order of what to drop (by each note’s musical role and how strong its beat is) is applied to the whole song, stopping at the step where the computed estimate lands near the target. Notes with the same role are treated the same everywhere in the song.',
     ),
     sections: spans.map((s) => ({ name: s.name, from: s.from, to: s.to, shift: 0 })),
-  };
-}
-
-/** 目標より難しくなる指定（元に近く・フィルを残す）を外した方針。外すものが無ければ null */
-export function relaxPlan(plan: DifficultyPlan): DifficultyPlan | null {
-  const strong = (s: DifficultyPlan['sections'][number]) => s.shift < 0 || s.fill === 'keep' || s.fill === 'thin';
-  if (!plan.sections.some(strong)) return null;
-  return {
-    summary: `${plan.summary}${plan.summary ? ' ' : ''}${tr(
-      '（この方針では目標のレベルまで簡単にできなかったので、「元の譜面に近く」「フィルを残す」の指定を外して作りました）',
-      '(This plan could not get down to the target level, so it was made without the “closer to the original” and “keep fills” settings.)',
-    )}`,
-    sections: plan.sections.map((s) => ({ ...s, shift: Math.max(0, s.shift), fill: s.fill === 'keep' || s.fill === 'thin' ? undefined : s.fill })),
   };
 }
 
@@ -615,7 +602,6 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
           masterLevel: src.level,
           others: othersForPlan(g, diff, src.slot),
           neighbors: neighborsForPlan(g, diff, src, pending),
-          rung: DEFAULT_RUNG[diff],
           sections: g.spans,
           guide,
           keep: g.keep,
@@ -629,8 +615,9 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
         return;
       }
       cost += r.costUsed;
-      // フィルの細かさの上限は、難易度の名前でなく目標のレベルで（難しい曲は BASIC でもレベルが高い）
-      plan = cleanPlan(r.data, g.spans, diff, ds.target.center);
+      plan = cleanPlan(r.data, g.spans);
+      // セクションの役割は、作者の指示があるときだけ使う（指示が無いのに AI がセクションごとに変えると、曲全体の一貫性が崩れる）
+      if (!g.instruction.trim()) plan = { ...plan, sections: plan.sections.map((s) => (s.shift ? { ...s, shift: 0 } : s)) };
       planSource = 'ai';
     }
     patchDiff(diff, { status: 'building', plan, planSource, cost });
@@ -639,7 +626,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
     const st = stairsFor(get(), diff, src, pending);
     if (st.upper?.plan) plan = { ...plan, sections: alignPlan(plan.sections, st.upper.plan.sections, st.upper.slot) };
     // 3. 配置と再調整（機械的な推定で、めやすの近くを狙う。幅の中なら合格）。上の難易度に無い音は置かず、下の難易度にある音は残す
-    let base = { doc: src.doc, sections: plan.sections, keep: get().keep, overrides, within: st.within ?? undefined, atLeast: st.atLeast };
+    const base = { doc: src.doc, sections: plan.sections, keep: get().keep, overrides, within: st.within ?? undefined, atLeast: st.atLeast };
     const calib = src.calib;
     const t = ds.target;
     // 隣の難易度とのあいだ（上より 0.3 下、下より 0.3 上）にも収める（作りたての上の難易度が目標より易しく出たときなど）
@@ -648,20 +635,8 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
     const aim = clampRange(aim0, step);
     const clipped = aim.min !== aim0.min || aim.max !== aim0.max;
     const rawAim = { min: aim.min / calib, max: aim.max / calib };
-    let result = generateToTarget(base, DEFAULT_RUNG[diff], rawAim);
-    // AI の方針（元に近く・フィルを残す）が強すぎて、いちばん簡単な段でも幅に入らないときは、それを外して作り直す
-    if (result.level * calib > Math.min(t.max, step.max) + 1e-9) {
-      const relaxed = relaxPlan(plan);
-      if (relaxed) {
-        const base2 = { ...base, sections: relaxed.sections };
-        const r2 = generateToTarget(base2, DEFAULT_RUNG[diff], rawAim);
-        if (r2.level < result.level) {
-          result = r2;
-          base = base2;
-          plan = relaxed;
-        }
-      }
-    }
+    // 省く順番は曲全体で同じ。セクションの役割（AI の方針）は段のあいだの調整にだけ使うので、どの方針でも目標まで下げられる
+    let result = generateToTarget(base, rawAim);
     // 4. AI 判定。幅から外れたら、AI と計算のずれのぶん狙いを動かして1回だけ作り直す（段のあいだの細かい調整も使う）。
     //    AI の判定は 0.1〜0.2 ほどぶれるので、作り直しはめやすを狙い、2つのうち幅に近い方を採る。
     //    幅は隣の難易度とのあいだ（判定の目盛り）に狭め、作り直しの狙いも隣の難易度とのあいだに収める
@@ -679,7 +654,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
         if (!inTarget(judge.level, want)) {
           const wantCenter = Math.max(want.min, Math.min(want.max, t.center));
           const center = Math.max(step.min, Math.min(step.max, wantCenter - (judge.level - result.level * calib)));
-          const r2 = generateToTarget(base, result.rung, { min: (center - 0.1) / calib, max: (center + 0.1) / calib });
+          const r2 = generateToTarget(base, { min: (center - 0.1) / calib, max: (center + 0.1) / calib });
           if (r2.rung !== result.rung || r2.ease !== result.ease) {
             const j2 = await judgeDoc(r2.doc, { title, sections, mech: r2.level * calib, quiet: true });
             if (j2) {
@@ -756,11 +731,12 @@ function rebuildAll() {
 export function shiftRung(diff: Difficulty, d: 1 | -1) {
   const ds = get().diffs[diff];
   if (!ds.result) return;
-  // 細かい調整があれば先にそれを動かす（易しく: 0→1→2→3→次の段、難しく: その逆）
+  // セクションの役割があれば、段のあいだの調整を先に動かす（易しく: 0→1→2→次の段、難しく: その逆）
+  const maxEase = easeSteps(ds.plan?.sections ?? []);
   let rung = ds.result.rung;
   let ease = ds.result.ease + d;
-  if (ease > MAX_EASE) (rung += 1), (ease = 0);
-  else if (ease < 0) (rung -= 1), (ease = rung >= 0 ? MAX_EASE : 0);
+  if (ease > maxEase) (rung += 1), (ease = 0);
+  else if (ease < 0) (rung -= 1), (ease = rung >= 0 ? maxEase : 0);
   if (rung < 0) (rung = 0), (ease = 0);
   if (rung > MAX_RUNG) (rung = MAX_RUNG), (ease = 0);
   patchDiff(diff, { result: { ...ds.result, rung, ease } });

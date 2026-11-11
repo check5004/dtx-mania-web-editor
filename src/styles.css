@@ -6216,6 +6216,12 @@ button.gen-plan {
   color: var(--amber);
 }
 
+/* セクションの役割（静か・山場。方針のカードの頭） */
+.gen-role {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* 上の難易度に合わせて薄くした区間（方針のカードの下） */
 .gen-aligned {
   color: var(--accent);

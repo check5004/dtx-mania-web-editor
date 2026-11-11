@@ -2,57 +2,28 @@
 // 楽器や奏法を別のものに書き換えない（ライドはライド、オープンHHはオープン、左シンバルは左のまま）。
 // 書き換えると曲として間違った譜面になり、叩きやすくもならない（楯さんの方針: 音楽理論を正義に）。
 // 例外は左バスドラム→右バスドラムだけ（同じバスドラムを片足で踏むだけで、鳴る音は変わらない）。
-// AI は「どの区間をどれだけ簡略化するか」だけを決め、ノーツの配置はここで決定的に行う。
-// 同じ中身の小節には同じ結果が出る（位置と中身だけで決める）ので、曲としての一貫性が保たれる。
-import { tr, withTr } from '../i18n';
+// どの音をどの順番で省くかは gen/reduce（音の役割と拍の強さで決めた1本の順番を、曲全体に同じに当てる）。
+// 「段」は、その順番の何番目まで省いたか。作者が指示したときだけ、AI が「どのセクションが静か・山場か」を決め、
+// 段のあいだの細かい調整（ease）で次の段を静かなセクションから先に当てる（どのセクションも曲全体と1段しか違わない）。
+// 同じ中身の小節には同じ結果が出るので、曲としての一貫性が保たれる。
+import { tr } from '../i18n';
 import { CH, type DtxDoc } from '../dtx/model';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { estimateLevel } from '../check/level';
 import { drumNotes, HAND_LANES, TOM_LANES, type Note } from './features';
+import { assignRoles, describeRung, MAX_EASE as REDUCE_MAX_EASE, MAX_STEPS, mergesLeftFoot, sectionRoles, SLOW_BPM, type Roles } from './reduce';
 
-/** 残す一番細かい間隔（拍）。0 は全部残す、null は残さない */
-export type Step = 0 | 0.25 | 0.5 | 1 | 2 | 4;
+/** 段の数（0 はそのまま、MAX_RUNG は省く順番をすべて当てた段） */
+export const MAX_RUNG = MAX_STEPS;
 
+/** 段の説明に使う（段の番号と、曲が遅いか。遅い曲は刻みの8分を省く順番が後ろ） */
 export interface Policy {
-  hh: Step;
-  kick: Step;
-  snare: Step | 'backbeat';
-  toms: Step;
-  /** フィル：前半と最後の拍の間隔（前半 null は消す） */
-  fillEarly: Step | null;
-  fillLast: Step;
-  /**
-   * クラッシュ（左右のシンバル。2つは同じに扱う）：小節の頭と食い（次の小節の頭の代わりに前の8分の裏で鳴らす）はいつも残す。
-   * 'keep' はそのほかもハイハットと同じ細かさまで残し、'heads' は頭と食いだけ
-   */
-  cymbals: 'keep' | 'heads';
-  /** 左足：merge は左バスドラムを右へ寄せる、drop は左ペダルも消す */
-  leftFoot: 'keep' | 'merge' | 'drop';
-  maxChord: number;
+  rung: number;
+  slow: boolean;
 }
-
-/** 簡略化の段（0 がほぼそのまま、9 がいちばん簡単） */
-export const LADDER: readonly Policy[] = [
-  { hh: 0, kick: 0, snare: 0, toms: 0, fillEarly: 0, fillLast: 0, cymbals: 'keep', leftFoot: 'keep', maxChord: 4 },
-  { hh: 0.25, kick: 0.25, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', leftFoot: 'keep', maxChord: 3 },
-  { hh: 0.25, kick: 0.5, snare: 0.25, toms: 0.25, fillEarly: 0.25, fillLast: 0.25, cymbals: 'keep', leftFoot: 'merge', maxChord: 3 },
-  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.25, fillEarly: 0.5, fillLast: 0.25, cymbals: 'keep', leftFoot: 'merge', maxChord: 3 },
-  { hh: 0.5, kick: 0.5, snare: 0.5, toms: 0.5, fillEarly: 0.5, fillLast: 0.5, cymbals: 'keep', leftFoot: 'merge', maxChord: 2 },
-  { hh: 0.5, kick: 1, snare: 0.5, toms: 0.5, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', leftFoot: 'drop', maxChord: 2 },
-  // 6・7 は ADVANCED になることが多い：シンバルの刻み・拍のアクセントは4分で残す（作者の ADVANCED は8割前後残している）
-  { hh: 1, kick: 1, snare: 'backbeat', toms: 1, fillEarly: 1, fillLast: 0.5, cymbals: 'keep', leftFoot: 'drop', maxChord: 2 },
-  { hh: 1, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 0.5, cymbals: 'keep', leftFoot: 'drop', maxChord: 2 },
-  { hh: 2, kick: 2, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', leftFoot: 'drop', maxChord: 2 },
-  // 速い曲の BASIC 用：キックは小節の頭だけ（人の作った BASIC は 180BPM 前後でこの形が多い）
-  { hh: 2, kick: 4, snare: 'backbeat', toms: 1, fillEarly: null, fillLast: 1, cymbals: 'heads', leftFoot: 'drop', maxChord: 2 },
-];
-
-export const MAX_RUNG = LADDER.length - 1;
 
 export type Difficulty = 'BASIC' | 'ADVANCED' | 'EXTREME';
 export const DIFFICULTIES: readonly Difficulty[] = ['EXTREME', 'ADVANCED', 'BASIC'];
-/** 難易度ごとの最初の段 */
-export const DEFAULT_RUNG: Record<Difficulty, number> = { EXTREME: 1, ADVANCED: 4, BASIC: 6 };
 /**
  * MASTER のレベルに対するレベルの比（楯さんの手元の5曲の人が作った譜面の平均: 0.85・0.60・0.37）。
  * 目標そのものではなく、難易度の並びの位置に使う（目標の幅は gen/targets）
@@ -74,14 +45,16 @@ export interface MustKeep {
 
 export const DEFAULT_KEEP: MustKeep = { backbeat: true, kick1: true, sectionCrash: true, fillLanding: true, openHH: false };
 
-/** 区間ごとの方針（AI が決める。無ければ全体と同じ） */
+/** 区間（セクション）ごとの方針（AI が決める。無ければ元の譜面の濃さから） */
 export interface SectionPlan {
   name: string;
   from: number;
   to: number;
-  /** 全体の段からの増減（+ でより簡単に） */
+  /**
+   * セクションの役割。+ は静かな所（段のあいだの調整で、次の段を先に当てる）、− は山場（最後まで元に近く残す）、0 はふつう。
+   * 省く順番は曲全体で同じで、どのセクションも曲全体と1段しか違わない（gen/reduce）
+   */
   shift: number;
-  fill?: 'keep' | 'thin' | 'short' | 'last';
   comment?: string;
   /** 上の難易度の方針に合わせて shift を上げた（その難易度の名前。gen/stairs alignPlan） */
   alignedTo?: string;
@@ -96,7 +69,10 @@ export interface SimplifyInput {
   keep: MustKeep;
   /** 手で直したもの：元のチップの id → 残す／消す */
   overrides?: ReadonlyMap<number, 'keep' | 'drop'>;
-  /** 段のあいだの細かい調整：4小節のうち何小節を1段やさしくするか（0〜3） */
+  /**
+   * 段のあいだの細かい調整：次の段を、静かなセクションから何番目の役割まで先に当てるか（0〜2。1 は静かな所だけ、
+   * 2 は静か・ふつう。山場は次の段まで元のまま）
+   */
   ease?: number;
   /**
    * 難易度の段階（gen/stairs）：上の難易度に残した音。これに無い音は置かない（どの小節も上の難易度より濃くしない）。
@@ -107,13 +83,8 @@ export interface SimplifyInput {
   atLeast?: ReadonlySet<number>;
 }
 
-/** 細かい調整でやさしくする小節の順（4小節の中の位置。頭の小節は最後） */
-const EASE_ORDER = [1, 3, 2];
-export const MAX_EASE = EASE_ORDER.length;
-
-function easedMeasure(m: number, ease: number): boolean {
-  return ease > 0 && EASE_ORDER.slice(0, ease).includes(((m % 4) + 4) % 4);
-}
+/** 段のあいだの細かい調整の最大 */
+export const MAX_EASE = REDUCE_MAX_EASE;
 
 export type ChipFate = { kind: 'kept' } | { kind: 'removed' } | { kind: 'moved'; ch: number };
 
@@ -123,31 +94,17 @@ export interface SimplifyResult {
   notesBefore: number;
   notesAfter: number;
   fills: number;
+  /** 遅い曲（刻みの8分を省く順番が後ろ。段の説明に使う） */
+  slow: boolean;
 }
 
 const EPS = 1e-6;
-const onGrid = (x: number, step: number) => step === 0 || Math.abs(x / step - Math.round(x / step)) < 1e-4;
+const onGrid = (x: number, step: number) => Math.abs(x / step - Math.round(x / step)) < 1e-4;
 
-export function policyFor(rung: number, plan?: SectionPlan): Policy {
-  const r = Math.max(0, Math.min(MAX_RUNG, Math.round(rung + (plan?.shift ?? 0))));
-  const p = { ...LADDER[r] };
-  if (plan?.fill) {
-    const f = FILL_STYLES[plan.fill];
-    p.fillEarly = f.early;
-    p.fillLast = f.last;
-  }
-  return p;
+/** 段の説明に使う方針（slow は遅い曲か。SimplifyResult.slow） */
+export function policyFor(rung: number, slow = false): Policy {
+  return { rung: Math.max(0, Math.min(MAX_RUNG, Math.round(rung))), slow };
 }
-
-type FillStyle = { early: Step | null; last: Step; label: string };
-const fillStyle = (early: Step | null, last: Step, label: readonly [string, string]) => withTr({ early, last } as FillStyle, { label });
-
-export const FILL_STYLES: Record<NonNullable<SectionPlan['fill']>, FillStyle> = {
-  keep: fillStyle(0.25, 0.25, ['フィルはほぼそのまま', 'Fills mostly as is']),
-  thin: fillStyle(0.5, 0.5, ['フィルは8分に間引く', 'Fills thinned to 8ths']),
-  short: fillStyle(1, 0.5, ['フィルは最後の拍を残して短く', 'Fills shortened to the last beat or so']),
-  last: fillStyle(null, 1, ['フィルは最後の拍だけ', 'Fills on the last beat only']),
-};
 
 /**
  * バックビートとして残すスネア。ふつうは2・4拍（0 から数えて奇数の拍）のスネア。
@@ -243,8 +200,8 @@ export function crashStarts(notes: readonly Note[]): Set<number> {
   return out;
 }
 
+// 手の数・同じ足で残すとき（手直し・段階の決まりで残した音がぶつかったとき）の重み。大きいほど残す
 const PRIORITY: Record<number, number> = {
-  // 大きいほど残す
   [CH.CY]: 9,
   [CH.LC]: 9,
   [CH.SD]: 8,
@@ -259,86 +216,76 @@ const PRIORITY: Record<number, number> = {
   [CH.LP]: 2,
 };
 
-export function simplify(input: SimplifyInput): SimplifyResult {
-  const { doc, keep } = input;
-  const tempo = buildTempoMap(doc);
-  const notes = drumNotes(doc, tempo);
+/** 曲のおもな BPM（いちばん長く続く BPM。拍で数える） */
+export function mainBpm(tempo: TempoMap, lastBeat: number): number {
+  const ev = tempo.events;
+  const span = new Map<number, number>();
+  for (let i = 0; i < ev.length; i++) {
+    const a = ev[i].beat;
+    const b = i + 1 < ev.length ? ev[i + 1].beat : Math.max(a, lastBeat);
+    if (b > a) span.set(ev[i].bpm, (span.get(ev[i].bpm) ?? 0) + (b - a));
+  }
+  let best = tempo.initialBpm;
+  let len = -1;
+  for (const [bpm, l] of span) if (l > len) (best = bpm), (len = l);
+  return best;
+}
+
+/** 作る元の譜面を読んだもの（段を変えて何度も作るときに使い回す） */
+export interface Prepared {
+  doc: DtxDoc;
+  notes: Note[];
+  roles: Roles;
+  fills: Map<number, number>;
+  group: (m: number) => 0 | 1 | 2;
+  /** セクションの役割があるか（無ければ段のあいだの調整は使わない） */
+  hasRoles: boolean;
+  slow: boolean;
+}
+
+export function prepare(input: Pick<SimplifyInput, 'doc' | 'sections' | 'keep'>): Prepared {
+  const tempo = buildTempoMap(input.doc);
+  const notes = drumNotes(input.doc, tempo);
   const fills = detectFills(notes);
-  const backbeat = backbeatSnares(notes, fills);
-  const starts = crashStarts(notes);
-  const sectionHeads = new Set(input.sections.map((s) => s.from));
-  const planOf = (m: number) => input.sections.find((s) => m >= s.from && m <= s.to);
-  const fate = new Map<number, ChipFate>();
-  // 残す候補と、移す先のチャンネル
-  const alive = new Map<number, { n: Note; ch: number; protect: boolean }>();
+  const bpm = mainBpm(tempo, notes.length ? notes[notes.length - 1].beat : 0);
+  const roles = assignRoles({
+    notes,
+    fills,
+    backbeat: backbeatSnares(notes, fills),
+    starts: crashStarts(notes),
+    sectionHeads: new Set(input.sections.map((s) => s.from)),
+    keep: input.keep,
+    bpm,
+  });
+  const sr = sectionRoles(input.sections);
+  return { doc: input.doc, notes, roles, fills, group: sr.group, hasRoles: sr.hasRoles, slow: bpm < SLOW_BPM };
+}
 
+type Alive = { n: Note; ch: number; protect: boolean };
+
+/** 読んだ譜面から、段 rung（と段のあいだの調整 ease）で作る */
+export function build(prep: Prepared, o: Omit<SimplifyInput, 'doc' | 'sections' | 'keep'>): SimplifyResult {
+  const { notes, roles } = prep;
+  const rung = Math.max(0, Math.min(MAX_RUNG, Math.round(o.rung)));
+  const ease = rung < MAX_RUNG && prep.hasRoles ? Math.max(0, Math.min(MAX_EASE, Math.round(o.ease ?? 0))) : 0;
+  const merge = mergesLeftFoot(roles, rung);
+  const alive = new Map<number, Alive>();
   for (const n of notes) {
-    const p = policyFor(input.rung + (easedMeasure(n.m, input.ease ?? 0) ? 1 : 0), planOf(n.m));
-    const fillStart = fills.get(n.m);
-    const inFill = fillStart !== undefined && n.inBeat >= fillStart - EPS;
-    const isHead = n.inBeat < EPS;
-    const landing = isHead && fills.has(n.m - 1);
-    let ch = n.ch;
-    let protect = false;
-    let ok: boolean;
-    // 必ず残すもの
-    if (keep.kick1 && n.ch === CH.BD && isHead) protect = true;
-    if (keep.backbeat && n.ch === CH.SD && !inFill && backbeat.has(n.id)) protect = true;
-    if (keep.sectionCrash && (n.ch === CH.CY || n.ch === CH.LC) && isHead && sectionHeads.has(n.m)) protect = true;
-    if (keep.fillLanding && landing && (n.ch === CH.CY || n.ch === CH.LC || n.ch === CH.BD)) protect = true;
-
-    if (inFill) {
-      const lastBeatStart = Math.max(fillStart!, Math.ceil(n.mBeats - 1 - EPS));
-      const step = n.inBeat >= lastBeatStart - EPS ? p.fillLast : p.fillEarly;
-      ok = step !== null && onGrid(n.inBeat, step);
-      // フィルの中のシンバル・キックはビートと同じに扱う（フィルの終わりの食いのクラッシュは残す）
-      if (n.lane === 0 || n.lane === 8) ok = starts.has(n.id) || onGrid(n.inBeat, Math.max(p.toms, 0.5));
-      if (n.lane === 5 || n.lane === 2) ok = step !== null && onGrid(n.inBeat, Math.max(step, p.kick));
-      if (n.lane === 2 && n.alt && p.leftFoot !== 'keep') ch = CH.BD;
-      if (n.lane === 2 && !n.alt && p.leftFoot === 'drop') ok = false;
-      if (n.lane === 1 || n.lane === 9) ok = step !== null && onGrid(n.inBeat, Math.max(step, p.hh));
-    } else {
-      switch (n.lane) {
-        case 1: // ハイハット（オープンはオープンのまま。クローズに書き換えない）
-          ok = onGrid(n.inBeat, p.hh);
-          break;
-        case 9: // ライド（ライドのまま、ハイハットと同じ細かさまで残す）
-          ok = onGrid(n.inBeat, p.hh);
-          break;
-        case 0:
-        case 8: // クラッシュ（左右のシンバルは同じに扱う）
-          ok = starts.has(n.id) || (p.cymbals === 'keep' && onGrid(n.inBeat, Math.max(0.5, p.hh)));
-          break;
-        case 3: // スネア
-          ok = p.snare === 'backbeat' ? backbeat.has(n.id) : onGrid(n.inBeat, p.snare);
-          break;
-        case 5: // バスドラム
-          ok = onGrid(n.inBeat, p.kick);
-          break;
-        case 2: // 左ペダル・左バスドラム
-          if (n.alt) {
-            ok = onGrid(n.inBeat, p.kick);
-            if (p.leftFoot !== 'keep') ch = CH.BD;
-          } else {
-            ok = p.leftFoot === 'drop' ? false : p.leftFoot === 'merge' ? onGrid(n.inBeat, 1) : onGrid(n.inBeat, p.hh);
-          }
-          break;
-        default: // タム
-          ok = onGrid(n.inBeat, p.toms);
-      }
-    }
-    if (keep.openHH && n.lane === 1 && n.alt && onGrid(n.inBeat, 0.5)) ok = true;
+    const r = roles.byId.get(n.id)!;
+    let ok = !(r.step <= rung || (r.step === rung + 1 && prep.group(n.m) < ease));
+    let protect = r.protect;
+    const ch = merge && n.lane === 2 && n.alt ? CH.BD : n.ch;
     // 難易度の段階：下の難易度にある音は残し、上の難易度に無い音は置かない（食い違うときは上に合わせる）
-    if (input.atLeast?.has(n.id)) (ok = true), (protect = true);
-    if (input.within && !input.within.has(n.id)) (ok = false), (protect = false);
-    const ov = input.overrides?.get(n.id);
+    if (o.atLeast?.has(n.id)) (ok = true), (protect = true);
+    if (o.within && !o.within.has(n.id)) (ok = false), (protect = false);
+    const ov = o.overrides?.get(n.id);
     if (ov === 'keep') (ok = true), (protect = true);
     if (ov === 'drop') (ok = false), (protect = false);
-    if (ok || protect) alive.set(n.id, { n, ch, protect });
+    if (ok) alive.set(n.id, { n, ch, protect });
   }
 
-  // 同じ時刻・同じチャンネルになったもの（左バスドラム→右など）は1つにする
-  const byTime = new Map<number, { n: Note; ch: number; protect: boolean }[]>();
+  // 手直し・段階の決まりで残した音がぶつかったときだけ：同じ時刻・同じチャンネルは1つ、手は2本まで
+  const byTime = new Map<number, Alive[]>();
   for (const a of alive.values()) {
     const k = Math.round(a.n.beat * 960);
     let g = byTime.get(k);
@@ -346,163 +293,120 @@ export function simplify(input: SimplifyInput): SimplifyResult {
     g.push(a);
   }
   for (const g of byTime.values()) {
-    // 同じチャンネル
-    const seen = new Map<number, { n: Note; ch: number; protect: boolean }>();
+    if (g.length < 2) continue;
+    const seen = new Set<number>();
     for (const a of [...g].sort((x, y) => (x.ch === x.n.ch ? 0 : 1) - (y.ch === y.n.ch ? 0 : 1))) {
       if (seen.has(a.ch)) alive.delete(a.n.id);
-      else seen.set(a.ch, a);
+      else seen.add(a.ch);
     }
-    const rest = g.filter((a) => alive.has(a.n.id));
-    // 手は2本まで、全体は maxChord まで（守るものは残す）
-    const m0 = rest[0]?.n.m ?? 0;
-    const p = policyFor(input.rung + (easedMeasure(m0, input.ease ?? 0) ? 1 : 0), planOf(m0));
-    const order = [...rest].sort((x, y) => (y.protect ? 100 : 0) + (PRIORITY[y.ch] ?? 1) - ((x.protect ? 100 : 0) + (PRIORITY[x.ch] ?? 1)));
-    let hands = 0;
-    let total = 0;
-    for (const a of order) {
-      const hand = HAND_LANES.has(laneOfCh(a.ch));
-      if ((hand && hands >= 2) || (!a.protect && total >= p.maxChord)) {
-        alive.delete(a.n.id);
-        continue;
-      }
-      if (hand) hands++;
-      total++;
+    const hands = g.filter((a) => alive.has(a.n.id) && HAND_LANES.has(a.n.lane));
+    if (hands.length > 2) {
+      const order = [...hands].sort((x, y) => (y.protect ? 100 : 0) + (PRIORITY[y.ch] ?? 1) - ((x.protect ? 100 : 0) + (PRIORITY[x.ch] ?? 1)));
+      for (const a of order.slice(2)) alive.delete(a.n.id);
     }
     // 左ペダルと左バスドラムは同じ足
-    const lp = rest.filter((a) => alive.has(a.n.id) && (a.ch === CH.LP || a.ch === CH.LBD));
+    const lp = g.filter((a) => alive.has(a.n.id) && (a.ch === CH.LP || a.ch === CH.LBD));
     if (lp.length > 1) for (const a of lp.slice(1)) alive.delete(a.n.id);
   }
 
-  const out: DtxDoc = structuredClone(doc);
-  const keepIds = new Set(alive.keys());
+  const out: DtxDoc = structuredClone(prep.doc);
   const noteIds = new Set(notes.map((n) => n.id));
-  out.chips = out.chips.filter((c) => !noteIds.has(c.id) || keepIds.has(c.id));
+  out.chips = out.chips.filter((c) => !noteIds.has(c.id) || alive.has(c.id));
   for (const c of out.chips) {
     const a = alive.get(c.id);
     if (a && a.ch !== c.ch) c.ch = a.ch;
   }
+  const fate = new Map<number, ChipFate>();
   for (const n of notes) {
     const a = alive.get(n.id);
     fate.set(n.id, !a ? { kind: 'removed' } : a.ch !== n.ch ? { kind: 'moved', ch: a.ch } : { kind: 'kept' });
   }
-  return { doc: out, fate, notesBefore: notes.length, notesAfter: keepIds.size, fills: fills.size };
+  return { doc: out, fate, notesBefore: notes.length, notesAfter: alive.size, fills: prep.fills.size, slow: prep.slow };
 }
 
-function laneOfCh(ch: number): number {
-  switch (ch) {
-    case CH.LC:
-      return 0;
-    case CH.HHC:
-    case CH.HHO:
-      return 1;
-    case CH.LP:
-    case CH.LBD:
-      return 2;
-    case CH.SD:
-      return 3;
-    case CH.HT:
-      return 4;
-    case CH.BD:
-      return 5;
-    case CH.LT:
-      return 6;
-    case CH.FT:
-      return 7;
-    case CH.CY:
-      return 8;
-    default:
-      return 9;
-  }
+export function simplify(input: SimplifyInput): SimplifyResult {
+  return build(prepare(input), input);
 }
 
 export interface Generated extends SimplifyResult {
   rung: number;
   level: number;
-  /** 段のあいだの細かい調整（4小節のうち1段やさしくした小節の数） */
+  /** 段のあいだの細かい調整（次の段を先に当てたセクションの役割の数。0〜2） */
   ease: number;
   tries: { rung: number; level: number; ease?: number }[];
 }
 
+/** 段のあいだの調整の数（セクションの役割が無ければ 0） */
+export function easeSteps(sections: readonly { shift: number }[]): number {
+  return sections.some((s) => s.shift !== 0) ? MAX_EASE : 0;
+}
+
 /**
- * 目標のレベル帯に入るまで段を上げ下げして作り直す（再調整ループ）。
- * 隣り合う段のあいだに目標があるときは、4小節のうち1〜3小節だけ次の段にして細かく合わせる。
+ * 目標のレベル帯に入る段を探す。段を上げるほど音は減る（前の段の音の一部だけになる）ので、二分探索で幅の上の端を見つけ、
+ * 幅の中に入るもののうち、まん中にいちばん近いものを採る（同じなら元に近いほう）。
+ * 幅に入らなければ、いちばん近いもの（同じなら元に近いほう）
  */
-export function generateToTarget(
-  base: Omit<SimplifyInput, 'rung' | 'ease'>,
-  startRung: number,
-  target: { min: number; max: number },
-  maxTries = LADDER.length,
-): Generated {
+export function generateToTarget(base: Omit<SimplifyInput, 'rung' | 'ease'>, target: { min: number; max: number }): Generated {
+  const prep = prepare(base);
+  // 段と調整を1本の並びにした番号（大きいほど易しい。どの番号も、それより小さい番号の譜面の音の一部だけ）
+  const per = (prep.hasRoles ? MAX_EASE : 0) + 1;
+  const CONFIGS = MAX_RUNG * per + 1;
+  const configOf = (i: number) => ({ rung: Math.floor(i / per), ease: i % per });
   const tries: Generated['tries'] = [];
-  const errOf = (level: number) => (level > target.max ? level - target.max : level < target.min ? target.min - level : 0);
-  let rung = Math.max(0, Math.min(MAX_RUNG, startRung));
-  let best: Generated | null = null;
-  let bestErr = Infinity;
-  const seen = new Map<number, number>();
-  for (let i = 0; i < maxTries && !seen.has(rung); i++) {
-    const r = simplify({ ...base, rung });
-    const level = levelOfDoc(r.doc);
-    seen.set(rung, level);
-    tries.push({ rung, level });
-    const err = errOf(level);
-    if (err < bestErr) {
-      bestErr = err;
-      best = { ...r, rung, level, ease: 0, tries };
+  const cache = new Map<number, { r: SimplifyResult; level: number }>();
+  const at = (i: number) => {
+    let x = cache.get(i);
+    if (!x) {
+      const c = configOf(i);
+      const r = build(prep, { ...base, ...c });
+      x = { r, level: levelOfDoc(r.doc) };
+      cache.set(i, x);
+      tries.push({ rung: c.rung, level: x.level, ...(c.ease ? { ease: c.ease } : {}) });
     }
-    if (err === 0) break;
-    const next = level > target.max ? rung + 1 : rung - 1;
-    if (next < 0 || next > MAX_RUNG) break;
-    rung = next;
-  }
-  // 段の刻みが粗くて目標を飛び越えたとき：難しすぎる段で、4小節のうち何小節かを次の段にする
-  const hard = [...seen].find(([r, lv]) => lv > target.max && (seen.get(r + 1) ?? Infinity) < target.min)?.[0];
-  if (bestErr > 0 && hard !== undefined) {
-    for (let ease = 1; ease <= MAX_EASE; ease++) {
-      const r = simplify({ ...base, rung: hard, ease });
-      const level = levelOfDoc(r.doc);
-      tries.push({ rung: hard, level, ease });
-      const err = errOf(level);
-      if (err < bestErr) {
-        bestErr = err;
-        best = { ...r, rung: hard, level, ease, tries };
-      }
-      if (err === 0 || level < target.min) break;
+    return x;
+  };
+  const errOf = (lv: number) => (lv > target.max ? lv - target.max : lv < target.min ? target.min - lv : 0);
+  // 幅の上の端より易しい最初の番号
+  let lo = 0;
+  let hi = CONFIGS - 1;
+  if (at(lo).level <= target.max + 1e-9) hi = lo;
+  else if (at(hi).level > target.max + 1e-9) lo = hi;
+  else {
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (at(mid).level <= target.max + 1e-9) hi = mid;
+      else lo = mid;
     }
   }
-  return { ...best!, tries };
+  // 候補：境目の前後と、幅の中に続くもの
+  const cands = new Set<number>([Math.max(0, hi - 1), hi]);
+  for (let i = hi + 1; i < CONFIGS && at(i - 1).level >= target.min - 1e-9; i++) cands.add(i);
+  const mid = (target.min + target.max) / 2;
+  let best = -1;
+  let bestKey = [Infinity, Infinity];
+  for (const i of [...cands].sort((a, b) => a - b)) {
+    const lv = at(i).level;
+    const key = [errOf(lv), Math.abs(lv - mid)];
+    if (key[0] < bestKey[0] - 1e-9 || (Math.abs(key[0] - bestKey[0]) <= 1e-9 && key[1] < bestKey[1] - 1e-9)) (best = i), (bestKey = key);
+  }
+  const c = configOf(best);
+  const x = at(best);
+  return { ...x.r, ...c, level: x.level, tries };
 }
 
 export function levelOfDoc(doc: DtxDoc, tempo: TempoMap = buildTempoMap(doc)): number {
   return estimateLevel(doc, tempo)?.level ?? 1;
 }
 
-/** 方針を人が読める文にする */
+/** 段で省いたものを、楽器ごとの人が読める文にする */
 export function describePolicy(p: Policy): string {
-  const g = (s: Step | null | 'backbeat') =>
-    s === null
-      ? tr('なし', 'none')
-      : s === 'backbeat'
-        ? tr('2・4拍', 'beats 2 & 4')
-        : s === 0
-          ? tr('そのまま', 'as is')
-          : s === 0.25
-            ? tr('16分', '16ths')
-            : s === 0.5
-              ? tr('8分', '8ths')
-              : s === 1
-                ? tr('4分', 'quarters')
-                : s === 2
-                  ? tr('2分', 'halves')
-                  : tr('小節の頭だけ', 'downbeats only');
-  const parts = [
-    tr(`ハイハット ${g(p.hh)}`, `Hi-hat ${g(p.hh)}`),
-    tr(`キック ${g(p.kick)}`, `Kick ${g(p.kick)}`),
-    tr(`スネア ${g(p.snare)}`, `Snare ${g(p.snare)}`),
-    tr(`フィル ${p.fillEarly === null ? '最後の拍だけ' : g(p.fillEarly)}`, `Fills ${p.fillEarly === null ? 'last beat only' : g(p.fillEarly)}`),
-  ];
-  if (p.cymbals === 'heads') parts.push(tr('クラッシュは小節の頭と食いだけ', 'Crashes only on downbeats and pushes'));
-  if (p.leftFoot === 'merge') parts.push(tr('左バスは右へ', 'Left bass moved to the right'));
-  if (p.leftFoot === 'drop') parts.push(tr('左足なし', 'No left foot'));
-  parts.push(tr(`同時 ${p.maxChord} まで`, `Up to ${p.maxChord} at once`));
-  return parts.join(tr('・', ' · '));
+  return describeRung(p.rung, p.slow);
+}
+
+/** 段のあいだの調整の説明（ease が 0 なら空） */
+export function describeEase(ease: number): string {
+  if (ease <= 0) return '';
+  return ease === 1
+    ? tr('（静かなセクションは次の段）', '(the calm sections use the next step)')
+    : tr('（山場のほかは次の段）', '(all but the high points use the next step)');
 }

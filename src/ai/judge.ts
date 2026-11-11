@@ -3,7 +3,8 @@ import { tr, aiLangRule, aiLangName } from '../i18n';
 import type { DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures, FEATURE_DEFS, featureSummary, sectionSummaries, spanName, type ChartFeatures } from '../gen/features';
-import { describePolicy, FILL_STYLES, LADDER, type Difficulty, type MustKeep, type SectionPlan } from '../gen/simplify';
+import { mainBpm, type Difficulty, type MustKeep, type SectionPlan } from '../gen/simplify';
+import { SLOW_BPM, STEP_INFO, stepOrder } from '../gen/reduce';
 import type { BandStats, ChartEntry } from '../store/guideline';
 
 // ---- レベル判定 ---------------------------------------------------------------------
@@ -192,11 +193,13 @@ export const planSchema = () => ({
             name: { type: 'string' },
             from: { type: 'integer' },
             to: { type: 'integer' },
-            shift: { type: 'integer', description: '全体の簡略化の段からの増減（-2〜2。+ でより簡単に、- で元の譜面に近く）' },
-            fill: { type: 'string', enum: ['keep', 'thin', 'short', 'last'], description: 'フィルの扱い' },
-            comment: { type: 'string', description: `このセクションで何を残し何を削るか（${aiLangName()}で1〜2文）` },
+            shift: {
+              type: 'integer',
+              description: 'セクションの役割（-1〜1）。作者の指示でセクションごとの違いを求められたときだけ +1（先に易しく）・-1（最後まで元に近く）。指示が無ければ 0',
+            },
+            comment: { type: 'string', description: `このセクションがどんな所か・なぜその役割か（${aiLangName()}で1文）` },
           },
-          required: ['name', 'from', 'to', 'shift', 'fill', 'comment'],
+          required: ['name', 'from', 'to', 'shift', 'comment'],
           additionalProperties: false,
         },
       },
@@ -240,7 +243,6 @@ export function planPrompt(o: {
    * このアプリで作った譜面なら方針。上の難易度・下の難易度の考え方に合わせるのに使う
    */
   neighbors?: { above: string[]; below: string[] };
-  rung: number;
   sections: SectionSpan[];
   guide: string;
   keep: MustKeep;
@@ -248,22 +250,19 @@ export function planPrompt(o: {
 }): { system: string; user: string } {
   const tempo = buildTempoMap(o.doc);
   const feat = chartFeatures(o.doc, tempo);
+  const notesEnd = tempo.measureStart(Math.max(0, ...o.doc.chips.map((c) => c.m)) + 1);
+  const order = stepOrder(mainBpm(tempo, notesEnd) < SLOW_BPM);
   // i18n-ignore-start
   const system = [
-    'あなたは DTXMania（ドラム）の譜面作者です。完成した上の難易度の譜面（ふつうは MASTER）から低い難易度を作るときの「どこをどう簡略化するか」だけを決めます。',
-    'ノーツの配置はルールエンジンが行います。あなたはセクションごとに、全体の簡略化の段からの増減（shift）とフィルの扱いなどを選んでください。',
-    'ルールエンジンは音を間引くだけで、楽器や奏法を別のものに置き換えません（ライドはライド、オープンHHはオープン、左右のシンバルもそのまま）。',
-    '音楽性を壊さないこと: 曲の山場（サビ）らしさ、キメ、ノリは残し、静かな所はより簡単にしてよい。同じ形のセクションには同じ方針を。',
-    '目標のレベル（幅）に入ることが最優先です。めやすの近くを狙ってください。shift の -（元の譜面に近く）は山場の一部だけにし、そのぶん静かな所を + にして釣り合わせてください。',
-    '曲にほかの難易度があるときは、そのあいだに収まり、隣の難易度と難しさがはっきり違うようにしてください。',
-    '難易度の段階は曲全体だけでなく、区間・小節ごとにも守ります。どの区間も上の難易度より濃くせず、下の難易度より薄くしないでください（ルールエンジンも、上の難易度に無い音は置かず、下の難易度にある音は残します）。',
-    'ほかの難易度の譜面が渡されたときは、その作り方を読み取って合わせてください。特に「どこを薄くし、どこを残すか」の考え方（フィルを目立たせるためにその手前を薄くする、静かな区間を薄くする、サビを濃く残す、など）は難易度どうしで同じ向きにします。考え方が食い違うと、その所だけ難しさが逆転して感じられます。',
-    '上の難易度が全体より薄くした区間（shift が +）は、こちらも同じだけ以上 + にします（ルールエンジンもそうします）。そのうえで、どの区間も上の難易度より一段ずつ易しくなるように、全体の釣り合いを取ってください。',
-    '難しい曲は、下の難易度も難しくてよい方針です（低い難易度に合わせて削りすぎると、曲として崩れるため）。難易度の名前ではなく目標のレベルに合わせ、BASIC でも目標が高ければノリ・キメ・フィルの形を残してください。',
-    `フィルの扱い: ${Object.entries(FILL_STYLES)
-      .map(([k, v]) => `${k}=${v.label}`)
-      .join('、')}`,
-    fillLimitLine(fillLimit(o.diff, o.target.center)),
+    'あなたは DTXMania（ドラム）の譜面作者です。完成した上の難易度の譜面（ふつうは MASTER）から低い難易度を作るときに、セクションごとの役割だけを決めます。',
+    'ノーツの配置はルールエンジンが行います。ルールエンジンは、音楽の決まりごと（拍の強さと楽器の役割）で決めた1本の「省く順番」を、曲全体に同じに当てます。同じ役割の音は、曲のどこにあっても同じ扱いになります（あるセクションではバスドラムを削り、別のセクションではバスドラムを残してハイハットを削る、といったばらつきは起きません）。',
+    `省く順番（上から順に、目標のレベルに届くまで省きます）: ${order.map((k, i) => `${i + 1}. ${STEP_INFO[k].label}`).join(' / ')}`,
+    'いつも残すもの: 1拍目のバスドラム、2・4拍のスネア（バックビート）、小節の頭と食いのクラッシュとそれに合わせたバスドラム、フィルの着地。楽器や奏法を別のものに置き換えることはしません（ライドはライド、オープンHHはオープン、左右のシンバルもそのまま）。',
+    '目標のレベルは決まっていて、ルールエンジンが目標に届く段で止めます。難しい曲は、下の難易度も難しくてよい方針です（低い難易度に合わせて削りすぎると、曲として崩れるため）。説明の文も、難易度の名前ではなく目標のレベルに合わせてください。',
+    'あなたが決めるのは、全体の方針の説明（summary）と、セクションごとの説明（comment: どんな所か）と役割（shift）です。',
+    '役割（shift）は、作者の指示でセクションごとに違う扱いを求められたときだけ使います（例:「サビは元の譜面に近く」ならサビを -1、「Aメロはもっと簡単に」なら Aメロを +1）。+1 = 先に易しくする、-1 = 最後まで元の譜面に近く残す。指示が無ければ、すべて 0 にしてください（曲全体で同じ扱いにするため。セクションごとにばらばらにすると、一貫しない譜面になります）。',
+    '役割を使うときも、省く順番の境目の1段をどこから先に当てるかにだけ使い、どのセクションも曲全体と1段しか違いません。同じ形のセクション（1番と2番のサビなど）は同じ値にしてください。',
+    '上の難易度の方針が渡されたときは、その役割に合わせます（上の難易度が +1 にしたセクションは、こちらも +1 にします。ルールエンジンもそうします）。',
     '答えは指定の JSON だけで返してください。sections は与えたセクションと同じ範囲で、すべて返してください。',
     aiLangRule(),
   ].join('\n');
@@ -276,12 +275,11 @@ export function planPrompt(o: {
   if (o.others?.length) lines.push(`曲にある難易度: ${o.others.join('、')}`);
   if (o.neighbors && (o.neighbors.above.length || o.neighbors.below.length)) {
     lines.push('');
-    lines.push('ほかの難易度の作り方（区間ごとに、元の譜面の同じ区間の音を何%残しているか。（）は方針の shift・フィル）:');
+    lines.push('ほかの難易度の作り方（区間ごとに、元の譜面の同じ区間の音を何%残しているか。（）は方針の役割 +1 静か・-1 山場）:');
     for (const l of o.neighbors.above) lines.push(`- 上: ${l}`);
     for (const l of o.neighbors.below) lines.push(`- 下: ${l}`);
-    lines.push('区間ごとの割合が、上の難易度以下・下の難易度以上になり、薄い区間・濃い区間の並び（考え方）が上の難易度と同じ向きになるように決めてください。');
+    lines.push('上の難易度と同じ向きの役割にしてください（静かな所・山場の考え方をそろえる）。');
   }
-  lines.push(`全体の簡略化の段: ${o.rung}（0〜${LADDER.length - 1}。${describePolicy(LADDER[o.rung])}）`);
   lines.push(`必ず残すもの: ${keepList(o.keep) || '指定なし'}`);
   if (o.instruction.trim()) lines.push(`作者の指示: ${o.instruction.trim()}`);
   lines.push('');
@@ -294,41 +292,16 @@ export function planPrompt(o: {
   return { system, user: lines.join('\n') };
 }
 
-type Fill = NonNullable<SectionPlan['fill']>;
-const FILL_ORDER: Fill[] = ['keep', 'thin', 'short', 'last'];
-/** 難易度ごとのフィルの細かさの上限（低いレベルで 16分のフィルを残すと目標のレベルに届かない） */
-export const FILL_LIMIT: Record<Difficulty, Fill> = { EXTREME: 'keep', ADVANCED: 'thin', BASIC: 'short' };
-
-/**
- * 目標のレベルでのフィルの細かさの上限。難しい曲は BASIC でもレベルが高い（gen/targets MAX_DROP）ので、
- * 名前の上限をめやすのレベルで緩める（Lv6 以上は 16分のフィルも、Lv4 以上は 8分まで）。名前の上限より厳しくはしない
- */
-export function fillLimit(diff: Difficulty, level?: number): Fill {
-  const byName = FILL_LIMIT[diff];
-  if (level === undefined || !Number.isFinite(level)) return byName;
-  const byLevel: Fill = level >= 6 ? 'keep' : level >= 4 ? 'thin' : 'short';
-  return FILL_ORDER.indexOf(byLevel) < FILL_ORDER.indexOf(byName) ? byLevel : byName;
-}
-
-// i18n-ignore-start（AI へのプロンプト）
-const fillLimitLine = (limit: Fill) =>
-  limit === 'keep' ? 'フィルの細かさの上限: なし（この目標のレベルなら keep も使えます）。' : `フィルの細かさの上限: ${limit} まで（それより細かい指定は ${limit} に直します）。`;
-// i18n-ignore-end
-
-/** AI の方針を整える。diff と level（目標のめやす）があれば、フィルの細かさを上限までにする（fillLimit） */
-export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpan[], diff?: Difficulty, level?: number): DifficultyPlan {
+/** AI の方針を整える（役割は -1〜1。古い答えの ±2 も符号だけ見る） */
+export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpan[]): DifficultyPlan {
   const got = Array.isArray(raw?.sections) ? raw!.sections : [];
-  const limit = diff ? fillLimit(diff, level) : null;
   const sections: SectionPlan[] = spans.map((s) => {
     const r = got.find((x) => x && Number(x.from) === s.from) ?? got.find((x) => x && x.name === s.name);
-    let fill = r?.fill && r.fill in FILL_STYLES ? r.fill : undefined;
-    if (fill && limit && FILL_ORDER.indexOf(fill) < FILL_ORDER.indexOf(limit)) fill = limit;
     return {
       name: s.name,
       from: s.from,
       to: s.to,
-      shift: Math.max(-2, Math.min(2, Math.round(Number(r?.shift) || 0))),
-      fill,
+      shift: Math.sign(Math.round(Number(r?.shift) || 0)),
       comment: r?.comment ? String(r.comment) : undefined,
     };
   });

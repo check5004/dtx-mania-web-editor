@@ -4,7 +4,7 @@
 // - 同じ元の譜面から作った難易度どうしは、チップの id で比べる。下の難易度は上の難易度に残した音だけを使い、
 //   上の難易度は下の難易度に残した音を残す（gen/simplify の within・atLeast）
 // - 曲に既にある譜面（作者の譜面など）は、同じ時刻・同じ楽器の音を探して合わせる
-// - 上の難易度が「ここは薄く」とした区間（方針の shift が +・フィルを短く）は、下の難易度でも同じかそれ以上に薄くする
+// - 上の難易度が「ここは静か（先にやさしく）」とした区間（方針の shift が +）は、下の難易度でも静かにする
 // - AI には、ほかの難易度が区間ごと・フィルの前後でどれだけ残しているかを渡して、考え方を合わせてもらう
 import { tr } from '../i18n';
 import type { DtxDoc } from '../dtx/model';
@@ -175,7 +175,7 @@ export function fillHabit(p: ChartProfile): string {
 export function profileLine(o: { label: string; who: string; level: number; profile: ChartProfile; plan?: readonly SectionPlan[] | null; rung?: number }): string {
   const parts = o.profile.sections.map((s) => {
     const p = o.plan?.find((x) => x.from === s.from);
-    const how = p && (p.shift || p.fill) ? `（${[p.shift ? `${p.shift > 0 ? '+' : ''}${p.shift}` : '', p.fill ?? ''].filter(Boolean).join('・')}）` : '';
+    const how = p && p.shift ? `（${p.shift > 0 ? '+1 静か' : '-1 山場'}）` : '';
     return `${s.from}〜${s.to} ${pct(s.ratio)}${how}`;
   });
   const fill =

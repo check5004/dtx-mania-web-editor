@@ -12,7 +12,7 @@ const H = vi.hoisted(() => ({
   prompts: [] as { diff: string; user: string }[],
 }));
 
-// AI の方針：EXTREME はフィルのある区間を薄く（+1）してフィルを残す、ADVANCED は逆にその区間を元に近く（-1）してフィルを薄く
+// AI の方針：EXTREME はフィルのある区間を静か（+1）に、ADVANCED は逆にその区間を山場（-1）に
 vi.mock('./ai', async (orig) => ({
   ...((await orig()) as object),
   hasAiKey: () => true,
@@ -22,9 +22,9 @@ vi.mock('./ai', async (orig) => ({
     const sections = H.spans.map((s) => {
       const f = H.fillSpans.has(s.from);
       const p = { name: s.name, from: s.from, to: s.to, comment: '' };
-      if (diff === 'EXTREME') return { ...p, shift: f ? 1 : 0, fill: 'keep' };
-      if (diff === 'ADVANCED') return { ...p, shift: f ? -1 : 0, fill: 'thin' };
-      return { ...p, shift: 0, fill: 'short' };
+      if (diff === 'EXTREME') return { ...p, shift: f ? 1 : 0 };
+      if (diff === 'ADVANCED') return { ...p, shift: f ? -1 : 0 };
+      return { ...p, shift: 0 };
     });
     return { data: { summary: '', sections }, costUsed: 0, model: 'mock', text: '', citations: [], webSearches: 0 };
   },
@@ -90,6 +90,8 @@ describe('難易度の段階', () => {
     useEditor.setState({ doc, page: 'ai', folder: null, meta: { ...useEditor.getState().meta, fileName: 'mstr.dtx', siblings: [] } });
     useGen.setState({ master: null });
     initGen();
+    // セクションの役割は、作者の指示があるときだけ使う
+    useGen.setState({ instruction: 'フィルのある所は先に易しく' });
     H.spans = useGen.getState().spans;
     H.fillSpans = new Set(H.spans.filter((s) => s.from <= 7 && s.to >= 7).map((s) => s.from));
     for (const s of H.spans) if (s.from <= 23 && s.to >= 23) H.fillSpans.add(s.from);
@@ -140,10 +142,21 @@ describe('難易度の段階', () => {
     // EXTREME を作るときは、まだ下の難易度を作り直していないので渡さない
     expect(ext).not.toContain('ほかの難易度の作り方');
     expect(adv).toContain('ほかの難易度の作り方');
-    expect(adv).toMatch(/- 上: EXTREME（作りたて・AI の方針・Lv\d\.\d\d・全体の段 \d）: 0〜7 \d+%（\+1・keep）/);
+    expect(adv).toMatch(/- 上: EXTREME（作りたて・AI の方針・Lv\d\.\d\d・全体の段 \d+）: 0〜7 \d+%（\+1 静か）/);
     expect(adv).toContain('フィルの前の小節');
     expect(bsc).toMatch(/- 上: ADVANCED（作りたて・AI の方針/);
     expect(bsc).toMatch(/- 上: EXTREME（作りたて・AI の方針/);
+  });
+
+  it('作者の指示が無ければ、AI がセクションごとに役割を付けても使わない（曲全体で同じ扱い）', async () => {
+    useGen.setState({ instruction: '' });
+    await generateAll();
+    for (const d of DIFFS) {
+      const g = useGen.getState().diffs[d];
+      expect(g.plan!.sections.every((s) => s.shift === 0), d).toBe(true);
+      expect(g.result!.ease, d).toBe(0);
+    }
+    expectStairs();
   });
 
   it('1つだけ作り直しても、できている上・下の難易度のあいだに収める', async () => {

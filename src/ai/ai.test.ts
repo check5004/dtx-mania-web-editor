@@ -3,10 +3,10 @@ import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures } from '../gen/features';
 import { bandStats, levelOfField, predictLevel, type ChartEntry } from '../store/guideline';
-import { buildSetDef, chooseOutFiles, outFileName, relaxPlan, replacedInSetDef } from '../store/gen';
+import { buildSetDef, chooseOutFiles, outFileName, replacedInSetDef } from '../store/gen';
 import { folderFromFiles } from '../fs/folder';
 import { chartHash } from '../dtx/origin';
-import { cleanJudgement, cleanPlan, fillLimit, planPrompt, sectionSpans } from './judge';
+import { cleanJudgement, cleanPlan, planPrompt, sectionSpans } from './judge';
 import { DEFAULT_KEEP } from '../gen/simplify';
 import { buildChatBody, isChatModel, missingKeys, parseJsonLoose, parseModels, repairPrompt } from './openrouter';
 import { cleanSongInfo, songInfoSchema } from './songInfo';
@@ -154,54 +154,30 @@ describe('レベル判定と方針', () => {
       [8, 16],
     ]);
   });
-  it('AIの方針は与えた区間にそろえ、範囲外の値は丸める', () => {
+  it('AIの方針は与えた区間にそろえ、役割は -1〜1（古い答えのフィルやライドの指定は使わない）', () => {
     const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
-    // 前の形の答え（ライド・オープンHHを残す指定）が来ても読めて、その指定は使わない（ライドもオープンHHも置き換えないので要らない）
-    const p = cleanPlan(JSON.parse('{"summary":"s","sections":[{"name":"サビ","from":8,"to":15,"shift":5,"fill":"thin","keepRide":true,"keepOpenHH":true,"comment":"c"}]}'), spans);
+    // 前の形の答え（shift ±2・フィル・ライドやオープンHHを残す指定）が来ても読めて、役割の向きだけを使う
+    const p = cleanPlan(JSON.parse('{"summary":"s","sections":[{"name":"サビ","from":8,"to":15,"shift":-5,"fill":"thin","keepRide":true,"keepOpenHH":true,"comment":"c"}]}'), spans);
     expect(p.sections).toHaveLength(2);
-    expect(p.sections[1]).toMatchObject({ shift: 2, fill: 'thin', comment: 'c' });
-    expect(p.sections[1]).not.toHaveProperty('keepRide');
-    expect(p.sections[1]).not.toHaveProperty('keepOpenHH');
+    expect(p.sections[1]).toMatchObject({ shift: -1, comment: 'c' });
+    for (const k of ['fill', 'keepRide', 'keepOpenHH']) expect(p.sections[1]).not.toHaveProperty(k);
     expect(p.sections[0].shift).toBe(0);
+    expect(cleanPlan({ summary: '', sections: [{ name: 'A', from: 0, to: 7, shift: 2 }] }, spans).sections[0].shift).toBe(1);
     expect(cleanJudgement({ level: 12, reasons: ['a'] }).level).toBe(9.99);
   });
-  it('低い難易度では細かいフィルの指定を上限までにする（BASIC に16分のフィルを残さない）', () => {
-    const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
-    const raw = { summary: 's', sections: [{ name: 'A', from: 0, to: 7, shift: 0, fill: 'keep' as const, comment: '' }, { name: 'サビ', from: 8, to: 15, shift: -1, fill: 'last' as const, comment: '' }] };
-    expect(cleanPlan(raw, spans, 'BASIC').sections.map((x) => x.fill)).toEqual(['short', 'last']);
-    expect(cleanPlan(raw, spans, 'ADVANCED').sections.map((x) => x.fill)).toEqual(['thin', 'last']);
-    expect(cleanPlan(raw, spans, 'EXTREME').sections.map((x) => x.fill)).toEqual(['keep', 'last']);
-  });
-  it('フィルの上限は目標のレベルで緩める（難しい曲の BASIC はレベルが高い）。名前の上限より厳しくはしない', () => {
-    const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
-    const raw = { summary: 's', sections: [{ name: 'A', from: 0, to: 7, shift: 0, fill: 'keep' as const, comment: '' }, { name: 'サビ', from: 8, to: 15, shift: -1, fill: 'last' as const, comment: '' }] };
-    const fills = (d: 'BASIC' | 'ADVANCED' | 'EXTREME', lv: number) => cleanPlan(raw, spans, d, lv).sections.map((x) => x.fill);
-    // MASTER Lv8.6 の BASIC（めやす 6.4）は 16分のフィルも残せる。Lv7 の曲の BASIC（4.8）は 8分まで
-    expect(fills('BASIC', 6.4)).toEqual(['keep', 'last']);
-    expect(fills('BASIC', 4.8)).toEqual(['thin', 'last']);
-    expect(fills('BASIC', 2.6)).toEqual(['short', 'last']);
-    expect(fills('ADVANCED', 6.8)).toEqual(['keep', 'last']);
-    expect(fills('ADVANCED', 3.0)).toEqual(['thin', 'last']);
-    expect(fills('EXTREME', 2.0)).toEqual(['keep', 'last']);
-    expect(fillLimit('BASIC', 6)).toBe('keep');
-    expect(fillLimit('BASIC', 5.99)).toBe('thin');
-    expect(fillLimit('BASIC')).toBe('short');
-  });
-  it('方針のプロンプト：フィルの上限は目標のレベルで、難しい曲は下の難易度も難しくてよいと伝える', () => {
-    const base = { doc: doc(beat8(4)), title: 't', genre: '', masterLevel: 8.6, rung: 6, sections: sectionSpans([], 4), guide: '', keep: DEFAULT_KEEP, instruction: '' };
-    const high = planPrompt({ ...base, diff: 'BASIC', target: { min: 5.4, max: 6.6, center: 6.4 } }).system;
-    expect(high).toContain('難しい曲は、下の難易度も難しくてよい');
-    expect(high).toContain('フィルの細かさの上限: なし');
-    const low = planPrompt({ ...base, diff: 'BASIC', target: { min: 2, max: 3, center: 2.6 } }).system;
-    expect(low).toContain('フィルの細かさの上限: short まで');
-  });
-  it('方針が強すぎて目標に届かないときは、元に近く・フィルの指定を外せる', () => {
-    const plan = { summary: 'x', sections: [{ name: 'A', from: 0, to: 7, shift: -1, fill: 'thin' as const, comment: 'サビ' }, { name: 'B', from: 8, to: 15, shift: 1, fill: 'last' as const }] };
-    const r = relaxPlan(plan)!;
-    expect(r.sections[0]).toMatchObject({ shift: 0, fill: undefined, comment: 'サビ' });
-    expect(r.sections[1]).toMatchObject({ shift: 1, fill: 'last' });
-    expect(r.summary).toContain('指定を外して');
-    expect(relaxPlan({ summary: '', sections: [{ name: 'B', from: 0, to: 7, shift: 1, fill: 'short' }] })).toBeNull();
+  it('方針のプロンプト：省く順番を曲全体に同じに当てること、役割は作者の指示があるときだけ、難しい曲は下の難易度も難しくてよいと伝える', () => {
+    const base = { doc: doc(beat8(4)), title: 't', genre: '', masterLevel: 8.6, sections: sectionSpans([], 4), guide: '', keep: DEFAULT_KEEP, instruction: '' };
+    const { system, user } = planPrompt({ ...base, diff: 'BASIC', target: { min: 5.4, max: 6.6, center: 6.4 } });
+    expect(system).toContain('難しい曲は、下の難易度も難しくてよい');
+    expect(system).toContain('曲全体に同じに当てます');
+    expect(system).toContain('指示が無ければ、すべて 0');
+    // 省く順番：120BPM（遅い曲）は刻みの8分の裏をバスドラムの8分のあとに省く
+    const order = /省く順番[^:]*: (.*)/.exec(system)![1];
+    expect(order.indexOf('刻みの8分の裏')).toBeGreaterThan(order.indexOf('バスドラムの8分のシンコペーション'));
+    const fast = planPrompt({ ...base, doc: doc(beat8(4), 170), diff: 'BASIC', target: { min: 5.4, max: 6.6, center: 6.4 } }).system;
+    const fastOrder = /省く順番[^:]*: (.*)/.exec(fast)![1];
+    expect(fastOrder.indexOf('刻みの8分の裏')).toBeLessThan(fastOrder.indexOf('バスドラムの8分の裏'));
+    expect(user).not.toContain('全体の簡略化の段');
   });
 });
 
