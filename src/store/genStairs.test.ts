@@ -38,7 +38,7 @@ vi.mock('./aiLevel', async (orig) => ({
 vi.stubGlobal('window', { setTimeout: () => 0 });
 
 const { useEditor } = await import('./editor');
-const { generate, generateAll, initGen, stairCount, stairIssues, toggleChip, useGen } = await import('./gen');
+const { calcLevel, generate, generateAll, initGen, stairCount, stairIssues, toggleChip, useGen } = await import('./gen');
 
 const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
 
@@ -103,6 +103,23 @@ describe('難易度の段階', () => {
     const g = useGen.getState();
     expect(g.diffs.EXTREME.result!.level).toBeGreaterThan(g.diffs.ADVANCED.result!.level);
     expect(g.diffs.ADVANCED.result!.level).toBeGreaterThan(g.diffs.BASIC.result!.level);
+  });
+
+  it('難しい曲（MASTER Lv8.0）は、下の難易度も上に引っ張られて高く、作った譜面も削りすぎない', () => {
+    const g = useGen.getState();
+    expect(g.masterLevel).toBe(8);
+    // めやすは MASTER から EXTREME 1.3・ADVANCED 1.8・BASIC 2.2 まで（比だけなら 6.8・4.8・2.96）
+    expect(g.diffs.EXTREME.target.center).toBeCloseTo(6.8, 2);
+    expect(g.diffs.ADVANCED.target.center).toBeCloseTo(6.2, 2);
+    expect(g.diffs.BASIC.target.center).toBeCloseTo(5.8, 2);
+    expect(g.diffs.BASIC.target).toMatchObject({ pulledFrom: 'MASTER' });
+    // 作った譜面のレベルは幅の中（7.02・6.01・5.57 前後）。BASIC でも元の音の4割より多く残す（比だけのときは2割ほど）
+    for (const d of DIFFS) {
+      const t = g.diffs[d].target;
+      expect(calcLevel(g.diffs[d]), d).toBeGreaterThanOrEqual(t.min - 1e-9);
+      expect(calcLevel(g.diffs[d]), d).toBeLessThanOrEqual(t.max + 1e-9);
+    }
+    expect(result('BASIC').notesAfter / result('BASIC').notesBefore).toBeGreaterThan(0.4);
   });
 
   it('上の難易度が薄くした区間は、下の難易度も同じだけ薄くする（AI が逆の方針を出しても）', () => {

@@ -6,7 +6,8 @@ import { bandStats, levelOfField, predictLevel, type ChartEntry } from '../store
 import { buildSetDef, chooseOutFiles, outFileName, relaxPlan, replacedInSetDef } from '../store/gen';
 import { folderFromFiles } from '../fs/folder';
 import { chartHash } from '../dtx/origin';
-import { cleanJudgement, cleanPlan, sectionSpans } from './judge';
+import { cleanJudgement, cleanPlan, fillLimit, planPrompt, sectionSpans } from './judge';
+import { DEFAULT_KEEP } from '../gen/simplify';
 import { buildChatBody, isChatModel, missingKeys, parseJsonLoose, parseModels, repairPrompt } from './openrouter';
 import { cleanSongInfo, songInfoSchema } from './songInfo';
 import { buildContext, decodeCandidates, enforcePlayable, measureGrid, phrasePrompt, ruleCandidates } from './phrase';
@@ -170,6 +171,29 @@ describe('レベル判定と方針', () => {
     expect(cleanPlan(raw, spans, 'BASIC').sections.map((x) => x.fill)).toEqual(['short', 'last']);
     expect(cleanPlan(raw, spans, 'ADVANCED').sections.map((x) => x.fill)).toEqual(['thin', 'last']);
     expect(cleanPlan(raw, spans, 'EXTREME').sections.map((x) => x.fill)).toEqual(['keep', 'last']);
+  });
+  it('フィルの上限は目標のレベルで緩める（難しい曲の BASIC はレベルが高い）。名前の上限より厳しくはしない', () => {
+    const spans = sectionSpans([{ m: 0, name: 'A' }, { m: 8, name: 'サビ' }], 15);
+    const raw = { summary: 's', sections: [{ name: 'A', from: 0, to: 7, shift: 0, fill: 'keep' as const, comment: '' }, { name: 'サビ', from: 8, to: 15, shift: -1, fill: 'last' as const, comment: '' }] };
+    const fills = (d: 'BASIC' | 'ADVANCED' | 'EXTREME', lv: number) => cleanPlan(raw, spans, d, lv).sections.map((x) => x.fill);
+    // MASTER Lv8.6 の BASIC（めやす 6.4）は 16分のフィルも残せる。Lv7 の曲の BASIC（4.8）は 8分まで
+    expect(fills('BASIC', 6.4)).toEqual(['keep', 'last']);
+    expect(fills('BASIC', 4.8)).toEqual(['thin', 'last']);
+    expect(fills('BASIC', 2.6)).toEqual(['short', 'last']);
+    expect(fills('ADVANCED', 6.8)).toEqual(['keep', 'last']);
+    expect(fills('ADVANCED', 3.0)).toEqual(['thin', 'last']);
+    expect(fills('EXTREME', 2.0)).toEqual(['keep', 'last']);
+    expect(fillLimit('BASIC', 6)).toBe('keep');
+    expect(fillLimit('BASIC', 5.99)).toBe('thin');
+    expect(fillLimit('BASIC')).toBe('short');
+  });
+  it('方針のプロンプト：フィルの上限は目標のレベルで、難しい曲は下の難易度も難しくてよいと伝える', () => {
+    const base = { doc: doc(beat8(4)), title: 't', genre: '', masterLevel: 8.6, rung: 6, sections: sectionSpans([], 4), guide: '', keep: DEFAULT_KEEP, instruction: '' };
+    const high = planPrompt({ ...base, diff: 'BASIC', target: { min: 5.4, max: 6.6, center: 6.4 } }).system;
+    expect(high).toContain('難しい曲は、下の難易度も難しくてよい');
+    expect(high).toContain('フィルの細かさの上限: なし');
+    const low = planPrompt({ ...base, diff: 'BASIC', target: { min: 2, max: 3, center: 2.6 } }).system;
+    expect(low).toContain('フィルの細かさの上限: short まで');
   });
   it('方針が強すぎて目標に届かないときは、元に近く・フィルの指定を外せる', () => {
     const plan = { summary: 'x', sections: [{ name: 'A', from: 0, to: 7, shift: -1, fill: 'thin' as const, comment: 'サビ' }, { name: 'B', from: 8, to: 15, shift: 1, fill: 'last' as const }] };

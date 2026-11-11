@@ -629,7 +629,8 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
         return;
       }
       cost += r.costUsed;
-      plan = cleanPlan(r.data, g.spans, diff);
+      // フィルの細かさの上限は、難易度の名前でなく目標のレベルで（難しい曲は BASIC でもレベルが高い）
+      plan = cleanPlan(r.data, g.spans, diff, ds.target.center);
       planSource = 'ai';
     }
     patchDiff(diff, { status: 'building', plan, planSource, cost });
@@ -670,7 +671,8 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
     if (useAi) {
       patchDiff(diff, { status: 'judging', result, issues: issueCount(result.doc), src, stairs });
       const sections = useSidecar.getState().sections;
-      judge = await judgeDoc(result.doc, { title, label: diff, sections, mech: result.level * calib, quiet: true });
+      // 難易度の名前（BASIC など）は渡さない。難しい曲は BASIC でもレベルが高いので、名前に引っ張られて低く判定しないように
+      judge = await judgeDoc(result.doc, { title, sections, mech: result.level * calib, quiet: true });
       if (judge) {
         cost += judge.cost;
         const want = clampRange(t, stepRange(st.upper?.shown ?? null, st.lower?.shown ?? null));
@@ -679,7 +681,7 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
           const center = Math.max(step.min, Math.min(step.max, wantCenter - (judge.level - result.level * calib)));
           const r2 = generateToTarget(base, result.rung, { min: (center - 0.1) / calib, max: (center + 0.1) / calib });
           if (r2.rung !== result.rung || r2.ease !== result.ease) {
-            const j2 = await judgeDoc(r2.doc, { title, label: diff, sections, mech: r2.level * calib, quiet: true });
+            const j2 = await judgeDoc(r2.doc, { title, sections, mech: r2.level * calib, quiet: true });
             if (j2) {
               cost += j2.cost;
               if (targetGap(j2.level, want) <= targetGap(judge.level, want)) {

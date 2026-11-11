@@ -11,7 +11,7 @@ import { gridStep, snapToGrid } from '../edit/ops';
 import { chartFeatures, FEATURE_DEFS, lastMeasure } from '../gen/features';
 import { DEFAULT_RUNG, describePolicy, FILL_STYLES, MAX_RUNG, policyFor, type Difficulty } from '../gen/simplify';
 import { measureList, STEP_GAP } from '../gen/stairs';
-import { SLOTS, type Slot } from '../gen/targets';
+import { MAX_DROP, SLOTS, type Slot } from '../gen/targets';
 import { originOf } from '../dtx/origin';
 import { setLoopPoint, toggleLoop } from '../store/assist';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
@@ -794,6 +794,18 @@ function bandTitle(g: GenState, ds: DiffState): string {
         `Raised by +${t.raised.toFixed(2)}: this song is fast or dense, so even the easiest step can't get lower`,
       ),
     );
+  if ((t.pulled ?? 0) >= 0.05 && t.pulledFrom) {
+    const name = slotLabel(g, t.pulledFrom);
+    const lv = known[t.pulledFrom];
+    const at = lv !== undefined ? tr(`（Lv ${lv.toFixed(2)}）`, ` (Lv ${lv.toFixed(2)})`) : '';
+    const d = (s: Slot) => MAX_DROP[s].toFixed(1);
+    parts.push(
+      tr(
+        `${name}${at}に合わせて +${t.pulled!.toFixed(2)} 引き上げています。難しい曲は下の難易度も難しくてよく、削りすぎると曲として崩れるので、いちばん上の譜面から EXTREME は ${d('EXTREME')}・ADVANCED は ${d('ADVANCED')}・BASIC は ${d('BASIC')} までしか下げません（BASIC でも元の音の約半分を残します）`,
+        `Raised by +${t.pulled!.toFixed(2)} to stay near ${name}${at}. Hard songs may keep their lower difficulties hard: thinning too much breaks the song, so from the top chart EXTREME drops at most ${d('EXTREME')}, ADVANCED ${d('ADVANCED')} and BASIC ${d('BASIC')} (even BASIC keeps about half of the notes)`,
+      ),
+    );
+  }
   return parts.join('\n');
 }
 
@@ -898,6 +910,11 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
           {t.raised >= 0.05 && (
             <div className="lbl gen-diff-line gen-diff-note gen-raised" title={bandTitle(g, ds)}>
               {tr(`速い・密な曲なので +${t.raised.toFixed(2)} 底上げ`, `Raised +${t.raised.toFixed(2)} for a fast or dense song`)}
+            </div>
+          )}
+          {(t.pulled ?? 0) >= 0.05 && t.pulledFrom && (
+            <div className="lbl gen-diff-line gen-diff-note gen-raised" title={bandTitle(g, ds)}>
+              {tr(`${slotLabel(g, t.pulledFrom)} に合わせて +${t.pulled!.toFixed(2)} 引き上げ（削りすぎない）`, `Raised +${t.pulled!.toFixed(2)} to stay near ${slotLabel(g, t.pulledFrom)}`)}
             </div>
           )}
           {src && src.slot !== g.sourceSlot && (

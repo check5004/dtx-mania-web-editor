@@ -259,10 +259,11 @@ export function planPrompt(o: {
     '難易度の段階は曲全体だけでなく、区間・小節ごとにも守ります。どの区間も上の難易度より濃くせず、下の難易度より薄くしないでください（ルールエンジンも、上の難易度に無い音は置かず、下の難易度にある音は残します）。',
     'ほかの難易度の譜面が渡されたときは、その作り方を読み取って合わせてください。特に「どこを薄くし、どこを残すか」の考え方（フィルを目立たせるためにその手前を薄くする、静かな区間を薄くする、サビを濃く残す、など）は難易度どうしで同じ向きにします。考え方が食い違うと、その所だけ難しさが逆転して感じられます。',
     '上の難易度が全体より薄くした区間（shift が +）は、こちらも同じだけ以上 + にします（ルールエンジンもそうします）。そのうえで、どの区間も上の難易度より一段ずつ易しくなるように、全体の釣り合いを取ってください。',
+    '難しい曲は、下の難易度も難しくてよい方針です（低い難易度に合わせて削りすぎると、曲として崩れるため）。難易度の名前ではなく目標のレベルに合わせ、BASIC でも目標が高ければノリ・キメ・フィルの形を残してください。',
     `フィルの扱い: ${Object.entries(FILL_STYLES)
       .map(([k, v]) => `${k}=${v.label}`)
       .join('、')}`,
-    `フィルの細かさの上限: ADVANCED は ${FILL_LIMIT.ADVANCED} まで、BASIC は ${FILL_LIMIT.BASIC} まで（それより細かい指定は ${FILL_LIMIT.BASIC}・${FILL_LIMIT.ADVANCED} に直します）。`,
+    fillLimitLine(fillLimit(o.diff, o.target.center)),
     '答えは指定の JSON だけで返してください。sections は与えたセクションと同じ範囲で、すべて返してください。',
     aiLangRule(),
   ].join('\n');
@@ -293,16 +294,35 @@ export function planPrompt(o: {
   return { system, user: lines.join('\n') };
 }
 
-/** 難易度ごとのフィルの細かさの上限（BASIC に 16分のフィルを残すと目標のレベルに届かない） */
-const FILL_ORDER: NonNullable<SectionPlan['fill']>[] = ['keep', 'thin', 'short', 'last'];
-export const FILL_LIMIT: Record<Difficulty, NonNullable<SectionPlan['fill']>> = { EXTREME: 'keep', ADVANCED: 'thin', BASIC: 'short' };
+type Fill = NonNullable<SectionPlan['fill']>;
+const FILL_ORDER: Fill[] = ['keep', 'thin', 'short', 'last'];
+/** 難易度ごとのフィルの細かさの上限（低いレベルで 16分のフィルを残すと目標のレベルに届かない） */
+export const FILL_LIMIT: Record<Difficulty, Fill> = { EXTREME: 'keep', ADVANCED: 'thin', BASIC: 'short' };
 
-export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpan[], diff?: Difficulty): DifficultyPlan {
+/**
+ * 目標のレベルでのフィルの細かさの上限。難しい曲は BASIC でもレベルが高い（gen/targets MAX_DROP）ので、
+ * 名前の上限をめやすのレベルで緩める（Lv6 以上は 16分のフィルも、Lv4 以上は 8分まで）。名前の上限より厳しくはしない
+ */
+export function fillLimit(diff: Difficulty, level?: number): Fill {
+  const byName = FILL_LIMIT[diff];
+  if (level === undefined || !Number.isFinite(level)) return byName;
+  const byLevel: Fill = level >= 6 ? 'keep' : level >= 4 ? 'thin' : 'short';
+  return FILL_ORDER.indexOf(byLevel) < FILL_ORDER.indexOf(byName) ? byLevel : byName;
+}
+
+// i18n-ignore-start（AI へのプロンプト）
+const fillLimitLine = (limit: Fill) =>
+  limit === 'keep' ? 'フィルの細かさの上限: なし（この目標のレベルなら keep も使えます）。' : `フィルの細かさの上限: ${limit} まで（それより細かい指定は ${limit} に直します）。`;
+// i18n-ignore-end
+
+/** AI の方針を整える。diff と level（目標のめやす）があれば、フィルの細かさを上限までにする（fillLimit） */
+export function cleanPlan(raw: Partial<DifficultyPlan> | null, spans: SectionSpan[], diff?: Difficulty, level?: number): DifficultyPlan {
   const got = Array.isArray(raw?.sections) ? raw!.sections : [];
+  const limit = diff ? fillLimit(diff, level) : null;
   const sections: SectionPlan[] = spans.map((s) => {
     const r = got.find((x) => x && Number(x.from) === s.from) ?? got.find((x) => x && x.name === s.name);
     let fill = r?.fill && r.fill in FILL_STYLES ? r.fill : undefined;
-    if (fill && diff && FILL_ORDER.indexOf(fill) < FILL_ORDER.indexOf(FILL_LIMIT[diff])) fill = FILL_LIMIT[diff];
+    if (fill && limit && FILL_ORDER.indexOf(fill) < FILL_ORDER.indexOf(limit)) fill = limit;
     return {
       name: s.name,
       from: s.from,
