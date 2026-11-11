@@ -1,7 +1,7 @@
 import { tr, pl, isJa } from '../i18n';
 import { useEffect, useState } from 'react';
 import { engine } from '../audio/engine';
-import { virtualSound } from '../audio/sounds';
+import { KIT_GENRES, kitSourceById, virtualSound } from '../audio/sounds';
 import { toBase36x2 } from '../dtx/base36';
 import { CH, DRUM_LANES, isSeChannel, laneVoice } from '../dtx/model';
 import { serializeHeader } from '../dtx/serialize';
@@ -89,29 +89,30 @@ function KitTab() {
     { ch: l.main, name: l.mainName, color: l.color, key: l.key },
     ...(l.alt !== undefined ? [{ ch: laneVoice(i, true), name: l.altName!, color: l.altColor ?? l.color, key: `${l.key}*` }] : []),
   ]);
-  const groups = [
-    ['builtin', tr('標準キット', 'Built-in kits')],
-    ['song', tr('曲から', 'From songs')],
-    ['own', tr('自分のキット', 'My kits')],
-  ] as const;
+  // 標準キットはジャンルごと、ライブラリのキットは曲から・自分のキット
+  const groups: { key: string; label: string; list: typeof choices }[] = [
+    ...KIT_GENRES.map((g) => ({ key: g.id, label: tr(`標準キット · ${g.name}`, `Built-in · ${g.name}`), list: choices.filter((c) => c.group === 'builtin' && c.genre === g.id) })),
+    { key: 'song', label: tr('曲から', 'From songs'), list: choices.filter((c) => c.group === 'song') },
+    { key: 'own', label: tr('自分のキット', 'My kits'), list: choices.filter((c) => c.group === 'own') },
+  ];
+  const credits = (cur?.sources ?? []).map((id) => kitSourceById.get(id)).filter((x) => !!x);
   return (
     <>
       <div className="section-title">{tr('使用中のキット', 'Current kit')}</div>
       <div className="kit-pick">
         <span className="kit-ic">{Icon.drum(16)}</span>
         <select className="field" value={cur?.id} onChange={(e) => setKit(e.target.value)} aria-label={tr('使うキット', 'Kit to use')}>
-          {groups.map(([g, label]) => {
-            const list = choices.filter((c) => c.group === g);
-            return list.length ? (
-              <optgroup key={g} label={label}>
+          {groups.map(({ key, label, list }) =>
+            list.length ? (
+              <optgroup key={key} label={label}>
                 {list.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
               </optgroup>
-            ) : null;
-          })}
+            ) : null,
+          )}
         </select>
       </div>
       <p className="lbl" style={{ margin: 0, lineHeight: 1.6 }}>
@@ -120,6 +121,24 @@ function KitTab() {
           `${cur?.desc ?? ''}. Used for chips you place from now on; only the sounds actually used are written to the song folder when saving.`,
         )}
       </p>
+      {credits.length > 0 && (
+        <p className="lbl" style={{ margin: 0, lineHeight: 1.6 }} title={tr('どの音も、作った譜面に入れて配れます', 'You can include any of these sounds in the charts you share')}>
+          {tr('音: ', 'Sounds: ')}
+          {credits.map((c, i) => (
+            <span key={c.id}>
+              {i > 0 && ' / '}
+              {c.url ? (
+                <a href={c.url} target="_blank" rel="noreferrer">
+                  {c.name}
+                </a>
+              ) : (
+                c.name
+              )}
+              {` (${c.license})`}
+            </span>
+          ))}
+        </p>
+      )}
       <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
         <button
           className="btn small"

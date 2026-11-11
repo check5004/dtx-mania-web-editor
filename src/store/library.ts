@@ -3,7 +3,7 @@ import { tr, pl, isJa } from '../i18n';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { create } from 'zustand';
 import { scanCharts } from './guideline';
-import { BUILTIN_KITS, KIT_LANES, decodeBytes, loadBuiltin, registerVirtual, unregisterVirtual, builtinFile } from '../audio/sounds';
+import { BUILTIN_KITS, KIT_LANES, decodeBytes, loadBuiltin, peekBuiltin, registerVirtual, unregisterVirtual, builtinFile } from '../audio/sounds';
 import { decodeDtx } from '../dtx/encoding';
 import { SD_RIM } from '../dtx/model';
 import { chipVoice, rimWavs } from '../dtx/rim';
@@ -209,9 +209,11 @@ export function loadBuiltinItems(): Promise<void> {
     const items: LibItem[] = [];
     for (const kit of BUILTIN_KITS) {
       if (kit.id === 'synth') continue;
-      for (const lane of KIT_LANES) {
-        if (lane.key === 'lbd') continue;
-        const buf = await loadBuiltin(kit.id, lane.key);
+      // キットごとに、レーンの音をまとめて読む（覚えずに読む。一覧には形と特徴だけ残す）
+      const lanes = KIT_LANES.filter((l) => l.key !== 'lbd');
+      const bufs = await Promise.all(lanes.map((l) => peekBuiltin(kit.id, l.key)));
+      for (const [i, lane] of lanes.entries()) {
+        const buf = bufs[i];
         if (!buf) continue;
         const mono = monoOf(buf);
         items.push({

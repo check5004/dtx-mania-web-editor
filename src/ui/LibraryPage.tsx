@@ -1,7 +1,7 @@
 // 音源ライブラリの画面：サンプルとキットの一覧、絞り込み、試聴、楽器の直し、似た音、レーンへの割り当て、取り込みとバックアップ。
 import { tr, pl, locale } from '../i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BUILTIN_KITS, KIT_LANES, laneByCh } from '../audio/sounds';
+import { BUILTIN_KITS, KIT_GENRES, KIT_LANES, KIT_SOURCES, kitSourceById, laneByCh } from '../audio/sounds';
 import { CH, SD_RIM } from '../dtx/model';
 import { rimWavs } from '../dtx/rim';
 import { addWav } from '../edit/rim';
@@ -217,7 +217,7 @@ export function LibraryPage() {
               ))}
               <div className="lib-h">{tr('出典', 'Source')}</div>
               <SideRow on={st.source === 'all' && !st.song} label={tr('すべて', 'All')} n={all.length} onClick={() => useLibrary.setState({ source: 'all', song: null })} />
-              <SideRow on={st.source === 'builtin'} label={tr('標準キット（GM）', 'Built-in kits (GM)')} n={st.builtins.length} onClick={() => useLibrary.setState({ source: 'builtin', song: null })} />
+              <SideRow on={st.source === 'builtin'} label={tr('標準キット', 'Built-in kits')} n={st.builtins.length} onClick={() => useLibrary.setState({ source: 'builtin', song: null })} />
               <SideRow
                 on={st.source === 'imported' && !st.song}
                 label={tr('取り込んだ曲', 'Imported songs')}
@@ -600,9 +600,27 @@ function KitsList() {
           {Icon.plus(14)} {tr('新しいキット', 'New kit')}
         </button>
       </div>
-      {BUILTIN_KITS.map((k) => (
-        <KitCard key={k.id} id={k.id} title={k.name} sub={tr(`標準キット · ${k.desc}`, `Built-in kit · ${k.desc}`)} on={kitId === k.id} lanes={KIT_LANES.map((l) => ({ ch: l.ch, label: l.label, name: kitFile(l.ch, k.id) ?? '' }))} />
+      {KIT_GENRES.map((g) => (
+        <div key={g.id} className="kits-genre">
+          <div className="kits-genre-title">{tr(`標準キット · ${g.name}`, `Built-in · ${g.name}`)}</div>
+          {BUILTIN_KITS.filter((k) => k.genre === g.id).map((k) => (
+            <KitCard
+              key={k.id}
+              id={k.id}
+              title={k.name}
+              sub={k.desc}
+              credit={k.sources
+                .map((id) => kitSourceById.get(id))
+                .filter((x) => !!x)
+                .map((x) => `${x.name} (${x.license})`)
+                .join(' / ')}
+              on={kitId === k.id}
+              lanes={KIT_LANES.map((l) => ({ ch: l.ch, label: l.label, name: kitFile(l.ch, k.id) ?? '' }))}
+            />
+          ))}
+        </div>
       ))}
+      {kits.length > 0 && <div className="kits-genre-title">{tr('ライブラリのキット', 'Library kits')}</div>}
       {kits.map((k) => (
         <KitCard
           key={k.id}
@@ -614,11 +632,54 @@ function KitsList() {
           lanes={KIT_LANES.map((l) => ({ ch: l.ch, label: l.label, name: k.lanes[l.ch] ? name(k.lanes[l.ch]) : tr('（標準キット）', '(built-in kit)') }))}
         />
       ))}
+      <KitCredits />
     </div>
   );
 }
 
-function KitCard({ id, kit, title, sub, on, lanes }: { id: string; kit?: LibraryKit; title: string; sub: string; on: boolean; lanes: { ch: number; label: string; name: string }[] }) {
+/** 標準キットの音の出どころとライセンス（どれも、作った譜面に入れて配れる） */
+function KitCredits() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="kit-credits">
+      <button className="link-btn" onClick={() => setOpen(!open)}>
+        {open ? Icon.chevronDown(13) : Icon.chevronRight(13)} {tr('標準キットの音の出どころとライセンス', 'Where the built-in kit sounds come from (licenses)')}
+      </button>
+      {open && (
+        <>
+          <p className="lbl">
+            {tr(
+              'どの音も、作った譜面に入れて配ってかまいません。GeneralUser GS 以外は CC0（パブリックドメイン）で、クレジットも要りません。',
+              'You may include any of these sounds in the charts you share. Everything except GeneralUser GS is CC0 (public domain) and needs no credit.',
+            )}
+          </p>
+          <ul>
+            {KIT_SOURCES.map((x) => (
+              <li key={x.id}>
+                {x.url ? (
+                  <a href={x.url} target="_blank" rel="noreferrer">
+                    {x.name}
+                  </a>
+                ) : (
+                  x.name
+                )}
+                <span className="lbl">
+                  {' '}
+                  · {x.by} · {x.license} · {tr('使っているキット: ', 'Used in: ')}
+                  {BUILTIN_KITS.filter((k) => k.sources.includes(x.id))
+                    .map((k) => k.name)
+                    .join(tr('、', ', '))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function KitCard({ id, kit, title, sub, credit, on, lanes }: { id: string; kit?: LibraryKit; title: string; sub: string; credit?: string; on: boolean; lanes: { ch: number; label: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
   const samples = useLibrary((s) => s.samples);
   const builtins = useLibrary((s) => s.builtins);
@@ -666,6 +727,7 @@ function KitCard({ id, kit, title, sub, on, lanes }: { id: string; kit?: Library
           </button>
         )}
       </div>
+      {open && credit && <div className="lbl kit-credit">{tr(`音: ${credit}`, `Sounds: ${credit}`)}</div>}
       {open && (
         <div className="kit-lanes">
           {lanes.map((l) => (

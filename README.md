@@ -207,7 +207,12 @@
 ## 音源ライブラリと標準キット（段階5）
 
 - **標準キット**（左パネルのキットのタブ）
-  - スタンダード・ロック・ルーム・ジャズ（ブラシ）・エレクトロ（808・909風）・メタルの6種類。GeneralUser GS（SoundFont）のドラムを1音ずつ書き出したもので、`public/kits/` に入っています（ライセンスは `public/kits/LICENSE-GeneralUser-GS.txt`）。以前の合成音は「シンセ（軽量）」として残しています。
+  - 28種類（v0.41.0 から）。ジャンルごと（スタンダード・ロック/メタル・ポップ/ファンク・ジャズ/アコースティック・エレクトロ/ダンス・ゲーム/シンセ）に並べています。
+    - GeneralUser GS（SoundFont）から: スタンダード・ルーム・ロック・メタル・ジャズ（ブラシ）・エレクトロ（808・909風）・ダンス・80年代エレドラ
+    - 生のドラムの録音（Karoryfer Samples などの CC0 の音源）から: ビンテージ・ヘビー・アリーナ・70年代ロック・ガレージ・ドライ・ファット・ファンク・ライブハウス・80年代ゲート・スウィング・ブラシ（生の録音）・レトロ・ローファイ
+    - CC0 の電子音（FreePats・Sonic Pi）と自前の合成から: アナログ・ハウス・トラップ・8ビット・FM音源。以前の合成音は「シンセ（軽量）」として残しています。
+  - どのキットも 13 音（左右のシンバル・ライド・ハイハットの閉じ/開き/ペダルが別の音。スネアのリムも）。`public/kits/` に入っています。
+  - どの音も、作った譜面に入れて配れます。GeneralUser GS 以外は CC0 です。出どころとライセンスはライブラリのキットの一覧の下と `public/kits/CREDITS.txt`（GeneralUser GS のライセンスは `public/kits/LICENSE-GeneralUser-GS.txt`）。
   - キットを選ぶと、これから置くチップにその音を使います。「置いてあるチップも替える」で、置いてあるチップの音も強さを保ったまま替えられます（Ctrl+Z で戻せます）。
   - どのキットにもスネアのリム（GM の 37 Side Stick）の音があり、キットのタブの「リム」の行で、リムに使う音をほかの音（曲の WAV・ライブラリ）に替えられます。リムのチップはスネアと別に音が替わります。
   - 譜面には `dtxweb_<キット>_<レーン>.wav` の名前で書き、保存するときに使った音だけを曲フォルダへ WAV で書き出します。
@@ -274,7 +279,7 @@ Safari（iPad）で動かなくなりやすい書き方（タップの外で音�
 
 公開は `npm run deploy` で行います。ビルドした `dist` を `gh-pages` ブランチに置き、GitHub Pages はそのブランチから配信します（Settings → Pages → Deploy from a branch → `gh-pages` / `(root)`）。
 
-標準キットの音（`public/kits/`）は `node scripts/make-kits.mjs <GeneralUser-GS.sf2>` で作り直せます（開発用の `spessasynth_core` を使います）。
+標準キットの音（`public/kits/`）は `node scripts/make-kits.mjs --src <音源のフォルダ> [--only キット,…]` で作り直せます（作り方は `scripts/kits/defs.mjs`、音源の取り方は [scripts/kits/SOURCES.md](scripts/kits/SOURCES.md)。`ffmpeg` と開発用の `spessasynth_core` を使います）。
 
 GitHub Actions で自動公開したい場合は、`docs/deploy-workflow.yml` を `.github/workflows/deploy.yml` に置いて、Pages の Source を「GitHub Actions」に切り替えてください。
 

@@ -3927,6 +3927,38 @@ button.scope-tag {
   gap: 8px;
 }
 
+.kits-genre {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kits-genre-title {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text3);
+}
+
+.kit-credit {
+  margin-top: 8px;
+}
+
+.kit-credits {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.kit-credits ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+
+.kit-credits a {
+  color: var(--accent);
+}
+
 .kit-card {
   padding: 10px 12px;
   border: 1px solid var(--line2);
