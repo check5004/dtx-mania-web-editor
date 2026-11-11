@@ -71,7 +71,10 @@ import { afterSaveFx, fxBeforeSave } from './fxSave';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
 import { sortByDifficulty } from '../gen/diffTabs';
-import { LINK_FILE, syncedPath } from '../drive/sync';
+import { LINK_FILE, syncedPath, writeDriveSkip } from '../drive/sync';
+import { nxSongPlace, type NxSaveSpot } from '../nxlib/save';
+import { useNxLib } from '../nxlib/store';
+import { nxSaveDialog } from '../ui/nxlib/NxSaveDialog';
 import { chartRefs, dirLabel, isLibraryLook, lookAtFolder, otherSongsIn, songFilesOf, songFolderName, subFolder } from '../fs/songDir';
 import { chooseSongDir, fewText, makeSongDir, pickDir, pickSongPlace, type SongPlace } from './songPlace';
 
@@ -536,6 +539,34 @@ export async function openFolderPicker(fallbackInput?: HTMLInputElement | null) 
     return;
   }
   fallbackInput?.click();
+}
+
+/**
+ * 曲のフォルダを開く（DTXMania の曲の一覧から。許可は呼ぶ側で取る）。chart を渡すとその譜面を開く
+ * （保存していない続き（自動保存の控え）が譜面より新しければ、その続きから）。サブフォルダの譜面は、そのフォルダを曲として開く。
+ * 開けたら true
+ */
+export async function openSongDir(dir: FileSystemDirectoryHandle, chart?: string): Promise<boolean> {
+  if (!(await confirmDiscard())) return false;
+  try {
+    let d = dir;
+    let name = chart;
+    if (chart?.includes('/')) {
+      const parts = chart.split('/');
+      name = parts.pop();
+      for (const p of parts) d = await d.getDirectoryHandle(p);
+    }
+    const folder = await folderFromHandle(d);
+    const f = name ? findFile(folder, name) : undefined;
+    if (f && /\.dtx$/i.test(f.name)) {
+      const draft = await draftFor(folder, f);
+      await openDtxFile(folder, f, undefined, draft?.text, draft ? recentSidecarOf(draft) : undefined);
+    } else await openFolder(folder);
+    return get().screen === 'editor' && get().folder === folder;
+  } catch (e) {
+    toast(tr(`曲を開けませんでした: ${(e as Error).message}`, `Couldn't open the song: ${(e as Error).message}`), 'error');
+    return false;
+  }
 }
 
 /** 曲を集めたフォルダ（読み込み済み）の中の曲を選んでもらう。やめたら null */
@@ -1396,11 +1427,35 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         `保存する場所（NX の DTXFiles など）を選ぶと、その中に「${songName}」フォルダを作って、譜面・原曲・ステム・キットの音をまとめて書きます。次からはそのフォルダに上書きします`,
         `Choose where to save it (such as DTXFiles in NX). A "${songName}" folder is made inside it and the chart, original audio, stems and kit sounds are written there together. Later saves overwrite that folder`,
       );
-      let where: 'folder' | 'local' = 'folder';
-      if (!opts.toFolder) {
-        const keep = folder?.local ? (await getLocalSong(folder.local))?.keepInBrowser : false;
-        if (keep) where = 'local';
-        else if (await checkLocal()) {
+      let where: 'folder' | 'local' | 'lib' = 'folder';
+      // DTXMania の曲（覚えている DTXManiaNX）に入れる所（src/nxlib/save.ts）
+      let spot: NxSaveSpot | null = null;
+      // false なら Google Drive に送らない印を書く（保存の画面で外した）
+      let toDrive = true;
+      const keep = !opts.toFolder && folder?.local ? (await getLocalSong(folder.local))?.keepInBrowser : false;
+      const nx = useNxLib.getState();
+      if (keep) where = 'local';
+      else if (nx.supported && nx.place) {
+        // DTXMania の曲を覚えている：BOX を選んでその中に保存できる画面で聞く
+        const files = new Set<string>([...(folder?.files.values() ?? [])].filter((f) => syncedPath(f.path)).map((f) => f.path));
+        for (const k of kit) files.add(k.path);
+        files.add(fileName);
+        const size = [...(folder?.files.values() ?? [])].reduce((a, f) => a + f.size, 0) + kit.reduce((a, k) => a + k.bytes.length, 0) + bytes.length;
+        const c = await nxSaveDialog({
+          title: doc.fields['TITLE']?.trim() || songName,
+          name: songName,
+          toFolder: !!opts.toFolder,
+          local: !opts.toFolder && (await checkLocal()),
+          inBrowser: !!folder?.local,
+          files: [...files],
+          size,
+        });
+        if (!c) return;
+        toDrive = c.drive;
+        where = c.where === 'pick' ? 'folder' : c.where;
+        if (c.where === 'lib') spot = c.spot;
+      } else if (!opts.toFolder) {
+        if (await checkLocal()) {
           const c = await chooseDialog<'folder' | 'local'>({
             title: tr('どこに保存しますか？', 'Where do you want to save?'),
             body: tr('NX で遊ぶには、NX の曲フォルダ（DTXFiles の中）に保存します。', 'To play it in NX, save it as a song folder inside DTXFiles in NX.'),
@@ -1438,12 +1493,13 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         const lf = await ensureLocalFolder(folder);
         if (lf?.local) {
           await updateLocalSong(lf.local, { keepInBrowser: true });
+          if (!toDrive && !lf.files.has(LINK_FILE)) await writeDriveSkip(lf);
           await saveIntoLocal(lf, fileName, bytes, kit, doc);
           return;
         }
         toast(tr(`${localPlace()}に保存できないので、曲フォルダを選んでください`, `Can't save in ${localPlace()}, so choose a song folder`), 'warn', 6000);
       }
-      const place = await pickSongPlace(songName);
+      const place = spot ? await nxSongPlace(spot) : await pickSongPlace(songName);
       if (!place) return;
       const target: SongFolder = place.created ? { name: place.dir.name, dir: place.dir, files: new Map() } : await folderFromHandle(place.dir);
       if (findFile(target, fileName)) {
@@ -1466,6 +1522,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       await writeFile(target, fileName, bytes);
       const side = sidecarBytes(null, fileName);
       if (side) await writeFile(target, sidecarName(fileName), side);
+      // Drive に送らない（保存の画面で外した）：つないでいない曲に印を書く（保存したあとの送る所が見る）
+      if (!toDrive && !target.files.has(LINK_FILE)) await writeDriveSkip(target);
       markSidecarSaved();
       const fxNow = useSidecar.getState().fx;
       const moved = folder?.local;
@@ -1475,8 +1533,17 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       void scanSiblingOrigins(folder);
       // 本体に置いていた曲は、曲フォルダへ移ったので本体からは消す（自動保存の控えはフォルダに付け替える）
       if (moved) await moveLocalToFolder(moved, folder);
-      const made = place.created ? tr(`（「${place.parent}」の中に「${folder.name}」フォルダを作りました）`, ` (made a "${folder.name}" folder in "${place.parent}")`) : '';
-      toast(`${tr('保存しました: ', 'Saved: ')}${place.parent ? `${place.parent}/` : ''}${folder.name}/${fileName}${made}${kitNote(kit)}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 6000);
+      if ('label' in place) {
+        // DTXMania の曲に入れた（一覧には、保存を見張る所が入れる。src/nxlib/store.ts）
+        toast(
+          `${tr('保存しました：', 'Saved: ')}${place.label} / ${folder.name}${kitNote(kit)}${creditNote(kit)}\n${tr('曲の一覧にも入りました。NX を開いたままなら、NX の設定の「Reload Songs」で出ます。', "It's in the song list too. If NX is open, use Reload Songs in NX's settings to see it.")}`,
+          'ok',
+          9000,
+        );
+      } else {
+        const made = place.created ? tr(`（「${place.parent}」の中に「${folder.name}」フォルダを作りました）`, ` (made a "${folder.name}" folder in "${place.parent}")`) : '';
+        toast(`${tr('保存しました: ', 'Saved: ')}${place.parent ? `${place.parent}/` : ''}${folder.name}/${fileName}${made}${kitNote(kit)}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 6000);
+      }
       void afterSaveFx(folder, fileName, doc, fxPrev, fxNow);
       return;
     }

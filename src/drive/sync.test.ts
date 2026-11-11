@@ -16,7 +16,7 @@ vi.mock('../fs/opfs', async (orig) => {
 });
 
 const { setDriveAuth } = await import('./api');
-const { LINK_FILE, extrasOf, listDriveSongs, listTree, newLink, planSync, pullSong, pushSong, readAutosaves, readLink, remoteChanges, forgetRoot, trashJunk } = await import('./sync');
+const { LINK_FILE, extrasOf, isSkipText, listDriveSongs, listTree, newLink, parseLink, planSync, pullSong, pushSize, pushSong, readAutosaves, readDriveSkip, readLink, remoteChanges, forgetRoot, trashJunk, writeDriveSkip } = await import('./sync');
 const { folderFromFiles, writeFile } = await import('../fs/folder');
 type SongFolder = import('../fs/folder').SongFolder;
 
@@ -105,6 +105,34 @@ describe('Drive と曲フォルダを合わせる（偽の Drive で）', () => 
     expect(f.drive ?? link.folderId).toBeTruthy();
     const songs = await listDriveSongs();
     expect(songs.map((s) => [s.name, s.info.t, s.info.n])).toEqual([['Mephisto', 'メフィスト', 3]]);
+  });
+
+  it('動画を除いて送る：つなぎの記録に残り、次からも動画は送らない', async () => {
+    const f = song({ 'ext.dtx': '#TITLE X', 'bgm.ogg': 'BGM', 'movie/bga.mp4': 'VIDEO-DATA' });
+    expect(pushSize(f)).toEqual({ total: 8 + 3 + 10, video: 10, videos: ['movie/bga.mp4'] });
+    const r = await pushSong(f, { create: true, noVideo: true });
+    expect(r.sent).toBe(2);
+    expect(drive.byPath('DTX Web Editor/Mephisto/movie/bga.mp4')).toBeUndefined();
+    const link = (await readLink(f))!;
+    expect(link.noVideo).toBe(true);
+    expect(parseLink(JSON.stringify(link))?.noVideo).toBe(true);
+    await writeFile(f, 'movie/bga.mp4', enc('VIDEO-2'));
+    expect((await pushSong(f, { create: false })).sent).toBe(0);
+    expect(drive.byPath('DTX Web Editor/Mephisto/movie/bga.mp4')).toBeUndefined();
+  });
+
+  it('送らない印：読めて、つなぎの記録ではない', async () => {
+    const f = song({ 'ext.dtx': 'v1' });
+    expect(await readDriveSkip(f)).toBe(false);
+    await writeDriveSkip(f);
+    expect(await readDriveSkip(f)).toBe(true);
+    expect(await readLink(f)).toBeNull();
+    expect(isSkipText('{"v":1,"skip":true,"folderId":"abc"}')).toBe(false);
+    expect(isSkipText('not json')).toBe(false);
+    // 押して送ると、つなぎの記録で上書きされて印は消える
+    await pushSong(f, { create: true });
+    expect(await readDriveSkip(f)).toBe(false);
+    expect((await readLink(f))?.folderId).toBeTruthy();
   });
 
   it('変わっていなければ何も送らず、変えたファイルだけ上書きする', async () => {

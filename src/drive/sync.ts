@@ -47,6 +47,8 @@ export interface DriveLink {
   autosaveDir?: string;
   autosave?: Record<string, string>;
   syncedAt: number;
+  /** 動画（.mp4 など）は送らない（大きい曲を初めて送るときに「動画を除いて送る」を選んだ）。動画はこの端末の曲フォルダに残る */
+  noVideo?: boolean;
 }
 
 export function newLink(folderId: string, name: string): DriveLink {
@@ -65,6 +67,7 @@ export function parseLink(text: string): DriveLink | null {
       autosaveDir: typeof j.autosaveDir === 'string' ? j.autosaveDir : undefined,
       autosave: j.autosave && typeof j.autosave === 'object' ? j.autosave : undefined,
       syncedAt: Number(j.syncedAt) || 0,
+      ...(j.noVideo === true ? { noVideo: true } : {}),
     };
   } catch {
     return null;
@@ -83,6 +86,33 @@ export async function readLink(folder: SongFolder): Promise<DriveLink | null> {
 
 export async function writeLink(folder: SongFolder, link: DriveLink): Promise<void> {
   await writeFile(folder, LINK_FILE, new TextEncoder().encode(JSON.stringify(link)));
+}
+
+/**
+ * 「この曲は Drive に送らない」の印（つないでいない曲の .dtxe-drive.json に {v:1, skip:true}）。
+ * 保存しても送らない。押して送ったら、つなぎの記録で上書きされて消える
+ */
+export function isSkipText(text: string): boolean {
+  try {
+    const j = JSON.parse(text) as { skip?: unknown; folderId?: unknown };
+    return j?.skip === true && !j.folderId;
+  } catch {
+    return false;
+  }
+}
+
+export async function readDriveSkip(folder: SongFolder): Promise<boolean> {
+  const f = folder.files.get(LINK_FILE);
+  if (!f) return false;
+  try {
+    return isSkipText(await (await f.getFile()).text());
+  } catch {
+    return false;
+  }
+}
+
+export async function writeDriveSkip(folder: SongFolder): Promise<void> {
+  await writeFile(folder, LINK_FILE, new TextEncoder().encode(JSON.stringify({ v: 1, skip: true })));
 }
 
 // ---- どうするかを決める（純粋な関数） ----------------------------------------------
@@ -314,12 +344,30 @@ export interface SyncProgress {
 
 // ---- 送る・取る ---------------------------------------------------------------------
 
-/** 曲フォルダの、Drive と合わせるファイル（ほかの曲のフォルダの中は除く） */
-function localFiles(folder: SongFolder): Map<string, FolderFile> {
+/** 動画（src/audio/videoAudio.ts の VIDEO_EXT と同じ。動画を除いて送るとき） */
+const VIDEO = /\.(mp4|m4v|mov|webm|mkv|avi|wmv|mpe?g|flv|3gp)$/i;
+
+/** 曲フォルダの、Drive と合わせるファイル（ほかの曲のフォルダの中は除く。noVideo なら動画も除く） */
+function localFiles(folder: SongFolder, noVideo = false): Map<string, FolderFile> {
   const others = otherSongDirs([...folder.files.values()].map((f) => f.path));
   const m = new Map<string, FolderFile>();
-  for (const [key, f] of folder.files) if (syncedPath(f.path) && !inDirs(key, others)) m.set(key, f);
+  for (const [key, f] of folder.files) if (syncedPath(f.path) && !inDirs(key, others) && !(noVideo && VIDEO.test(f.path))) m.set(key, f);
   return m;
+}
+
+/** 初めて送るときの大きさ（送るファイルの合計と、そのうちの動画） */
+export function pushSize(folder: SongFolder): { total: number; video: number; videos: string[] } {
+  let total = 0;
+  let video = 0;
+  const videos: string[] = [];
+  for (const f of localFiles(folder).values()) {
+    total += f.size;
+    if (VIDEO.test(f.path)) {
+      video += f.size;
+      videos.push(f.path);
+    }
+  }
+  return { total, video, videos };
 }
 
 /** ほかの曲も入ったフォルダ（曲フォルダではない）か。入っている曲のフォルダ（正規化したパス） */
@@ -393,6 +441,8 @@ export interface AutosaveFile extends Autosave {
 export interface PushOptions {
   /** つないでいない曲は Drive に作ってつなぐ（保存のとき。自動保存では作らない） */
   create: boolean;
+  /** 新しくつなぐとき、動画を除いて送る（つなぎの記録に残り、次からも送らない） */
+  noVideo?: boolean;
   /** 両方で変わったファイルをどうするか。null なら送らない */
   resolve?: (paths: string[]) => Promise<'mine' | 'theirs' | null>;
   /** Drive に同じ名前の曲があるとき（つなぐ前）。'join' はその曲に合わせる、'new' は別の曲として作る */
@@ -462,11 +512,12 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
     }
     target ??= await createFolder(freeName(folder.name, new Set(kids.map((k) => k.name.toLowerCase()))), root, { appProperties: { dtxe: 'song' } });
     link = newLink(target.id, target.name);
+    if (o.noVideo) link.noVideo = true;
   }
   progress({ phase: 'check', done: 0, total: 0, bytes: 0, totalBytes: 0 });
   const tree = await listTree(link.folderId);
   pruneLink(link, tree.junk);
-  const files = localFiles(folder);
+  const files = localFiles(folder, link.noVideo);
   const { state, blobs } = await localState(files, tree.files, link.files, progress);
   let steps = planSync(state, tree.files, link.files, 'push');
   const conflicts = steps.filter((s) => s.op === 'conflict');
@@ -518,7 +569,7 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
 
 /** ファイルが前に合わせた時のまま（大きさと更新時刻が同じ・増えていない）か */
 async function unchangedSince(folder: SongFolder, link: DriveLink): Promise<boolean> {
-  for (const [key, f] of localFiles(folder)) {
+  for (const [key, f] of localFiles(folder, link.noVideo)) {
     const rec = link.files[key];
     if (!rec) return false;
     const file = await f.getFile();
@@ -609,7 +660,7 @@ export async function pullSong(folder: SongFolder, link: DriveLink, o: PullOptio
   progress({ phase: 'check', done: 0, total: 0, bytes: 0, totalBytes: 0 });
   const tree = await listTree(link.folderId);
   pruneLink(link, tree.junk);
-  const files = localFiles(folder);
+  const files = localFiles(folder, link.noVideo);
   const { state, blobs } = await localState(files, tree.files, link.files, progress);
   let steps = planSync(state, tree.files, link.files, 'pull');
   const conflicts = steps.filter((s) => s.op === 'conflict');

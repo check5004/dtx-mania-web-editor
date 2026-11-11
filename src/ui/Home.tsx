@@ -18,6 +18,7 @@ import { HomePhone } from './phone/HomePhone';
 import { InstallCard } from './pwa/InstallCard';
 import { LogoMark } from './LogoMark';
 import { HomeLinks } from './HomeLinks';
+import { NxHomeCard } from './nxlib/NxHomeCard';
 
 function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
@@ -172,6 +173,8 @@ function HomeDesktop() {
             </div>
           </div>
         </div>
+
+        <NxHomeCard />
 
         <section>
           <div className="row" style={{ marginBottom: 10 }}>

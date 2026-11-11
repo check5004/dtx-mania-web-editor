@@ -97,7 +97,8 @@ export interface ViewState {
 export type EditorPage = 'chart' | 'tempo' | 'settings' | 'stems' | 'library' | 'songinfo' | 'ai' | 'guideline';
 
 export interface EditorState {
-  screen: 'home' | 'editor';
+  /** home：ホーム、editor：エディタ、songs：DTXMania の曲（src/ui/nxlib） */
+  screen: 'home' | 'editor' | 'songs';
   /** エディタの中の画面（譜面・テンポ合わせ・設定） */
   page: EditorPage;
   doc: DtxDoc;

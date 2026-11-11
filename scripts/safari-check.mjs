@@ -63,6 +63,7 @@ export const API_OK = {
   'src/app/songPlace.ts': 'pickDir は supportsDirectWrite() のとき・PC の曲フォルダ（isDiskFolder）のときだけ呼ぶ（fileActions。無いときは webkitdirectory の input・本体・ZIP）',
   'src/store/guideline.ts': 'window.showDirectoryPicker があるときだけ',
   'src/store/library.ts': 'window.showDirectoryPicker があるときだけ',
+  'src/nxlib/store.ts': 'DTXMania の曲は PC だけ（initNxLib が supportsDirectWrite() を見て、無ければ入口を出さない）。選ぶ関数も window.showDirectoryPicker を見る',
   'src/input/midi.ts': "'requestMIDIAccess' in navigator を見る",
   'src/store/device.ts': '使えるかの判定そのもの',
   'src/audio/tabCapture.ts': 'getDisplayMedia の有無を見る（iPad はボタンを出さない）',

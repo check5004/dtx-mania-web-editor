@@ -189,6 +189,7 @@ AI は [OpenRouter](https://openrouter.ai/) を使います。キーは「設定
 - Chrome・Edge は曲フォルダへじかに保存します。ほかのブラウザ・iPad・iPhone は ZIP やダウンロードで。
 - エディタが使わない行（#RANDOM・BGA・ギターやベースのチップなど）も、そのまま残します。DTXCreator で作った譜面も開けます。
 - 曲は音ごとブラウザの中にも自動で保存されるので、リロードしても「最近の曲」から続きを開けます。Google Drive にも保存して、ほかの端末で続きを開けます（いまは試験中で、使える人を限っています）。
+- PC の Chrome・Edge では、DTXMania のフォルダ（DTXManiaNX.exe のある所か DTXFiles）を覚えると、ゲームに入っている曲を、画像・難易度・レベルの一覧から開いて直せます。曲名のフォルダが二重になった曲も読み、set.def が無い・ファイルが足りないなど NX で困る所も点検します。新しい曲は BOX を選んでその中に保存できます。Google Drive には、保存した曲のフォルダだけを送ります（くわしくは[説明書](docs/manual.md#dtxmania-の曲pc)）。
 
 ## iPad・iPhone でも
 

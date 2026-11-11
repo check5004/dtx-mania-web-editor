@@ -14,12 +14,15 @@ import {
   newLink,
   NotSongFolderError,
   pullSong,
+  pushSize,
   pushSong,
   readAutosaves,
+  readDriveSkip,
   readLink,
   remoteChanges,
   songsInside,
   trashJunk,
+  writeDriveSkip,
   type DriveLink,
   type DriveSong,
   type DriveTree,
@@ -34,6 +37,8 @@ import { getRecent, listRecent } from '../fs/recent';
 import { dismissToast, isDirty, toast, useEditor } from '../store/editor';
 import { bumpLocal, initLocalSongs, refreshLocalSongs } from '../store/localSongs';
 import { chooseDialog, confirmDialog } from '../ui/dialogs';
+import { askDriveFirst } from '../ui/DriveFirstDialog';
+import { useNxLib } from '../nxlib/store';
 import { formatLevel } from '../ui/format';
 import { autosaveNow, autosaveSnapshot, confirmDiscard, moveToOwnSongFolder, openFolder, openRecent, recentIdFor, reopenFromFolder, save, setBeforeSave } from './fileActions';
 import { fewText } from './songPlace';
@@ -54,9 +59,11 @@ interface DriveSyncState {
   newer: string[];
   /** Drive のこの曲のフォルダに入っている、ほかの曲のフォルダ（送りも取りもしない。ゴミ箱に移せる） */
   junk: JunkDir[];
+  /** 開いている曲は「Drive に送らない」にしてある（保存しても送らない。押して送ると送る） */
+  skip: boolean;
 }
 
-export const useDriveSync = create<DriveSyncState>(() => ({ linked: false, status: 'none', progress: null, doing: null, at: 0, error: '', conflicts: [], newer: [], junk: [] }));
+export const useDriveSync = create<DriveSyncState>(() => ({ linked: false, status: 'none', progress: null, doing: null, at: 0, error: '', conflicts: [], newer: [], junk: [], skip: false }));
 
 const ed = useEditor.getState;
 const set = useDriveSync.setState;
@@ -131,6 +138,38 @@ function currentInfo(folder: SongFolder) {
   return { t: f['TITLE'] ?? '', a: f['ARTIST'] ?? '', b: f['BPM'] ?? '', l: f['DLEVEL'] ?? '' };
 }
 
+/** 初めて送る曲がこれより大きいときは、送る前に聞く（無料の Drive を動画の大きい曲で使い切らないように） */
+const BIG_FIRST = 100 * 1024 * 1024;
+
+/** 「Drive に送らない」にした、つないでいない曲か（保存では送らない。押して送ったときは送る） */
+async function skipped(folder: SongFolder): Promise<boolean> {
+  if (folder.drive || !(await readDriveSkip(folder))) return false;
+  if (ed().folder === folder) set({ skip: true });
+  return true;
+}
+
+/** つないでいない曲を初めて送る前：大きい曲（100 MB をこえる）は聞く。送るなら { noVideo }、送らないなら null */
+async function firstPush(folder: SongFolder, kind: PushKind): Promise<{ noVideo: boolean } | null> {
+  // ほかの曲も入ったフォルダは pushSong が送らない（大きさを聞かない）
+  if (songsInside(folder).length) return { noVideo: false };
+  const size = pushSize(folder);
+  if (size.total <= BIG_FIRST) return { noVideo: false };
+  const how = await askDriveFirst({
+    title: currentInfo(folder)?.t.trim() || folder.name,
+    ...size,
+    saved: kind === 'save',
+    library: !!useNxLib.getState().place,
+  });
+  if (!how) return null;
+  if (how === 'skip') {
+    await writeDriveSkip(folder);
+    if (ed().folder === folder) set({ skip: true });
+    toast(tr('この曲は Google Drive に送りません。送るときは「ファイル › Google Drive にも保存する」から', "This song won't be sent to Google Drive. To send it, use File › Also save to Google Drive"), 'info', 6000);
+    return null;
+  }
+  return { noVideo: how === 'novideo' };
+}
+
 /** 開いている曲を Drive に送る（つないでいなければ、保存のときだけ Drive に作ってつなぐ） */
 async function push(kind: PushKind): Promise<void> {
   const folder = ed().folder;
@@ -138,6 +177,7 @@ async function push(kind: PushKind): Promise<void> {
   if (!folder?.dir || !auth.connected) return;
   if (kind === 'save' && !auth.onSave) return;
   if (kind === 'autosave' && (!auth.autosave || !folder.drive)) return;
+  if (kind === 'save' && (await skipped(folder))) return;
   const waiting = pendingSignIn;
   pendingSignIn = null;
   if (waiting) await waiting;
@@ -149,10 +189,17 @@ async function push(kind: PushKind): Promise<void> {
   const snap = kind === 'save' ? null : autosaveSnapshot();
   if (kind === 'autosave' && !snap) return;
   const wasLinked = !!folder.drive;
+  let noVideo = false;
+  if (!wasLinked && kind !== 'autosave') {
+    const go = await firstPush(folder, kind);
+    if (!go) return;
+    noVideo = go.noVideo;
+  }
   set({ status: 'busy', doing: 'up', error: '' });
   try {
     const r = await pushSong(folder, {
       create: kind !== 'autosave',
+      noVideo,
       quick: kind === 'autosave',
       resolve: kind === 'autosave' ? undefined : askConflict('push'),
       sameName: kind === 'autosave' ? undefined : askSameName,
@@ -179,13 +226,17 @@ async function push(kind: PushKind): Promise<void> {
       bumpLocal();
     }
     const status: DriveStatus = r.conflicts.length ? 'conflict' : r.newer.length ? 'newer' : 'ok';
-    if (ed().folder === folder) set({ linked: true, status, at: Date.now(), conflicts: r.conflicts, newer: r.newer, doing: null });
+    if (ed().folder === folder) set({ linked: true, status, at: Date.now(), conflicts: r.conflicts, newer: r.newer, doing: null, skip: false });
     if (kind !== 'autosave') {
       if (!wasLinked) {
+        const what = r.link.noVideo ? tr('この曲だけ・動画は除いて', 'this song only, without the video') : tr('この曲だけ', 'this song only');
         toast(
-          tr(`Google Drive にも保存しました（DTX Web Editor/${r.link.name}）。次からは保存するたびに変わったファイルだけ送ります`, `Also saved to Google Drive (DTX Web Editor/${r.link.name}). From now on, each save sends only the files that changed`),
+          tr(
+            `Google Drive にも送りました（${what} · ${sizeText(r.bytes)}）\n次からは、保存するたびに変わったファイルだけ送ります（DTX Web Editor/${r.link.name}）`,
+            `Also sent to Google Drive (${what} · ${sizeText(r.bytes)})\nFrom now on, each save sends only the files that changed (DTX Web Editor/${r.link.name})`,
+          ),
           'ok',
-          6000,
+          7000,
         );
       } else if (r.sent > 0 && kind === 'manual') toast(tr(`Google Drive に送りました（${r.sent} 個）`, `Sent to Google Drive (${r.sent} ${pl(r.sent, 'file')})`), 'ok', 4000);
       if (r.newer.length) newerToast(r.newer);
@@ -277,6 +328,8 @@ function newerToast(paths: string[]) {
 function beforeSave(opts: { toFolder?: boolean }) {
   const a = useDriveAuth.getState();
   if (!a.connected || !a.onSave || tokenValid() || a.redirect || !a.gisReady) return;
+  // 「Drive に送らない」にした曲は、保存しても送らないのでログインし直さない
+  if (useDriveSync.getState().skip && !ed().folder?.drive) return;
   // 曲フォルダを選ぶ保存は、ログインの小窓を開くとフォルダ選択が開けなくなる（小窓が操作を使い切る）。
   // そのときは保存のあとでフッターの「Drive につなぎ直す」から送る
   if (opts.toFolder) return;
@@ -648,25 +701,27 @@ async function onFolder(folder: SongFolder | null) {
   if (notSongToast) dismissToast(notSongToast);
   notSongToast = 0;
   if (!folder?.dir) {
-    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '' });
+    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '', skip: false });
     return;
   }
   // ほかの曲も入ったフォルダ（DTXFiles など）は Drive と合わせない（保存のときに、この曲だけのフォルダへ移す）
   if (songsInside(folder).length) {
     folder.drive = undefined;
-    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '' });
+    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '', skip: false });
     return;
   }
   const link = await readLink(folder);
   if (ed().folder !== folder) return;
   if (!link) {
     folder.drive = undefined;
-    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '' });
+    const skip = await readDriveSkip(folder);
+    if (ed().folder !== folder) return;
+    set({ linked: false, status: 'none', conflicts: [], newer: [], junk: [], error: '', skip });
     return;
   }
   folder.drive = link.folderId;
   const busy = useDriveSync.getState().status === 'busy';
-  set({ linked: true, status: busy ? 'busy' : 'ok', at: link.syncedAt, conflicts: [], newer: [], junk: [], error: '' });
+  set({ linked: true, status: busy ? 'busy' : 'ok', at: link.syncedAt, conflicts: [], newer: [], junk: [], error: '', skip: false });
   if (!useDriveAuth.getState().connected || !tokenValid() || busy || Date.now() - (synced.get(link.folderId) ?? 0) < 30_000) return;
   try {
     const { newer, junk } = await remoteChanges(folder, link);

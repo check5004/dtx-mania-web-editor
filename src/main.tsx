@@ -5,6 +5,7 @@ import { initPwa } from './store/pwa';
 import './styles.css';
 import './tablet.css';
 import './phone.css';
+import './nxlib.css';
 
 // ホーム画面に追加できるアプリにする（オフラインで開ける・新しい版の知らせ・インストール）
 initPwa();

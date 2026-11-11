@@ -1,6 +1,6 @@
 // 確認・選択・新規作成のダイアログ。Promise で結果を返す。
 import { tr } from '../i18n';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import type { NewSongInfo } from '../store/editor';
 import { audioNameFor, isVideoName, NX_MOVIE_EXT } from '../audio/videoAudio';
@@ -15,7 +15,8 @@ type Spec =
   | { kind: 'confirm'; title: string; body: string; ok: string; cancel?: string; danger?: boolean }
   | { kind: 'choose'; title: string; body?: string; options: ChoiceOption<unknown>[] }
   | { kind: 'prompt'; title: string; body?: string; value: string; ok: string }
-  | { kind: 'newSong'; title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> };
+  | { kind: 'newSong'; title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> }
+  | { kind: 'custom'; render: (done: (v: unknown) => void) => ReactNode; className?: string };
 
 interface DialogState {
   spec: Spec | null;
@@ -49,6 +50,13 @@ export const promptDialog = (o: { title: string; body?: string; value: string; o
 export const newSongDialog = (o: { title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> }) =>
   open<NewSongInfo | null>({ kind: 'newSong', ...o });
 
+/**
+ * 中身を自分で描くダイアログ（DTXMania の曲に保存する・Drive に初めて送る など）。done(値) で閉じる。
+ * Esc・外を押したら null。render は描くたびに呼ぶので、状態は返す部品の中に持つ
+ */
+export const customDialog = <T,>(render: (done: (v: T | null) => void) => ReactNode, o: { className?: string } = {}) =>
+  open<T | null>({ kind: 'custom', render: render as (done: (v: unknown) => void) => ReactNode, ...o });
+
 export function DialogHost() {
   const spec = useDialog((s) => s.spec);
   useEffect(() => {
@@ -65,7 +73,7 @@ export function DialogHost() {
   if (!spec) return null;
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && close(spec.kind === 'confirm' ? false : null)}>
-      <div className="modal" role="dialog" aria-modal="true">
+      <div className={`modal ${spec.kind === 'custom' ? (spec.className ?? '') : ''}`} role="dialog" aria-modal="true">
         {spec.kind === 'confirm' && (
           <>
             <h2>{spec.title}</h2>
@@ -101,6 +109,7 @@ export function DialogHost() {
         )}
         {spec.kind === 'prompt' && <PromptBody spec={spec} />}
         {spec.kind === 'newSong' && <NewSongBody spec={spec} />}
+        {spec.kind === 'custom' && spec.render(close)}
       </div>
     </div>
   );

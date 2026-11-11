@@ -471,6 +471,27 @@ export const Icon = {
       <path d="M8 4.3v9" />
     </Svg>
   ),
+  /** 箱（DTXMania の BOX） */
+  box: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2.5 5 8 2.5 13.5 5v6L8 13.5 2.5 11z" />
+      <path d="M2.5 5 8 7.5 13.5 5M8 7.5v6" />
+    </Svg>
+  ),
+  /** 守る（ほかのフォルダには書かない） */
+  shield: (s?: number) => (
+    <Svg size={s}>
+      <path d="M8 2 13.3 4v4c0 3-2.3 5.5-5.3 6-3-.5-5.3-3-5.3-6V4z" />
+      <path d="m5.7 8 1.7 1.7 3-3.3" />
+    </Svg>
+  ),
+  /** 読み直す */
+  refresh: (s?: number) => (
+    <Svg size={s}>
+      <path d="M13 7.5A5 5 0 1 0 11.6 11" />
+      <path d="M13 3v4.5H8.5" />
+    </Svg>
+  ),
   /** GitHub のマーク（Primer Octicons の mark-github、MIT。GitHub へのリンクにだけ使う） */
   github: (s?: number) => (
     <Svg size={s}>

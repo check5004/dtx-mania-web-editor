@@ -112,6 +112,13 @@ export async function about(): Promise<{ email: string; name: string }> {
   return { email: j.user?.emailAddress ?? '', name: j.user?.displayName ?? '' };
 }
 
+/** Drive の容量（limit が無ければ無制限）と使っている大きさ（バイト） */
+export async function storageQuota(): Promise<{ limit: number | null; usage: number }> {
+  const j = await json<{ storageQuota?: { limit?: string; usage?: string } }>(`${API}/about?fields=storageQuota(limit,usage)`);
+  const limit = Number(j.storageQuota?.limit);
+  return { limit: Number.isFinite(limit) && limit > 0 ? limit : null, usage: Number(j.storageQuota?.usage) || 0 };
+}
+
 /** 条件に合うファイル・フォルダを全部（ページをめくって） */
 export async function listFiles(query: string): Promise<DriveFile[]> {
   const out: DriveFile[] = [];

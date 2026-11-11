@@ -15,6 +15,8 @@ import { DriveProgressChip } from './ui/DriveUi';
 import { DialogHost } from './ui/dialogs';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
+import { initNxLib } from './nxlib/store';
+import { SongsPage } from './ui/nxlib/SongsPage';
 import { UpdateNotice } from './ui/pwa/UpdateNotice';
 import { VideoExtractHost } from './ui/VideoExtract';
 
@@ -25,7 +27,11 @@ function Toasts() {
       <UpdateNotice />
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.level} ${t.action || t.action2 ? 'has-action' : ''} ${t.action && t.action2 ? 'two-actions' : ''}`}>
-          <span>{t.text}</span>
+          {/* 2 行目からは小さく（「保存しました」と、そのあとにすること） */}
+          <span>
+            {t.text.split('\n')[0]}
+            {t.text.includes('\n') && <span className="toast-sub">{t.text.slice(t.text.indexOf('\n') + 1)}</span>}
+          </span>
           {[t.action, t.action2].map(
             (a, i) =>
               a && (
@@ -62,9 +68,10 @@ export function App() {
   useEffect(() => void loadLibrary(), []);
   useEffect(() => void initLocalSongs(), []);
   useEffect(() => initDrive(), []);
+  useEffect(() => void initNxLib(), []);
   return (
     <>
-      {screen === 'home' ? <Home /> : <Editor />}
+      {screen === 'home' ? <Home /> : screen === 'songs' ? <SongsPage /> : <Editor />}
       {/* スマホの縦：画面の上端に上のバーと同じ色の帯（iOS の Safari が上端にかけるぼかしを消す。phone.css の .p-edge-top） */}
       {phone && <div className="p-edge-top" aria-hidden="true" />}
       <DialogHost />

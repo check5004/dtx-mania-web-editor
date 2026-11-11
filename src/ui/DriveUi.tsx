@@ -279,6 +279,9 @@ export function DriveSaveRow() {
   } else if (st.linked) {
     text = st.at ? tr(`Drive にも保存 · ${timeText(st.at)}`, `Also saved on Drive at ${timeText(st.at)}`) : tr('Drive とつないでいます', 'Linked to Drive');
     action = { label: tr('今すぐ送る', 'Send now'), run: () => pushNow() };
+  } else if (st.skip) {
+    text = tr('この曲は Drive に送らないことにしています（保存しても送りません）', "This song is set not to go to Drive (saving doesn't send it)");
+    action = { label: tr('Drive にも保存', 'Save to Drive'), run: () => pushNow() };
   } else {
     text = tr('保存すると Drive にも送ります', 'Saving also sends it to Drive');
     action = { label: tr('Drive にも保存', 'Save to Drive'), run: () => pushNow() };

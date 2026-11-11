@@ -4,6 +4,7 @@ import { changeSongFolder, downloadDtx, exportSongZip, newEmptySong, openFolderP
 import { isDiskFolder, isLocalFolder, supportsDirectWrite } from '../fs/folder';
 import { localPlace, useLocalSongs } from '../store/localSongs';
 import { cleanDriveJunk, connectDrive, openFromDrive, pushNow } from '../app/driveActions';
+import { openNxPage } from '../nxlib/actions';
 import { useDriveAuth } from '../drive/auth';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
@@ -121,6 +122,8 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         NO_FOLDER_PICK || useDevice.getState().phone
           ? { label: tr('曲の ZIP・ファイルを開く…', 'Open song ZIP or files…'), run: () => openFilesPicker() }
           : { label: tr('曲フォルダを開く…', 'Open song folder…'), key: 'Ctrl+O', run: () => void openFolderPicker(folderInput.current) },
+        // DTXMania の曲（PC の Chrome・Edge。src/ui/nxlib）
+        ...(!tablet && supportsDirectWrite() ? [{ label: tr('DTXMania の曲…', 'DTXMania songs…'), run: () => void openNxPage() }] : []),
         { label: tr('新しい譜面…', 'New chart…'), run: () => void newEmptySong() },
         { label: bgmSource(s().doc) ? tr('原曲を差し替える…', 'Replace original audio…') : tr('原曲（音声ファイル）を読み込む…', 'Load original audio file…'), run: pickBgmFile },
         '-',
