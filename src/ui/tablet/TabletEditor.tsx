@@ -793,8 +793,8 @@ export function TabletEditor({ folderInput }: { folderInput: React.RefObject<HTM
   useVel((s) => s.lanes.length);
   useBga((s) => `${s.show}|${s.wide}`);
   useEditor((s) => hasBga(s.doc));
-  // エフェクトの編集はパネルを重ねない（重ねるとカーブの列が隠れる。レーンを細くして、列とパネルを並べる）
-  const overlay = !portrait && !fxOpen && (panel !== null || velMode) && panelOverlays(vw);
+  // ベロシティ・エフェクトの編集はパネルを重ねない（重ねるとベロシティの列・カーブの列が隠れる。レーンを細くして、列とパネルを並べる）
+  const overlay = !portrait && !fxOpen && !velMode && panel !== null && panelOverlays(vw);
   // タブレットのプレビューはパネル（横）・シート（縦）に出すので、デスクトップの右のパネルのプレビューは使わない
   useEffect(() => {
     if (usePreview.getState().mode === 'side') usePreview.setState({ mode: 'off' });
