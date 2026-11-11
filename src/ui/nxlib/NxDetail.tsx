@@ -262,10 +262,15 @@ function ChartRow({ s, c, color, draft }: { s: LibSong; c: LibChart; color: stri
       <span className="lv mono">{levelText(c.head.level)}</span>
       <span className="rec">
         {sc && sc.plays > 0 && <span className={`nx-rk ${rank && 'SSAB'.includes(rank[0]) ? rank[0] : rank ? 'C' : 'N'}`}>{rank ?? '—'}</span>}
-        <span className="rec-t">
-          <span className="a">{sc && sc.plays > 0 ? (sc.skill !== null ? `${sc.skill.toFixed(1)}%` : '—') : tr('まだ遊んでいません', 'Not played yet')}</span>
-          <span>{sc && sc.plays > 0 ? tr(`${sc.plays} 回`, `${sc.plays} ${sc.plays === 1 ? 'play' : 'plays'}`) : ''}</span>
-        </span>
+        {sc && sc.plays > 0 ? (
+          <span className="rec-t">
+            <span className="a">{sc.skill !== null ? `${sc.skill.toFixed(1)}%` : '—'}</span>
+            <span>{tr(`${sc.plays} 回`, `${sc.plays} ${sc.plays === 1 ? 'play' : 'plays'}`)}</span>
+          </span>
+        ) : (
+          // 遊んでいない：狭いので 2 行に折り返す（デザインの通り）
+          <span className="rec-t np">{tr('まだ遊んでいません', 'Not played yet')}</span>
+        )}
       </span>
       <button
         className="btn small"

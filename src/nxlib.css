@@ -1056,6 +1056,11 @@ button.nx-dc.add:hover {
   text-overflow: ellipsis;
 }
 
+.nx-dr .rec-t.np {
+  display: block;
+  color: var(--text3);
+}
+
 .nx-rk {
   width: 24px;
   height: 24px;
