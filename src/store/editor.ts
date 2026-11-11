@@ -3,13 +3,14 @@ import { tr, pl, isJa } from '../i18n';
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer';
 import { create } from 'zustand';
 import { engine, type Mix, type SoundEvent, type WavSource } from '../audio/engine';
-import { builtinFile, virtualSound } from '../audio/sounds';
+import { builtinFile, virtualKey, virtualSound } from '../audio/sounds';
 import { IS_IOS, iosName, oggUnsupported } from '../platform';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import type { DtxEncoding } from '../dtx/encoding';
 import { cmp, frac, type Frac } from '../dtx/fraction';
 import { endMeasureOf, moveEndDecorations, naturalEndMeasure, solidEndMeasure } from '../dtx/end';
 import { CH, DRUM_LANES, drumChannel, emptyDoc, laneChannel, laneVoice, SD_RIM, type DtxDoc, type HeaderLine, type ParseWarning } from '../dtx/model';
+import { shiftFxSide } from '../fx/model';
 import { chipAlt, chipVoice, rimWavs } from '../dtx/rim';
 import { kindName, voiceKind } from '../dtx/kinds';
 import { addKindWav, findKindWav, kindWavFor } from '../edit/kinds';
@@ -391,8 +392,25 @@ export function goHome() {
 // ---- 編集と Undo ---------------------------------------------------------------
 
 /**
+ * 編集のあとに譜面を直すもの（store/fx：エフェクトのかかる所のチップをかけた音にそろえる）。prev は編集の前、next は後の譜面。
+ * 直すものが無ければ null。返したパッチは編集のパッチのうしろに足すので、Ctrl+Z 1 回で一緒に戻る。
+ * sounds: 音の定義を足した（鳴らす音を読み込み直す）
+ */
+export type DocFixer = (prev: DtxDoc, next: DtxDoc) => { doc: DtxDoc; redo: Patch[]; undo: Patch[]; sounds?: boolean } | null;
+const docFixers: DocFixer[] = [];
+
+export function addDocFixer(fn: DocFixer): () => void {
+  if (!docFixers.includes(fn)) docFixers.push(fn);
+  return () => {
+    const i = docFixers.indexOf(fn);
+    if (i >= 0) docFixers.splice(i, 1);
+  };
+}
+
+/**
  * 譜面を書き換える。変化が無ければ履歴に積まない。group が同じなら直前の履歴にまとめる。
  * 履歴は無制限（差分だけを持つので軽い）。side は譜面の外の変更を一緒に戻すためのもの。
+ * 書き換えが無くても、直すもの（docFixers。エフェクトのカーブを変えたときなど）があれば、それを履歴に積む
  */
 export function edit(
   label: string,
@@ -409,13 +427,22 @@ export function edit(
 ): boolean {
   const s = get();
   let [next, redo, undo] = produceWithPatches(s.doc, recipe);
-  if (redo.length === 0) return false;
-  const kept = opts.replace ? null : keepSpecials(s.doc, next);
+  const kept = opts.replace || redo.length === 0 ? null : keepSpecials(s.doc, next);
   if (kept) {
     next = kept.doc;
     redo = [...redo, ...kept.redo];
     undo = [...kept.undo, ...undo];
   }
+  let sounds = false;
+  for (const fix of docFixers) {
+    const r = fix(s.doc, next);
+    if (!r) continue;
+    next = r.doc;
+    redo = [...redo, ...r.redo];
+    undo = [...r.undo, ...undo];
+    if (r.sounds) sounds = true;
+  }
+  if (redo.length === 0) return false;
   const last = s.past[s.past.length - 1];
   let past: HistoryEntry[];
   const at = Date.now();
@@ -425,6 +452,7 @@ export function edit(
     past = [...s.past, { label, redo, undo, group: opts.group, side: opts.side, at }];
   }
   set({ doc: next, past, future: [] });
+  if (sounds) void prepareSounds();
   if (kept?.auto.size) {
     const list = [...kept.auto].map(([id, n]) => ({ name: kindName(id), n }));
     const n = list.reduce((a, x) => a + x.n, 0);
@@ -681,7 +709,8 @@ export function placeChips(items: readonly PlaceItem[], opts: { label?: string; 
   );
   if (opts.select && ids.length) set({ selection: ids });
   if (Object.keys(get().doc.fields).length !== hadKit) void prepareSounds();
-  if (opts.preview && firstV) previewWav(firstV);
+  // 鳴らすのは置いたあとの音（エフェクトのかかる所なら、かけた音に替わっている）
+  if (opts.preview && firstV) previewWav(get().doc.chips.find((c) => c.id === ids[0])?.v ?? firstV);
   return ids;
 }
 
@@ -709,19 +738,27 @@ export function duplicatePrevMeasure(m: number) {
   );
 }
 
-/** m 小節目の前に n 小節の空の小節を入れる（セクション・テンポのアンカー・自動で入れた小節の印もずらす） */
+/** m 小節目の前に n 小節の空の小節を入れる（セクション・テンポのアンカー・自動で入れた小節の印・エフェクトのカーブもずらす） */
 export function insertMeasures(m: number, n = 1): boolean {
   const before = useSidecar.getState();
   const sections = before.sections.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
   const anchors = before.anchors.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
   const auto = before.auto.map((x) => ({ ...x, m: shiftMeasure(x.m, m, n, 'insert')! }));
+  const fx = before.fx ? shiftFxSide(before.fx, m, n, 'insert') : null;
+  // 入らないとき（いちばん後ろのチップが Z99 を越える）は何もしない
+  const last = get().doc.chips.reduce((a, c) => Math.max(a, c.m), 0);
+  if (n <= 0 || last + n >= MAX_MEASURES) {
+    if (n > 0) toast(tr('これ以上小節を増やせません（Z99 まで）', "Can't add more measures (the limit is Z99)"), 'error');
+    return false;
+  }
   let ok = false;
-  const side = sideForMeasures(before, { sections, anchors, auto });
-  edit(tr(`小節 ${toMeasure(m)} の前に ${n} 小節を挿入`, `Insert ${n} ${pl(n, 'measure')} before measure ${toMeasure(m)}`), (d) => {
+  const side = sideForMeasures(before, { sections, anchors, auto, fx });
+  // 印は先に動かしておく（エフェクトのかかる所を、動かしたカーブで決めるため）。何も変わらなければ戻す
+  side.redo();
+  const changed = edit(tr(`小節 ${toMeasure(m)} の前に ${n} 小節を挿入`, `Insert ${n} ${pl(n, 'measure')} before measure ${toMeasure(m)}`), (d) => {
     ok = opInsertMeasures(d, m, n);
   }, { side });
-  if (ok) side.redo();
-  else toast(tr('これ以上小節を増やせません（Z99 まで）', "Can't add more measures (the limit is Z99)"), 'error');
+  if (!changed) side.undo();
   return ok;
 }
 
@@ -741,18 +778,21 @@ export function deleteMeasures(m: number, n = 1): DeleteResult {
     return to === null ? [] : [{ ...x, m: to }];
   });
   let res: DeleteResult = { removed: 0, kept: 0 };
-  const side = sideForMeasures(before, { sections, anchors, auto });
+  const fx = before.fx ? shiftFxSide(before.fx, m, n, 'delete') : null;
+  const side = sideForMeasures(before, { sections, anchors, auto, fx });
+  // 印は先に動かしておく（エフェクトのかかる所を、動かしたカーブで決めるため）。何も変わらなければ戻す
+  side.redo();
   const changed = edit(tr(`小節 ${toMeasure(m)}${n > 1 ? `〜${toMeasure(m + n - 1)}` : ''} を削除`, `Delete measure${n > 1 ? 's' : ''} ${toMeasure(m)}${n > 1 ? `–${toMeasure(m + n - 1)}` : ''}`), (d) => {
     res = opDeleteMeasures(d, m, n);
   }, { side, replace: true });
-  if (changed) side.redo();
+  if (!changed) side.undo();
   return res;
 }
 
-type MeasureMarks = Pick<SidecarData, 'sections' | 'anchors' | 'auto'>;
+type MeasureMarks = Pick<SidecarData, 'sections' | 'anchors' | 'auto' | 'fx'>;
 
 function sideForMeasures(before: MeasureMarks, after: MeasureMarks): NonNullable<HistoryEntry['side']> {
-  const b: MeasureMarks = { sections: before.sections, anchors: before.anchors, auto: before.auto };
+  const b: MeasureMarks = { sections: before.sections, anchors: before.anchors, auto: before.auto, fx: before.fx };
   const same = JSON.stringify(b) === JSON.stringify(after);
   return {
     undo: () => {
@@ -1194,7 +1234,7 @@ export async function fileBuffer(path: string): Promise<AudioBuffer | null> {
   const f = findFile(s.folder, path, s.doc.fields['PATH_WAV'] ?? '');
   const vs = f ? null : virtualSound(path);
   if (!f && !vs) return null;
-  const key = f ? `${s.folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : `virtual:${vs!.sampleId ?? vs!.file.toLowerCase()}`;
+  const key = f ? `${s.folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : virtualKey(vs!);
   let p = previewCache.get(key);
   if (!p) {
     p = (async () => {

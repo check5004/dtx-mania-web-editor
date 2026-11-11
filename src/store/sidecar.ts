@@ -4,6 +4,7 @@ import { withTr } from '../i18n';
 import { create } from 'zustand';
 import { renameOldOtherStems } from '../audio/stemNames';
 import { drumChannel, isSeChannel } from '../dtx/model';
+import { parseFxSide, type FxSide } from '../fx/model';
 
 export interface SectionMark {
   /** この小節から始まる */
@@ -128,6 +129,11 @@ export interface SidecarData {
   fullMix: string | null;
   /** 特殊ノーツの種類の決め（無ければ null。曲の音のものなので、同じ曲の別の難易度へも持っていく） */
   special: SpecialSide | null;
+  /**
+   * チップのエフェクトのカーブ（src/fx）。譜面ごと（ほかの難易度へは保存するときに入れる）。
+   * null の譜面はエフェクトを扱わない（かけた音があっても触らない）
+   */
+  fx: FxSide | null;
 }
 
 export interface SidecarState extends SidecarData {
@@ -139,7 +145,7 @@ export interface SidecarState extends SidecarData {
   loadSeq: number;
 }
 
-export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [], fullMix: null, special: null });
+export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [], fullMix: null, special: null, fx: null });
 
 export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, changed: [], loadSeq: 0 }));
 
@@ -232,7 +238,7 @@ export function sameStemFiles(a: readonly StemTrack[], b: readonly StemTrack[]):
 export function sameSongSidecar(next: SidecarData | null): SidecarData {
   const cur = sidecarData();
   // 自動で入れた小節の印は譜面ごと（別の難易度へは持っていかない）
-  if (!next) return { ...cur, auto: [] };
+  if (!next) return { ...cur, auto: [], fx: null };
   const out = { ...next };
   if (out.stems.length === 0 && cur.stems.length > 0) {
     out.stems = cur.stems;
@@ -268,17 +274,22 @@ export function markSidecarSaved() {
 
 export function sidecarData(): SidecarData {
   const s = get();
-  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto, fullMix: s.fullMix, special: s.special };
+  return { sections: s.sections, sectionColors: s.sectionColors, youtube: s.youtube, anchors: s.anchors, stems: s.stems, analysisStem: s.analysisStem, mix: s.mix, auto: s.auto, fullMix: s.fullMix, special: s.special, fx: s.fx };
 }
 
 /** 書く中身が無いか（聴く音量だけなら、作業ファイルを新しく作るほどではない） */
 export function sidecarIsEmpty(d: SidecarData = sidecarData()): boolean {
-  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0 && !d.fullMix && !d.special;
+  return d.sections.length === 0 && Object.keys(d.sectionColors).length === 0 && !d.youtube && d.anchors.length === 0 && d.stems.length === 0 && d.auto.length === 0 && !d.fullMix && !d.special && !d.fx;
 }
 
 /** 特殊ノーツの種類の決めを書き換える */
 export function setSpecialSide(special: SpecialSide | null) {
   touch({ special });
+}
+
+/** エフェクトのカーブを書き換える（store/fx の commitFx から。元に戻す・やり直すも） */
+export function setFxSide(fx: FxSide | null) {
+  touch({ fx });
 }
 
 /** 自動で入れた小節の印を書き換える */
@@ -389,6 +400,7 @@ export function parseSidecar(text: string): SidecarData | null {
     if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
     if (typeof j.fullMix === 'string' && j.fullMix.trim()) out.fullMix = j.fullMix;
     if (j.special && typeof j.special === 'object') out.special = parseSpecial(j.special);
+    if (j.fx && typeof j.fx === 'object') out.fx = parseFxSide(j.fx);
     if (Array.isArray(j.auto)) {
       const seen = new Set<number>();
       for (const a of j.auto) {

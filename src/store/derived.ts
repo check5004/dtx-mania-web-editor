@@ -1,6 +1,6 @@
 // 譜面から計算する値（テンポ表、表示用のチップ一覧、再生イベント）。doc ごとにキャッシュする。
 import type { SoundEvent, WavSource } from '../audio/engine';
-import { virtualSound } from '../audio/sounds';
+import { virtualKey, virtualSound } from '../audio/sounds';
 import { parseNxNumber, toBase36x2 } from '../dtx/base36';
 import { bgaChannel, CH, drumChannel, isSeChannel, type Chip, type ChipKind, type DtxDoc } from '../dtx/model';
 import { rimWavs } from '../dtx/rim';
@@ -187,7 +187,7 @@ export function wavSources(doc: DtxDoc, folder: SongFolder | null): WavSource[] 
     }
     out.push({
       no,
-      key: f ? `${folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : `virtual:${vs!.sampleId ?? vs!.file.toLowerCase()}`,
+      key: f ? `${folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : virtualKey(vs!),
       load: f ? async () => (await f.getFile()).arrayBuffer() : undefined,
       fallback: vs ? () => vs.load() : undefined,
       volume: wavVolume(doc, no),

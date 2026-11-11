@@ -46,9 +46,11 @@ import { NxPreview } from '../NxPreview';
 import { OriginBadge, originTitle } from '../OriginBadge';
 import { PhrasePanel } from '../PhrasePanel';
 import { abbrDiff, useEditorMenus, usePreimage } from '../TopBar';
-import { TABLET_TRACK_ROW, TrackPanel, useTrackRows } from '../Tracks';
+import { TABLET_TRACK_ROW, TrackPanel, useTrackCount } from '../Tracks';
 import { PlayControls } from '../Transport';
 import { VelocityPanel } from '../VelocityPanel';
+import { FxPanel } from '../FxPanel';
+import { openFx, useFx } from '../../store/fx';
 import { PanelContent, panelIcon } from './Panels';
 import { SaveSheet } from './SaveSheet';
 import { SelectionBar } from './SelectionBar';
@@ -394,6 +396,7 @@ function Palette() {
   const pen = useDevice((s) => s.pen);
   const flam = useFlam((s) => s.mode);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
   const ref = useRef<HTMLElement>(null);
   const [h, setH] = useState(800);
   useEffect(() => {
@@ -421,6 +424,7 @@ function Palette() {
       <hr />
       <Strength compact={compact} />
       <ToolBtn on={velMode} icon={Icon.bars(20)} label={tr('ベロシティ', 'Velocity')} onClick={() => toggleVelMode()} title={tr('ベロシティの編集', 'Edit velocity')} />
+      <ToolBtn on={fxOpen} icon={Icon.fx(20)} label={tr('エフェクト', 'Effects')} onClick={() => openFx()} title={tr('エフェクトの編集（スペクトルの列をタップで点を足す・ドラッグで動かす・長押しで消す）', 'Effect editing (tap the spectrum column to add a point, drag to move it, long-press to delete)')} />
       {zoomBtns && (
         <>
           <hr />
@@ -437,10 +441,17 @@ function Palette() {
 function Rail() {
   const panel = useDevice((s) => s.panel);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
+  const busy = velMode || fxOpen;
   return (
     <nav className="t-rail" aria-label={tr('パネル', 'Panels')}>
       {tabletPanels().map((p) => (
-        <button key={p.id} className={`t-rail-btn ${panel === p.id && !velMode ? 'on' : ''}`} onClick={() => (velMode ? (toggleVelMode(false), useDevice.setState({ panel: p.id })) : togglePanelT(p.id))} aria-pressed={panel === p.id}>
+        <button
+          key={p.id}
+          className={`t-rail-btn ${panel === p.id && !busy ? 'on' : ''}`}
+          onClick={() => (busy ? (toggleVelMode(false), openFx(false), useDevice.setState({ panel: p.id })) : togglePanelT(p.id))}
+          aria-pressed={panel === p.id}
+        >
           {panelIcon(p.id, 22)}
           <span>{p.label}</span>
         </button>
@@ -453,6 +464,23 @@ function Rail() {
 function PanelHost({ overlay }: { overlay: boolean }) {
   const panel = useDevice((s) => s.panel);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
+  if (fxOpen) {
+    return (
+      <aside className={`t-panel vel fx ${overlay ? 'overlay' : ''}`}>
+        <div className="t-panel-head">
+          <b>{tr('エフェクトの編集', 'Effect editing')}</b>
+          <span className="grow" />
+          <button className="t-btn" onClick={() => openFx(false)}>
+            {tr('終わる', 'Done')}
+          </button>
+        </div>
+        <div className="t-panel-body scroll">
+          <FxPanel />
+        </div>
+      </aside>
+    );
+  }
   if (velMode) {
     return (
       <aside className={`t-panel vel ${overlay ? 'overlay' : ''}`}>
@@ -541,7 +569,7 @@ export function useDragHeight(get: () => number, set: (h: number) => void, onEnd
 
 /** トラックの帯の止まる高さ：閉じた帯・上の帯＋1本ずつ・全部をゆったり */
 function useTrackStops(maxH: number): number[] {
-  const n = useTrackRows().length;
+  const n = useTrackCount();
   return trackStops(n, { closed: STRIP_H, ruler: TABLET_TRACK_ROW.ruler, row: TABLET_TRACK_ROW.stop, roomy: TABLET_TRACK_ROW.max, maxH });
 }
 
@@ -588,6 +616,7 @@ function SheetT() {
   const size = useDevice((s) => s.sheetSize);
   const vh = useDevice((s) => s.vh);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
   const doc = useEditor((s) => s.doc);
   const length = useSongLength(doc);
   const span = useSongSpan(doc);
@@ -642,7 +671,18 @@ function SheetT() {
       </div>
       {showBody && (
         <div className="t-sheet-body" style={{ height: bodyH }}>
-          {velMode ? (
+          {fxOpen ? (
+            <div className="t-pane t-cards scroll">
+              <div className="t-panel-head inline">
+                <b>{tr('エフェクトの編集', 'Effect editing')}</b>
+                <span className="grow" />
+                <button className="t-btn" onClick={() => openFx(false)}>
+                  {tr('終わる', 'Done')}
+                </button>
+              </div>
+              <FxPanel />
+            </div>
+          ) : velMode ? (
             <div className="t-pane t-cards scroll">
               <div className="t-panel-head inline">
                 <b>{tr('ベロシティの道具', 'Velocity tools')}</b>
@@ -744,6 +784,7 @@ export function TabletEditor({ folderInput }: { folderInput: React.RefObject<HTM
   const vw = useDevice((s) => s.vw);
   const panel = useDevice((s) => s.panel);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
   const findOpen = useFind((s) => s.open);
   const phraseOpen = usePhrase((s) => s.open);
   const previewMode = usePreview((s) => s.mode);
@@ -752,7 +793,8 @@ export function TabletEditor({ folderInput }: { folderInput: React.RefObject<HTM
   useVel((s) => s.lanes.length);
   useBga((s) => `${s.show}|${s.wide}`);
   useEditor((s) => hasBga(s.doc));
-  const overlay = !portrait && (panel !== null || velMode) && panelOverlays(vw);
+  // エフェクトの編集はパネルを重ねない（重ねるとカーブの列が隠れる。レーンを細くして、列とパネルを並べる）
+  const overlay = !portrait && !fxOpen && (panel !== null || velMode) && panelOverlays(vw);
   // タブレットのプレビューはパネル（横）・シート（縦）に出すので、デスクトップの右のパネルのプレビューは使わない
   useEffect(() => {
     if (usePreview.getState().mode === 'side') usePreview.setState({ mode: 'off' });

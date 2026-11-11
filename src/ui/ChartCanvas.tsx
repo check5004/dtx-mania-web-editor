@@ -58,6 +58,8 @@ import { chooseAnalysisStem } from '../store/stems';
 import { placeSongBpm } from '../store/songSync';
 import { sectionAt, sectionColor, useSidecar } from '../store/sidecar';
 import { applyVel, nudgeSelection, useVel, weakVel } from '../store/velocity';
+import { addPoint, cancelLive, chipFx, chipValueAt, finishLive, fxSide, movePointLive, pointBeatOf, selectPoint, shapeName, sideBeats, specTypes, typeName, useFx, valueText } from '../store/fx';
+import { FX_COLORS, PITCH_RANGE, isFilter, pitchX, sortPoints, valueAt, xPitch, type FxCurve, type FxSide, type FxType } from '../fx/model';
 import { flamModHeld, flamOptions, flamRoles, placeFlam, useFlam, wantFlam } from '../store/flam';
 import { flamSpot } from '../edit/flam';
 import { keyLabel, laneAt, shiftLane, slotOf, useInputSettings } from '../input/settings';
@@ -187,7 +189,8 @@ function applyGeo(w: number): boolean {
   const doc = useEditor.getState().doc;
   const sp = specialColumns(doc);
   const n = sp.length;
-  const key = `${tablet}|${phone}|${land}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}|${specialLayout(doc).key}|${sp.map((k) => k.id + k.dest + k.color + k.code).join(',')}`;
+  const fx = tablet && useFx.getState().open;
+  const key = `${tablet}|${phone}|${land}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}|${fx}|${specialLayout(doc).key}|${sp.map((k) => k.id + k.dest + k.color + k.code).join(',')}`;
   if (key === geoKey) return false;
   geoKey = key;
   tabletGeo = tablet;
@@ -232,7 +235,8 @@ function applyGeo(w: number): boolean {
     GEO.bpmW = 34;
     GEO.laneX = 98;
     GEO.miniW = 54;
-    const audio = a.audioCols ? 4 + 40 + 4 + 38 : 0;
+    // エフェクトの編集では、カーブの列（原曲の列を広げる）の幅を先に取り、残りをレーンに分ける
+    const audio = fx ? 4 + 40 + 4 + FX_W_TABLET : a.audioCols ? 4 + 40 + 4 + 38 : 0;
     const spGap = n ? 4 : 0;
     const room = w - GEO.miniW - 6 - GEO.laneX - audio - velW - bga - spGap;
     GEO.laneW = Math.max(22, Math.min(64, Math.floor(room / (10 + n))));
@@ -271,12 +275,19 @@ const SPEC_W_MAX = 196;
 
 /** 原曲の波形・スペクトルの列の幅 */
 function waveColW(): number {
-  if (tabletGeo || useAssist.getState().waveMode !== 'spec') return GEO.waveW;
+  const fx = useFx.getState().open && !phoneGeo;
+  if ((tabletGeo && !fx) || useAssist.getState().waveMode !== 'spec') return GEO.waveW;
   const v = useVel.getState();
   const vel = v.mode ? GEO.velGap + v.lanes.length * GEO.velW : 0;
-  const room = viewport.w - GEO.miniW - 24 - GEO.waveX - vel;
-  return Math.max(GEO.waveW, Math.min(SPEC_W_MAX, Math.floor(room)));
+  const room = viewport.w - GEO.miniW - (tabletGeo ? 6 : 24) - GEO.waveX - vel;
+  // エフェクトの編集では、カーブを引きやすいように広げる
+  return Math.max(GEO.waveW, Math.min(fx ? FX_W_MAX : SPEC_W_MAX, Math.floor(room)));
 }
+
+/** エフェクトの編集のときの列の最大幅 */
+const FX_W_MAX = 440;
+/** タブレットでエフェクトを編集するとき、レーンより先に取っておく列の幅 */
+const FX_W_TABLET = 200;
 
 /** 原曲の列まで含めた幅 */
 function fullW(): number {
@@ -339,7 +350,12 @@ type Drag =
   /** 曲の終わり（END）の線。grab: 掴んだ所と線の差（拍） */
   | { type: 'end'; group: string; grab: number }
   /** スマホ：吹き出しを見ながら置く所を狙っている（離すと置く。端に寄せるとスクロール） */
-  | { type: 'aim' };
+  | { type: 'aim' }
+  /**
+   * エフェクトの点を動かしている。index は押したときの（時刻の順の）番号、base は押したときのカーブ、before は作業ファイルの前の形。
+   * dx・dy は押した所と点のずれ（px）。axis は Shift で縦か横だけにしたとき
+   */
+  | { type: 'fxPoint'; curveId: string; index: number; base: FxSide; before: FxSide | null; x0: number; y0: number; dx: number; dy: number; moved: boolean; axis: 'x' | 'y' | null; v0: number; b0: number };
 
 interface Hover {
   x: number;
@@ -949,6 +965,11 @@ export function ChartCanvas() {
       l.mini = null;
     });
     unsubs.push(unsubVel);
+    unsubs.push(
+      useFx.subscribe(() => {
+        l.dirty = true;
+      }),
+    );
 
     let raf = 0;
     const loop = (now: number) => {
@@ -1081,6 +1102,10 @@ export function ChartCanvas() {
       // チップの上から押したままなぞると、なぞったチップを消す（以前の右ドラッグ）
       const beat = h.kind === 'miniLoop' || h.kind === 'mini' ? miniGeom(l).beatAt(y) : Math.max(0, g.yToBeat(y));
       l.drag = { type: 'rpress', x0: x, y0: y, cx: e.clientX, cy: e.clientY, hit: h, beat, shift: e.shiftKey };
+      return;
+    }
+    if (h.kind === 'fx') {
+      startFxDrag(l, g, h, x, y);
       return;
     }
     if (h.kind === 'vel' || h.kind === 'velChip') {
@@ -1228,8 +1253,13 @@ export function ChartCanvas() {
       const gv = genView();
       const onGen = gv ? genTargetAt(g, h, x, y, gv) : null;
       if (onGen && l.hover) l.hover = { ...l.hover, pos: null };
+      if (h?.kind === 'fx') l.hover = null;
       const cur = onGen || h?.kind === 'genBtn'
         ? 'pointer'
+        : h?.kind === 'fx'
+          ? h.point !== null
+            ? 'grab'
+            : 'crosshair'
         : h?.kind === 'vel' || h?.kind === 'velChip'
           ? tool === 'pencil' || tool === 'line'
             ? 'crosshair'
@@ -1252,6 +1282,11 @@ export function ChartCanvas() {
                     ? 'pointer'
                     : 'default';
       canvasRef.current!.style.cursor = cur;
+      return;
+    }
+    if (d.type === 'fxPoint') {
+      moveFxDrag(d, g, x, y, e.shiftKey);
+      canvasRef.current!.style.cursor = 'grabbing';
       return;
     }
     if (d.type === 'pending') {
@@ -1332,6 +1367,10 @@ export function ChartCanvas() {
     l.dirty = true;
     if (!d) return;
     const s = useEditor.getState();
+    if (d.type === 'fxPoint') {
+      endFxDrag(d);
+      return;
+    }
     if (d.type === 'pending') {
       // 「ペンで書く」：選ぶ道具なら何もない所のタップで選択を外す、置く道具なら置く（選ばない）
       if (l.penTool === 'select') {
@@ -1419,6 +1458,10 @@ export function ChartCanvas() {
     const tempo = tempoOf(s.doc);
     const open = (t: Parameters<typeof openCtxMenu>[0]) => openCtxMenu(t, d.cx, d.cy, touch);
     switch (h.kind) {
+      case 'fx':
+        if (h.curveId && h.point !== null) selectPoint(h.curveId, h.point);
+        open({ kind: 'fx', curveId: h.curveId ?? useFx.getState().curveId, point: h.point });
+        return;
       case 'chip':
       case 'velChip': {
         // 選んでいるチップなら選んでいるもの全部、そうでなければそのチップだけを選んで
@@ -1528,6 +1571,8 @@ export function ChartCanvas() {
       return true;
     }
     if (rx >= GEO.waveX && rx < GEO.waveX + waveColW()) {
+      // エフェクトの編集のあいだは、スペクトルのまま（見出しは目盛り）
+      if (useFx.getState().open) return true;
       // スペクトルの帯域の見出し：その帯域だけ聴く（もう一度で全体）
       const z = a.waveMode === 'spec' && y >= SPEC_ZONE_Y ? specZoneAt(rx - GEO.waveX) : null;
       if (z) {
@@ -1781,6 +1826,26 @@ export function ChartCanvas() {
         mouseDown(e);
         t.mode = 'mouse';
         return;
+      case 'fx':
+        if (h.point !== null && !t.fingerOnly) {
+          // エフェクトの点：すぐ掴む（なぞれば動かす）。動かさずに長押しで点のメニュー（消す・形）
+          startFxDrag(l, g, h, x, y);
+          t.mode = 'mouse';
+          l.ring = { x, y, t0: performance.now(), ms: dev.longPressMs };
+          t.timer = window.setTimeout(() => {
+            const d = l.drag;
+            l.ring = null;
+            l.dirty = true;
+            if (l.touch !== t || !d || d.type !== 'fxPoint' || d.moved) return;
+            l.drag = null;
+            cancelLive();
+            t.mode = 'menu';
+            openMenuFor({ type: 'rpress', x0: x, y0: y, cx: pt.cx, cy: pt.cy, hit: h, beat: t.menuBeat, shift: false }, true);
+          }, dev.longPressMs);
+          return;
+        }
+        // 何もない所：タップで点を足す・なぞればスクロール・長押しでメニュー（カーブを足す）
+        break;
       case 'measureBtn':
         l.pressM = h.m;
         l.dirty = true;
@@ -1958,6 +2023,8 @@ export function ChartCanvas() {
         return;
       case 'drag':
       case 'mouse':
+        // エフェクトの点を動かしたら長押しのメニューは出さない
+        if (far && t.timer) cancelPress(l, t);
         mouseMove(e);
         return;
       case 'multi':
@@ -2149,6 +2216,13 @@ export function ChartCanvas() {
       }
       case 'header':
         headerButton(g, x, y);
+        return;
+      case 'fx':
+        // エフェクトの列の何もない所：選んでいるカーブ（無ければハイカット）に点を足す
+        if (h.point === null && !t.fingerOnly) {
+          startFxDrag(l, g, h, x, y);
+          l.drag = null;
+        }
         return;
       case 'section':
         setPopover({ m: h.m, x: g.ox + GEO.bpmX + 4, y: Math.max(GEO.head + 4, y - 10) });
@@ -2785,7 +2859,9 @@ type Hit =
   /** タブレット版：小節番号のボタン（押すと小節のメニュー） */
   | { kind: 'measureBtn'; m: number }
   /** 特殊ノーツの列の何もない所（種類の id） */
-  | { kind: 'sp'; sp: string };
+  | { kind: 'sp'; sp: string }
+  /** エフェクトの列（エフェクトの編集のとき）。点の上なら curveId と point（時刻の順の番号） */
+  | { kind: 'fx'; curveId: string | null; point: number | null };
 
 function colAt(g: Geom, x: number): number | 'gutter' | 'gen' | 'audio' | 'loop' | null {
   const rx = x - g.ox;
@@ -2947,6 +3023,8 @@ function hitTest(l: Local, g: Geom, x: number, y: number): Hit | null {
   }
   const sm = sectionTagAt(g, x, y);
   if (sm !== null) return { kind: 'section', m: sm };
+  const fxHit = fxHitAt(g, x, y);
+  if (fxHit) return fxHit;
   const col = colAt(g, x);
   if (col === null) return null;
   if (col === 'loop') return { kind: 'loop' };
@@ -3666,6 +3744,8 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
 
   // 原曲の打点と波形
   if (a.audioCols) drawAudioCols(ctx, l, g, tempo, a, H);
+  // エフェクトのカーブ（スペクトルの上）
+  if (a.audioCols && useFx.getState().open && !phoneGeo) drawFxCol(ctx, l, g, tempo, H);
   // BGA・動画の列
   if (bgaVisible()) {
     const bx = ox + bgaX();
@@ -3705,6 +3785,9 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
   // フラム（同じレーンのすばやい2打）：先に鳴る1打目は細く描き、2打目には境目の線を引く
   const flams = flamRoles(doc);
   const spLay = specialLayout(doc);
+  // エフェクト：かけた音のチップは右端に色の帯、エフェクトの編集ではかかる値も出す
+  const fxS = useFx.getState().open ? fxSide() : null;
+  const fxCurves = fxS ? sideBeats(fxS, tempo) : null;
   const drawChip = (v: ChipView, beat: number, col: number, alpha: number, selected: boolean) => {
     const y = g.beatToY(beat);
     if (v.sp !== undefined) {
@@ -3795,6 +3878,22 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
           ctx.beginPath();
           ctx.arc(cx, y, 2.6, 0, Math.PI * 2);
           ctx.fill();
+        }
+        const fxi = chipFx(doc, v.c);
+        if (fxi) {
+          specTypes(fxi.spec).forEach((t, i) => {
+            ctx.fillStyle = FX_COLORS[t];
+            ctx.fillRect(cx + hw - 3.5 - i * 3, y - ch / 2 + 1.5, 2.5, ch - 3);
+          });
+        }
+        if (fxCurves && fxS && px >= 10 && hw >= 12) {
+          const lab = chipValueAt(fxCurves, col, beat, fxS.res);
+          if (lab) {
+            ctx.fillStyle = vel > 50 ? 'rgba(11,14,19,.88)' : '#E7EBF1';
+            ctx.font = '600 8.5px "JetBrains Mono", ui-monospace, monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(lab.text, cx - hw + 3, y + 0.5);
+          }
         }
       } else {
         ctx.fillStyle = v.kind === 'hidden' ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.02)';
@@ -4241,7 +4340,8 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
     // BGA の列が波形の上に重なっているときは、見えている所の真ん中に出す
     const waveRight = bgaVisible() && bgaX() < fullW() ? Math.max(GEO.waveX + 40, bgaX() - 2) : GEO.waveX + waveColW();
     const narrowWave = waveRight - GEO.waveX < 80;
-    if (a.waveMode === 'spec') drawSpecHeader(ctx, ox, waveRight, a);
+    if (useFx.getState().open) drawFxHeader(ctx, ox, waveRight);
+    else if (a.waveMode === 'spec') drawSpecHeader(ctx, ox, waveRight, a);
     else ctx.fillText(narrowWave ? tr('波形 ⇄', 'Wave ⇄') : tr('原曲の波形 ⇄', 'Original wave ⇄'), ox + (GEO.waveX + waveRight) / 2, GEO.head / 2);
   }
 
@@ -4805,6 +4905,307 @@ function specZoneAt(rx: number): SpecZone | null {
 
 function fmtHz(f: number): string {
   return f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 0 : 1)}kHz` : `${Math.round(f / 10) * 10}Hz`;
+}
+
+// ---- エフェクトのカーブ（エフェクトの編集） -------------------------------------------------------
+// 列の横は値（ハイカット・ローカットはスペクトルと同じ周波数の目盛り、ピッチは −12〜+12 半音で真ん中が元の高さ）、縦は時間。
+
+/** いま見せている目盛りがピッチか（選んでいるカーブがピッチなら） */
+function fxPitchAxis(): boolean {
+  const id = useFx.getState().curveId;
+  const c = id ? fxSide()?.curves.find((x) => x.id === id) : undefined;
+  return c?.type === 'pitch';
+}
+
+/** 値 → 列の中の x（列の左端から） */
+function fxXAt(type: FxType, v: number): number {
+  if (type === 'pitch') return 1 + pitchX(v) * (specVisW() - 2);
+  return specXAt(v);
+}
+
+/** 列の中の x → 値 */
+function fxValueAt(type: FxType, rx: number): number {
+  if (type === 'pitch') return xPitch((rx - 1) / Math.max(1, specVisW() - 2));
+  return specFreqAt(rx);
+}
+
+/** エフェクトの列を押した：点の上ならその点を掴む、何もない所なら選んでいるカーブ（無ければハイカット）に点を足して掴む */
+function startFxDrag(l: Local, g: Geom, h: Extract<Hit, { kind: 'fx' }>, x: number, y: number) {
+  const s = useEditor.getState();
+  const tempo = tempoOf(s.doc);
+  const before = useSidecar.getState().fx;
+  let curveId = h.curveId;
+  let index = h.point;
+  if (curveId && index !== null) {
+    selectPoint(curveId, index);
+  } else {
+    const sel = useFx.getState().curveId;
+    const selC = sel ? fxSide()?.curves.find((c) => c.id === sel) : undefined;
+    const type: FxType = selC?.type ?? 'hicut';
+    const pos = snapToGrid(tempo, Math.max(0, g.yToBeat(y)), s.view.div);
+    const added = addPoint(selC ? selC.id : null, pos, fxValueAt(type, x - g.ox - GEO.waveX));
+    if (!added) return;
+    curveId = added.curveId;
+    index = added.index;
+  }
+  const base = fxSide();
+  const c = base?.curves.find((v) => v.id === curveId);
+  const p = c ? sortPoints(c.points)[index] : undefined;
+  if (!base || !c || !p) return;
+  const pb = pointBeatOf(tempo, p);
+  l.drag = {
+    type: 'fxPoint',
+    curveId: c.id,
+    index,
+    base,
+    // 点を足したときは、足したあとの形から（足すのと動かすのは別の Ctrl+Z）
+    before: h.point === null ? useSidecar.getState().fx : before,
+    x0: x,
+    y0: y,
+    dx: x - (g.ox + GEO.waveX + fxXAt(c.type, p.v)),
+    dy: y - g.beatToY(pb),
+    moved: false,
+    axis: null,
+    v0: p.v,
+    b0: pb,
+  };
+}
+
+/** 点を動かす（Shift で縦か横だけ）。作業ファイルには離したときに入れる */
+function moveFxDrag(d: Extract<Drag, { type: 'fxPoint' }>, g: Geom, x: number, y: number, shift: boolean) {
+  if (!d.moved && Math.hypot(x - d.x0, y - d.y0) < 3) return;
+  d.moved = true;
+  const c = d.base.curves.find((v) => v.id === d.curveId);
+  const p0 = c ? sortPoints(c.points)[d.index] : undefined;
+  if (!c || !p0) return;
+  if (!shift) d.axis = null;
+  else if (!d.axis) d.axis = Math.abs(x - d.x0) >= Math.abs(y - d.y0) ? 'x' : 'y';
+  const s = useEditor.getState();
+  const tempo = tempoOf(s.doc);
+  const pos = d.axis === 'x' ? { m: p0.m, f: { n: p0.n, d: p0.d } } : snapToGrid(tempo, Math.max(0, g.yToBeat(y - d.dy)), s.view.div);
+  const v = d.axis === 'y' ? d.v0 : fxValueAt(c.type, x - d.dx - g.ox - GEO.waveX);
+  movePointLive(d.base, d.curveId, d.index, pos, v);
+}
+
+function endFxDrag(d: Extract<Drag, { type: 'fxPoint' }>) {
+  if (d.moved) finishLive(d.before);
+  else cancelLive();
+}
+
+/** エフェクトの編集で、エフェクトの列の上か（点の上ならその点。選んでいるカーブの点を先に見る） */
+function fxHitAt(g: Geom, x: number, y: number): Hit | null {
+  if (!useFx.getState().open || phoneGeo || !useAssist.getState().audioCols) return null;
+  const rx = x - g.ox - GEO.waveX;
+  if (rx < 0 || rx >= specVisW() || y < GEO.head) return null;
+  const side = fxSide();
+  if (side) {
+    const sel = useFx.getState().curveId;
+    const pitch = fxPitchAxis();
+    const tempo = tempoOf(useEditor.getState().doc);
+    const r = tabletGeo ? 14 : 8;
+    const curves = side.curves.filter((c) => (c.type === 'pitch') === pitch).sort((a, b) => (a.id === sel ? -1 : b.id === sel ? 1 : 0));
+    let best: { curveId: string; point: number; d: number } | null = null;
+    for (const c of curves) {
+      const pts = sortPoints(c.points);
+      for (let i = 0; i < pts.length; i++) {
+        const px = fxXAt(c.type, pts[i].v);
+        const py = g.beatToY(pointBeatOf(tempo, pts[i]));
+        const d = Math.hypot(px - rx, py - y);
+        if (d <= r && (!best || d < best.d)) best = { curveId: c.id, point: i, d };
+      }
+      if (best && c.id === sel) break;
+    }
+    if (best) return { kind: 'fx', curveId: best.curveId, point: best.point };
+  }
+  return { kind: 'fx', curveId: null, point: null };
+}
+
+/** 1 本のカーブ（かかる側を暗く・線・点）。dashed は原曲から読み取った案 */
+function drawFxCurve(ctx: CanvasRenderingContext2D, g: Geom, tempo: TempoMap, c: FxCurve, wx: number, W: number, H: number, selected: boolean, point: number | null, dashed = false) {
+  const pts = sortPoints(c.points);
+  if (!pts.length) return;
+  const beats = pts.map((p) => pointBeatOf(tempo, p));
+  const cb = { curve: c, beats, vals: pts.map((p) => p.v), shapes: pts.map((p) => p.s) };
+  const color = FX_COLORS[c.type];
+  const yTop = Math.max(GEO.head, g.beatToY(beats[beats.length - 1]));
+  const yBot = Math.min(H, g.beatToY(beats[0]));
+  if (yTop <= yBot) {
+    // かかる側（ハイカットは右・ローカットは左）を暗くする
+    if (!dashed && isFilter(c.type)) {
+      ctx.fillStyle = selected ? 'rgba(6,8,12,0.6)' : 'rgba(6,8,12,0.38)';
+      for (let y = Math.floor(yTop); y < yBot; y += 2) {
+        const v = valueAt(cb, g.yToBeat(y + 1));
+        if (v === null) continue;
+        const x = wx + fxXAt(c.type, v);
+        if (c.type === 'hicut') ctx.fillRect(x, y, wx + W - x, 2);
+        else ctx.fillRect(wx, y, x - wx, 2);
+      }
+    }
+    ctx.beginPath();
+    let started = false;
+    for (let y = yBot; y >= yTop - 2; y -= 2) {
+      const v = valueAt(cb, g.yToBeat(Math.max(yTop, y)));
+      if (v === null) continue;
+      const x = wx + fxXAt(c.type, v);
+      if (!started) {
+        ctx.moveTo(x, Math.max(yTop, y));
+        started = true;
+      } else ctx.lineTo(x, Math.max(yTop, y));
+    }
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = selected ? 1 : 0.55;
+    ctx.lineWidth = selected ? 2 : 1.4;
+    if (dashed) ctx.setLineDash([5, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 点
+  for (let i = 0; i < pts.length; i++) {
+    const y = g.beatToY(beats[i]);
+    if (y < GEO.head - 8 || y > H + 8) continue;
+    const x = wx + fxXAt(c.type, pts[i].v);
+    const on = selected && point === i;
+    ctx.globalAlpha = selected ? 1 : 0.6;
+    ctx.beginPath();
+    ctx.arc(x, y, on ? 6 : 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = on ? color : dashed ? 'rgba(11,14,19,.9)' : '#141A22';
+    ctx.fill();
+    ctx.strokeStyle = on ? '#FFFFFF' : color;
+    ctx.lineWidth = on ? 1.6 : 1.5;
+    if (dashed) ctx.setLineDash([2, 2]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** エフェクトの列（スペクトルの上）：カーブ・点・選んだ点の吹き出し・原曲から読み取った案 */
+function drawFxCol(ctx: CanvasRenderingContext2D, l: Local, g: Geom, tempo: TempoMap, H: number) {
+  const fx = useFx.getState();
+  const side = fxSide();
+  const wx = g.ox + GEO.waveX;
+  const W = specVisW();
+  const pitch = fxPitchAxis();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(wx, GEO.head, W, H - GEO.head);
+  ctx.clip();
+  if (pitch) {
+    // ピッチ：スペクトルは薄く、半音の目盛り（真ん中が元の高さ）
+    ctx.fillStyle = 'rgba(11,14,19,0.82)';
+    ctx.fillRect(wx, GEO.head, W, H - GEO.head);
+    for (let st = -PITCH_RANGE; st <= PITCH_RANGE; st++) {
+      ctx.fillStyle = st === 0 ? 'rgba(91,214,154,.45)' : st % 6 === 0 ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.045)';
+      ctx.fillRect(Math.round(wx + fxXAt('pitch', st)) - 0.5, GEO.head, 1, H - GEO.head);
+    }
+  }
+  const curves = side ? side.curves.filter((c) => (c.type === 'pitch') === pitch) : [];
+  curves.sort((a, b) => (a.id === fx.curveId ? 1 : 0) - (b.id === fx.curveId ? 1 : 0));
+  for (const c of curves) drawFxCurve(ctx, g, tempo, c, wx, W, H, c.id === fx.curveId, fx.point);
+  if (fx.proposals && !pitch) for (const p of fx.proposals) drawFxCurve(ctx, g, tempo, { id: '', type: p.type, points: p.points, lanes: null, q: 0 }, wx, W, H, true, null, true);
+  // 何も無いときの案内
+  if (!curves.length && !fx.proposals) {
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(11,14,19,.85)';
+    const msg = pitch ? tr('クリックで点を足す（真ん中が元の高さ）', 'Click to add a point (the middle is the original pitch)') : tr('クリックで点を足す（右ほど高い音。右端はかけない）', 'Click to add a point (higher to the right; the right edge is off)');
+    const tw = ctx.measureText(msg).width;
+    roundRect(ctx, wx + W / 2 - tw / 2 - 8, GEO.head + 10, tw + 16, 22, 6);
+    ctx.fill();
+    ctx.fillStyle = '#C9D1DC';
+    ctx.fillText(msg, wx + W / 2, GEO.head + 21);
+  }
+  ctx.restore();
+  // 選んだ点の吹き出し（時刻・値・次の点までの形）
+  const c = fx.curveId && side ? side.curves.find((x) => x.id === fx.curveId) : undefined;
+  if (c && fx.point !== null && (c.type === 'pitch') === pitch) {
+    const pts = sortPoints(c.points);
+    const p = pts[fx.point];
+    if (p) {
+      const y = g.beatToY(pointBeatOf(tempo, p));
+      if (y >= GEO.head && y <= H) {
+        const x = wx + fxXAt(c.type, p.v);
+        const next = pts[fx.point + 1];
+        const l1 = `${formatPosition(tempo, pointBeatOf(tempo, p))} · ${valueText(c.type, p.v)}`;
+        const l2 = next ? tr(`${formatPosition(tempo, pointBeatOf(tempo, next))} まで ${shapeName(p.s)}`, `${shapeName(p.s)} to ${formatPosition(tempo, pointBeatOf(tempo, next))}`) : tr('ここで終わり（このあとはかけない）', 'The curve ends here (off after this)');
+        ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+        const w1 = ctx.measureText(l1).width;
+        ctx.font = '10.5px system-ui, sans-serif';
+        const w2 = ctx.measureText(l2).width;
+        const bw = Math.max(w1, w2) + 18;
+        const bh = 38;
+        let bx = x + 14;
+        if (bx + bw > wx + W - 2) bx = x - 14 - bw;
+        bx = Math.max(wx + 2, bx);
+        const by = Math.max(GEO.head + 2, Math.min(H - bh - 2, y - bh / 2));
+        ctx.fillStyle = 'rgba(14,18,24,.96)';
+        roundRect(ctx, bx, by, bw, bh, 7);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,.14)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+        ctx.fillStyle = FX_COLORS[c.type];
+        ctx.fillText(l1, bx + 9, by + 12);
+        ctx.font = '10.5px system-ui, sans-serif';
+        ctx.fillStyle = '#A3ADBB';
+        ctx.fillText(l2, bx + 9, by + 27);
+        ctx.textBaseline = 'alphabetic';
+      }
+    }
+  }
+  void l;
+}
+
+/** エフェクトの編集のときの列の見出し：種類と目盛り（右端・真ん中の意味） */
+function drawFxHeader(ctx: CanvasRenderingContext2D, ox: number, right: number) {
+  const x0 = ox + GEO.waveX;
+  const x1 = ox + right;
+  const pitch = fxPitchAxis();
+  const side = fxSide();
+  const id = useFx.getState().curveId;
+  const sel = id ? side?.curves.find((c) => c.id === id) : undefined;
+  const type: FxType = sel?.type ?? 'hicut';
+  ctx.textAlign = 'left';
+  ctx.font = '700 10px system-ui, sans-serif';
+  ctx.fillStyle = FX_COLORS[type];
+  const title = typeName(type);
+  ctx.fillText(title, x0 + 6, 10);
+  let tx = x0 + 6 + ctx.measureText(title).width + 6;
+  ctx.font = '9px system-ui, sans-serif';
+  ctx.fillStyle = '#8B95A4';
+  const sub = type === 'hicut' ? tr('高い音を削る', 'cuts the highs') : type === 'locut' ? tr('低い音を削る', 'cuts the lows') : tr('半音', 'semitones');
+  if (tx + ctx.measureText(sub).width < x1 - 70) {
+    ctx.fillText(sub, tx, 10);
+    tx += ctx.measureText(sub).width + 8;
+  }
+  if (!pitch && side) {
+    const other = side.curves.some((c) => c.type !== type && c.type !== 'pitch') ? (type === 'hicut' ? tr('＋ローカット', '+ low cut') : tr('＋ハイカット', '+ high cut')) : '';
+    if (other && tx + ctx.measureText(other).width < x1 - 70) {
+      ctx.fillStyle = FX_COLORS[type === 'hicut' ? 'locut' : 'hicut'];
+      ctx.fillText(other, tx, 10);
+    }
+  }
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#8B95A4';
+  ctx.fillText(pitch ? tr('真ん中 = 元の高さ', 'middle = original') : type === 'locut' ? tr('左端 = かけない', 'left edge = off') : tr('右端 = かけない', 'right edge = off'), x1 - 4, 10);
+  // 目盛り
+  ctx.textAlign = 'center';
+  ctx.font = '600 9px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillStyle = '#7E8A99';
+  const ticks: [number, string][] = pitch
+    ? [[-12, '−12'], [-6, '−6'], [0, '0'], [6, '+6'], [12, '+12']]
+    : [[50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k']];
+  let lastX = -Infinity;
+  for (const [v, label] of ticks) {
+    const x = x0 + fxXAt(pitch ? 'pitch' : 'hicut', v);
+    const w = ctx.measureText(label).width;
+    if (x - w / 2 < lastX + 4 || x + w / 2 > x1 - 2 || x - w / 2 < x0 + 1) continue;
+    ctx.fillText(label, x, 22);
+    lastX = x + w / 2;
+  }
 }
 
 /** スペクトルの列の見出し：上の段に「スペクトル ⇄」、下の段に帯域（クリックでその帯域だけ聴く） */

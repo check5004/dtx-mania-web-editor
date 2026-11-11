@@ -200,7 +200,8 @@ export interface SiblingChange {
  * revert・reapply は、その譜面が今も書き換えたとき（戻したとき）のままなら戻す（やり直す）
  */
 export interface SiblingSteps<U> {
-  apply(d: DtxDoc): { undo: U } | Exclude<Verdict, 'changed'>;
+  /** name はその譜面のファイル名（小文字） */
+  apply(d: DtxDoc, name: string): { undo: U } | Exclude<Verdict, 'changed'>;
   revert(d: DtxDoc, u: U): boolean;
   /** やり直したら新しい控え。やり直せなければ null */
   reapply(d: DtxDoc, u: U): U | null;
@@ -215,7 +216,7 @@ export function startSiblingChange<U>(folder: SongFolder, current: string, steps
   // Ctrl+Z を押しても、書き換え終わってから戻す）
   const touched = () => new Set([...undos.keys()].map((k) => k.split('|')[0]));
   const done = runSiblings(folder, current, (d, id) => {
-    const r = steps.apply(d);
+    const r = steps.apply(d, id.split('|')[0]);
     if (typeof r === 'string') return r;
     undos.set(id, r.undo);
     return 'changed';

@@ -51,6 +51,7 @@ import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
 import { openMeasureGenAtCursor } from '../store/measureGen';
 import { toggleFlamSelection } from '../store/flam';
+import { openFx, useFx } from '../store/fx';
 import { summon } from '../store/complete';
 import { toMeasure } from '../dtx/base36';
 import { togglePanel, useLayout } from '../store/layout';
@@ -173,6 +174,8 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         { label: tr('検索と置換・レーンの入れ替え…', 'Find & replace / swap lanes…'), key: 'Ctrl+F', run: openFind },
         { label: tr('選んだチップを左右反転', 'Mirror selected chips'), run: mirrorSelection, disabled: s().selection.length === 0 },
         { label: tr('選んだチップをフラムにする／1打に戻す', 'Make selected chips a flam / back to one hit'), key: 'Alt+F', run: toggleFlamSelection, disabled: s().selection.length === 0 },
+        // スマホは見る・聴くだけ
+        ...(useDevice.getState().phone ? [] : [{ label: tr('エフェクトの編集（ハイカット・ローカット・ピッチ）', 'Effect editing (high cut, low cut, pitch)'), key: 'E', checked: useFx.getState().open, run: () => openFx() }]),
         '-',
         { label: tr('カーソルの小節の前に小節を挿入', 'Insert measure before cursor measure'), run: () => insertMeasures(cursorM()) },
         { label: tr('カーソルの小節を削除して詰める', 'Delete cursor measure and close gap'), run: () => deleteCursorMeasure() },

@@ -21,6 +21,8 @@ import { useLibrary } from '../store/library';
 import { useSidecar } from '../store/sidecar';
 import { AuditionButton, AuditionProgress } from './Audition';
 import { SpecialKitSection } from './SpecialUi';
+import { fxWavGroups, fxWavs, openFx, type FxWavGroup } from '../store/fx';
+import { FX_COLORS } from '../fx/model';
 import { chooseDialog, confirmDialog } from './dialogs';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -259,6 +261,33 @@ function WavTab() {
     else if (isSeChannel(c.ch)) seNos.add(c.v);
   }
 
+  // かけた音（エフェクト）は元の音の下にまとめる（初めは畳む）
+  const [filter, setFilter] = useState<'all' | 'song' | 'fx'>('all');
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const fxw = fxWavs(doc);
+  const groups = fxWavGroups(doc);
+  const groupAt = new Map<number, [string, FxWavGroup]>();
+  const placed = new Set<string>();
+  for (const w of wavs) {
+    if (fxw.has(w.no)) continue;
+    const k = slash(w.path);
+    const g = groups.get(k);
+    if (g && !placed.has(k)) {
+      groupAt.set(w.no, [k, g]);
+      placed.add(k);
+    }
+  }
+  // 元の音が WAV の表に無いもの（最後にまとめて出す）
+  const orphans = [...groups].filter(([k]) => !placed.has(k));
+  const show = fxw.size > 0 ? filter : 'all';
+  const toggleGroup = (k: string) =>
+    setOpened((o) => {
+      const n = new Set(o);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+
   const unused = wavs.filter((w) => !usage.get(w.no));
   const unusedList = `${unused
     .slice(0, 8)
@@ -296,6 +325,110 @@ function WavTab() {
     setFieldValue('WAV' + toBase36x2(no), picked, tr(`WAV${toBase36x2(no)} を追加`, `Add WAV${toBase36x2(no)}`));
   };
 
+  /** 曲の音の行（ファイル・ラベル・音量・パンを変えられる） */
+  const songRow = (w: { no: number; path: string }) => {
+    const z = toBase36x2(w.no);
+    const isMissing = missSet.has(w.no) || (!findFile(folder, w.path, pathWav) && !/^dtxweb_kit_/i.test(w.path) && !!folder);
+    const kind: 'bgm' | 'se' | null = bgmNos.has(w.no) ? 'bgm' : seNos.has(w.no) ? 'se' : null;
+    const dur = engine.duration(w.no);
+    const long = dur >= LONG_SOUND_SEC;
+    return (
+      <tr
+        key={w.no}
+        className={isMissing ? 'missing' : ''}
+        title={tr(
+          `${usage.get(w.no) ?? 0} 個のチップで使用${isMissing ? '・ファイルが見つかりません' : ''}`,
+          `Used by ${usage.get(w.no) ?? 0} ${pl(usage.get(w.no) ?? 0, 'chip')}${isMissing ? ' · file not found' : ''}`,
+        )}
+      >
+        <td className="mono wav-no">
+          {z}
+          <span className="wav-uses" style={kind ? { visibility: 'hidden' } : undefined}>
+            {usage.get(w.no) ?? 0}
+          </span>
+          {kind && (
+            <span className={`wav-kind ${kind === 'bgm' ? 'bgm' : ''}`} title={kindHint(kind)}>
+              {kind === 'bgm' ? tr('原曲', 'BGM') : 'SE'}
+            </span>
+          )}
+        </td>
+        <td className="wav-file">
+          <CommitInput value={w.path} onCommit={(v) => setFieldValue('WAV' + z, v || undefined)} />
+          <div className="wav-sub">
+            <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder={tr('ラベル', 'Label')} onCommit={(v) => setComment('WAV' + z, v)} />
+            {cutSet.has(slash(w.path)) && (
+              <span className="wav-cut" title={tr('ステム・原曲から切り出した音（ほかのキットに替えても残します）', 'Extracted from the stems or the original (kept when you switch kits)')}>
+                {tr('切り出し', 'Extracted')}
+              </span>
+            )}
+            {long && (
+              <span className="wav-len mono" title={tr(`${formatDur(dur)} の長い音（試聴は ■ か Esc で止められます）`, `A long sound (${formatDur(dur)}). Stop the preview with ■ or Esc`)}>
+                {formatDur(dur)}
+              </span>
+            )}
+          </div>
+          <AuditionProgress k={`wav:${w.no}`} />
+        </td>
+        <td>
+          <CommitInput
+            className="mono"
+            value={String(wavVolume(doc, w.no))}
+            onCommit={(v) => setFieldValue('VOLUME' + z, v === '' || v === '100' ? undefined : v)}
+          />
+        </td>
+        <td>
+          <CommitInput className="mono" value={String(wavPan(doc, w.no))} onCommit={(v) => setFieldValue('PAN' + z, v === '' || v === '0' ? undefined : v)} />
+        </td>
+        <td>
+          <AuditionButton k={`wav:${w.no}`} load={() => wavAuditionSound(w.no)} label={tr(`WAV${z}（${w.path}）`, `WAV${z} (${w.path})`)} style={{ width: 22, height: 22 }} />
+        </td>
+      </tr>
+    );
+  };
+
+  /** かけた音のまとまりの見出し（押すと開く・閉じる）。open: いつも開いている（エフェクトだけを見せるとき） */
+  const fxHead = (k: string, g: FxWavGroup, open: boolean, orphan = false) => (
+    <tr key={`fxg:${k}`} className="wav-fx-head">
+      <td colSpan={5}>
+        <button
+          className={`wav-fx-group ${open || opened.has(k) ? 'open' : ''}`}
+          style={{ ['--c' as string]: FX_COLORS[g.types[0] ?? 'hicut'] }}
+          onClick={open ? () => openFx(true) : () => toggleGroup(k)}
+          title={open ? tr('エフェクトの編集を開く（E）', 'Open effect editing (E)') : tr('かけた音を開く・閉じる', 'Show or hide the processed sounds')}
+        >
+          {Icon.fx(12)}
+          {(open || orphan) && <span className="mono ellipsis wav-fx-orig">{g.orig}</span>}
+          <span className="ellipsis">{g.text}</span>
+          <span className="mono wav-fx-n">{tr(`${g.files} 音`, `${g.files} ${pl(g.files, 'sound')}`)}</span>
+          {!open && <span className="wav-fx-tri">{opened.has(k) ? '▾' : '▸'}</span>}
+        </button>
+      </td>
+    </tr>
+  );
+
+  /** かけた音の行（エディタが作る音なので、ここでは変えない。聴くだけ） */
+  const fxRow = (no: number) => {
+    const z = toBase36x2(no);
+    const path = String(doc.fields['WAV' + z] ?? '');
+    return (
+      <tr key={no} className="wav-fx-row" title={tr(`${usage.get(no) ?? 0} 個のチップで使用（エフェクトのカーブから作った音）`, `Used by ${usage.get(no) ?? 0} ${pl(usage.get(no) ?? 0, 'chip')} (made from the effect curves)`)}>
+        <td className="mono wav-no">
+          {z}
+          <span className="wav-uses">{usage.get(no) ?? 0}</span>
+        </td>
+        <td className="wav-file">
+          <div className="mono ellipsis wav-fx-path">{path}</div>
+          <AuditionProgress k={`wav:${no}`} />
+        </td>
+        <td className="mono wav-fx-val">{wavVolume(doc, no)}</td>
+        <td className="mono wav-fx-val">{wavPan(doc, no)}</td>
+        <td>
+          <AuditionButton k={`wav:${no}`} load={() => wavAuditionSound(no)} label={tr(`WAV${z}（${path}）`, `WAV${z} (${path})`)} style={{ width: 22, height: 22 }} />
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <>
       <div className="section-title">
@@ -314,6 +447,19 @@ function WavTab() {
           </button>
         </div>
       )}
+      {fxw.size > 0 && (
+        <div className="seg small wav-filter">
+          <button className={show === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
+            {tr('すべて', 'All')}
+          </button>
+          <button className={show === 'song' ? 'on' : ''} onClick={() => setFilter('song')}>
+            {tr('曲の音', 'Song sounds')}
+          </button>
+          <button className={`fx ${show === 'fx' ? 'on' : ''}`} onClick={() => setFilter('fx')} title={tr('エフェクトをかけた音（保存で曲フォルダの fx/ に書き出します）', 'Sounds with effects (written to fx/ in the song folder when you save)')}>
+            {tr('エフェクト', 'Effects')} <span className="mono">{fxw.size}</span>
+          </button>
+        </div>
+      )}
       <table className="wav-table">
         <thead>
           <tr>
@@ -325,65 +471,17 @@ function WavTab() {
           </tr>
         </thead>
         <tbody>
-          {wavs.map((w) => {
-            const z = toBase36x2(w.no);
-            const isMissing = missSet.has(w.no) || (!findFile(folder, w.path, pathWav) && !/^dtxweb_kit_/i.test(w.path) && !!folder);
-            const kind: 'bgm' | 'se' | null = bgmNos.has(w.no) ? 'bgm' : seNos.has(w.no) ? 'se' : null;
-            const dur = engine.duration(w.no);
-            const long = dur >= LONG_SOUND_SEC;
-            return (
-              <tr
-                key={w.no}
-                className={isMissing ? 'missing' : ''}
-                title={tr(
-                  `${usage.get(w.no) ?? 0} 個のチップで使用${isMissing ? '・ファイルが見つかりません' : ''}`,
-                  `Used by ${usage.get(w.no) ?? 0} ${pl(usage.get(w.no) ?? 0, 'chip')}${isMissing ? ' · file not found' : ''}`,
-                )}
-              >
-                <td className="mono wav-no">
-                  {z}
-                  <span className="wav-uses" style={kind ? { visibility: 'hidden' } : undefined}>
-                    {usage.get(w.no) ?? 0}
-                  </span>
-                  {kind && (
-                    <span className={`wav-kind ${kind === 'bgm' ? 'bgm' : ''}`} title={kindHint(kind)}>
-                      {kind === 'bgm' ? tr('原曲', 'BGM') : 'SE'}
-                    </span>
-                  )}
-                </td>
-                <td className="wav-file">
-                  <CommitInput value={w.path} onCommit={(v) => setFieldValue('WAV' + z, v || undefined)} />
-                  <div className="wav-sub">
-                    <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder={tr('ラベル', 'Label')} onCommit={(v) => setComment('WAV' + z, v)} />
-                    {cutSet.has(slash(w.path)) && (
-                      <span className="wav-cut" title={tr('ステム・原曲から切り出した音（ほかのキットに替えても残します）', 'Extracted from the stems or the original (kept when you switch kits)')}>
-                        {tr('切り出し', 'Extracted')}
-                      </span>
-                    )}
-                    {long && (
-                      <span className="wav-len mono" title={tr(`${formatDur(dur)} の長い音（試聴は ■ か Esc で止められます）`, `A long sound (${formatDur(dur)}). Stop the preview with ■ or Esc`)}>
-                        {formatDur(dur)}
-                      </span>
-                    )}
-                  </div>
-                  <AuditionProgress k={`wav:${w.no}`} />
-                </td>
-                <td>
-                  <CommitInput
-                    className="mono"
-                    value={String(wavVolume(doc, w.no))}
-                    onCommit={(v) => setFieldValue('VOLUME' + z, v === '' || v === '100' ? undefined : v)}
-                  />
-                </td>
-                <td>
-                  <CommitInput className="mono" value={String(wavPan(doc, w.no))} onCommit={(v) => setFieldValue('PAN' + z, v === '' || v === '0' ? undefined : v)} />
-                </td>
-                <td>
-                  <AuditionButton k={`wav:${w.no}`} load={() => wavAuditionSound(w.no)} label={tr(`WAV${z}（${w.path}）`, `WAV${z} (${w.path})`)} style={{ width: 22, height: 22 }} />
-                </td>
-              </tr>
-            );
-          })}
+          {show === 'fx'
+            ? [...groups].flatMap(([k, g]) => [fxHead(k, g, true), ...g.nos.map((no) => fxRow(no))])
+            : wavs.flatMap((w) => {
+                if (fxw.has(w.no)) return [];
+                const row = songRow(w);
+                const at = show === 'all' ? groupAt.get(w.no) : undefined;
+                if (!at) return [row];
+                const [k, g] = at;
+                return [row, fxHead(k, g, false), ...(opened.has(k) ? g.nos.map((no) => fxRow(no)) : [])];
+              })}
+          {show === 'all' && orphans.flatMap(([k, g]) => [fxHead(k, g, false, true), ...(opened.has(k) ? g.nos.map((no) => fxRow(no)) : [])])}
         </tbody>
       </table>
       {wavs.length === 0 && <p className="lbl">{tr('まだWAVはありません。譜面にチップを置くと内蔵キットの音が自動で登録されます。', 'No WAVs yet. Placing chips registers the built-in kit sounds automatically.')}</p>}

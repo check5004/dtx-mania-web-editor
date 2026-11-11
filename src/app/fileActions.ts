@@ -66,6 +66,8 @@ import { toBase36x2 } from '../dtx/base36';
 import { frac } from '../dtx/fraction';
 import { loadSidecar, markSidecarSaved, markSidecarUnsaved, serializeSidecar, sidecarData, sidecarIsEmpty, sidecarName, useSidecar, type SidecarData } from '../store/sidecar';
 import { readSidecarFor, recentSidecarOf, type RecentSidecar } from '../store/sidecarFile';
+import { FX_NAME_RE } from '../fx/model';
+import { afterSaveFx, fxBeforeSave } from './fxSave';
 import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
 import { sortByDifficulty } from '../gen/diffTabs';
@@ -887,25 +889,50 @@ export async function newEmptySong() {
 
 // ---- 保存 ---------------------------------------------------------------------
 
-/** 曲フォルダにまだ無い、エディタが用意した音（標準キット・ライブラリ）。出典も返す */
-async function kitFilesNeeded(doc: DtxDoc, folder: SongFolder | null): Promise<{ path: string; bytes: Uint8Array; origin: string; library: boolean }[]> {
-  const out: { path: string; bytes: Uint8Array; origin: string; library: boolean }[] = [];
+/**
+ * 曲フォルダにまだ無い、エディタが用意した音（標準キット・ライブラリ・エフェクトをかけた音）。出典も返す。
+ * かけた音は fx/ に置く（ほかは #PATH_WAV の直下）。かけた音は作るのに時間がかかるので、進み具合を出す
+ */
+async function kitFilesNeeded(doc: DtxDoc, folder: SongFolder | null): Promise<KitFile[]> {
+  const out: KitFile[] = [];
   const pathWav = doc.fields['PATH_WAV'] ?? '';
   const names = new Set<string>();
   const used = new Set(doc.chips.map((c) => c.v));
-  for (const [k, v] of Object.entries(doc.fields)) {
-    if (!/^WAV[0-9A-Z]{2}$/.test(k)) continue;
-    if (!used.has(parseInt(k.slice(3), 36))) continue;
-    if (names.has(v.toLowerCase()) || findFile(folder, v, pathWav)) continue;
-    const vs = virtualSound(v);
-    if (!vs) continue;
-    names.add(v.toLowerCase());
-    const bytes = await vs.bytes();
-    if (!bytes) continue;
-    const name = v.replace(/\\/g, '/').split('/').pop()!;
-    out.push({ path: pathWav ? `${pathWav.replace(/\\/g, '/').replace(/\/+$/, '')}/${name}` : name, bytes, origin: vs.origin, library: !!vs.sampleId });
+  const fxN = Object.entries(doc.fields).filter(([k, v]) => /^WAV[0-9A-Z]{2}$/.test(k) && used.has(parseInt(k.slice(3), 36)) && FX_NAME_RE.test(v.trim().replace(/\\/g, '/'))).length;
+  let fxDone = 0;
+  try {
+    for (const [k, v] of Object.entries(doc.fields)) {
+      if (!/^WAV[0-9A-Z]{2}$/.test(k)) continue;
+      if (!used.has(parseInt(k.slice(3), 36))) continue;
+      if (names.has(v.toLowerCase()) || findFile(folder, v, pathWav)) continue;
+      const vs = virtualSound(v);
+      if (!vs) continue;
+      names.add(v.toLowerCase());
+      const rel = v.trim().replace(/\\/g, '/');
+      const fx = FX_NAME_RE.test(rel);
+      if (fx && fxN > 4) {
+        fxDone++;
+        useEditor.setState({ loading: tr(`エフェクトの音を書き出しています… ${fxDone}/${fxN}`, `Writing effect sounds… ${fxDone}/${fxN}`) });
+      }
+      const bytes = await vs.bytes();
+      if (!bytes) continue;
+      const name = fx ? rel : rel.split('/').pop()!;
+      out.push({ path: pathWav ? `${pathWav.replace(/\\/g, '/').replace(/\/+$/, '')}/${name}` : name, bytes, origin: vs.origin, library: !!vs.sampleId, fx });
+    }
+  } finally {
+    if (fxDone) useEditor.setState({ loading: null });
   }
   return out;
+}
+
+/** 保存の知らせに足す、一緒に書いた音（キットの音・エフェクトの音） */
+function kitNote(kit: KitFile[]): string {
+  const fx = kit.filter((k) => k.fx).length;
+  const n = kit.length - fx;
+  const parts: string[] = [];
+  if (n) parts.push(tr(`キットの音 ${n} 個`, `${n} kit ${pl(n, 'sound')}`));
+  if (fx) parts.push(tr(`エフェクトの音 ${fx} 個`, `${fx} effect ${pl(fx, 'sound')}`));
+  return parts.length ? tr(`（${parts.join('・')}も保存）`, ` (also saved ${parts.join(' and ')})`) : '';
 }
 
 /** 他の曲から取り込んだ音を使っているときは、出典を知らせる */
@@ -939,7 +966,7 @@ function markSaved(doc: DtxDoc, patch: Partial<EditorState> = {}) {
   else void autosaveNow(true);
 }
 
-type KitFile = { path: string; bytes: Uint8Array; origin: string; library: boolean };
+type KitFile = { path: string; bytes: Uint8Array; origin: string; library: boolean; fx?: boolean };
 
 /** 本体の曲フォルダにする（メモリの曲フォルダは本体に入れ、曲フォルダが無ければ作る）。できなければ null */
 async function ensureLocalFolder(folder: SongFolder | null): Promise<SongFolder | null> {
@@ -973,12 +1000,14 @@ async function saveIntoLocal(folder: SongFolder, fileName: string, bytes: Uint8A
     });
     if (!ok) return false;
   }
+  const fxPrev = await fxBeforeSave(folder, fileName);
   for (const k of kit) await writeFile(folder, k.path, k.bytes);
   for (const f of pendingFiles(folder)) await writeFile(folder, f.path, await f.getFile());
   await writeFile(folder, fileName, bytes);
   const side = sidecarBytes(folder, fileName);
   if (side) await writeFile(folder, sidecarName(fileName), side);
   markSidecarSaved();
+  const fxNow = useSidecar.getState().fx;
   const { siblings, fresh } = await refreshSiblings(folder);
   markSaved(doc, { meta: { ...get().meta, fileName, siblings, recentId: recentIdFor(folder, fileName) } });
   if (fresh) void scanSiblingOrigins(folder);
@@ -992,9 +1021,9 @@ async function saveIntoLocal(folder: SongFolder, fileName: string, bytes: Uint8A
       : supportsDirectWrite()
         ? { label: tr('曲フォルダへ…', 'To a folder…'), run: () => void save({ toFolder: true }) }
         : { label: tr('ZIP で保存', 'Save as ZIP'), run: () => void exportSongZip() };
-    const kitNote = kit.length ? tr(`（キットの音 ${kit.length} 個も保存）`, ` (also saved ${kit.length} kit ${pl(kit.length, 'sound')})`) : '';
-    toast(tr(`${localPlace()}に保存しました: `, `Saved in ${localPlace()}: `) + `${folder.name}/${fileName}${kitNote}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 5000, action);
+    toast(tr(`${localPlace()}に保存しました: `, `Saved in ${localPlace()}: `) + `${folder.name}/${fileName}${kitNote(kit)}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 5000, action);
   }
+  void afterSaveFx(folder, fileName, doc, fxPrev, fxNow);
   return true;
 }
 
@@ -1345,6 +1374,7 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         });
         if (!ok) return;
       }
+      const fxPrev = await fxBeforeSave(folder, fileName);
       for (const k of kit) await writeFile(folder, k.path, k.bytes);
       // ステムや書き出した音で、まだフォルダに書けていなかったもの
       for (const f of pendingFiles(folder)) await writeFile(folder, f.path, await f.getFile());
@@ -1353,8 +1383,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       if (side) await writeFile(folder, sidecarName(fileName), side);
       markSidecarSaved();
       markSaved(doc, { meta: { ...get().meta, fileName, recentId: recentIdFor(folder, fileName) } });
-      const kitNote = kit.length ? tr(`（キットの音 ${kit.length} 個も保存）`, ` (also saved ${kit.length} kit ${pl(kit.length, 'sound')})`) : '';
-      toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${kitNote}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
+      toast(`${tr('保存しました: ', 'Saved: ')}${folder.name}/${fileName}${kitNote(kit)}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 4000);
+      void afterSaveFx(folder, fileName, doc, fxPrev, useSidecar.getState().fx);
       return;
     }
     if (supportsDirectWrite()) {
@@ -1425,6 +1455,7 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         });
         if (!over) return;
       }
+      const fxPrev = await fxBeforeSave(target, fileName);
       if (folder) {
         for (const f of folder.files.values()) {
           if (findFile(target, f.path)) continue;
@@ -1436,6 +1467,7 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       const side = sidecarBytes(null, fileName);
       if (side) await writeFile(target, sidecarName(fileName), side);
       markSidecarSaved();
+      const fxNow = useSidecar.getState().fx;
       const moved = folder?.local;
       folder = target;
       const labels = await readSetDefLabels(folder);
@@ -1444,7 +1476,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       // 本体に置いていた曲は、曲フォルダへ移ったので本体からは消す（自動保存の控えはフォルダに付け替える）
       if (moved) await moveLocalToFolder(moved, folder);
       const made = place.created ? tr(`（「${place.parent}」の中に「${folder.name}」フォルダを作りました）`, ` (made a "${folder.name}" folder in "${place.parent}")`) : '';
-      toast(`${tr('保存しました: ', 'Saved: ')}${place.parent ? `${place.parent}/` : ''}${folder.name}/${fileName}${made}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 6000);
+      toast(`${tr('保存しました: ', 'Saved: ')}${place.parent ? `${place.parent}/` : ''}${folder.name}/${fileName}${made}${kitNote(kit)}${creditNote(kit)}`, 'ok', kit.some((k) => k.library) ? 9000 : 6000);
+      void afterSaveFx(folder, fileName, doc, fxPrev, fxNow);
       return;
     }
     // フォルダに直接書けないブラウザ（iPad・Safari・Firefox）：本体（このブラウザの保存領域）に保存する

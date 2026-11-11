@@ -6,6 +6,7 @@ import { dismissToast, useEditor } from './store/editor';
 import { useDevice } from './store/device';
 import './store/stems';
 import './store/kit';
+import './store/fx';
 import { loadLibrary } from './store/library';
 import { initLocalSongs } from './store/localSongs';
 import { LocalCopyChip } from './ui/LocalStorage';

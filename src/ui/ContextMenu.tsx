@@ -48,6 +48,9 @@ import { makeChipsSpecial, openKindSettings, pickNewKind, placeSpecial, setChips
 import { chipSpecialKind, destCode, specialKind, specialKinds, specialLayout, type SpecialLayout } from '../store/specialLayout';
 import { canCutChip, cutSources, cutSpotAt, openCutAtChip, openCutAtSpot } from '../store/cut';
 import { useSidecar } from '../store/sidecar';
+import { addCurve, applyTemplate, deletePoint, FX_SHAPES, openFx, removeCurve, setPointShape, shapeName, templateNote, typeName, valueText } from '../store/fx';
+import { FX_COLORS, pointBeat, sortPoints } from '../fx/model';
+import { FX_TEMPLATES, type FxTemplate, type FxTemplateId } from '../fx/templates';
 import { openSectionEditor } from './ChartCanvas';
 import { promptDialog } from './dialogs';
 import { channelName, chipBpmLabel, chipName, formatPosition, formatTime, meterLabel } from './format';
@@ -129,6 +132,8 @@ function Frame({ menu }: { menu: CtxMenu }) {
       <TracksMenu rows={menu.rows} />
     ) : menu.kind === 'wave' ? (
       <WaveMenu menu={menu} />
+    ) : menu.kind === 'fx' ? (
+      <FxMenu menu={menu} />
     ) : (
       <EndMenu />
     );
@@ -328,6 +333,12 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
       {velIds.length > 0 && (
         <>
           <VelBlock ids={velIds} anchor={anchor} group={`ctx-vel-${seq}`} />
+          <Sep />
+        </>
+      )}
+      {drums.length > 0 && !useDevice.getState().phone && (
+        <>
+          <FxTemplateBlock ids={drumIds} />
           <Sep />
         </>
       )}
@@ -664,6 +675,110 @@ function VelBlock({ ids, anchor, group }: { ids: number[]; anchor: number; group
         </button>
       </div>
     </div>
+  );
+}
+
+// ---- エフェクト --------------------------------------------------------------------
+
+/** テンプレートの小さな絵 */
+function FxIcon({ t }: { t: FxTemplate }) {
+  const pts = t.icon.map(([x, y]) => `${2 + x * 32},${3 + y * 10}`).join(' ');
+  return (
+    <svg width="36" height="16" viewBox="0 0 36 16" aria-hidden="true" className="ctx-fx-ic">
+      <polyline points={pts} fill="none" stroke={FX_COLORS[t.type]} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
+ * 選んだチップのメニューのエフェクト：テンプレートでカーブを引く（選んだチップで決まるのは時間の範囲だけ）。
+ * 下にテンプレートの説明（マウスを乗せたもの）と「エフェクトの編集を開く」
+ */
+function FxTemplateBlock({ ids }: { ids: number[] }) {
+  const [hover, setHover] = useState<FxTemplateId>('close');
+  const doc = useEditor((s) => s.doc);
+  const want = new Set(ids);
+  const ms = doc.chips.filter((c) => want.has(c.id)).map((c) => c.m);
+  const range = ms.length ? `${toMeasure(Math.min(...ms))}${Math.max(...ms) !== Math.min(...ms) ? `〜${toMeasure(Math.max(...ms))}` : ''}` : '';
+  return (
+    <>
+      <div className="ctx-sec ctx-fx">
+        <div className="ctx-sec-title">
+          <span className="ctx-fx-title">
+            {Icon.fx(12)} {tr('エフェクト', 'Effect')}
+          </span>
+          <span className="ctx-dim mono">{tr(`${range} 小節に`, `measures ${range}`)}</span>
+        </div>
+        <div className="ctx-fx-grid">
+          {FX_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              className={`ctx-fx-tile ${t.type === 'hicut' ? '' : 'wide'} ${hover === t.id ? 'hover' : ''}`}
+              style={{ ['--c' as string]: FX_COLORS[t.type] }}
+              onPointerEnter={() => setHover(t.id)}
+              onFocus={() => setHover(t.id)}
+              onClick={then(() => void applyTemplate(t.id, ids))}
+            >
+              <FxIcon t={t} />
+              <span>{t.name}</span>
+            </button>
+          ))}
+        </div>
+        <div className="ctx-fx-note">{templateNote(hover, ids)}</div>
+      </div>
+      <Item icon={Icon.fx(12)} label={tr('エフェクトの編集を開く', 'Open the effect editor')} hint="E" onClick={then(() => openFx(true))} />
+    </>
+  );
+}
+
+/** エフェクトの列の右クリック：点なら形・消す、何もない所ならカーブを足す */
+function FxMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'fx' }> }) {
+  const side = useSidecar((s) => s.fx);
+  const doc = useEditor((s) => s.doc);
+  const c = menu.curveId ? side?.curves.find((x) => x.id === menu.curveId) : undefined;
+  const at = menu.point;
+  const p = c && at !== null ? sortPoints(c.points)[at] : undefined;
+  if (c && p && at !== null) {
+    const tempo = tempoOf(doc);
+    return (
+      <>
+        <div className="ctx-head">
+          <span className="dot" style={{ background: FX_COLORS[c.type], width: 10, height: 10, flex: 'none' }} />
+          <b>{typeName(c.type)}</b>
+          <span className="ctx-head-sub mono ellipsis">
+            {formatPosition(tempo, pointBeat(tempo, p))} · {valueText(c.type, p.v)}
+          </span>
+        </div>
+        <div className="ctx-sec">
+          <div className="ctx-sec-title">
+            <span>{tr('次の点まで', 'To the next point')}</span>
+          </div>
+          <div className="ctx-fx-shapes">
+            {FX_SHAPES.map((sh) => (
+              <button key={sh} className={(p.s ?? 'smooth') === sh ? 'on' : ''} onClick={then(() => setPointShape(c.id, at, sh))}>
+                {shapeName(sh)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Sep />
+        <Item icon={Icon.trash(13)} danger label={tr('この点を消す', 'Delete this point')} hint="Delete" onClick={then(() => deletePoint(c.id, at))} />
+        <Item danger label={tr('このカーブを消す', 'Delete this curve')} onClick={then(() => removeCurve(c.id))} />
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="ctx-head">
+        <span className="ctx-fx-title">{Icon.fx(12)}</span>
+        <b>{tr('エフェクト', 'Effect')}</b>
+      </div>
+      {(['hicut', 'locut', 'pitch'] as const).map((t) => (
+        <Item key={t} icon={<span className="dot" style={{ background: FX_COLORS[t], width: 8, height: 8 }} />} label={tr(`${typeName(t)}のカーブを足す`, `Add a ${typeName(t).toLowerCase()} curve`)} onClick={then(() => void addCurve(t))} />
+      ))}
+      <Sep />
+      <Item label={tr('エフェクトの編集を閉じる', 'Close the effect editor')} hint="E" onClick={then(() => openFx(false))} />
+    </>
   );
 }
 

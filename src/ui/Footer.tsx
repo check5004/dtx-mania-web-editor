@@ -9,7 +9,7 @@ import { stemsActive, useStems } from '../store/stems';
 import { localPlace, useLocalSongs } from '../store/localSongs';
 import { DriveFooterChip } from './DriveUi';
 import { songEndM, useSongLength, useSongSpan, useSoundsVersion } from './hooks';
-import { TrackPanel, useTrackRows } from './Tracks';
+import { TrackPanel, useTrackCount } from './Tracks';
 import { useSidecar } from '../store/sidecar';
 import { openSpecialSettings, specialCount } from '../store/special';
 
@@ -34,7 +34,7 @@ export function Footer() {
   const length = useSongLength(doc);
   const span = useSongSpan(doc);
   // 上の境目の止まる高さ（細く・標準・ゆったり）はトラックの数で決まる
-  const rows = useTrackRows().length;
+  const rows = useTrackCount();
   // 本体に入れ終わった・曲フォルダへ移したら描き直す
   useLocalSongs((s) => s.ver);
   const copying = useLocalSongs((s) => s.copying);

@@ -6,6 +6,7 @@ import { tempoOf } from '../store/derived';
 import { currentBeat, goToStart, openTempo, playFrom, setCursorBeat, setView, togglePause, togglePlay, useEditor } from '../store/editor';
 import { useInputSettings } from '../input/settings';
 import { setPreset, toggleVelMode, useVel, velPresetNames } from '../store/velocity';
+import { openFx, useFx } from '../store/fx';
 import { useMidi } from '../input/midi';
 import { chipBpmLabel, formatPosition, formatTime, meterLabel } from './format';
 import { usePlayBeat } from './hooks';
@@ -199,6 +200,7 @@ export function Transport() {
   const loading = useEditor((s) => s.loading);
   const velPreset = useVel((s) => s.preset);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
   const velPresets = useInputSettings((s) => s.velPresets);
   const beat = usePlayBeat();
   const tempo = tempoOf(doc);
@@ -292,6 +294,9 @@ export function Transport() {
         </div>
         <button className={`ib ${velMode ? 'on' : ''}`} onClick={() => toggleVelMode()} title={tr('ベロシティの編集（V）', 'Edit velocity (V)')} aria-pressed={velMode}>
           {Icon.bars()}
+        </button>
+        <button className={`ib ${fxOpen ? 'on' : ''}`} onClick={() => openFx()} title={tr('エフェクトの編集（E）：ハイカット・ローカット・ピッチ', 'Effect editing (E): high cut, low cut, pitch')} aria-pressed={fxOpen}>
+          {Icon.fx()}
         </button>
       </div>
       <div className="vsep" />

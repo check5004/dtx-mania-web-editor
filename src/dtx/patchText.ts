@@ -1,8 +1,11 @@
 // 読んだ DTX のテキストを、変わった所の行だけ書き換える（開いていない難易度の譜面を直すときに使う）。
 // serializeDtx で全部を書き直すと、チップの行の並び・チップの行のコメント・タブなどまで変わってしまうので、
-// 値の変わった定義の行・消した定義の行・足したチップ・消したチップの行だけを触り、ほかの行は1文字も変えない。
+// 値の変わった定義の行・消した定義の行・足したチップ・消したチップの行だけを触り、ほかの行は1文字も変えない
+// （同じ所で音だけ替えたチップは、その2文字だけを書き換える）。
 // 書き換えたテキストを読み直して after と同じにならなければ（#IF の中・小節長が変わった など）、serializeDtx(after) にする。
+// エフェクトのコメント「;fx 元の音 かけ方」の行は、直後の #WAV に付く行として、定義と一緒に足す・消す・書き換える。
 import { insertIndexFor } from '../edit/ops';
+import { parseFxLine } from '../fx/model';
 import { parseNxNumber, toBase36x2, toHex2, toMeasure } from './base36';
 import { CH, type Chip, type DtxDoc } from './model';
 import { chipLineTarget, parseDtx, splitChipData, splitCommandLine } from './parse';
@@ -129,8 +132,22 @@ export function sameContent(a: DtxDoc, b: DtxDoc): boolean {
  * 行で書き換えられる変更か：ヘッダのそのまま残す行（コメント・空行など）が同じで、前からある定義の行の書き方
  * （コメントなど）を変えておらず、小節長・曲の終わりも同じ
  */
+/** エフェクトのコメントの行か */
+const isFxRaw = (text: string) => parseFxLine(text) !== null;
+
+/** エフェクトのコメントの行と、それが付く直後の定義（並びごと比べる） */
+function fxLines(d: Pick<DtxDoc, 'header'>): string {
+  return d.header
+    .flatMap((h, i) => {
+      if (h.kind !== 'raw' || !isFxRaw(h.text)) return [];
+      const next = d.header[i + 1];
+      return [`${h.text}\t${next?.kind === 'field' ? next.key : ''}`];
+    })
+    .join('\n');
+}
+
 function patchable(before: DtxDoc, after: DtxDoc): boolean {
-  const raw = (d: DtxDoc) => d.header.flatMap((h) => (h.kind === 'raw' ? [h.text] : []));
+  const raw = (d: DtxDoc) => d.header.flatMap((h) => (h.kind === 'raw' && !isFxRaw(h.text) ? [h.text] : []));
   const ra = raw(before);
   const rb = raw(after);
   if (ra.length !== rb.length || ra.some((t, i) => t !== rb[i])) return false;
@@ -155,6 +172,18 @@ function patchLines(lines: readonly Line[], eol: string, before: DtxDoc, after: 
     else inserts.set(i, [t]);
   };
   const atEnd: string[] = [];
+
+  // エフェクトのコメントの行が変わったら、いまの行をすべて消し、after で付いている定義の直前に置き直す
+  const fxFor = new Map<string, string>();
+  if (fxLines(before) !== fxLines(after)) {
+    info.forEach((x, i) => {
+      if (x.kind === 'raw' && isFxRaw(lines[i].text)) text[i] = null;
+    });
+    after.header.forEach((h, i) => {
+      const next = after.header[i + 1];
+      if (h.kind === 'raw' && isFxRaw(h.text) && next?.kind === 'field') fxFor.set(next.key, h.text);
+    });
+  }
 
   // 定義（#WAVxx など）
   for (const k of new Set([...Object.keys(before.fields), ...Object.keys(after.fields)])) {
@@ -181,7 +210,22 @@ function patchLines(lines: readonly Line[], eol: string, before: DtxDoc, after: 
     // 足した定義：エディタで足すときと同じ所（#WAVxx なら最後の #WAVxx の後ろ）
     const h = after.header.find((x) => x.kind === 'field' && x.key === k);
     const idx = insertIndexFor(before.header, k);
-    insertAfter(idx > 0 ? headerAt[idx - 1] : -1, (h && headerLineText(h, after.fields)) ?? `#${k}: ${b}`);
+    const at = idx > 0 ? headerAt[idx - 1] : -1;
+    const fx = fxFor.get(k);
+    if (fx !== undefined) {
+      insertAfter(at, fx);
+      fxFor.delete(k);
+    }
+    insertAfter(at, (h && headerLineText(h, after.fields)) ?? `#${k}: ${b}`);
+  }
+  // 前からある定義に付くエフェクトのコメントの行：その定義の行（効いている最後の行）の直前に
+  for (const [k, fx] of fxFor) {
+    let last = -1;
+    info.forEach((x, i) => {
+      if (x.kind === 'field' && x.key === k && text[i] !== null) last = i;
+    });
+    if (last < 0) return null;
+    insertAfter(last - 1, fx);
   }
 
   // チップ：消したチップはその行の2文字を 00 に、足したチップは小節の順になる所へ行を足す
@@ -196,10 +240,12 @@ function patchLines(lines: readonly Line[], eol: string, before: DtxDoc, after: 
     sample.set(chipKey(c), c);
   }
   const touched = new Set<number>();
-  const added: Chip[] = [];
+  const moved: Chip[] = [];
+  // 消したチップの所（同じ所に足すチップは、行を足さずにその2文字に書く＝音だけ替えたチップ）
+  const freed: { i: number; slot: number }[] = [];
   for (const [k, n] of diff) {
     const c = sample.get(k)!;
-    for (let j = 0; j < -n; j++) added.push(c);
+    for (let j = 0; j < -n; j++) moved.push(c);
     for (let j = 0; j < n; j++) {
       let found = false;
       for (let i = info.length - 1; i >= 0 && !found; i--) {
@@ -209,10 +255,26 @@ function patchLines(lines: readonly Line[], eol: string, before: DtxDoc, after: 
         if (x.values[slot] !== c.v) continue;
         x.values[slot] = 0;
         touched.add(i);
+        freed.push({ i, slot });
         found = true;
       }
       if (!found) return null;
     }
+  }
+  const added: Chip[] = [];
+  for (const c of moved) {
+    const at = freed.findIndex(({ i, slot }) => {
+      const x = info[i];
+      return x.kind === 'chip' && x.m === c.m && x.ch === c.ch && x.values.length % c.f.d === 0 && (c.f.n * x.values.length) / c.f.d === slot && x.values[slot] === 0;
+    });
+    if (at < 0) {
+      added.push(c);
+      continue;
+    }
+    const { i, slot } = freed[at];
+    const x = info[i];
+    if (x.kind === 'chip') x.values[slot] = c.v;
+    freed.splice(at, 1);
   }
   for (const i of touched) {
     const x = info[i];
@@ -282,5 +344,6 @@ export function patchDtxText(text: string, before: DtxDoc, after: DtxDoc): strin
   const out = patchLines(lines, eol, before, after);
   if (!out) return serializeDtx(after);
   const next = bom + out.map((l) => l.text + l.eol).join('');
-  return sameContent(parseDtx(next).doc, after) ? next : serializeDtx(after);
+  const got = parseDtx(next).doc;
+  return sameContent(got, after) && fxLines(got) === fxLines(after) ? next : serializeDtx(after);
 }

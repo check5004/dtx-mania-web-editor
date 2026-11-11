@@ -147,6 +147,20 @@ export const Icon = {
       <circle cx="11" cy="7" r=".7" fill="currentColor" />
     </Svg>
   ),
+  /** エフェクト（フィルターのカーブ） */
+  fx: (s?: number) => (
+    <Svg size={s}>
+      <path d="M2 5h4.2c2.6 0 3.6 6.5 8 6.5" />
+      <circle cx="6.2" cy="5" r="1.3" fill="currentColor" stroke="none" />
+    </Svg>
+  ),
+  /** 切って聴く（丸に斜線） */
+  ban: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M4.2 11.8l7.6-7.6" />
+    </Svg>
+  ),
   bars: (s?: number) => (
     <Svg size={s}>
       <path d="M2.5 13.5h11" />

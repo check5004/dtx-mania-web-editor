@@ -748,6 +748,12 @@ export function selectKindChips(id: string): number {
 
 // ---- キー・MIDI ---------------------------------------------------------------------------
 
+/** そのキーを自分で種類に決めたか（決まった種類のキー Q W E R は数えない） */
+export function kindKeyChosen(code: string): boolean {
+  if (specialOff()) return false;
+  return specialKinds(useEditor.getState().doc).some((k) => specialDef(k.id)?.key === code);
+}
+
 /**
  * そのキー（KeyboardEvent.code）で置く種類（特殊ノーツに分けていなければ null）。
  * 種類で決めたキーはレーンのキーより先、決まった種類のキー（Q W E R）は mapped（レーンのキー）でないときだけ

@@ -358,7 +358,7 @@ function MidiSettings() {
                   </td>
                   <td>
                     {v !== null && (
-                      <span className="vel">
+                      <span className="vel-meter">
                         <span style={{ width: `${(v / 127) * 100}%` }} />
                       </span>
                     )}

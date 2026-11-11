@@ -2655,7 +2655,8 @@ select.field.speed-slow {
   color: var(--danger);
 }
 
-.vel {
+/* 設定の MIDI の強さの棒（タブレットのパネルの「vel」と混ざらない名前に） */
+.vel-meter {
   display: block;
   width: 70px;
   height: 6px;
@@ -2664,7 +2665,7 @@ select.field.speed-slow {
   overflow: hidden;
 }
 
-.vel span {
+.vel-meter span {
   display: block;
   height: 100%;
   background: var(--ok);
@@ -8270,4 +8271,535 @@ html body:has(.cut-back) .toasts {
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+/* ---- エフェクト（ui/FxPanel・右クリックのテンプレート・ChartCanvas の列） ---- */
+
+.ctx-fx-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #ffb547;
+  font-weight: 600;
+}
+
+.ctx-fx-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.ctx-fx-tile {
+  --c: #ffb547;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text2);
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.ctx-fx-tile.wide {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+}
+
+.ctx-fx-tile > span {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx-fx-tile:hover,
+.ctx-fx-tile.hover {
+  border-color: color-mix(in srgb, var(--c) 65%, var(--line3));
+  background: color-mix(in srgb, var(--c) 12%, var(--raise));
+  color: var(--text);
+}
+
+.ctx-fx-ic {
+  flex: none;
+}
+
+.ctx-fx-note {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 181, 71, 0.32);
+  background: rgba(255, 181, 71, 0.07);
+  color: #e9c68e;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.ctx-fx-shapes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.ctx-fx-shapes button {
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 6px;
+  border: 1px solid var(--line3);
+  background: var(--raise);
+  color: var(--text2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.ctx-fx-shapes button:hover {
+  background: #222a35;
+  border-color: #3a4554;
+  color: var(--text);
+}
+
+.ctx-fx-shapes button.on {
+  border-color: #ffb547;
+  background: rgba(255, 181, 71, 0.1);
+  color: #ffb547;
+}
+
+.fx-panel .card {
+  padding: 12px;
+}
+
+.fx-empty {
+  margin: 0 0 8px;
+  line-height: 1.65;
+}
+
+.fx-curves {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fx-curve {
+  --c: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line3);
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+}
+
+.fx-curve:hover {
+  border-color: #3a4554;
+}
+
+.fx-curve.on {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 9%, var(--bg));
+}
+
+.fx-curve .dot,
+.fx-add .dot,
+.fx-tpl-grid .dot,
+.fx-found-row .dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.fx-sel {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--bg);
+}
+
+.fx-lanes {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.fx-lanes button {
+  height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--line3);
+  background: var(--panel);
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.fx-lanes button.on {
+  background: #151b23;
+  font-weight: 700;
+}
+
+.link-btn.on {
+  color: var(--text);
+  background: #14212b;
+}
+
+.link-btn.danger {
+  color: #ff8a8f;
+}
+
+.link-btn.danger:hover {
+  background: #2a1517;
+}
+
+.fx-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.fx-btns .btn.on {
+  border-color: #3a4554;
+  background: #222a35;
+  color: var(--text);
+}
+
+.fx-btns .fx-read-btn {
+  color: #ffb547;
+  border-color: rgba(255, 181, 71, 0.45);
+}
+
+.fx-btns .fx-read-btn.on {
+  background: rgba(255, 181, 71, 0.12);
+  border-color: #ffb547;
+  color: #ffb547;
+}
+
+.fx-add,
+.fx-tpl {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--bg);
+}
+
+.fx-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fx-tpl-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.fx-tpl-grid .btn {
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.fx-read {
+  border-color: rgba(255, 181, 71, 0.32);
+}
+
+.fx-found {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 181, 71, 0.45);
+  background: var(--bg);
+}
+
+.fx-found-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.8;
+}
+
+.fx-val {
+  gap: 6px;
+}
+
+.fx-val .ib {
+  width: 28px;
+  height: 30px;
+  border-color: var(--line3);
+  background: var(--bg);
+  font-size: 15px;
+}
+
+.fx-val-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line3);
+  background: var(--bg);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fx-val-box .lbl {
+  font-weight: 400;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx-shapes {
+  --c: #ffb547;
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.fx-shapes button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 0 3px;
+  border-radius: 6px;
+  border: 1px solid var(--line3);
+  background: var(--bg);
+  color: var(--mute);
+  font-size: 10px;
+}
+
+.fx-shapes button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-shapes button:hover:not(:disabled) {
+  border-color: #3a4554;
+  color: var(--text);
+}
+
+.fx-shapes button.on {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 10%, var(--bg));
+  color: var(--c);
+}
+
+.fx-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fx-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--bg);
+}
+
+.fx-stats b {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-stats .lbl {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx-stats small {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--mute);
+}
+
+.fx-stats .warn {
+  border-color: #6b4a1a;
+}
+
+.fx-stats .warn b,
+.fx-stats .warn small {
+  color: #ffb547;
+}
+
+.fx-tails {
+  margin-top: 10px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: var(--text2);
+  cursor: pointer;
+}
+
+.fx-tails input {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+/* 下のエフェクトの行（ui/Tracks の FxTrackHead） */
+.trk-fx .trk-name {
+  flex: 0 1 auto;
+}
+
+.trk-fx .btn.small {
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.trk-fx .trk-bypass.on {
+  border-color: #6b5326;
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.trk-fx .trk-fx-open {
+  border-color: rgba(255, 181, 71, 0.5);
+  background: rgba(255, 181, 71, 0.08);
+  color: #ffb547;
+}
+
+.trk-fx .trk-fx-open.on {
+  background: rgba(255, 181, 71, 0.18);
+}
+
+.trk-fx .trk-fx-open .key {
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.trk.trk-fx.off .trk-name b {
+  color: var(--mute);
+}
+
+/* WAV の表：かけた音（エフェクト）を元の音の下にまとめる（ui/LeftPanel） */
+.seg.wav-filter {
+  display: flex;
+  margin: 0 0 8px;
+}
+
+.seg.wav-filter button {
+  flex: 1;
+}
+
+.seg.wav-filter button.fx {
+  color: #d9a24a;
+}
+
+.seg.wav-filter button.fx.on {
+  color: #ffb547;
+}
+
+.seg.wav-filter button .mono {
+  margin-left: 3px;
+  font-size: 10.5px;
+}
+
+.wav-table tr.wav-fx-head td {
+  padding: 2px 6px 3px 22px;
+  border-top: 0;
+}
+
+.wav-fx-group {
+  --c: #ffb547;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, var(--line3));
+  background: color-mix(in srgb, var(--c) 7%, var(--bg));
+  color: var(--c);
+  font-size: 11px;
+  text-align: left;
+}
+
+.wav-fx-group:hover {
+  background: color-mix(in srgb, var(--c) 13%, var(--bg));
+}
+
+.wav-fx-group svg {
+  flex: none;
+}
+
+.wav-fx-group .ellipsis {
+  min-width: 0;
+}
+
+.wav-fx-orig {
+  flex: 0 1 auto;
+  color: var(--text2);
+}
+
+.wav-fx-n {
+  flex: none;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text3);
+}
+
+.wav-fx-tri {
+  flex: none;
+  font-size: 10px;
+}
+
+.wav-table tr.wav-fx-row td {
+  border-top: 0;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  background: #0d1015;
+}
+
+.wav-table tr.wav-fx-row td.wav-file {
+  border-left: 2px solid #3a2f1c;
+}
+
+.wav-fx-path {
+  max-width: 100%;
+  padding: 1px 4px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.wav-fx-val {
+  padding-left: 10px !important;
+  font-size: 11px;
+  color: var(--mute);
 }

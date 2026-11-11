@@ -239,6 +239,8 @@ export interface VirtualSound {
   origin: string;
   /** ライブラリの音ならサンプルの id */
   sampleId?: string;
+  /** 読み込んだ音を覚えておく名前（無ければ sampleId かファイル名）。中身が変わる音（エフェクトをかけた音）は元の音とかけ方を入れる */
+  key?: string;
   load(): Promise<AudioBuffer | null>;
   /** 曲フォルダに書き出す中身 */
   bytes(): Promise<Uint8Array | null>;
@@ -257,6 +259,20 @@ export function unregisterVirtual(file: string) {
   extra.delete(baseName(file));
 }
 
+/** パスから音を用意するもの（エフェクトをかけた音。store/fx）。フォルダの中のパスもそのまま見る */
+const resolvers: ((path: string) => VirtualSound | null)[] = [];
+
+export function addVirtualResolver(fn: (path: string) => VirtualSound | null): () => void {
+  if (!resolvers.includes(fn)) resolvers.push(fn);
+  return () => {
+    const i = resolvers.indexOf(fn);
+    if (i >= 0) resolvers.splice(i, 1);
+  };
+}
+
+/** 読み込んだ音を覚えておく名前（再生の表・試聴で共通） */
+export const virtualKey = (v: VirtualSound) => `virtual:${v.key ?? v.sampleId ?? v.file.toLowerCase()}`;
+
 /** 譜面に書かれたパスの音をエディタが用意できるなら返す */
 export function virtualSound(path: string): VirtualSound | null {
   const b = parseBuiltinFile(path);
@@ -271,6 +287,10 @@ export function virtualSound(path: string): VirtualSound | null {
         return buf ? encodeWav(buf) : null;
       },
     };
+  }
+  for (const fn of resolvers) {
+    const v = fn(path);
+    if (v) return v;
   }
   return extra.get(baseName(path)) ?? null;
 }

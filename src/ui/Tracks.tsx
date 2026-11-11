@@ -37,6 +37,8 @@ import { useLang } from '../i18n/useLang';
 import { StemTrackPopover } from './StemTrackPopover';
 import { openSeparation, separating, useSeparate } from '../store/separate';
 import { useGlowing } from '../store/glow';
+import { openFx, setBypass, sideBeats, useFx } from '../store/fx';
+import { FX_COLORS, FX_HI, FX_LO, PITCH_RANGE, valueAt, type FxSide } from '../fx/model';
 
 /** トラックの見出しの幅 */
 export const HEAD_W = 344;
@@ -89,6 +91,9 @@ export type TrackRow =
   /** SE のチャンネル（61〜92）で鳴らす音。原曲のドラム（drums.ogg など）を SE で鳴らす譜面がある */
   | { type: 'se'; id: 'se'; name: string; sub: string; color: string };
 type Row = TrackRow;
+/** エフェクトの行（譜面の音のすぐ下。カーブがあるか、エフェクトの編集を開いているとき）。音量・M・S は無い */
+type FxRow = { type: 'fx'; id: 'fx'; name: string; sub: string; color: string };
+type PanelRow = Row | FxRow;
 
 /** SE のチャンネルで鳴らすファイル（出てくる順・重なりなし） */
 const seFilesCache = new WeakMap<DtxDoc, string[]>();
@@ -147,6 +152,19 @@ export function useTrackRows(): Row[] {
     });
   }
   return rows;
+}
+
+/** 下のトラックにエフェクトの行を出すか */
+export function useFxRowShown(): boolean {
+  const open = useFx((s) => s.open);
+  const n = useSidecar((s) => s.fx?.curves.length ?? 0);
+  return open || n > 0;
+}
+
+/** 下のトラックの本数（エフェクトの行も数える。止まる高さに使う） */
+export function useTrackCount(): number {
+  const n = useTrackRows().length;
+  return n + (useFxRowShown() ? 1 : 0);
 }
 
 /** トラックが鳴るか（ミュート・ソロ・曲の音をまとめて消しているか） */
@@ -245,6 +263,70 @@ function drawSeLane(c: CanvasRenderingContext2D, doc: DtxDoc, top: number, rowH:
       c.fillRect(x, mid - h, 1, h * 2);
     }
   }
+}
+
+/**
+ * エフェクトの行：カーブを曲全体の長さで小さく描く。上の端が「かけない（開放）」、下へ行くほど深くかける
+ * （ハイカット・ローカットは周波数の対数、ピッチは上げ下げの幅）。on でなければ（切って聴く）薄く
+ */
+function drawFxLane(c: CanvasRenderingContext2D, side: FxSide | null, tempo: ReturnType<typeof tempoOf>, top: number, rowH: number, W: number, len: number, on: boolean) {
+  const y0 = top + 12;
+  const y1 = top + rowH - 5;
+  c.font = '9px system-ui, sans-serif';
+  c.textBaseline = 'middle';
+  c.fillStyle = '#5F6978';
+  c.fillText(tr('開放', 'Open'), 6, top + 6);
+  c.strokeStyle = 'rgba(139,149,164,.35)';
+  c.lineWidth = 1;
+  c.setLineDash([2, 3]);
+  c.beginPath();
+  c.moveTo(0, y0 + 0.5);
+  c.lineTo(W, y0 + 0.5);
+  c.stroke();
+  c.setLineDash([]);
+  if (!side || y1 <= y0 + 2) return;
+  const depth = (type: FxSide['curves'][number]['type'], v: number) =>
+    type === 'hicut'
+      ? Math.log(FX_HI / Math.max(FX_LO, Math.min(FX_HI, v))) / Math.log(FX_HI / FX_LO)
+      : type === 'locut'
+        ? Math.log(Math.max(FX_LO, Math.min(FX_HI, v)) / FX_LO) / Math.log(FX_HI / FX_LO)
+        : Math.min(1, Math.abs(v) / PITCH_RANGE);
+  const secPerPx = len / Math.max(1, W);
+  c.globalAlpha = on ? 1 : 0.35;
+  for (const cb of sideBeats(side, tempo)) {
+    if (!cb.beats.length) continue;
+    const col = FX_COLORS[cb.curve.type];
+    const xa = Math.max(0, Math.floor((tempo.beatToSec(cb.beats[0]) / len) * W));
+    const xb = Math.min(W, Math.ceil((tempo.beatToSec(cb.beats[cb.beats.length - 1]) / len) * W));
+    const ys: number[] = [];
+    for (let x = xa; x <= xb; x++) {
+      const v = valueAt(cb, tempo.secToBeat(Math.min(x, xb) * secPerPx));
+      ys.push(v === null ? y0 : y0 + depth(cb.curve.type, v) * (y1 - y0));
+    }
+    // かかっている所を塗る
+    c.fillStyle = col + '33';
+    c.beginPath();
+    c.moveTo(xa, y0);
+    ys.forEach((y, i) => c.lineTo(xa + i, y));
+    c.lineTo(xa + ys.length - 1, y0);
+    c.closePath();
+    c.fill();
+    c.strokeStyle = col;
+    c.lineWidth = 1.5;
+    c.beginPath();
+    ys.forEach((y, i) => (i ? c.lineTo(xa + i, y) : c.moveTo(xa, y)));
+    c.stroke();
+    // 点
+    c.fillStyle = col;
+    for (let i = 0; i < cb.beats.length; i++) {
+      const x = (tempo.beatToSec(cb.beats[i]) / len) * W;
+      const y = y0 + depth(cb.curve.type, cb.vals[i]) * (y1 - y0);
+      c.beginPath();
+      c.arc(x, y, 2, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  c.globalAlpha = 1;
 }
 
 // ---- 操作（シーク・ループ） --------------------------------------------------------
@@ -562,7 +644,12 @@ export function TrackPanel({
     return () => window.removeEventListener('resize', h);
   }, []);
   void winH;
-  const rows = useTrackRows();
+  const base = useTrackRows();
+  const fxShown = useFxRowShown();
+  const fxN = useSidecar((s) => s.fx?.curves.length ?? 0);
+  const rows: PanelRow[] = fxShown
+    ? [base[0], { type: 'fx', id: 'fx', name: tr('エフェクト', 'Effects'), sub: tr(`カーブ ${fxN} 本`, `${fxN} ${fxN === 1 ? 'curve' : 'curves'}`), color: FX_COLORS.hicut }, ...base.slice(1)]
+    : base;
   // PC：止まる高さ（1本・細く・標準・ゆったり）ならトラックの数に合わせた高さ。全部をゆったり並べた高さより高くしない
   const height = tablet ? tablet.height : deskTracksHeight({ seekOpen: deskOpen, tracksH, tracksStop }, rows.length);
   const bodyH = Math.max(0, height - TD.ruler - 1);
@@ -580,9 +667,7 @@ export function TrackPanel({
         <div ref={body} className="tracks-body scroll" style={{ height: bodyH }}>
           <div className="tracks-grid" style={{ gridTemplateColumns: `${TD.headW}px minmax(0, 1fr)`, minHeight: '100%' }}>
             <div className="tracks-heads">
-              {rows.map((r) => (
-                <TrackHead key={r.id} row={r} h={rowH} />
-              ))}
+              {rows.map((r) => (r.type === 'fx' ? <FxTrackHead key={r.id} row={r} h={rowH} /> : <TrackHead key={r.id} row={r} h={rowH} />))}
             </div>
             <Lanes rows={rows} rowH={rowH} length={length} span={span} />
           </div>
@@ -839,7 +924,7 @@ function Ruler({ length, span }: { length: number; span: number }) {
 }
 
 /** トラックの波形（原曲・ステム）と譜面の音（レーンごとの色の印） */
-function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length: number; span: number }) {
+function Lanes({ rows, rowH, length, span }: { rows: PanelRow[]; rowH: number; length: number; span: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const doc = useEditor((s) => s.doc);
   const mix = useEditor((s) => s.mix);
@@ -852,6 +937,11 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
   const stems = useSidecar((s) => s.stems);
   const version = useStems((s) => s.version);
   const sounds = useSoundsVersion();
+  // エフェクトのカーブ（動かしている間は動かしている形）と、切って聴く
+  const fxLive = useFx((s) => s.live);
+  const fxSaved = useSidecar((s) => s.fx);
+  const fxOff = useFx((s) => s.bypass);
+  const fx = fxLive ?? fxSaved;
   const cache = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
   // 原曲・ステムの波形の右クリックで、その時刻の音を切り出す（store/cut）
   const handlers = useSeekPointer(span, false, (y) => {
@@ -860,7 +950,7 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
   });
   const lang = useLang();
   const H = rows.length * rowH;
-  const audible = rows.map(rowAudible).join('');
+  const audible = rows.map((r) => (r.type === 'fx' ? !fxOff : rowAudible(r))).join('');
   useDraw(
     ref,
     (ctx, W, Hc, dpr) => {
@@ -868,7 +958,7 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
       const tempo = tempoOf(doc);
       const bgm = bgmSource(doc);
       const at = bgm?.sec ?? 0;
-      const key = [doc, W, Hc, len, rowH, rows.map((r) => r.id).join('|'), audible, sections, stems, version, sounds, dpr, lang];
+      const key = [doc, W, Hc, len, rowH, rows.map((r) => r.id).join('|'), audible, sections, stems, version, sounds, dpr, lang, fx];
       if (!cache.current || cache.current.key.some((v, i) => v !== key[i])) {
         const off = cache.current?.canvas ?? document.createElement('canvas');
         off.width = Math.floor(W * dpr);
@@ -885,6 +975,10 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
           c.fillRect(0, top, W, rowH);
           c.fillStyle = '#161B22';
           c.fillRect(0, top + rowH - 1, W, 1);
+          if (r.type === 'fx') {
+            drawFxLane(c, fx, tempo, top, rowH, W, len, !fxOff);
+            return;
+          }
           const on = rowAudible(r);
           c.globalAlpha = on ? 0.9 : 0.28;
           if (r.type === 'chart') {
@@ -953,7 +1047,7 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
       ctx.restore();
       drawOverlay(ctx, W, Hc, span, 0, { tabs: false, cursor, beat, playing, end: length });
     },
-    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix, lang],
+    [doc, length, span, beat, cursor, playing, loop, loopMark, sections, stems, version, sounds, rowH, rows.length, audible, mix, lang, fx],
   );
   return (
     <canvas
@@ -974,6 +1068,44 @@ function Lanes({ rows, rowH, length, span }: { rows: Row[]; rowH: number; length
 }
 
 // ---- トラックの見出し --------------------------------------------------------------
+
+/** エフェクトの行の見出し：カーブの本数、切って聴く（かけない元の音で聴く）、エフェクトの編集を開く */
+function FxTrackHead({ row, h }: { row: FxRow; h: number }) {
+  const bypass = useFx((s) => s.bypass);
+  const open = useFx((s) => s.open);
+  const tall = h >= 42;
+  return (
+    <div className={`trk trk-fx ${bypass ? 'off' : ''}`} style={{ height: h, borderLeftColor: row.color }}>
+      <div className="trk-name">
+        <span className="trk-title">
+          <b className="ellipsis">{row.name}</b>
+          <span
+            className="trk-tag"
+            title={tr(
+              'カーブは作業ファイルに、かけた音は譜面に入ります（保存で曲フォルダの fx/ に書き出し、チップの音を差し替えます）。ゲームでもこの音が鳴ります',
+              'The curves go in the work file and the processed sounds go in the chart (saving writes them to fx/ in the song folder and swaps the chip sounds). The game plays these sounds too',
+            )}
+          >
+            {tr('譜面', 'Chart')}
+          </span>
+        </span>
+        {tall && <span className="sub ellipsis">{row.sub}</span>}
+      </div>
+      <span className="grow" />
+      <button
+        className={`btn small trk-bypass ${bypass ? 'on' : ''}`}
+        onClick={() => setBypass(!bypass)}
+        aria-pressed={bypass}
+        title={tr('エフェクトを切って、かける前の音で聴く（譜面は変わりません）', 'Listen without the effects, to the sounds before processing (the chart does not change)')}
+      >
+        {Icon.ban(12)} {tr('切って聴く', 'Bypass')}
+      </button>
+      <button className={`btn small trk-fx-open ${open ? 'on' : ''}`} onClick={() => openFx()} title={open ? tr('エフェクトの編集を閉じる（E）', 'Close effect editing (E)') : tr('エフェクトの編集を開く（E）', 'Open effect editing (E)')}>
+        {open ? tr('閉じる', 'Close') : tr('開く', 'Open')} <span className="key">E</span>
+      </button>
+    </div>
+  );
+}
 
 function TrackHead({ row, h }: { row: Row; h: number }) {
   const mix = useEditor((s) => s.mix);

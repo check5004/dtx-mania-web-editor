@@ -116,6 +116,48 @@ describe('譜面のテキストを行だけ書き換える', () => {
     expect(out).toBe(crlf(['#WAV0A: a.wav', '#WAV0B: b.wav', '#00111: 0a_00', '#00101: 00 ;bgm']));
   });
 
+  it('同じ所で音だけ替えたチップは、その2文字だけを書き換える（行を足さない）', () => {
+    const t = crlf(['#WAV01: hh.ogg', '#WAV02: hh2.ogg', '', '#00111: 01_01 ;hh', '#00112: 0001']);
+    const { out, after } = change(t, (d) => {
+      d.chips.find((c) => c.ch === CH.HHC && c.f.n === 1)!.v = 2;
+    });
+    expect(out).toBe(crlf(['#WAV01: hh.ogg', '#WAV02: hh2.ogg', '', '#00111: 01_02 ;hh', '#00112: 0001']));
+    expect(sameContent(parseDtx(out).doc, after)).toBe(true);
+  });
+
+  it('エフェクトのコメント「;fx」は付く #WAV と一緒に足し・消し、戻すと元のテキストにもどる（ほかの行は動かさない）', () => {
+    const t = crlf(['#TITLE: Song', '#WAV01: hh.ogg', '#WAV02: sd.ogg', '', '#000C2: 01', '#00111: 01010101', '#00112: 0002']);
+    const fxWav = (d: DtxDoc, key: string, path: string, line: string) => {
+      setField(d, key, path);
+      const i = d.header.findIndex((h) => h.kind === 'field' && h.key === key);
+      d.header.splice(i, 0, { kind: 'raw', text: line });
+    };
+    const { out, after } = change(t, (d) => {
+      fxWav(d, 'WAV03', 'fx/hh_hc800.ogg', ';fx hh.ogg hicut 800');
+      for (const c of d.chips) if (c.ch === CH.HHC && c.f.n * 2 >= c.f.d) c.v = 3;
+    });
+    expect(out).toBe(crlf(['#TITLE: Song', '#WAV01: hh.ogg', '#WAV02: sd.ogg', ';fx hh.ogg hicut 800', '#WAV03: fx/hh_hc800.ogg', '', '#000C2: 01', '#00111: 01010303', '#00112: 0002']));
+    expect(sameContent(parseDtx(out).doc, after)).toBe(true);
+    // かけ方を変える（同じ番号で別のかけた音に）：コメントの行も一緒に
+    const re = change(out, (d) => {
+      d.header.splice(
+        d.header.findIndex((h) => h.kind === 'raw' && h.text.startsWith(';fx')),
+        1,
+      );
+      fxWav(d, 'WAV03', 'fx/hh_hc500.ogg', ';fx hh.ogg hicut 500');
+    });
+    expect(re.out).toBe(out.replace(';fx hh.ogg hicut 800', ';fx hh.ogg hicut 500').replace('fx/hh_hc800.ogg', 'fx/hh_hc500.ogg'));
+    const back = change(out, (d) => {
+      d.header.splice(
+        d.header.findIndex((h) => h.kind === 'raw' && h.text.startsWith(';fx')),
+        1,
+      );
+      setField(d, 'WAV03', undefined);
+      for (const c of d.chips) if (c.v === 3) c.v = 1;
+    });
+    expect(back.out).toBe(t);
+  });
+
   it('先頭の BOM の文字は残す', () => {
     const t = '﻿' + crlf(['#WAV01: a.ogg', '#00101: 01']);
     expect(change(t, (d) => setField(d, 'WAV01', 'b.ogg')).out).toBe('﻿' + crlf(['#WAV01: b.ogg', '#00101: 01']));

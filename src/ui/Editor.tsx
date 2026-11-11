@@ -38,6 +38,10 @@ import { RightPanel } from './RightPanel';
 import { SettingsPage } from './SettingsPage';
 import { tapKey } from './TapTempoPanel';
 import { VelocityPanel } from './VelocityPanel';
+import { FxPanel } from './FxPanel';
+import { deleteSelectedPoint, openFx, stepSelectedPoint, useFx } from '../store/fx';
+import { kindKeyChosen } from '../store/special';
+import { useInputSettings } from '../input/settings';
 import { nudgeSelection, setPreset, toggleVelMode, useVel } from '../store/velocity';
 import { TempoPage } from './TempoPage';
 import { StemsPage } from './StemsPage';
@@ -80,6 +84,11 @@ function bracketDir(e: KeyboardEvent): 1 | -1 | 0 {
   if (e.code === 'BracketRight') return 1;
   if (e.code === 'BracketLeft') return -1;
   return 0;
+}
+
+/** E をエフェクトの編集に使うか（マウスで置くときで、E を自分でレーンにも種類にも決めていない） */
+function fxKey(): boolean {
+  return useAssist.getState().inputMode === 'mouse' && useInputSettings.getState().keys.KeyE === undefined && !kindKeyChosen('KeyE');
 }
 
 function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
@@ -211,9 +220,20 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     nudgeSelection((k === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 1 : 5));
     return;
   }
+  // E：エフェクトの編集。キー入力・録音のときと、E を自分でレーンか種類に決めたときは叩く音（カウベルなど）が先
+  if (!e.altKey && !e.shiftKey && e.code === 'KeyE' && fxKey()) {
+    e.preventDefault();
+    if (!e.repeat) openFx();
+    return;
+  }
   // ドラムのキー（試し打ち・キー入力・録音）
   if (!e.altKey && keyHit(e)) {
     e.preventDefault();
+    return;
+  }
+  if (!e.altKey && !e.shiftKey && e.code === 'KeyE') {
+    e.preventDefault();
+    if (!e.repeat) openFx();
     return;
   }
   // I・O：今の位置をループの A・B に。/：ループのオン・オフ
@@ -261,6 +281,8 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     case 'Delete':
     case 'Backspace':
       e.preventDefault();
+      // エフェクトの編集で点を選んでいれば、その点
+      if (deleteSelectedPoint()) return;
       deleteSelection();
       return;
     case 'Escape':
@@ -273,6 +295,10 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
       if (dismissGhost()) return;
       if (useVel.getState().mode) {
         toggleVelMode(false);
+        return;
+      }
+      if (useFx.getState().open) {
+        openFx(false);
         return;
       }
       useEditor.setState({ selection: [] });
@@ -296,6 +322,11 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     }
     case 'ArrowLeft':
     case 'ArrowRight':
+      // エフェクトの編集で点を選んでいれば、その点の値を 1 段
+      if (stepSelectedPoint(k === 'ArrowLeft' ? -1 : 1)) {
+        e.preventDefault();
+        return;
+      }
       if (s.selection.length > 0) {
         e.preventDefault();
         moveSelection(frac(0), k === 'ArrowLeft' ? -1 : 1, { hear: true });
@@ -319,6 +350,7 @@ export function Editor() {
   const phone = useDevice((s) => s.phone);
   const portrait = useDevice((s) => s.portrait);
   const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
   const findOpen = useFind((s) => s.open);
   const previewMode = usePreview((s) => s.mode);
   const phraseOpen = usePhrase((s) => s.open);
@@ -329,9 +361,9 @@ export function Editor() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  const hasLeft = !velMode;
+  const hasLeft = !velMode && !fxOpen;
   const cols = effectiveColumns(layout, width, hasLeft);
-  const rightLabel = velMode ? tr('ベロシティの道具', 'Velocity tools') : previewMode === 'side' ? tr('NX風プレビュー', 'NX-style preview') : tr('原曲・耳コピアシスト・確かめる', 'Original, transcription assist, checks');
+  const rightLabel = velMode ? tr('ベロシティの道具', 'Velocity tools') : fxOpen ? tr('エフェクトの編集', 'Effect editing') : previewMode === 'side' ? tr('NX風プレビュー', 'NX-style preview') : tr('原曲・耳コピアシスト・確かめる', 'Original, transcription assist, checks');
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);
@@ -387,7 +419,7 @@ export function Editor() {
           <TopBar folderInput={folderInput} />
           <Transport />
           <div
-            className={`main ${velMode ? 'vel-mode' : ''}`}
+            className={`main ${velMode ? 'vel-mode' : ''} ${fxOpen ? 'fx-mode' : ''}`}
             style={{
               gridTemplateColumns: hasLeft
                 ? `${cols.left}px 0px minmax(0, 1fr) 0px ${cols.right}px`
@@ -406,6 +438,8 @@ export function Editor() {
               <PanelRail side="right" label={rightLabel} />
             ) : velMode ? (
               <VelocityPanel />
+            ) : fxOpen ? (
+              <FxPanel />
             ) : previewMode === 'side' ? (
               <NxPreview />
             ) : (

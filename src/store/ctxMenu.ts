@@ -22,7 +22,9 @@ export type CtxTarget =
   /** PC の下のトラックの高さ（上の境目・角）。rows: トラックの数 */
   | { kind: 'tracks'; rows: number }
   /** 下のトラックの波形（原曲・ステム）。src は 'orig' かステムのファイル、sec は譜面の秒、tol はその近くのチップを探す幅（秒） */
-  | { kind: 'wave'; src: string; sec: number; beat: number; tol: number };
+  | { kind: 'wave'; src: string; sec: number; beat: number; tol: number }
+  /** エフェクトの列（エフェクトの編集）。点の上なら curveId と point（時刻の順の番号） */
+  | { kind: 'fx'; curveId: string | null; point: number | null };
 
 export type CtxMenu = CtxTarget & {
   /** 画面の座標（出す位置） */
