@@ -2751,6 +2751,18 @@ html.tablet .tempo-head h1 {
   }
 }
 
+/* ホームのいちばん下のリンク（説明書・GitHub）：文字は小さいまま、指で押せる高さに（スマホも） */
+.th-home .home-links {
+  gap: 0 8px;
+  padding-top: 4px;
+  font-size: 13px;
+}
+
+.th-home .home-links a {
+  min-height: 44px;
+  padding: 0 10px;
+}
+
 /* 参照映像のずれ（タブレット：0.1 秒・0.01 秒のボタン） */
 .t-yt-offset {
   gap: 6px;

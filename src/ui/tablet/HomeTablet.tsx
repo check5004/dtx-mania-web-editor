@@ -18,6 +18,7 @@ import { openFilesPicker } from './shared';
 import { InstallCard, useInstallHint } from '../pwa/InstallCard';
 import { usePwa } from '../../store/pwa';
 import { LogoMark } from '../LogoMark';
+import { HomeLinks } from '../HomeLinks';
 
 const TIPS_KEY = 'dtxe.ipadTips.closed';
 
@@ -326,6 +327,7 @@ export function HomeTablet() {
             </div>
           </div>
         </section>
+        <HomeLinks />
       </main>
       <FolderInput inputRef={folderInput} />
     </div>

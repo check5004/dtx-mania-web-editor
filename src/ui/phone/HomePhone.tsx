@@ -19,6 +19,7 @@ import { SafariNotice } from '../SafariNotice';
 import { ago, artColor } from '../tablet/HomeTablet';
 import { openFilesPicker } from '../tablet/shared';
 import { LogoMark } from '../LogoMark';
+import { HomeLinks } from '../HomeLinks';
 
 const TIPS_KEY = 'dtxe.phoneTips.closed';
 /** 最近の曲を、すべてを開くまでに出す数 */
@@ -261,6 +262,7 @@ export function HomePhone() {
             {tipsCard}
           </>
         )}
+        <HomeLinks />
       </main>
     </div>
   );

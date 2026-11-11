@@ -1812,6 +1812,39 @@ input[type='range'] {
   margin-bottom: 4px;
 }
 
+/* ホームのいちばん下：説明書（README）・GitHub のリンクと版。目立たせない（src/ui/HomeLinks.tsx） */
+.home-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.home-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+}
+
+@media (hover: hover) {
+  .home-links a:hover {
+    color: var(--text2);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+
+.home-links-ver {
+  font-family: var(--mono);
+  color: var(--dim);
+}
+
 /* ---- 耳コピアシスト ---- */
 
 .popover {
