@@ -32,7 +32,7 @@ import { SaveSheet } from '../tablet/SaveSheet';
 import { tabletSave } from '../tablet/shared';
 import { Drawer } from '../tablet/TabletEditor';
 import { DiffMenu, GridPick, MetronomeButton, PosBox, SpeedPick, StrengthPick, VolumeButton } from './PhoneParts';
-import { PhonePads, PhoneTracks, PhoneVelocity } from './PhoneSheets';
+import { KIND_ROW_H, kindRows, PhonePads, PhoneTracks, PhoneVelocity, usePadKinds } from './PhoneSheets';
 
 /** 下のタブ（デザインの並び） */
 function phoneTabs(): { id: PhoneTab; label: string }[] {
@@ -229,12 +229,14 @@ function PSheet() {
   const high = useDevice((s) => s.pHigh);
   const vh = useDevice((s) => s.vh);
   const velMode = useVel((s) => s.mode);
+  const kinds = usePadKinds().length;
   const [drag, setDrag] = useState<number | null>(null);
   if (!tab && !velMode) return null;
   const maxH = Math.min(PHONE_SHEET.high, sheetMax(vh));
-  // パッドは譜面を見ながら叩くので、いつも低いまま
+  // パッドは譜面を見ながら叩くので、いつも低いまま（特殊ノーツの種類があれば、その段の分だけ高く）
   const canHigh = tab !== 'pad' || velMode;
-  const target = high && canHigh ? maxH : Math.min(PHONE_SHEET.low, maxH);
+  const lowH = tab === 'pad' && !velMode && kinds ? PHONE_SHEET.low + kindRows(kinds) * (KIND_ROW_H + 6) : PHONE_SHEET.low;
+  const target = high && canHigh ? maxH : Math.min(lowH, maxH);
   const height = drag ?? target;
   const grip = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -273,7 +275,7 @@ function PSheet() {
       }
       const recent = samples.filter((p) => ev.timeStamp - p.t <= 100);
       const v = recent.length >= 2 ? (recent[recent.length - 1].h - recent[0].h) / Math.max(16, ev.timeStamp - recent[0].t) : 0;
-      const low = Math.min(PHONE_SHEET.low, maxH);
+      const low = Math.min(lowH, maxH);
       // はじいたらその向きへ（高いから下へはじいたら低い、低いから下へなら閉じる）。止めて離したら近い所
       let to: 'close' | 'low' | 'high';
       if (v > 0.5) to = canHigh ? 'high' : 'low';

@@ -92,7 +92,7 @@ function loadCols(): boolean | null {
   }
 }
 
-/** 種類ごとの列に分けて見せるか（null は画面に合わせる：PC は列、iPad・スマホは行き先のレーンに重ねる） */
+/** 種類ごとの列に分けて見せるか（null は画面に合わせる：PC・スマホは列、iPad は行き先のレーンに重ねる） */
 export const useSpecialView = create<{ cols: boolean | null }>(() => ({ cols: loadCols() }));
 
 let colsDefault: () => boolean = () => true;

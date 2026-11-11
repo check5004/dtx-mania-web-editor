@@ -12,7 +12,8 @@ import { tempoOf, chipViews, viewsInRange } from './derived';
 import { useDevice } from './device';
 import { chipAt, deleteChips, placeChips, playFrom, setCursorBeat, setView, stop, togglePlay, toast, useEditor } from './editor';
 import { keyFlam, useFlam } from './flam';
-import { pastFirstLoop, previewLane, recordHit } from './hits';
+import { pastFirstLoop, previewKind, previewLane, recordHit, recordKindHit } from './hits';
+import { placeSpecial, specialChipAt } from './special';
 import { placeVel } from './velocity';
 
 export type PadMode = 'aud' | 'step' | 'rec';
@@ -94,6 +95,41 @@ export function padDown(lane: number, alt: boolean, perfMs: number) {
   }
 }
 
+/**
+ * 特殊ノーツ（クラップなど）のパッドを押した。レーンのパッドと同じく、試し打ちは鳴らすだけ、ステップは ▶ に置く（同時に押したパッドと同じ位置）、
+ * 録音は叩いた所に置く。もうその種類のチップがあれば置かない。離したら padUp
+ */
+export function padKindDown(id: string, perfMs: number) {
+  const vel = placeVel();
+  previewKind(id, vel / 100);
+  const s = useEditor.getState();
+  if (s.screen !== 'editor' || s.page !== 'chart') return;
+  const mode = useAssist.getState().inputMode;
+  if (mode === 'key') {
+    const tempo = tempoOf(s.doc);
+    const dev = useDevice.getState();
+    if (!dev.stepChord) {
+      const p = snapToGrid(tempo, Math.max(0, s.cursorBeat), s.view.div);
+      if (specialChipAt(id, p) === null) placeSpecial(id, p, { vel });
+      if (dev.stepAdvance) stepCursor(1, p);
+      return;
+    }
+    if (held === 0 || !chordPos) {
+      chordPos = snapToGrid(tempo, Math.max(0, s.cursorBeat), s.view.div);
+      chordGroup = `pad-step-${Date.now()}`;
+    }
+    held++;
+    if (specialChipAt(id, chordPos) === null) placeSpecial(id, chordPos, { vel, group: chordGroup });
+    return;
+  }
+  if (mode === 'rec') {
+    if (!engine.playing) return;
+    if (perfMs < countInEnd - 120) return;
+    if (!useDevice.getState().recOverdub && pastFirstLoop(perfMs)) return;
+    recordKindHit(id, vel, perfMs, useDevice.getState().padLatencyMs);
+  }
+}
+
 /** パッドから指を離した。ステップでは、指を全部離したら1グリッド進む */
 export function padUp() {
   if (useAssist.getState().inputMode !== 'key') {
@@ -108,14 +144,14 @@ export function padUp() {
   if (useDevice.getState().stepAdvance) stepCursor(1, p);
 }
 
-/** ステップ：▶ の位置のチップを消す（ドラムのチップ全部） */
+/** ステップ：▶ の位置のチップを消す（ドラムのチップ全部と特殊ノーツ） */
 export function clearAtCursor() {
   const s = useEditor.getState();
   const tempo = tempoOf(s.doc);
   const p = snapToGrid(tempo, Math.max(0, s.cursorBeat), s.view.div);
   const b = tempo.beatOf(p.m, p.f);
   const ids = viewsInRange(chipViews(s.doc), b - 1e-6, b + 1e-6)
-    .filter((v) => v.col >= 0)
+    .filter((v) => v.col >= 0 || v.sp !== undefined)
     .map((v) => v.c.id);
   if (ids.length === 0) {
     toast(tr('▶ の所にチップはありません', 'No chips at ▶'), 'info', 2500);

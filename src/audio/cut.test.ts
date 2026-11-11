@@ -92,6 +92,26 @@ describe('切り方と整え方', () => {
     expect(cutPcm(p, m.start, m.end, { ...DEFAULT_SHAPE, mono: true }).ch).toHaveLength(1);
   });
 
+  it('切り始めを手でずらせる（＋で後ろ・−で前、±100 ms まで）。長さが自動なら終わりはそのまま、手で決めた長さなら一緒に動く', () => {
+    const p = stereo(SR * 2);
+    const a = msToSamples(SR, 500);
+    const b = msToSamples(SR, 900);
+    for (const x of p.ch) {
+      addBurst(x, a, 0.3, 7);
+      addBurst(x, b, 0.3, 8);
+    }
+    const r0 = autoRange(p, a, b);
+    const later = autoRange(p, a, b, { align: true, startMs: 5 });
+    expect(later.start - r0.start).toBe(msToSamples(SR, 5));
+    expect(later.end).toBe(r0.end);
+    const earlier = autoRange(p, a, b, { align: true, startMs: -3, lenMs: 200 });
+    expect(r0.start - earlier.start).toBe(msToSamples(SR, 3));
+    expect(earlier.end - earlier.start).toBe(msToSamples(SR, 200));
+    expect(r0.start - autoRange(p, a, b, { align: true, startMs: -500 }).start).toBe(msToSamples(SR, 100));
+    // チップの時刻から切るときも同じようにずらす
+    expect(autoRange(p, a, b, { align: false, startMs: 10 }).start).toBe(a + msToSamples(SR, 10));
+  });
+
   it('低い音を弱めると、バスドラムの混ざりが減る', () => {
     const p = stereo(SR);
     const a = msToSamples(SR, 200);

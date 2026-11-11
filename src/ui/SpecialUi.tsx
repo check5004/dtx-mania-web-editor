@@ -28,7 +28,7 @@ import {
   useSpecialUi,
 } from '../store/special';
 import { destCode, destName, SPECIAL_DESTS, specialKind, specialKinds, type SpecialKind } from '../store/specialLayout';
-import { openCutForKind } from '../store/cut';
+import { canRecut, openCutForKind, openRecut } from '../store/cut';
 import { AuditionButton, AuditionProgress } from './Audition';
 import { Icon } from './icons';
 
@@ -316,12 +316,15 @@ function DestSection({ k }: { k: SpecialKind }) {
 /** 音：譜面の音（その種類の音・ラベルを付ければその種類と読める音）か標準の音（キット） */
 function SoundSection({ k }: { k: SpecialKind }) {
   const fields = useEditor((s) => s.doc.fields);
+  useSidecar((s) => s.special?.cuts);
   const no = kindSoundNo(k.id);
   const kit = currentKitFile(k.voice);
   const choices = kindSoundChoices(k.id);
   const value = no !== null ? String(no) : 'kit';
   const path = no !== null ? fields['WAV' + toBase36x2(no)] : undefined;
   const label = no !== null ? wavLabel(useEditor.getState().doc, no) : null;
+  // いまの音がステム・原曲から切り出した音なら、直せる（切り始め・長さなどを変えて同じファイルを作り直す）
+  const cutPath = path && canRecut(path) ? path : null;
   return (
     <div className="sp-pop-sec">
       <div className="sp-sec-title">
@@ -353,16 +356,30 @@ function SoundSection({ k }: { k: SpecialKind }) {
         <AuditionButton k={`sp:${k.id}`} load={() => kindAudition(k)} label={tr(`${k.name}の音`, `${k.name} sound`)} size={14} idleIcon={Icon.speaker(14)} style={{ width: 30, height: 30 }} />
         <AuditionProgress k={`sp:${k.id}`} />
       </div>
-      <button
-        className="btn small sp-cut-btn"
-        onClick={() => {
-          closeKindSettings();
-          openCutForKind(k.id);
-        }}
-        title={tr(`ステム（無ければ原曲）から${k.name}の音を切り出して、この種類の音にします`, `Extract the ${k.name} sound from the stems (or the original) and use it for this kind`)}
-      >
-        {Icon.extract(13)} {tr('ステムから切り出す…', 'Extract from stems…')}
-      </button>
+      <div className="row sp-cut-row">
+        <button
+          className="btn small sp-cut-btn"
+          onClick={() => {
+            closeKindSettings();
+            openCutForKind(k.id);
+          }}
+          title={tr(`ステム（無ければ原曲）から${k.name}の音を切り出して、この種類の音にします`, `Extract the ${k.name} sound from the stems (or the original) and use it for this kind`)}
+        >
+          {Icon.extract(13)} {tr('ステムから切り出す…', 'Extract from stems…')}
+        </button>
+        {cutPath && (
+          <button
+            className="btn small sp-cut-btn"
+            onClick={() => {
+              closeKindSettings();
+              openRecut(cutPath);
+            }}
+            title={tr(`${cutPath} の切り始め・長さなどを変えて、同じファイルを作り直します`, `Change the start, length and so on of ${cutPath} and remake the same file`)}
+          >
+            {Icon.pencil(13)} {tr('切り出した音を直す…', 'Edit the extracted sound…')}
+          </button>
+        )}
+      </div>
       <div className="lbl sp-note">
         {path === undefined
           ? tr(
@@ -521,9 +538,12 @@ async function addAndOpen() {
 
 function KitKindCard({ k }: { k: SpecialKind }) {
   const fields = useEditor((s) => s.doc.fields);
+  useSidecar((s) => s.special?.cuts);
   const no = kindSoundNo(k.id);
   const kit = currentKitFile(k.voice);
   const choices = kindSoundChoices(k.id);
+  const path = no !== null ? fields['WAV' + toBase36x2(no)] : undefined;
+  const cutPath = path && canRecut(path) ? path : null;
   return (
     <div className="sp-card" style={{ ['--c' as string]: k.color }}>
       <div className="sp-card-head">
@@ -589,6 +609,16 @@ function KitKindCard({ k }: { k: SpecialKind }) {
           >
             {Icon.extract(13)}
           </button>
+          {cutPath && (
+            <button
+              className="ib tiny ghost"
+              onClick={() => openRecut(cutPath)}
+              title={tr(`切り出した${k.name}の音（${cutPath}）を直す…`, `Edit the extracted ${k.name} sound (${cutPath})…`)}
+              aria-label={tr(`切り出した${k.name}の音を直す`, `Edit the extracted ${k.name} sound`)}
+            >
+              {Icon.pencil(13)}
+            </button>
+          )}
         </div>
       </div>
       {k.dest !== 'auto' && (

@@ -1,12 +1,13 @@
-// スマホ版の下のタブの中身：パッド（キット 4×3 と、ステップ・録音の右の列）とトラック（ミキサー）。
+// スマホ版の下のタブの中身：パッド（キット 4×3 と特殊ノーツの種類、ステップ・録音の右の列）とトラック（ミキサー）。
 // ほかのタブ（音・原曲・耳コピ・確かめる）はタブレットのパネルの中身をそのまま使う（tablet/Panels）
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { tr } from '../../i18n';
 import { useAssist } from '../../store/assist';
 import { setTouchPrefs, useDevice } from '../../store/device';
 import { openPage, useEditor } from '../../store/editor';
-import { clearAtCursor, padModeOf, setPadMode, stepBack, stepRest, toggleRecording } from '../../store/pads';
+import { clearAtCursor, padKindDown, padModeOf, padUp, setPadMode, stepBack, stepRest, toggleRecording } from '../../store/pads';
 import { useSidecar } from '../../store/sidecar';
+import { destCode, specialLayout, useSpecialView, type SpecialKind } from '../../store/specialLayout';
 import { useStems } from '../../store/stems';
 import { toggleVelMode } from '../../store/velocity';
 import { Icon } from '../icons';
@@ -58,10 +59,63 @@ function SideColumn() {
   return null;
 }
 
+/** パッドに並べる特殊ノーツの種類（クラップなど。曲に無い・分けて見せていないときは空） */
+export function usePadKinds(): SpecialKind[] {
+  const doc = useEditor((s) => s.doc);
+  useSidecar((s) => s.special);
+  useSpecialView((s) => s.cols);
+  const lay = specialLayout(doc);
+  return lay.on ? lay.kinds : [];
+}
+
+/** 特殊ノーツの段の高さ（縦のシートは種類の段の分だけ高くする） */
+export const KIND_ROW_H = 46;
+
+/** 特殊ノーツの段の数（1 段に 4 つ） */
+export function kindRows(n: number): number {
+  return Math.ceil(n / 4);
+}
+
+/** 特殊ノーツの種類のパッド。キットのパッドと同じく押した瞬間に鳴らし、入れ方（試し打ち・ステップ・録音）で置く */
+function KindPad({ k }: { k: SpecialKind }) {
+  const [hit, setHit] = useState(false);
+  const fingers = useRef(new Set<number>());
+  const up = (id: number) => {
+    if (!fingers.current.delete(id)) return;
+    padUp();
+    if (fingers.current.size === 0) setHit(false);
+  };
+  const dest = destCode(k.dest);
+  return (
+    <button
+      type="button"
+      className={`t-pad p-kind-pad ${hit ? 'hit' : ''}`}
+      style={{ ['--pad' as string]: k.color }}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        fingers.current.add(e.pointerId);
+        setHit(true);
+        padKindDown(k.id, e.timeStamp || performance.now());
+      }}
+      onPointerUp={(e) => up(e.pointerId)}
+      onPointerCancel={(e) => up(e.pointerId)}
+      onContextMenu={(e) => e.preventDefault()}
+      aria-label={tr(`${k.name}（特殊ノーツ。ゲームでは ${dest}）`, `${k.name} (special note; ${dest} in the game)`)}
+    >
+      <span className="t-pad-key">
+        {k.code}
+        <em>→{dest}</em>
+      </span>
+      <span className="t-pad-name">{k.name}</span>
+    </button>
+  );
+}
+
 /** パッドのシート（縦）・パネル（横）。見出しは試し打ち・ステップ・録音と、縦ではグリッドと強さ（横は左の列にある） */
 export function PhonePads({ land = false }: { land?: boolean }) {
   const order = useDevice((s) => s.kitOrder);
   const mode = padModeOf(useAssist((s) => s.inputMode));
+  const kinds = usePadKinds();
   useEffect(() => {
     if (padsOpened) return;
     padsOpened = true;
@@ -80,9 +134,12 @@ export function PhonePads({ land = false }: { land?: boolean }) {
         )}
       </div>
       <div className="p-pads-body">
-        <div className="p-kit">
+        <div className={`p-kit ${kinds.length ? 'has-kinds' : ''}`}>
           {order.map((k) => (
             <KitPad key={k} order={order} k={k} />
+          ))}
+          {kinds.map((k) => (
+            <KindPad key={k.id} k={k} />
           ))}
         </div>
         <SideColumn />

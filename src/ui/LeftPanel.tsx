@@ -19,6 +19,7 @@ import { editSong, setSongField, toastSongEdit } from '../store/songSync';
 import { applyKitToChips, kitChoices, kitFile, setKit, useKit } from '../store/kit';
 import { useLibrary } from '../store/library';
 import { useSidecar } from '../store/sidecar';
+import { canRecut, openRecut } from '../store/cut';
 import { AuditionButton, AuditionProgress } from './Audition';
 import { SpecialKitSection } from './SpecialUi';
 import { fxWavGroups, fxWavs, openFx, type FxWavGroup } from '../store/fx';
@@ -84,6 +85,8 @@ function KitTab() {
   const kitId = useKit((s) => s.kitId);
   useLibrary((s) => s.kits);
   useLibrary((s) => s.samples);
+  // 切り出した音の印（直すボタン）
+  useSidecar((s) => s.special?.cuts);
   useStopAuditionOnClose('kit:');
   const choices = kitChoices();
   const cur = choices.find((k) => k.id === kitId) ?? choices[0];
@@ -178,6 +181,8 @@ function KitTab() {
         const vs = !own && path ? virtualSound(path) : null;
         const badge: 'own' | 'lib' | 'std' = own ? 'own' : vs?.sampleId ? 'lib' : 'std';
         const badgeText = badge === 'own' ? tr('曲', 'Song') : badge === 'lib' ? tr('曲から', 'Library') : tr('標準', 'Built-in');
+        // ステム・原曲から切り出した音なら、印の代わりに「直す」（切り始め・長さなどを変えて作り直す）
+        const cutPath = valid && assignedPath && canRecut(assignedPath) ? assignedPath : null;
         return (
           <div key={r.ch} className="kit-row">
             <span className="dot" style={{ background: r.color }} />
@@ -206,9 +211,22 @@ function KitTab() {
                 </option>
               ))}
             </select>
-            <span className={`kit-badge ${badge === 'std' ? '' : badge}`} title={vs?.origin ?? (own ? tr('曲フォルダの音', 'Sound from the song folder') : '')}>
-              {badgeText}
-            </span>
+            {cutPath ? (
+              <button
+                type="button"
+                className="kit-badge cut"
+                onClick={() => openRecut(cutPath)}
+                title={tr(`ステム・原曲から切り出した音（${cutPath}）。押すと切り始め・長さなどを直せます`, `Extracted from the stems or the original (${cutPath}). Press to edit its start, length and so on`)}
+                aria-label={tr(`${r.name}の切り出した音を直す`, `Edit the extracted ${r.name} sound`)}
+              >
+                {Icon.pencil(10)}
+                {tr('直す', 'Edit')}
+              </button>
+            ) : (
+              <span className={`kit-badge ${badge === 'std' ? '' : badge}`} title={vs?.origin ?? (own ? tr('曲フォルダの音', 'Sound from the song folder') : '')}>
+                {badgeText}
+              </span>
+            )}
             <AuditionButton
               k={`kit:${r.ch}`}
               load={() => (valid ? wavAuditionSound(no!) : kf ? fileSound(kf) : null)}
@@ -357,9 +375,19 @@ function WavTab() {
           <div className="wav-sub">
             <CommitInput className="wav-label" value={commentOf(doc, 'WAV' + z)} placeholder={tr('ラベル', 'Label')} onCommit={(v) => setComment('WAV' + z, v)} />
             {cutSet.has(slash(w.path)) && (
-              <span className="wav-cut" title={tr('ステム・原曲から切り出した音（ほかのキットに替えても残します）', 'Extracted from the stems or the original (kept when you switch kits)')}>
+              <button
+                type="button"
+                className="wav-cut"
+                onClick={() => openRecut(w.path)}
+                title={tr(
+                  'ステム・原曲から切り出した音（ほかのキットに替えても残します）。押すと切り始め・長さなどを直せます',
+                  'Extracted from the stems or the original (kept when you switch kits). Press to edit its start, length and so on',
+                )}
+                aria-label={tr(`切り出した音（${w.path}）を直す`, `Edit the extracted sound (${w.path})`)}
+              >
+                {Icon.pencil(9)}
                 {tr('切り出し', 'Extracted')}
-              </span>
+              </button>
             )}
             {long && (
               <span className="wav-len mono" title={tr(`${formatDur(dur)} の長い音（試聴は ■ か Esc で止められます）`, `A long sound (${formatDur(dur)}). Stop the preview with ■ or Esc`)}>

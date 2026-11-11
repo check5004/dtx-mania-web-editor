@@ -46,7 +46,7 @@ import { nudgeVel, setVelOf, velStep, velPresetNames } from '../store/velocity';
 import { placeSongBpm } from '../store/songSync';
 import { makeChipsSpecial, openKindSettings, pickNewKind, placeSpecial, setChipsAuto, unmakeSpecial } from '../store/special';
 import { chipSpecialKind, destCode, specialKind, specialKinds, specialLayout, type SpecialLayout } from '../store/specialLayout';
-import { canCutChip, cutSources, cutSpotAt, openCutAtChip, openCutAtSpot } from '../store/cut';
+import { canCutChip, cutFileOfChip, cutSources, cutSpotAt, openCutAtChip, openCutAtSpot, openRecut } from '../store/cut';
 import { useSidecar } from '../store/sidecar';
 import { addCurve, applyTemplate, deletePoint, FX_SHAPES, openFx, removeCurve, setPointShape, shapeName, templateNote, typeName, valueText } from '../store/fx';
 import { FX_COLORS, pointBeat, sortPoints } from '../fx/model';
@@ -214,6 +214,12 @@ function ExtraItem({ it }: { it: CtxItem }) {
 
 const Sep = () => <div className="ctx-sep" />;
 
+/** メニューの右に出すファイル名（フォルダを省き、長ければ間を詰める） */
+function shortFile(path: string): string {
+  const b = path.split(/[\\/]/).pop() ?? path;
+  return b.length > 18 ? `${b.slice(0, 8)}…${b.slice(-8)}` : b;
+}
+
 /** 押したら閉じてから実行する（ダイアログを出す操作などのため、先に閉じる） */
 const then = (fn: () => void) => () => {
   closeCtxMenu();
@@ -302,6 +308,8 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
   // 音を切り出す（右クリックしたチップの所から。ドラムの通常チップ・特殊ノーツ）
   const anchorChip = chips.find((c) => c.id === anchor) ?? one;
   const cutAt = anchorChip && canCutChip(doc, anchorChip) ? anchorChip : null;
+  // 切り出した音のチップなら、その音を直す（切り始め・長さなどを変えて同じファイルを作り直す）
+  const recutFile = anchorChip ? cutFileOfChip(doc, anchorChip) : null;
   // 特殊ノーツにできるチップ（ドラムの通常チップ・自動で鳴らす SE で、まだ特殊ノーツでないもの）
   const makeIds = chips.filter((c) => (drumChannel(c.ch)?.kind === 'normal' || isSeChannel(c.ch)) && spOf(c) === undefined).map((c) => c.id);
 
@@ -424,7 +432,16 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
           onClick={then(() => openCutAtChip(cutAt.id))}
         />
       )}
-      {(drums.length > 0 || makeIds.length > 0 || cutAt) && <Sep />}
+      {recutFile && (
+        <Item
+          icon={Icon.pencil(12)}
+          label={tr('切り出した音を直す…', 'Edit the extracted sound…')}
+          hint={shortFile(recutFile)}
+          title={tr(`${recutFile} の切り始め・長さなどを変えて、同じファイルを作り直す`, `Change the start, length and so on of ${recutFile} and remake the same file`)}
+          onClick={then(() => openRecut(recutFile))}
+        />
+      )}
+      {(drums.length > 0 || makeIds.length > 0 || cutAt || recutFile) && <Sep />}
       {isBpm && <Item label={tr('BPM を変える…', 'Change BPM…')} hint={dblHint()} onClick={then(() => void askBpm({ m: one!.m, f: one!.f }))} />}
       {extras.map((it, i) => (
         <ExtraItem key={i} it={it} />
@@ -879,6 +896,9 @@ function GridPicker({ m }: { m: number }) {
   );
 }
 
+/** 譜面の原曲の列から切り出すとき、近くのチップを拾う幅（秒。グリッドに吸着した所から） */
+const AUDIO_CUT_TOL = 0.08;
+
 function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
   const doc = useEditor((s) => s.doc);
   const clip = useEditor((s) => s.clipboard.length);
@@ -900,13 +920,15 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
     closeCtxMenu();
     placeSpecial(id, menu.pos, { auto, select: true, preview: true });
   };
+  // 原曲の列（打点・波形）：ここの音を切り出す（スマホは下のトラックが無いので、ここから）。近くのチップの音、無ければこの時刻の音
+  const cutSpot = menu.col === 'audio' && cutSources().length > 0 ? cutSpotAt(tempoOf(doc).beatToSec(menu.beat), AUDIO_CUT_TOL) : null;
   return (
     <>
       {(phone || spHere) && (
         <div className="ctx-head">
           {spHere && <span className="ctx-sp-pill" style={{ ['--c' as string]: spHere.color }} />}
           <b className="mono">{formatPosition(tempoOf(doc), menu.beat)}</b>
-          <span className="ctx-head-sub">{spHere ? tr(`${spHere.name}の列`, `${spHere.name} column`) : tr('何もない所', 'Empty spot')}</span>
+          <span className="ctx-head-sub">{spHere ? tr(`${spHere.name}の列`, `${spHere.name} column`) : menu.col === 'audio' ? tr('原曲の列', 'Original audio column') : tr('何もない所', 'Empty spot')}</span>
         </div>
       )}
       {phone ? <PhoneGridPicker /> : <GridPicker m={m} />}
@@ -925,6 +947,12 @@ function SpaceMenu({ menu }: { menu: Extract<CtxMenu, { kind: 'space' }> }) {
       {extras.map((it, i) => (
         <ExtraItem key={i} it={it} />
       ))}
+      {cutSpot && (
+        <>
+          <Sep />
+          <Item icon={Icon.extract(12)} label={tr('ここの音を切り出す…', 'Extract the sound here…')} hint={cutSpot.pos} onClick={then(() => openCutAtSpot(null, cutSpot, AUDIO_CUT_TOL))} />
+        </>
+      )}
       {spOver.map((k) => (
         <Item
           key={k.id}

@@ -11,7 +11,7 @@ import { tr, isJa, pl } from '../i18n';
 import { engine } from '../audio/engine';
 import { downmix } from '../audio/dsp';
 import { KIT_LANES, laneByCh } from '../audio/sounds';
-import { autoRange, cutPcm, findOnset, fingerprint, minMax, msToSamples, pcmLength, pcmOf, preDb, recommend, shapePcm, similarity, slicePcm, stackPcm, wavBytes, type CutRange, type Onset, type Pcm, type Shape } from '../audio/cut';
+import { autoRange, cutPcm, findOnset, fingerprint, minMax, msToSamples, pcmLength, pcmOf, preDb, recommend, shapePcm, shiftSamples, similarity, slicePcm, stackPcm, wavBytes, type CutRange, type Onset, type Pcm, type Shape } from '../audio/cut';
 import { toBase36x2, toMeasure } from '../dtx/base36';
 import { fracToString } from '../dtx/fraction';
 import { kindCode, kindLabel, kindName, kindOfSound, kindVoice, presetById, specialWavs, specialWavsOf } from '../dtx/kinds';
@@ -21,7 +21,7 @@ import { addKindWav } from '../edit/kinds';
 import { freeWavNumber, setField, setFieldComment } from '../edit/ops';
 import { addWav } from '../edit/rim';
 import { usedWavs, velOfWav, wavVariant } from '../edit/velocity';
-import { folderFromFiles, joinPath, normPath, putFile, type SongFolder } from '../fs/folder';
+import { findFile, folderFromFiles, joinPath, normPath, putFile, type SongFolder } from '../fs/folder';
 import { nxSafeName } from '../fs/nxName';
 import type { Inst } from '../library/db';
 import { instOfChannel } from '../library/analyze';
@@ -29,11 +29,11 @@ import { formatPosition } from '../ui/format';
 import { stopAudition, type AuditionSound } from './audition';
 import { useDevice } from './device';
 import { bgmSource, soundBus, tempoOf, wavPath } from './derived';
-import { edit, lastHistory, openPage, prepareSounds, previewWav, toast, undoIfLast, useEditor } from './editor';
+import { edit, lastHistory, openPage, prepareSounds, previewWav, pushSideHistory, toast, undoIfLast, useEditor } from './editor';
 import { isCutFile } from './kit';
 import { addSampleBytes } from './library';
 import { openSeparation, useSeparate } from './separate';
-import { setSpecialSide, useSidecar } from './sidecar';
+import { setSpecialSide, useSidecar, type CutRecipe } from './sidecar';
 import { kindSoundNo, pickNewKind } from './special';
 import { specialKinds } from './specialLayout';
 import { readyStems, trackAudio, useStems } from './stems';
@@ -56,6 +56,10 @@ export interface CutOpen {
   searchMs?: number;
   /** 元（ステムのファイルか 'orig'）。省くとドラムのステム→ほかのステム→原曲 */
   src?: string | null;
+  /**
+   * 切り出した音を直す（同じファイルを作り直す）。recipe はそのときの作り方（前の版で作った音には無い。初めの切り方から）
+   */
+  redo?: { file: string; recipe: CutRecipe | null } | null;
   /** 開いた回数（画面の状態を作り直す） */
   seq: number;
 }
@@ -134,13 +138,99 @@ function pickRank(s: Sounding): number {
   return 1;
 }
 
-/** 下のトラックの波形から開く。src はそのトラック（'orig' かステムのファイル） */
-export function openCutAtSpot(src: string, spot: CutSpot, tol: number) {
+/** 下のトラックの波形から開く。src はそのトラック（'orig' かステムのファイル。null は初めの決まり：ドラムのステム→ほかのステム→原曲） */
+export function openCutAtSpot(src: string | null, spot: CutSpot, tol: number) {
   const doc = useEditor.getState().doc;
   const c = spot.chip !== null ? doc.chips.find((x) => x.id === spot.chip) : undefined;
   const t = c ? chipTarget(doc, c) : null;
   if (c && t) openCut({ target: t, chip: c.id, src });
   else openCut({ target: { type: 'free' }, sec: spot.sec, src, searchMs: Math.max(30, Math.min(250, tol * 1000)) });
+}
+
+// ---- 切り出した音を直す ------------------------------------------------------------------------
+
+const slashLow = (p: string) => p.trim().replace(/\\/g, '/').toLowerCase();
+
+/** ファイルの音の WAV 番号（強さ違いの番号も） */
+function wavNosOfFile(doc: DtxDoc, file: string): Set<number> {
+  const k = slashLow(file);
+  return new Set(
+    Object.entries(doc.fields)
+      .filter(([key, v]) => /^WAV[0-9A-Z]{2}$/.test(key) && slashLow(v) === k)
+      .map(([key]) => parseInt(key.slice(3), 36)),
+  );
+}
+
+/** ファイルの音で鳴るチップ（id） */
+export function chipsOfFile(doc: DtxDoc, file: string): number[] {
+  const nos = wavNosOfFile(doc, file);
+  return doc.chips.filter((c) => nos.has(c.v)).map((c) => c.id);
+}
+
+/** 切り出した音の作り方（作業ファイル。無ければ null） */
+export function cutRecipe(file: string): CutRecipe | null {
+  const k = slashLow(file);
+  return useSidecar.getState().special?.recipes?.find((r) => slashLow(r.file) === k) ?? null;
+}
+
+/** そのファイルの音を使っているもの（特殊ノーツの種類・レーンの音）。どれも使っていなければ null */
+function usedAs(doc: DtxDoc, file: string): CutTarget | null {
+  const nos = wavNosOfFile(doc, file);
+  if (!nos.size) return null;
+  const sp = specialWavs(doc);
+  for (const no of nos) {
+    const kind = sp.get(no);
+    if (kind !== undefined && kindVoice(kind) !== null) return { type: 'kind', id: kind };
+  }
+  const rims = rimWavs(doc);
+  for (const c of doc.chips) {
+    if (!nos.has(c.v) || drumChannel(c.ch)?.kind !== 'normal') continue;
+    const v = chipVoice(doc, c, rims, sp);
+    if (v !== null) return { type: 'voice', voice: v };
+  }
+  // チップが無くても、これから置く音にしていればそのレーン
+  const lw = useEditor.getState().laneWav;
+  for (const [v, no] of Object.entries(lw)) if (no !== undefined && nos.has(no)) return { type: 'voice', voice: Number(v) };
+  return null;
+}
+
+/**
+ * 切り出した音を直す画面を開く（同じ所・同じ切り方から。使うと同じファイルを作り直すので、その音のチップはみな新しい音になる）。
+ * 作り方が残っていない音（前の版で作った音）は、その音を使っている種類・レーンの初めの切り方から
+ */
+export function openRecut(file: string) {
+  const recipe = cutRecipe(file);
+  const doc = useEditor.getState().doc;
+  const target: CutTarget = recipe?.target ?? usedAs(doc, file) ?? { type: 'free' };
+  if (recipe) {
+    const src = cutSources().some((x) => x.id === recipe.src) ? recipe.src : null;
+    const near = target.type === 'free' ? undefined : cutCandidates(doc, target).find((c) => Math.abs(c.sec - recipe.sec) < 0.03);
+    // チップが動いた・消えたときは、前に切り出した時刻の所から
+    const t: CutTarget = target.type === 'free' || near ? target : { type: 'free' };
+    openCut({ target: t, chip: near?.chip ?? null, sec: near ? null : recipe.sec, searchMs: recipe.searchMs ?? (near ? undefined : 80), src, redo: { file, recipe } });
+    return;
+  }
+  // 使っている所も分からない音は、▶ の所から
+  if (target.type === 'free') {
+    const s = useEditor.getState();
+    const sec = tempoOf(s.doc).beatToSec(Math.max(0, s.cursorBeat));
+    openCut({ target, sec, searchMs: 80, src: null, redo: { file, recipe: null } });
+    return;
+  }
+  openCut({ target, src: null, redo: { file, recipe: null } });
+}
+
+/** チップの音が切り出した音なら、そのファイル（直す画面を開ける）。違えば null */
+export function cutFileOfChip(doc: DtxDoc, c: Chip): string | null {
+  const f = doc.fields['WAV' + toBase36x2(c.v)];
+  return f && canRecut(f) ? f : null;
+}
+
+/** ファイルが切り出した音なら、直す画面を開ける（作業ファイルの special.cuts にある） */
+export function canRecut(file: string | undefined): boolean {
+  if (!file) return false;
+  const k = slashLow(file);
+  return !!useSidecar.getState().special?.cuts?.some((c) => slashLow(c) === k);
 }
 
 // ---- ステムに分けてから戻る -------------------------------------------------------------------
@@ -428,6 +518,8 @@ export function sortCands(cands: readonly CutCand[], sounds: ReadonlyMap<string,
 export interface CutSettings {
   /** 鳴り始めにそろえる（2 ms 前から）。外すとチップの時刻から */
   align: boolean;
+  /** 切り始めを手でずらす（ms。＋で後ろ、−で前。0 は自動のまま） */
+  startMs?: number;
   /** 長さを手で決める（ms）。null は自動（次の音の 16 ms 手前まで） */
   lenMs: number | null;
   shape: Shape;
@@ -435,10 +527,10 @@ export interface CutSettings {
 
 /** 1 か所の切り方 */
 export function rangeOf(p: Pcm, s: CandSound, set: CutSettings): CutRange {
-  const r = autoRange(p, s.at, s.nextAt, { align: set.align, lenMs: set.lenMs });
+  const r = autoRange(p, s.at, s.nextAt, { align: set.align, lenMs: set.lenMs, startMs: set.startMs });
   // 鳴り始めはもう探してある（時刻から開いたときは広く探した）
   if (s.onset.found && set.align && (r.onset.at !== s.onset.at || !r.onset.found)) {
-    const start = s.onset.at - msToSamples(p.sr, 2);
+    const start = s.onset.at - msToSamples(p.sr, 2) + shiftSamples(p.sr, set.startMs);
     const len = r.end - r.start;
     return { ...r, onset: s.onset, start, end: set.lenMs ? start + msToSamples(p.sr, set.lenMs) : Math.max(start + msToSamples(p.sr, 40), Math.min(start + len, r.next !== null ? r.next - msToSamples(p.sr, 16) : start + len)) };
   }
@@ -652,6 +744,8 @@ export interface CutApply {
   tags: string[];
   /** どこから切り出したか（ライブラリの理由に出す） */
   from: string;
+  /** 作り方（あとで直すため。作業ファイルに残す） */
+  recipe?: Omit<CutRecipe, 'file'>;
 }
 
 /** 楽器（ライブラリの分類） */
@@ -692,11 +786,14 @@ export function tagName(u: CutUse | CutTarget): string | null {
 }
 // i18n-ignore-end
 
-/** ステム・原曲から切り出した音のファイルの一覧に足す（作業ファイル） */
-function rememberCut(path: string) {
+/** ステム・原曲から切り出した音のファイルの一覧に足す（作業ファイル）。作り方があれば一緒に覚える（同じファイルの前の作り方は替える） */
+function rememberCut(path: string, recipe?: Omit<CutRecipe, 'file'>) {
   const side = useSidecar.getState().special ?? { kinds: [] };
-  if (side.cuts?.some((c) => c.toLowerCase() === path.toLowerCase())) return;
-  setSpecialSide({ ...side, cuts: [...(side.cuts ?? []), path] });
+  const has = side.cuts?.some((c) => c.toLowerCase() === path.toLowerCase());
+  if (has && !recipe) return;
+  const cuts = has ? side.cuts : [...(side.cuts ?? []), path];
+  const recipes = recipe ? [...(side.recipes ?? []).filter((r) => r.file.toLowerCase() !== path.toLowerCase()), { file: path, ...recipe }] : side.recipes;
+  setSpecialSide({ ...side, cuts, ...(recipes?.length ? { recipes } : {}) });
 }
 
 /**
@@ -776,7 +873,7 @@ export async function applyCut(a: CutApply): Promise<number | null> {
   }
   const no: number = base;
   const entry = lastHistory();
-  rememberCut(name);
+  rememberCut(name, a.recipe);
   if (u.type === 'kind') {
     const v = kindVoice(u.id);
     if (v !== null) useEditor.setState((s) => ({ laneWav: { ...s.laneWav, [v]: no } }));
@@ -824,6 +921,67 @@ export async function applyCut(a: CutApply): Promise<number | null> {
     entry ? { label: tr('元に戻す', 'Undo'), run: () => void undoIfLast(entry) } : undefined,
   );
   return changed;
+}
+
+/** 切り出した音を直す（同じファイルを作り直す） */
+export interface CutRedo {
+  pcm: Pcm;
+  /** 作り直すファイル（#WAV に書いたパス） */
+  file: string;
+  recipe: Omit<CutRecipe, 'file'>;
+}
+
+/**
+ * 切り出した音を作り直す：同じファイルに新しい音を書き、作り方を覚え直す。譜面（WAV の番号・チップ）は変えないので、
+ * そのファイルを使うチップはみな新しい音で鳴る。元に戻すと前の音に戻す。できたら true
+ */
+export async function applyRecut(a: CutRedo): Promise<boolean> {
+  const s0 = useEditor.getState();
+  let folder = s0.folder;
+  if (!folder) {
+    folder = folderFromFiles([], s0.doc.fields['TITLE'] || tr('新しい曲', 'New song'));
+    useEditor.setState({ folder });
+  }
+  const pathWav = s0.doc.fields['PATH_WAV'] ?? '';
+  const f = findFile(folder, a.file, pathWav);
+  const rel = f?.path ?? joinPath(pathWav, a.file);
+  let old: Uint8Array | null = null;
+  try {
+    old = f ? new Uint8Array(await (await f.getFile()).arrayBuffer()) : null;
+  } catch {
+    old = null;
+  }
+  const bytes = wavBytes(a.pcm);
+  const fd = folder;
+  const where = await putFile(fd, rel, bytes);
+  const sideBefore = useSidecar.getState().special;
+  rememberCut(a.file, a.recipe);
+  const sideAfter = useSidecar.getState().special;
+  const write = (b: Uint8Array | null, side: typeof sideBefore) => {
+    setSpecialSide(side);
+    if (b) void putFile(fd, rel, b).then(() => prepareSounds());
+  };
+  const label = tr(`切り出した音（${a.file}）を作り直す`, `Remake the extracted sound (${a.file})`);
+  pushSideHistory(label, { undo: () => write(old, sideBefore), redo: () => write(bytes, sideAfter) });
+  const entry = lastHistory();
+  await prepareSounds();
+  const doc = useEditor.getState().doc;
+  const nos = wavNosOfFile(doc, a.file);
+  const n = chipsOfFile(doc, a.file).length;
+  const first = [...nos].sort((x, y) => x - y)[0];
+  const head =
+    n > 0
+      ? tr(`${a.file} を作り直しました。この音のチップ ${n} 個が新しい音で鳴ります`, `Remade ${a.file}. ${n} ${pl(n, 'chip')} now play the new sound`)
+      : tr(`${a.file} を作り直しました`, `Remade ${a.file}`);
+  const note = where === 'memory' ? tr('曲フォルダへは保存するときに書き出します', 'It is written to the song folder when you save') : '';
+  toast(
+    head + (note ? (isJa() ? `。${note}` : `. ${note}`) : '') + (isJa() ? '' : '.'),
+    'ok',
+    9000,
+    first !== undefined ? { label: tr('聴いてみる', 'Listen'), run: () => previewWav(first) } : undefined,
+    entry ? { label: tr('元に戻す', 'Undo'), run: () => void undoIfLast(entry) } : undefined,
+  );
+  return true;
 }
 
 /**

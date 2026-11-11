@@ -468,6 +468,15 @@ export function edit(
   return true;
 }
 
+/**
+ * 譜面を変えない操作（曲フォルダのファイルを作り直すなど）を履歴に積む。Ctrl+Z で side.undo、やり直しで side.redo を呼ぶ。
+ * 名前に「音」「WAV」があれば、戻す・やり直すと音を読み直す
+ */
+export function pushSideHistory(label: string, side: NonNullable<HistoryEntry['side']>) {
+  const s = get();
+  set({ past: [...s.past, { label, redo: [], undo: [], side, at: Date.now() }], future: [] });
+}
+
 /** 履歴の好きな時点へ戻る・進む（n = その時点までに残す履歴の数） */
 export function jumpHistory(n: number) {
   const s = get();

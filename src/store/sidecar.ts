@@ -101,12 +101,42 @@ export interface SpecialDef {
   off?: boolean;
 }
 
+/**
+ * 切り出した音の作り方（あとで「切り出した音を直す」で同じ所・同じ切り方から開き直すため）。
+ * 所は譜面の秒で持つ（チップの番号は開き直すと変わる）
+ */
+export interface CutRecipe {
+  /** 作った音（#WAV に書いたパス。cuts と同じ） */
+  file: string;
+  /** 元（ステムのファイルか 'orig'） */
+  src: string;
+  /** 何の音を切り出したか（候補の出し方） */
+  target: { type: 'kind'; id: string } | { type: 'voice'; voice: number } | { type: 'free' };
+  /** 切り出した所（譜面の秒。チップの時刻か、時刻から開いた所） */
+  sec: number;
+  /** 時刻から開いたときの、鳴り始めを探す幅（ms） */
+  searchMs?: number;
+  /** 重ねた所（譜面の秒。1 つ目が選んだ所。1 か所なら無し） */
+  stack?: number[];
+  align: boolean;
+  /** 切り始めを手でずらした分（ms） */
+  startMs: number;
+  /** 手で決めた長さ（ms。null は自動） */
+  lenMs: number | null;
+  fadeMs: number;
+  lowCut: boolean;
+  normalize: boolean;
+  mono: boolean;
+}
+
 export interface SpecialSide {
   /** 開いたときに分けない（お知らせの「元に戻す」）。譜面の音の見分け（置く音・キット）は変わらない */
   off?: boolean;
   kinds: SpecialDef[];
   /** ステム・原曲から切り出して曲フォルダに作った音（#WAV に書いたパス。WAV の一覧の「切り出し」の印、使っていなくても消さない） */
   cuts?: string[];
+  /** 切り出した音の作り方（cuts のファイルごと。この版より前に作った音には無い） */
+  recipes?: CutRecipe[];
 }
 
 export interface SidecarData {
@@ -474,6 +504,51 @@ function parseSpecial(j: Partial<SpecialSide>): SpecialSide | null {
       if (path && !/[;\r\n]/.test(path) && !cuts.some((x) => x.toLowerCase() === path.toLowerCase()) && cuts.length < 500) cuts.push(path);
     }
   }
+  const recipes: CutRecipe[] = [];
+  if (Array.isArray(j.recipes)) {
+    for (const r of j.recipes as unknown[]) {
+      const ok = parseRecipe(r);
+      if (ok && !recipes.some((x) => x.file.toLowerCase() === ok.file.toLowerCase()) && recipes.length < 500) recipes.push(ok);
+    }
+  }
   if (!kinds.length && !j.off && !cuts.length) return null;
-  return { ...(j.off ? { off: true } : {}), kinds, ...(cuts.length ? { cuts } : {}) };
+  return { ...(j.off ? { off: true } : {}), kinds, ...(cuts.length ? { cuts } : {}), ...(recipes.length ? { recipes } : {}) };
+}
+
+/** 切り出した音の作り方（読めない・おかしな値なら null） */
+function parseRecipe(v: unknown): CutRecipe | null {
+  if (!v || typeof v !== 'object') return null;
+  const r = v as Record<string, unknown>;
+  const str = (x: unknown, max: number) => (typeof x === 'string' && x.trim() && x.length <= max && !/[;\r\n]/.test(x) ? x.trim() : null);
+  const num = (x: unknown, lo: number, hi: number) => (typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi ? x : null);
+  const file = str(r.file, 200);
+  const src = str(r.src, 300);
+  const sec = num(r.sec, -60, 36000);
+  if (!file || !src || sec === null) return null;
+  const t = r.target as Record<string, unknown> | undefined;
+  let target: CutRecipe['target'];
+  if (t?.type === 'kind' && typeof t.id === 'string' && t.id.length > 0 && t.id.length <= 40) target = { type: 'kind', id: t.id };
+  else if (t?.type === 'voice' && typeof t.voice === 'number' && Number.isInteger(t.voice) && t.voice >= 0 && t.voice < 0x400) target = { type: 'voice', voice: t.voice };
+  else if (t?.type === 'free') target = { type: 'free' };
+  else return null;
+  const out: CutRecipe = {
+    file,
+    src,
+    target,
+    sec,
+    align: r.align !== false,
+    startMs: num(r.startMs, -100, 100) ?? 0,
+    lenMs: num(r.lenMs, 10, 5000),
+    fadeMs: num(r.fadeMs, 0, 1000) ?? 40,
+    lowCut: r.lowCut !== false,
+    normalize: r.normalize !== false,
+    mono: r.mono === true,
+  };
+  const searchMs = num(r.searchMs, 1, 2000);
+  if (searchMs !== null) out.searchMs = searchMs;
+  if (Array.isArray(r.stack)) {
+    const st = (r.stack as unknown[]).map((x) => num(x, -60, 36000)).filter((x): x is number => x !== null).slice(0, 64);
+    if (st.length >= 2) out.stack = st;
+  }
+  return out;
 }

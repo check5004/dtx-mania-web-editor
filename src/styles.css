@@ -3610,6 +3610,23 @@ button.scope-tag {
   color: var(--accent);
 }
 
+/* 切り出した音：押すと直す画面（WAV の一覧の「切り出し」と同じ色） */
+.kit-badge.cut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 20px;
+  border: 0;
+  background: #1f2a1c;
+  color: #9fd38a;
+  cursor: pointer;
+}
+
+.kit-badge.cut:hover {
+  background: #283823;
+}
+
 /* ---- 音源ライブラリ ---- */
 
 .lib-page {
@@ -4384,6 +4401,19 @@ button.scope-tag {
   line-height: 16px;
   background: #1f2a1c;
   color: #9fd38a;
+}
+
+button.wav-cut {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  border: 0;
+  cursor: pointer;
+}
+
+button.wav-cut:hover {
+  background: #283823;
 }
 
 .wav-kind.bgm {
@@ -6572,6 +6602,14 @@ button.gen-plan {
   width: 292px;
 }
 
+/* 画面より高いメニュー（チップのメニューにエフェクトが入ったときなど）は、中でスクロールする */
+.ctx-menu:not(.sheet) {
+  max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .ctx-head {
   display: flex;
   align-items: center;
@@ -7496,6 +7534,11 @@ button.drive-pill:hover {
   gap: 6px;
 }
 
+.sp-cut-row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .sp-in {
   gap: 8px;
   align-items: center;
@@ -7976,6 +8019,48 @@ html body:has(.cut-back) .toasts {
   font-size: 12px;
 }
 
+/* 切り始め：− 値 ＋（1 ms ずつ）と、何からずらすかの説明 */
+.cut-shift {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.cut-nudge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #252c37;
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.cut-nudge .btn {
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 15px;
+}
+
+.cut-nudge .btn:hover:not(:disabled) {
+  background: #222a35;
+}
+
+.cut-nudge .cut-val {
+  min-width: 64px;
+  text-align: center;
+}
+
+.cut-shift-note {
+  min-width: 0;
+  line-height: 1.5;
+}
+
 .cut-checks {
   display: flex;
   flex-direction: column;
@@ -8180,6 +8265,18 @@ html body:has(.cut-back) .toasts {
   width: 270px;
 }
 
+/* 直すとき：ファイル名と使い道の代わりに、作り直すファイル */
+.cut-redo {
+  max-width: 360px;
+}
+
+.cut-redo-file {
+  height: 30px;
+  line-height: 30px;
+  font-size: 12px;
+  color: var(--text);
+}
+
 .cut-btns {
   display: flex;
   gap: 8px;
@@ -8256,7 +8353,8 @@ html body:has(.cut-back) .toasts {
 
   .cut-name,
   .cut-use,
-  .cut-where {
+  .cut-where,
+  .cut-redo {
     width: 100%;
     max-width: none;
   }

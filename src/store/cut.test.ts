@@ -202,3 +202,100 @@ describe('作業ファイル', () => {
     expect(none?.special ?? null).toBe(null);
   });
 });
+
+describe('切り出した音を直す', () => {
+  const clap = { type: 'kind', id: 'clap' } as const;
+  const recipe = { src: 'orig', target: clap, sec: 2.5, align: true, startMs: 4, lenMs: null, fadeMs: 40, lowCut: true, normalize: true, mono: false };
+  const bytesOf = async (path: string) => {
+    const f = useEditor.getState().folder!.files.get(path)!;
+    return { ver: f.ver ?? 0, bytes: new Uint8Array(await (await f.getFile()).arrayBuffer()) };
+  };
+
+  it('作り方を作業ファイルに覚え、チップから直す画面を開ける（同じ所・同じ切り方から）', async () => {
+    open();
+    await cut.applyCut({ pcm: PCM, name: 'clap_mela.wav', use: clap, target: clap, library: false, tags: [], from: 'drums', recipe });
+    expect(useSidecar.getState().special?.recipes).toEqual([{ file: 'clap_mela.wav', ...recipe }]);
+    expect(cut.cutRecipe('Clap_Mela.wav')?.startMs).toBe(4);
+    expect(cut.canRecut('clap_mela.wav')).toBe(true);
+    expect(cut.canRecut('clap1.ogg')).toBe(false);
+    // 切り出した音のチップ（強さ 60 の番号も）から分かる。ほかの音のチップは違う
+    const [c1, c2] = chipsAt(CH.HT);
+    expect(cut.cutFileOfChip(doc(), c1)).toBe('clap_mela.wav');
+    expect(cut.cutFileOfChip(doc(), c2)).toBe('clap_mela.wav');
+    expect(cut.cutFileOfChip(doc(), chipsAt(CH.SD)[0])).toBe(null);
+    expect(cut.chipsOfFile(doc(), 'clap_mela.wav')).toHaveLength(3);
+    cut.openRecut('clap_mela.wav');
+    const o = cut.useCut.getState().open!;
+    expect(o.redo).toEqual({ file: 'clap_mela.wav', recipe: { file: 'clap_mela.wav', ...recipe } });
+    expect(o.target).toEqual(clap);
+    // 前に切り出した 2.5 秒のクラップから
+    expect(o.chip).toBe(c2.id);
+    cut.closeCut();
+  });
+
+  it('チップが動いていたら、前に切り出した時刻の所から', async () => {
+    open();
+    await cut.applyCut({ pcm: PCM, name: 'clap_mela.wav', use: clap, target: clap, library: false, tags: [], from: 'drums', recipe: { ...recipe, sec: 2.7 } });
+    cut.openRecut('clap_mela.wav');
+    const o = cut.useCut.getState().open!;
+    expect(o.target).toEqual({ type: 'free' });
+    expect(o.sec).toBe(2.7);
+    expect(o.chip).toBe(null);
+    cut.closeCut();
+  });
+
+  it('作り方が残っていない音は、使っている種類・レーンの初めの切り方から', async () => {
+    open();
+    await cut.applyCut({ pcm: PCM, name: 'snare_mela.wav', use: { type: 'voice', voice: CH.SD }, target: { type: 'voice', voice: CH.SD }, library: false, tags: [], from: 'drums' });
+    expect(useSidecar.getState().special?.recipes).toBeUndefined();
+    cut.openRecut('snare_mela.wav');
+    const o = cut.useCut.getState().open!;
+    expect(o.redo).toEqual({ file: 'snare_mela.wav', recipe: null });
+    expect(o.target).toEqual({ type: 'voice', voice: CH.SD });
+    cut.closeCut();
+  });
+
+  it('作り直す：同じファイルに書き、譜面は変えない。元に戻すと前の音、やり直すと新しい音', async () => {
+    open();
+    await cut.applyCut({ pcm: PCM, name: 'clap_mela.wav', use: clap, target: clap, library: false, tags: [], from: 'drums', recipe });
+    const chart = serializeDtx(doc());
+    const before = await bytesOf('clap_mela.wav');
+    const PCM2: Pcm = { sr: 44100, ch: [new Float32Array(2205).fill(0.2)] };
+    expect(await cut.applyRecut({ pcm: PCM2, file: 'clap_mela.wav', recipe: { ...recipe, startMs: -2 } })).toBe(true);
+    expect(serializeDtx(doc())).toBe(chart);
+    const after = await bytesOf('clap_mela.wav');
+    expect(after.ver).toBeGreaterThan(before.ver);
+    expect(after.bytes.length).not.toBe(before.bytes.length);
+    expect(useSidecar.getState().special?.recipes).toEqual([{ file: 'clap_mela.wav', ...recipe, startMs: -2 }]);
+    expect(useSidecar.getState().special?.cuts).toEqual(['clap_mela.wav']);
+
+    undo();
+    expect(serializeDtx(doc())).toBe(chart);
+    expect((await bytesOf('clap_mela.wav')).bytes).toEqual(before.bytes);
+    expect(cut.cutRecipe('clap_mela.wav')?.startMs).toBe(4);
+    redo();
+    expect((await bytesOf('clap_mela.wav')).bytes).toEqual(after.bytes);
+    expect(cut.cutRecipe('clap_mela.wav')?.startMs).toBe(-2);
+  });
+});
+
+describe('作業ファイルの作り方', () => {
+  it('読めない作り方は捨て、ずらしは ±100 ms まで。同じファイルは 1 つ', () => {
+    const good = { file: 'clap_mela.wav', src: 'drums.ogg', target: { type: 'kind', id: 'clap' }, sec: 2.5, align: true, startMs: 4, lenMs: null, fadeMs: 40, lowCut: true, normalize: true, mono: false };
+    const d = parseSidecar(
+      JSON.stringify({
+        version: 1,
+        special: {
+          kinds: [],
+          cuts: ['clap_mela.wav'],
+          recipes: [good, { ...good, file: 'CLAP_MELA.wav', startMs: 9 }, { ...good, file: 'x.wav', target: { type: 'nope' } }, { ...good, file: 'y.wav', startMs: 500, stack: [1, 2, 'a'] }, 'bad'],
+        },
+      }),
+    );
+    const r = d?.special?.recipes ?? [];
+    expect(r.map((x) => x.file)).toEqual(['clap_mela.wav', 'y.wav']);
+    expect(r[0]).toEqual(good);
+    expect(r[1].startMs).toBe(0);
+    expect(r[1].stack).toEqual([1, 2]);
+  });
+});

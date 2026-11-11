@@ -139,15 +139,19 @@ export interface CutRange {
   next: number | null;
 }
 
+/** 切り始めを手でずらせる幅（ms。自動の切り始めから前後に） */
+export const CUT_SHIFT_MAX_MS = 100;
+
 /**
  * 1 か所の切り方（自動）。鳴り始めの 2 ms 前（align を外すとチップの時刻）から、次の音の 16 ms 手前まで。
- * 長くても 1 秒、短くても 40 ms。nextAt は譜面の次のチップの時刻（サンプル。その前後で次の音の鳴り始めを探す）
+ * 長くても 1 秒、短くても 40 ms。nextAt は譜面の次のチップの時刻（サンプル。その前後で次の音の鳴り始めを探す）。
+ * startMs: 切り始めを手でずらす（＋で後ろ・−で前。長さが自動なら終わりはそのまま、手で決めた長さなら一緒に動く）
  */
-export function autoRange(p: Pcm, at: number, nextAt: number | null, o: { align: boolean; lenMs?: number | null } = { align: true }): CutRange {
+export function autoRange(p: Pcm, at: number, nextAt: number | null, o: { align: boolean; lenMs?: number | null; startMs?: number } = { align: true }): CutRange {
   const sr = p.sr;
   const onset = findOnset(p, at);
   const head = onset.found ? onset.at : at;
-  const start = o.align ? head - msToSamples(sr, CUT_PRE_MS) : at;
+  const start = (o.align ? head - msToSamples(sr, CUT_PRE_MS) : at) + shiftSamples(sr, o.startMs);
   let next: number | null = null;
   if (nextAt !== null) {
     const n = findOnset(p, nextAt, 12);
@@ -158,6 +162,12 @@ export function autoRange(p: Pcm, at: number, nextAt: number | null, o: { align:
   if (o.lenMs) end = start + msToSamples(sr, o.lenMs);
   end = Math.max(end, start + msToSamples(sr, CUT_MIN_MS));
   return { start, end, onset, next };
+}
+
+/** 切り始めをずらす分（サンプル。±100 ms まで） */
+export function shiftSamples(sr: number, ms: number | undefined): number {
+  if (!ms || !Number.isFinite(ms)) return 0;
+  return msToSamples(sr, Math.max(-CUT_SHIFT_MAX_MS, Math.min(CUT_SHIFT_MAX_MS, ms)));
 }
 
 export interface Shape {
