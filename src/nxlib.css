@@ -1356,7 +1356,7 @@ button.nx-dc.add:hover {
 
 /* ---- 下の帯 ---- */
 
-.nx-foot {
+.nx-statusbar {
   grid-column: 1 / -1;
   grid-row: 4;
   background: var(--bar);
@@ -1372,7 +1372,7 @@ button.nx-dc.add:hover {
   min-width: 0;
 }
 
-.nx-foot b {
+.nx-statusbar b {
   font-weight: 500;
   color: var(--text2);
 }

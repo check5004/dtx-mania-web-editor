@@ -4,7 +4,7 @@ import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
 
 vi.stubGlobal('window', { setTimeout: () => 0 });
 
-const { edit, undo, useEditor } = await import('./editor');
+const { edit, jumpHistory, redo, undo, useEditor } = await import('./editor');
 const { loadSidecar, markSidecarSaved, setSection, useSidecar } = await import('./sidecar');
 const { hasUnsaved, unsavedOf, unsavedText } = await import('./unsaved');
 
@@ -49,6 +49,32 @@ describe('保存していない変更', () => {
     undo();
     expect(now()).toEqual({ chart: { labels: [], undone: 1 }, work: null });
     expect(unsavedText(now()!)).toBe('譜面（元に戻した変更）');
+  });
+
+  it('元に戻して保存した所に戻ったら、未保存ではない（やり直すとまた未保存）', () => {
+    edit('A', (d) => void (d.fields.ARTIST = 'a'));
+    undo();
+    expect(now()).toBeNull();
+    expect(hasUnsaved()).toBe(false);
+    redo();
+    expect(now()?.chart?.labels).toEqual(['A']);
+    save();
+    edit('B', (d) => void d.chips.push({ id: 2, ch: CH.SD, m: 1, f: { n: 1, d: 4 }, v: 1 }));
+    edit('C', (d) => void (d.chips[0].v = 2));
+    undo();
+    expect(now()?.chart?.labels).toEqual(['B']);
+    undo();
+    expect(now()).toBeNull();
+    // 保存した所より前に戻ると「元に戻した変更」、また保存した所に進めば無し
+    undo();
+    expect(now()?.chart).toEqual({ labels: [], undone: 1 });
+    redo();
+    expect(now()).toBeNull();
+    // 履歴の好きな所へ飛んでも同じ
+    jumpHistory(3);
+    expect(now()?.chart?.labels).toEqual(['C', 'B']);
+    jumpHistory(1);
+    expect(now()).toBeNull();
   });
 
   it('作業ファイルだけの変更も数え、何を変えたかを出す（聴く音量は数えない）', () => {

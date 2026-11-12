@@ -258,9 +258,10 @@ export async function writeFile(folder: SongFolder, path: string, data: Uint8Arr
   if (!folder.dir) throw new Error(tr('このフォルダには直接保存できません', "Can't save directly to this folder"));
   let rel = path.replace(/\\/g, '/').split('/').filter(Boolean).join('/');
   const size = data instanceof Blob ? data.size : data.length;
+  // 本体や Linux のフォルダは大文字・小文字を区別するので、同じファイル（NX は区別しない）があればその綴りに書く
+  // （SET.def のある曲に set.def をもう1つ作らない）
+  rel = folder.files.get(normPath(rel))?.path ?? rel;
   if (folder.local) {
-    // 本体は大文字・小文字を区別するので、同じファイル（NX は区別しない）があればその綴りに書く
-    rel = folder.files.get(normPath(rel))?.path ?? rel;
     const name = rel.split('/').pop()!;
     const fh = await writeSongFile(folder.local, rel, data);
     folder.files.set(normPath(rel), { path: rel, name, size, getFile: () => fh.getFile(), ver: ++fileVer });
@@ -284,7 +285,9 @@ let fileVer = 0;
  * 保存（フォルダを選ぶ・本体に入れる・ZIPでダウンロード）のときに一緒に書き出す。
  */
 export async function putFile(folder: SongFolder, path: string, data: Uint8Array | File): Promise<'written' | 'memory'> {
-  const rel = path.replace(/\\/g, '/').replace(/^\/+/, '');
+  const given = path.replace(/\\/g, '/').replace(/^\/+/, '');
+  // 同じファイルが別の綴り（SET.def など）であれば、その綴りのまま置き換える
+  const rel = folder.files.get(normPath(given))?.path ?? given;
   if (folder.dir) {
     try {
       if (await ensureWritable(folder)) {

@@ -167,6 +167,26 @@ const set = useEditor.setState;
 
 export const isDirty = (s: EditorState) => s.doc !== s.savedDoc;
 
+/** 2つの値の中身が同じか（譜面はただのデータ。変わっていない所は同じ物を指しているので、すぐ終わる） */
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(rb, k) && sameData(ra[k], rb[k]));
+}
+
+/**
+ * 元に戻す・やり直すで、保存したときと同じ中身に戻ったら、保存した譜面そのものを使う（未保存の印が消える）。
+ * 同じでなければ doc のまま
+ */
+function backToSaved(doc: DtxDoc): DtxDoc {
+  const saved = get().savedDoc;
+  return saved && saved !== doc && sameData(doc, saved) ? saved : doc;
+}
+
 /**
  * 保存していない譜面の変更（新しい順の履歴の名前）。保存したあとに元に戻して、保存した所より前に戻ったときは undone に数を入れる。
  * 保存していなければ null
@@ -500,6 +520,7 @@ export function jumpHistory(n: number) {
     past.push(h);
     moved.push(h);
   }
+  doc = backToSaved(doc);
   set({ doc, past, future, selection: keepSelection(doc, s.selection) });
   if (moved.some(changesSounds)) void prepareSounds();
 }
@@ -514,7 +535,7 @@ export function undo() {
   const s = get();
   const h = s.past[s.past.length - 1];
   if (!h) return;
-  const doc = applyPatches(s.doc, h.undo);
+  const doc = backToSaved(applyPatches(s.doc, h.undo));
   h.side?.undo();
   set({ doc, past: s.past.slice(0, -1), future: [...s.future, h], selection: keepSelection(doc, s.selection) });
   if (changesSounds(h)) void prepareSounds();
@@ -539,7 +560,7 @@ export function redo() {
   const s = get();
   const h = s.future[s.future.length - 1];
   if (!h) return;
-  const doc = applyPatches(s.doc, h.redo);
+  const doc = backToSaved(applyPatches(s.doc, h.redo));
   h.side?.redo();
   set({ doc, future: s.future.slice(0, -1), past: [...s.past, h], selection: keepSelection(doc, s.selection) });
   if (changesSounds(h)) void prepareSounds();

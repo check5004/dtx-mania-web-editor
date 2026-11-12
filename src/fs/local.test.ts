@@ -83,4 +83,13 @@ describe('本体（OPFS）の曲フォルダ', () => {
     expect(writes).toEqual([]);
     expect(f.files.get('a.ogg')?.pending).toBe(true);
   });
+
+  it('同じファイルが別の綴りであれば、その綴りのまま置き換える（SET.def に set.def を足さない）', async () => {
+    const mem = folderFromFiles([new File([new Uint8Array(2)], 'SET.def')], 'mem');
+    expect(await putFile(mem, 'set.def', new Uint8Array(6))).toBe('memory');
+    expect(mem.files.get('set.def')?.path).toBe('SET.def');
+    const f = localFolder();
+    expect(await putFile(f, 'bgm.OGG', new Uint8Array(9))).toBe('written');
+    expect(writes).toEqual([{ id: 'abc', rel: 'BGM.ogg', size: 9 }]);
+  });
 });

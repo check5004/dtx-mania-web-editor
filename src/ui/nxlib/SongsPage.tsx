@@ -700,7 +700,7 @@ function NxFoot() {
   const linked = songs.filter((s) => s.drive?.state === 'linked');
   const bytes = linked.reduce((a, s) => a + (s.drive?.bytes ?? 0), 0);
   return (
-    <footer className="nx-foot">
+    <footer className="nx-statusbar">
       {place && (
         <span>
           {place.name}

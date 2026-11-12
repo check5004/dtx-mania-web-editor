@@ -24,7 +24,7 @@ export function FlamButton() {
     <div ref={ref} className={`flam-ctl ${mode ? 'on' : ''}`} role="group" aria-label={tr('フラム', 'Flam')}>
       <button className="flam-toggle" aria-pressed={mode} onClick={() => toggleFlamMode()} title={tip}>
         {Icon.flam(14)}
-        {tr('フラム', 'Flam')}
+        <span className="fold-2">{tr('フラム', 'Flam')}</span>
       </button>
       <button
         className="flam-more"

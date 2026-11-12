@@ -1,4 +1,6 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import { tr } from '../i18n';
+import { useLang } from '../i18n/useLang';
 import { toMeasure } from '../dtx/base36';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { setInputMode, setLoop, setLoopPoint, setSpeed, toggleLoop, useAssist, type InputMode } from '../store/assist';
@@ -133,7 +135,7 @@ export function LoopControls() {
         }
       >
         {Icon.loop(14)}
-        {tr('ループ', 'Loop')}
+        <span className="fold-1">{tr('ループ', 'Loop')}</span>
       </button>
       <button
         className={`ab-btn ${half?.side === 'b' ? 'next' : ''}`}
@@ -210,9 +212,12 @@ export function Transport() {
   const midiName = useMidi((s) => s.inputs[0]?.name ?? '');
   // テンポを反映して戻ったら数秒光らせる
   const bpmGlow = useGlowing('bpm');
+  const bar = useRef<HTMLDivElement>(null);
+  const lang = useLang();
+  const fit = useBarFit(bar, `${lang}|${loading ?? ''}|${midi}`);
 
   return (
-    <div className="transport">
+    <div ref={bar} className={`transport ${fit >= 1 ? 'tf-1' : ''} ${fit >= 2 ? 'tf-2' : ''} ${fit >= 3 ? 'tf-3' : ''}`}>
       <PlayControls />
       <div className="vsep" />
       <div className="row" style={{ gap: 4 }}>
@@ -222,7 +227,9 @@ export function Transport() {
             <span className="v">
               {chipBpmLabel(tempo.bpmAt(Math.max(0, beat)))} · {meterLabel(tempo.barLen(m))}
             </span>
-            <span style={{ fontSize: 11, color: 'var(--accent)' }}>{tr('テンポ合わせ', 'Match tempo')}</span>
+            <span className="fold-2" style={{ fontSize: 11, color: 'var(--accent)' }}>
+              {tr('テンポ合わせ', 'Match tempo')}
+            </span>
           </span>
         </button>
         <TapTempoButton />
@@ -273,7 +280,7 @@ export function Transport() {
       </div>
       <div className="vsep" />
       <div className="row" style={{ gap: 6 }}>
-        <span className="lbl">{tr('ベロシティ', 'Velocity')}</span>
+        <span className="lbl fold-1">{tr('ベロシティ', 'Velocity')}</span>
         <div className="seg small vel-seg" role="radiogroup" aria-label={tr('置くベロシティ', 'Velocity for new chips')}>
           {velPresetNames().map((name, i) => (
             <button
@@ -310,6 +317,54 @@ export function Transport() {
       )}
     </div>
   );
+}
+
+/**
+ * 操作バーが狭いときに畳む段：1 見れば分かる文字（ベロシティ・ループ・速度などの見出し）を隠す、
+ * 2 「テンポ合わせ」と BPMタップ・フラムの文字も隠して絵だけにする、3 すき間を詰める。それでも入らなければ横にスクロールする。
+ * 決まった画面幅ではなく中身の幅を測る（言語やフォント、ループの範囲・読み込み中の表示で幅が変わっても崩れない）。
+ * watch が変わったとき（読み込み中の札が出た・消えたなど）も測り直す
+ */
+const BAR_FOLDS = 3;
+function useBarFit(bar: React.RefObject<HTMLElement | null>, watch: string): number {
+  const [level, setLevel] = useState(0);
+  /** 段 i から i+1 に畳んで狭くなった幅 */
+  const gain = useRef<number[]>([]);
+  const stepped = useRef<{ from: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const check = () => {
+      const w = contentWidth(el);
+      const st = stepped.current;
+      stepped.current = null;
+      if (st && st.from === level - 1) gain.current[st.from] = Math.max(0, st.width - w);
+      if (w > el.clientWidth + 1) {
+        if (level < BAR_FOLDS) {
+          stepped.current = { from: level, width: w };
+          setLevel(level + 1);
+        }
+      } else if (level > 0 && w + (gain.current[level - 1] ?? Infinity) <= el.clientWidth) {
+        setLevel(level - 1);
+      }
+    };
+    check();
+    // バーの幅と、中の部品の幅（ループの範囲・速さの「準備中…」・フォントの読み込みなど）が変わったら測り直す
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    for (const c of el.children) ro.observe(c);
+    return () => ro.disconnect();
+  }, [bar, level, watch]);
+  return level;
+}
+
+/** バーの中身の幅（はみ出していても余っていても測れる）：部品の幅＋すき間＋左右の余白。伸びる空き（.grow）は数えない */
+function contentWidth(el: HTMLElement): number {
+  const cs = getComputedStyle(el);
+  const kids = [...el.children] as HTMLElement[];
+  let w = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + (parseFloat(cs.columnGap) || 0) * Math.max(0, kids.length - 1);
+  for (const k of kids) if (!k.classList.contains('grow')) w += k.getBoundingClientRect().width;
+  return w;
 }
 
 const inputModes = (): [InputMode, string, string, string][] => [

@@ -42,7 +42,9 @@ export function TapTempoButton() {
         onClick={() => openTap(!open)}
       >
         {Icon.tap(14)}
-        <span style={{ fontSize: 11 }}>{tr('BPMタップ', 'Tap BPM')}</span>
+        <span className="fold-2" style={{ fontSize: 11 }}>
+          {tr('BPMタップ', 'Tap BPM')}
+        </span>
       </button>
       {open && <TapTempoPanel anchor={ref} />}
     </>

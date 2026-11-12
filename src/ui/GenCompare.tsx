@@ -482,7 +482,8 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
   // 作った難易度の見出しはレベルの出どころ（計算・AI判定）と ✓ も入るので、名前が切れないように早めに畳む
   const roomy = w >= 260;
   const full = kind === 'source' ? masterLabel : kind === 'existing' ? (chart?.label ?? col) : col;
-  const name = tiny && full === col ? SHORT[col] : full;
+  // 作る譜面の見出しは AI の印・レベル・✓ も入るので、狭い列では短い名前（聴く譜面の切り替えと同じ ADV など）
+  const name = (tiny || (narrow && kind === 'made')) && full === col ? SHORT[col] : full;
   const made = kind === 'made' ? ds : null;
   const busy = made && (made.status === 'planning' || made.status === 'building' || made.status === 'judging');
   // 2行目：作っている途中ならその様子、作ってあればノーツ数（元の譜面に対する割合）・平均の密度・最大同時打数

@@ -5789,6 +5789,8 @@ button.wav-cut:hover {
 
 /* 左の下の「チェックした難易度を作る／作り直す（数）」：狭い列では2行に折り返す */
 .btn.gen-make-all {
+  /* 左の列は縦に並べているので、縮めると 2 行の文字が切れる */
+  flex: none;
   justify-content: center;
   white-space: normal;
   text-align: center;
@@ -6356,6 +6358,17 @@ button.gen-plan {
   .transport .tlabel {
     display: none;
   }
+}
+
+/* エディタの操作バーがはみ出すとき（Transport の useBarFit が幅を測って段を付ける）。説明はマウスを乗せると出る */
+.transport.tf-1 :is(.fold-1, .tlabel),
+.transport.tf-2 .fold-2 {
+  display: none;
+}
+
+.transport.tf-3 {
+  gap: 4px;
+  padding: 0 8px;
 }
 
 /* ---- TAB補完の札（点線の上） ---- */
