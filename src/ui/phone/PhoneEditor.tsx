@@ -2,13 +2,14 @@
 // 縦：上のバー 44・見出し 22＋譜面・道具の帯 44（シートを開くと隠す）・再生の帯 52・シート（低い 270・高い 520）・下のタブ 50
 // 横：左に道具 52｜譜面｜右に再生 80。パネルは右から 320 で譜面に重ねる（譜面は縮めない）
 // 回しても ▶・選んでいるチップ・開いているタブはそのまま（タブは縦のシートと横のパネルで同じ）
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { tr } from '../../i18n';
 import { frac, mul } from '../../dtx/fraction';
 import { gridStep } from '../../edit/ops';
 import { setLoopPoint, toggleLoop, useAssist } from '../../store/assist';
 import { hasBga, useBga } from '../../store/bga';
 import { openCtxMenu } from '../../store/ctxMenu';
+import { chipViews } from '../../store/derived';
 import { closePhoneTab, openPhoneTab, setDrawer, setPhoneHigh, setTool, useDevice, type PhoneTab } from '../../store/device';
 import { copySelection, deleteChips, goToStart, moveSelection, openPage, redo, setView, toast, togglePause, togglePlay, undo, useEditor } from '../../store/editor';
 import { toggleFlamMode, useFlam } from '../../store/flam';
@@ -16,7 +17,7 @@ import { useFind } from '../../store/find';
 import { usePreview } from '../../store/preview';
 import { unsavedText, useUnsaved } from '../../store/unsaved';
 import { toggleVelMode, useVel } from '../../store/velocity';
-import { ChartCanvas } from '../ChartCanvas';
+import { ChartCanvas, lowerBelowTopCover } from '../ChartCanvas';
 import { ContextMenuHost } from '../ContextMenu';
 import { SpecialPopoverHost } from '../SpecialUi';
 import { FindPanel } from '../FindPanel';
@@ -331,6 +332,22 @@ function nudge(dBeat: -1 | 0 | 1, dLane: -1 | 0 | 1) {
 
 function PSelBar() {
   const sel = useEditor((s) => s.selection);
+  const doc = useEditor((s) => s.doc);
+  const wrap = useRef<HTMLDivElement>(null);
+  // 選んだチップがバーの陰になったら（譜面の上の方で選んだ・↑ で上へ動かした）、バーの下に見えるまで送る
+  useEffect(() => {
+    const el = wrap.current;
+    const chart = el?.parentElement;
+    if (!el || !chart || sel.length === 0) return;
+    const ids = new Set(sel);
+    const beats = chipViews(doc)
+      .filter((v) => ids.has(v.c.id))
+      .map((v) => v.beat);
+    if (beats.length === 0) return;
+    const bar = el.querySelector('.p-selbar');
+    const cover = (bar ?? el).getBoundingClientRect().bottom - chart.getBoundingClientRect().top;
+    lowerBelowTopCover(Math.min(...beats), Math.max(...beats), cover);
+  }, [sel, doc]);
   if (sel.length === 0) return null;
   const n = sel.length;
   const btn = (icon: React.ReactNode, label: string, onClick: (e: React.MouseEvent<HTMLButtonElement>) => void, cls = '') => (
@@ -339,7 +356,7 @@ function PSelBar() {
     </button>
   );
   return (
-    <div className="p-selbar-wrap">
+    <div className="p-selbar-wrap" ref={wrap}>
       <div className="p-selbar" role="toolbar" aria-label={tr('選んだチップ', 'Selected chips')} onPointerDown={(e) => e.stopPropagation()}>
         <span className="p-selbar-count">
           <b className="mono">{n}</b>

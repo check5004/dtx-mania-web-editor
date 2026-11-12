@@ -6,6 +6,7 @@ import { itunesSearch, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type Sto
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { setField } from '../edit/ops';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { useDevice } from '../store/device';
 import { goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion, type SuggestSource } from '../store/songinfo';
@@ -76,8 +77,17 @@ const fieldLabel = (k: InfoField): string =>
 /** 案の出どころの表示 */
 const srcLabel = (s: SuggestSource): string => (s === 'tag' ? tr('タグ', 'Tag') : s);
 
+/** 素材（#WAV・#BMP など）を直す所の案内。PC は左のパネル、タブレットは「音」のパネル、スマホは下の「音」のタブ */
+function assetsWhere(phone: boolean, tablet: boolean): string {
+  if (phone) return tr('BGM・音・BGA の定義（#WAV・#BMP など）は、下の「音」の「WAV」「画像」「ヘッダ」から直せます。', 'Edit BGM, sound and BGA definitions (#WAV, #BMP, etc.) from WAV, Images or Header under Sounds at the bottom.');
+  if (tablet) return tr('BGM・音・BGA の定義（#WAV・#BMP など）は、「音」のパネルの「WAV」「画像」「ヘッダ」から直せます。', 'Edit BGM, sound and BGA definitions (#WAV, #BMP, etc.) from WAV, Images or Header in the Sounds panel.');
+  return tr('BGM・音・BGA の定義（#WAV・#BMP など）は、左のパネルの「WAV」「画像」「ヘッダ」から直せます。', 'Edit BGM, sound and BGA definitions (#WAV, #BMP, etc.) from WAV, Images or Header in the left panel.');
+}
+
 export function SongInfoPage() {
   const fields = useEditor((s) => s.doc.fields);
+  const phone = useDevice((s) => s.phone);
+  const tablet = useDevice((s) => s.tablet);
   const result = useSongInfo((s) => s.result);
   useEffect(() => {
     ensureClues();
@@ -126,7 +136,7 @@ export function SongInfoPage() {
               </div>
             </section>
           )}
-          <p className="lbl">{tr('BGM・音・BGA の定義（#WAV・#BMP など）は左のパネルの「素材」や「ヘッダ」から直せます。', 'Edit BGM, sound and BGA definitions (#WAV, #BMP, etc.) from "Assets" or "Header" in the left panel.')}</p>
+          <p className="lbl">{assetsWhere(phone, tablet)}</p>
         </main>
         <aside className="info-side scroll">
           <LookupCard />

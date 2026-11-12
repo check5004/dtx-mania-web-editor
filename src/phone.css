@@ -720,6 +720,63 @@ html.phone-port .p-edge-top {
   display: none;
 }
 
+/*
+ * 幅が 400 より狭い iPhone（390 の iPhone 12〜16・16e、375 の SE・mini）：再生の帯と道具の帯をもう少し詰めて、
+ * 右端の 🔊・「追う」が画面の外に切れないようにする（iPhone 17 の 402 はそのまま）
+ */
+@media (max-width: 400px) {
+  .p-transport {
+    gap: 2px;
+    padding: 0 3px;
+  }
+
+  .p-transport > .p-ib,
+  .p-transport .p-popwrap > .p-ib {
+    width: 32px;
+  }
+
+  .p-transport > .p-play {
+    width: 42px;
+    height: 42px;
+  }
+
+  .p-transport .p-pos {
+    width: 61px;
+    padding-left: 3px;
+  }
+
+  .p-transport .p-pos-main {
+    font-size: 13.5px;
+  }
+
+  .p-transport .p-ab {
+    width: 29px;
+  }
+
+  .p-transport .p-loop {
+    width: 31px;
+  }
+
+  .p-transport .p-speed {
+    padding: 0 5px;
+  }
+
+  .p-tools {
+    gap: 1px;
+    padding: 0 4px;
+  }
+
+  .p-tools .p-seg > button {
+    gap: 3px;
+    padding: 0 5px;
+  }
+
+  .p-tools .p-pt {
+    min-width: 40px;
+    padding: 0 3px;
+  }
+}
+
 /* ---- 縦：下のタブ（50）とシート ---- */
 
 .p-tabs {
@@ -796,6 +853,14 @@ html.phone-port .p-edge-top {
   height: 5px;
   border-radius: 3px;
   background: #3a4554;
+}
+
+/*
+ * 押した手ごたえ。:active の見た目があると、ブラウザが指の位置を近くのボタン（「音」の下のタブなど）へずらさず、
+ * つまみそのものを押したことにする（ずれると、つまみをタップしたのに下のタブが切り替わった）
+ */
+.p-sheet-grip:active i {
+  background: #6b7889;
 }
 
 .p-sheet-body {
@@ -1911,6 +1976,25 @@ html.tablet .p-dock-input {
   min-height: 36px;
   padding: 0;
   border-radius: 9px;
+}
+
+/*
+ * 横で高さが低い iPhone（iPhone 17 は 352 からホームバーの分を引いて 331、16e は 319、SE は 326 ほど）：
+ * 右の列（保存まで 8 段）と左の道具（7 個）の間を詰めて、下の保存・パネルが切れないようにする
+ */
+@media (max-height: 380px) {
+  .p-right {
+    gap: 3px;
+    padding: 4px 0;
+  }
+
+  .p-left {
+    padding: 2px 0;
+  }
+
+  .p-left .p-pt.rail {
+    height: 42px;
+  }
 }
 
 .p-panel {

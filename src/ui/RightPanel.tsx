@@ -29,6 +29,7 @@ import { promptDialog } from './dialogs';
 import { usePlayBeat } from './hooks';
 import { visibleBeats } from './ChartCanvas';
 import { Icon } from './icons';
+import { useDevice } from '../store/device';
 import { ReferenceCard } from './ReferenceCard';
 import { SourceCard } from './SourceCard';
 
@@ -615,6 +616,8 @@ const audioNote = (k: string): string =>
 export function CompleteCard() {
   const c = useComplete();
   const drumsReady = useDrums((d) => d.enabled && d.status === 'ready');
+  // スマホはキーボードが無いので、キーの案内の代わりに譜面の下の帯の使い方を出す
+  const phone = useDevice((d) => d.phone);
   return (
     <div className="card">
       <div className="row" style={{ marginBottom: 6 }}>
@@ -651,7 +654,16 @@ export function CompleteCard() {
               ))}
             </div>
           </div>
-          {isJa() ? (
+          {phone ? (
+            <p className="lbl" style={{ margin: '8px 0 0', lineHeight: 1.7, color: 'var(--text3)' }}>
+              {tr(
+                '点線が出ると、譜面の下の端に帯が出ます。帯の「入れる」（全部入れる・1小節だけ）で入れ、‹ › で前・次の候補、× で消します。',
+                'When dotted chips appear, a strip shows at the bottom of the chart. "Insert" (Insert all, Just one) adds them, ‹ › switches ideas and × dismisses them.',
+              )}{' '}
+              <span style={{ color: '#FF9F43' }}>{tr('オレンジの枠', 'Orange outline')}</span>
+              {tr(' … 原曲でその音が聞こえない所（バスドラム・スネア・タム）', " … that sound isn't heard in the original there (bass drum, snare, toms)")}
+            </p>
+          ) : isJa() ? (
             <div className="lbl" style={{ marginTop: 8, lineHeight: 1.9, color: 'var(--text3)' }}>
               <div>
                 <kbd>Tab</kbd> … まとめて入れる、<kbd>Shift</kbd>+<kbd>Tab</kbd> … 1小節だけ

@@ -605,6 +605,24 @@ export function liftAboveCover(b: number): boolean {
   return true;
 }
 
+/**
+ * スマホ：選んだチップ（拍 b0〜b1）が、譜面の上端に浮かせた選択バー（譜面の上端から coverPx まで）の陰にあるとき、
+ * バーの下に見えるまでだけ下へ送る（いちばん前のチップは下の端より下へ送らない）。再生中は動かさない。動かしたら true
+ */
+export function lowerBelowTopCover(b0: number, b1: number, coverPx: number): boolean {
+  if (engine.playing) return false;
+  const s = useEditor.getState();
+  const px = s.view.pxPerBeat;
+  const vis = visibleBeats();
+  const top = vis.to - (Math.max(0, coverPx - GEO.head) + 10) / px;
+  // バーの陰に無い（バーより下・見えている所より上の外）なら何もしない
+  if (b1 <= top || b1 > vis.to + 1e-6) return false;
+  const d = Math.min(b1 - top, b0 - (vis.from + 10 / px));
+  if (d <= 1e-6) return false;
+  setView({ scrollBeat: s.view.scrollBeat + d });
+  return true;
+}
+
 export function visibleBeats(): { from: number; to: number } {
   return visibleBeatsFor(viewport.h);
 }
@@ -4204,7 +4222,7 @@ function draw(ctx: CanvasRenderingContext2D, l: Local) {
 
   // ベロシティのレーン
   if (velMode) drawVelLanes(ctx, g, H, sel, d);
-  else drawVelBubble(ctx, g, sel, H);
+  else drawVelBubble(ctx, g, sel, H, W);
 
   // 置く位置のプレビュー（フラムなら2打）。スマホで狙っている間は、そのレーンを薄く光らせる
   const hv = l.hover;
@@ -4746,9 +4764,12 @@ function drawVelLanes(ctx: CanvasRenderingContext2D, g: Geom, H: number, sel: Se
   }
 }
 
-/** 1つだけ選んだチップの横にベロシティの吹き出し */
-function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>, H: number) {
-  if (sel.size !== 1) return;
+/**
+ * 1つだけ選んだチップの横にベロシティの吹き出し（右にはみ出すならチップの左に）。
+ * スマホはレーンが細く、札が隣のレーンのチップを隠すので出さない（強さは長押しのメニューに出る）
+ */
+function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>, H: number, W: number) {
+  if (sel.size !== 1 || phoneGeo) return;
   const doc = useEditor.getState().doc;
   const id = [...sel][0];
   const v = chipViews(doc).find((x) => x.c.id === id);
@@ -4756,14 +4777,16 @@ function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>,
   const y = g.beatToY(v.beat);
   if (y < GEO.head + 8 || y > H - 8) return;
   const vel = wavVel(doc, v.c.v);
-  const x = g.ox + laneCX(v.col) + 22;
   ctx.font = '10px system-ui, sans-serif';
   const label = tr('ベロシティ', 'Velocity');
-  const hint = tr('Alt+ホイール', 'Alt+wheel');
+  // Alt+ホイールはマウスとキーボードの操作。指の画面では出さない（強さは長押しのメニューで変える）
+  const hint = useDevice.getState().tablet ? '' : tr('Alt+ホイール', 'Alt+wheel');
   ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
   const numW = ctx.measureText(String(vel)).width;
   ctx.font = '10px system-ui, sans-serif';
-  const w = ctx.measureText(label).width + numW + ctx.measureText(hint).width + 26;
+  const w = ctx.measureText(label).width + numW + (hint ? ctx.measureText(hint).width + 7 : 0) + 19;
+  const cx = g.ox + laneCX(v.col);
+  const x = cx + 22 + w > W - 2 ? Math.max(2, cx - 22 - w) : cx + 22;
   roundRect(ctx, x, y - 9, w, 18, 9);
   ctx.fillStyle = 'rgba(18,22,29,.94)';
   ctx.fill();
@@ -4779,6 +4802,7 @@ function drawVelBubble(ctx: CanvasRenderingContext2D, g: Geom, sel: Set<number>,
   ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
   ctx.fillStyle = '#E7EBF1';
   ctx.fillText(String(vel), tx, y + 0.5);
+  if (!hint) return;
   tx += numW + 7;
   ctx.font = '10px system-ui, sans-serif';
   ctx.fillStyle = '#5F6978';

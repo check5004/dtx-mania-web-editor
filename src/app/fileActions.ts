@@ -484,10 +484,15 @@ export async function openFolder(folder: SongFolder, restore?: Map<string, { tex
   }
   let file = list[0];
   if (list.length > 1) {
+    // 易しい順（BASIC → MASTER。set.def の順、名前で分からなければファイル名の順）に並べる
+    const ordered = sortByDifficulty(
+      list.map((f) => ({ file: f.name, label: labels.get(f.name.toLowerCase()) ?? f.name.replace(/\.dtx$/i, ''), f })),
+      [...labels.keys()],
+    );
     const picked = await chooseDialog({
       title: tr('どの難易度を開きますか？', 'Which difficulty do you want to open?'),
       body: tr(`${folder.name} には譜面が ${list.length} 個あります。`, `${folder.name} has ${list.length} charts.`),
-      options: list.map((f) => ({
+      options: ordered.map(({ f }) => ({
         label: labels.get(f.name.toLowerCase()) ?? f.name,
         sub: `${f.name} · ${(f.size / 1024).toFixed(1)} KB`,
         value: f,
