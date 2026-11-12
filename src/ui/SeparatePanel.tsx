@@ -27,7 +27,7 @@ import { useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
 import { audioReflected, fileExists, undoAudioReflect, useStems } from '../store/stems';
 import { useSongBgm } from '../store/songBgm';
-import { IS_IOS } from '../store/device';
+import { IS_IOS, iosName } from '../store/device';
 import { confirmDialog } from './dialogs';
 import { Icon } from './icons';
 
@@ -158,10 +158,18 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
       {s.gpu && !s.gpu.ok && (
         <div className="notice" style={{ marginBottom: 10 }}>
           {Icon.warn(14)}{' '}
-          {tr(
-            'このブラウザでは WebGPU（GPU で計算する仕組み）が使えないので、高精度のモデルは動きません。Chrome か Edge の新しい版で開くか、「軽い」モデルを選んでください（CPU で動くので時間がかかります）。',
-            "WebGPU (computing on the GPU) isn't available in this browser, so the accurate models can't run. Open this page in a recent Chrome or Edge, or pick the \"Light\" model (it runs on the CPU, so it takes longer).",
-          )}
+          {IS_IOS
+            ? // iPad・iPhone のブラウザはどれも Safari と同じ仕組みなので、Chrome に替えても変わらない
+              iosName(
+                tr(
+                  'この iPad では WebGPU（GPU で計算する仕組み）が使えないので、高精度のモデルは動きません。「軽い」モデルを選んでください（CPU で動くので時間がかかります）。iPadOS を新しくすると使えることがあります。',
+                  "WebGPU (computing on the GPU) isn't available on this iPad, so the accurate models can't run. Pick the \"Light\" model (it runs on the CPU, so it takes longer). Updating iPadOS may make it available.",
+                ),
+              )
+            : tr(
+                'このブラウザでは WebGPU（GPU で計算する仕組み）が使えないので、高精度のモデルは動きません。Chrome か Edge の新しい版で開くか、「軽い」モデルを選んでください（CPU で動くので時間がかかります）。',
+                "WebGPU (computing on the GPU) isn't available in this browser, so the accurate models can't run. Open this page in a recent Chrome or Edge, or pick the \"Light\" model (it runs on the CPU, so it takes longer).",
+              )}
         </div>
       )}
 

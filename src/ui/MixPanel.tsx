@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DRUM_LANES } from '../dtx/model';
 import type { Mix } from '../audio/engine';
 import { clearMuteSolo, toggleMute, toggleSolo, useAssist } from '../store/assist';
+import { useDevice } from '../store/device';
 import { openPage, setMix, useEditor } from '../store/editor';
 import { useSidecar } from '../store/sidecar';
 import { LISTEN_PRESETS, leaveListenPreset, setListen, soloOnly, toggleBgmMute, toggleDrumMute, useStems } from '../store/stems';
@@ -13,8 +14,11 @@ import { releaseFocus, rowAudible, setTrack, silentWhy, trackMix, useTrackRows, 
 
 const pct = (v: number) => Math.round(v * 100);
 
-/** 上のバーのマスター：全体の音量、曲の音（原曲・SE・ステム）と譜面の音をまとめてミュート、クリック、ミックスのパネル */
-export function MasterMixer() {
+/**
+ * 上のバーのマスター：全体の音量、曲の音（原曲・SE・ステム）と譜面の音をまとめてミュート、クリック、ミックスのパネル。
+ * 幅が足りないとき（タブレットの縦など）：noVolume でマスターの音量をミックスの小窓へ移し、iconOnly でミックスをアイコンだけにする
+ */
+export function MasterMixer({ noVolume = false, iconOnly = false }: { noVolume?: boolean; iconOnly?: boolean } = {}) {
   const mix = useEditor((s) => s.mix);
   const listen = useStems((s) => s.listen);
   const [open, setOpen] = useState(false);
@@ -44,43 +48,58 @@ export function MasterMixer() {
       >
         {mix.masterMute ? Icon.speakerOff(16) : Icon.speaker(16)}
       </button>
-      <input
-        type="range"
-        className="master-vol"
-        min={0}
-        max={1}
-        step={0.01}
-        value={mix.master}
-        onChange={(e) => setMix({ master: Number(e.target.value), masterMute: false })}
-        onDoubleClick={() => setMix({ master: 0.9 })}
-        aria-label={tr('マスターの音量', 'Master volume')}
-        title={tr(
-          `マスターの音量 ${pct(mix.master)}（すべての音。ダブルクリックで 90 に戻す）。トラックごとの音量は下のトラックで変えます`,
-          `Master volume ${pct(mix.master)} (all sound; double-click to reset to 90). Change each track's volume in the tracks below`,
-        )}
-      />
+      {!noVolume && <MasterVolume />}
       <button className={`ib mixer-click ${mix.metronome ? 'on' : ''}`} onClick={() => setMix({ metronome: !mix.metronome })} title={mix.metronome ? tr('クリック（メトロノーム）を止める', 'Turn the click (metronome) off') : tr('クリック（メトロノーム）を鳴らす', 'Turn the click (metronome) on')} aria-pressed={mix.metronome}>
         {Icon.metronome(15)}
       </button>
       <button
-        className={`btn small mixer-open ${open ? 'on' : ''}`}
+        className={`btn small mixer-open ${open ? 'on' : ''} ${iconOnly ? 'icon' : ''}`}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
+        aria-label={tr('ミックス', 'Mix')}
         title={tr(
-          `ミックス（聞こえ方${preset && listen !== 'all' ? `: ${preset.label}` : ''}・曲の音と譜面の音をまとめて消す・レーンのミュートとソロ・クリックの音量）`,
-          `Mix (listening mode${preset && listen !== 'all' ? `: ${preset.label}` : ''}, mute the song or chart sounds, lane mute and solo, click volume)`,
+          `ミックス（${noVolume ? 'マスターの音量・' : ''}聞こえ方${preset && listen !== 'all' ? `: ${preset.label}` : ''}・曲の音と譜面の音をまとめて消す・レーンのミュートとソロ・クリックの音量）`,
+          `Mix (${noVolume ? 'master volume, ' : ''}listening mode${preset && listen !== 'all' ? `: ${preset.label}` : ''}, mute the song or chart sounds, lane mute and solo, click volume)`,
         )}
       >
         {Icon.sliders(14)}
         {groupMuted && <i className="mute-dot" title={mix.bgmMute ? tr('曲の音を消しています（Alt+1）', 'Song audio is muted (Alt+1)') : tr('譜面の音を消しています（Alt+2）', 'Chart sounds are muted (Alt+2)')} />}
-        {Icon.chevronDown(12)}
+        {!iconOnly && Icon.chevronDown(12)}
       </button>
-      {open && <MixPopover onClose={() => setOpen(false)} />}
+      {open && <MixPopover onClose={() => setOpen(false)} withMaster={noVolume} />}
     </div>
   );
 }
 
-function MixPopover({ onClose }: { onClose: () => void }) {
+/** マスターの音量のつまみ（上のバー・幅が足りないときはミックスの小窓の中） */
+function MasterVolume() {
+  const master = useEditor((s) => s.mix.master);
+  return (
+    <input
+      type="range"
+      className="master-vol"
+      min={0}
+      max={1}
+      step={0.01}
+      value={master}
+      onChange={(e) => setMix({ master: Number(e.target.value), masterMute: false })}
+      onDoubleClick={() => setMix({ master: 0.9 })}
+      aria-label={tr('マスターの音量', 'Master volume')}
+      title={tr(
+        `マスターの音量 ${pct(master)}（すべての音。ダブルクリックで 90 に戻す）。トラックごとの音量は下のトラックで変えます`,
+        `Master volume ${pct(master)} (all sound; double-click to reset to 90). Change each track's volume in the tracks below`,
+      )}
+    />
+  );
+}
+
+/** 指でレーンをソロにする長押しの長さ（ミリ秒） */
+const SOLO_HOLD_MS = 450;
+
+function MixPopover({ onClose, withMaster = false }: { onClose: () => void; withMaster?: boolean }) {
+  // 指で使う端末（タブレット・スマホ）：Alt が無いので、レーンのソロは長押し
+  const touch = useDevice((s) => s.tablet);
+  const hold = useRef<{ timer: number; fired: boolean }>({ timer: 0, fired: false });
   const mix = useEditor((s) => s.mix);
   const previewOnPlace = useEditor((s) => s.previewOnPlace);
   const stems = useSidecar((s) => s.stems);
@@ -109,6 +128,15 @@ function MixPopover({ onClose }: { onClose: () => void }) {
           {Icon.close(14)}
         </button>
       </div>
+      {withMaster && (
+        <div className="row mix-master" style={{ gap: 10, marginBottom: 10 }}>
+          <span className="lbl">{tr('マスター', 'Master')}</span>
+          <MasterVolume />
+          <span className="mono lbl" style={{ width: 26, textAlign: 'right' }}>
+            {pct(mix.master)}
+          </span>
+        </div>
+      )}
       <div className="lbl" style={{ marginBottom: 6 }}>
         {tr('聞こえ方', 'Listening mode')}
       </div>
@@ -148,7 +176,7 @@ function MixPopover({ onClose }: { onClose: () => void }) {
             {tr('解除', 'Reset')}
           </button>
         )}
-        <span className="lbl">{tr('押すとミュート · Alt+押すとソロ', 'Click to mute · Alt+click to solo')}</span>
+        <span className="lbl">{touch ? tr('押すとミュート · 長押しでソロ', 'Tap to mute · long-press to solo') : tr('押すとミュート · Alt+押すとソロ', 'Click to mute · Alt+click to solo')}</span>
       </div>
       <div className="lane-ms">
         {DRUM_LANES.map((l, i) => {
@@ -160,12 +188,33 @@ function MixPopover({ onClose }: { onClose: () => void }) {
               key={l.key}
               className={`${silent ? 'off' : ''} ${so ? 'solo' : ''}`}
               style={{ color: silent ? undefined : l.color }}
+              onPointerDown={(e) => {
+                // 指・ペンは Alt が無いので、長押しでソロ
+                if (e.pointerType === 'mouse') return;
+                window.clearTimeout(hold.current.timer);
+                hold.current = {
+                  fired: false,
+                  timer: window.setTimeout(() => {
+                    hold.current.fired = true;
+                    toggleSolo(i);
+                    leaveListenPreset();
+                  }, SOLO_HOLD_MS),
+                };
+              }}
+              onPointerUp={() => window.clearTimeout(hold.current.timer)}
+              onPointerLeave={() => window.clearTimeout(hold.current.timer)}
+              onPointerCancel={() => window.clearTimeout(hold.current.timer)}
+              onContextMenu={(e) => e.preventDefault()}
               onClick={(e) => {
+                if (hold.current.fired) {
+                  hold.current.fired = false;
+                  return;
+                }
                 if (e.altKey) toggleSolo(i);
                 else toggleMute(i);
                 leaveListenPreset();
               }}
-              title={tr(`${l.name}：押すとミュート、Alt+押すとソロ`, `${l.name}: click to mute, Alt+click to solo`)}
+              title={touch ? tr(`${l.name}：押すとミュート、長押しでソロ`, `${l.name}: tap to mute, long-press to solo`) : tr(`${l.name}：押すとミュート、Alt+押すとソロ`, `${l.name}: click to mute, Alt+click to solo`)}
             >
               {l.key}
             </button>

@@ -2,7 +2,7 @@
 // 横（幅 1024 以上）：上のバー 56・操作のバー 60・左に道具 68・譜面・パネル 360（1枚だけ）・右にレール 76・下にトラックの帯 52（開くと 274、トラック1本ずつの高さで止まる）
 // 縦（幅 1024 未満）：パネルは下のシート（タブだけ 80・細い 196・低い 304・半分 420・大 600、タブごとに高さを覚える）。上のバーは難易度を ▼ にまとめる
 // 押せる所は 44×44 以上。ホバー・右クリックの代わりに、文字付きのボタンと長押し
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { tr } from '../../i18n';
 import { useLang } from '../../i18n/useLang';
 import { switchDifficulty } from '../../app/fileActions';
@@ -239,6 +239,7 @@ function SpeedSelect() {
 
 function TransportT() {
   const portrait = useDevice((s) => s.portrait);
+  const lang = useLang();
   // テンポを反映して戻ったら数秒光らせる
   const bpmGlow = useGlowing('bpm');
   const loop = useAssist((s) => s.loop);
@@ -249,8 +250,11 @@ function TransportT() {
   const tempo = tempoOf(doc);
   const { m } = tempo.locate(Math.max(0, beat));
   const half = loop ? null : loopMark;
+  const bar = useRef<HTMLDivElement>(null);
+  // 幅が足りないとき（縦・iPad mini など）に畳む段：1 マスターの音量をミックスの小窓へ、2 追いかけるを ☰ の「再生」へ、3 ミックスをアイコンだけに
+  const fold = useFold(bar, 3, `${lang}|${portrait}`);
   return (
-    <div className="t-transport" style={{ height: TRANSPORT_H }}>
+    <div className="t-transport" ref={bar} style={{ height: TRANSPORT_H }}>
       <PlayControls where={tr('譜面の小節番号の左の帯・下のトラックの帯', 'the strip left of the measure numbers or the tracks strip below')} />
       <span className="t-vsep" />
       <button className={`t-ab ${loop || half?.side === 'a' ? 'set' : ''}`} onClick={() => setLoopPoint('a')} title={tr('▶ の位置を A（ループの始まり）にする', 'Set A (loop start) at ▶')}>
@@ -265,9 +269,11 @@ function TransportT() {
       </button>
       <span className="t-vsep" />
       <SpeedSelect />
-      <button className={`t-ib boxed ${follow ? 'on' : ''}`} onClick={() => setView({ follow: !follow })} aria-pressed={follow} aria-label={tr('再生位置を追いかける', 'Follow playback')} title={tr('再生位置を追いかける', 'Follow playback')}>
-        {Icon.follow(20)}
-      </button>
+      {fold < 2 && (
+        <button className={`t-ib boxed ${follow ? 'on' : ''}`} onClick={() => setView({ follow: !follow })} aria-pressed={follow} aria-label={tr('再生位置を追いかける', 'Follow playback')} title={tr('再生位置を追いかける', 'Follow playback')}>
+          {Icon.follow(20)}
+        </button>
+      )}
       {!portrait && (
         <button className={`t-btn t-tempo ${bpmGlow ? 'glow' : ''}`} onClick={openTempo} title={tr('テンポと開始位置を合わせる', 'Match tempo and start position')}>
           {Icon.metronome(16)}
@@ -277,7 +283,7 @@ function TransportT() {
         </button>
       )}
       <span className="grow" />
-      <MasterMixer />
+      <MasterMixer noVolume={fold >= 1} iconOnly={fold >= 3} />
     </div>
   );
 }
@@ -293,13 +299,11 @@ function ToolBtn({ on, icon, label, onClick, title }: { on?: boolean; icon: Reac
   );
 }
 
-function GridButton() {
+/** グリッドの選びかた（グリッドの小窓・「その他」の小窓）。選んだら done */
+function GridChoices({ done }: { done: () => void }) {
   const div = useEditor((s) => s.view.div);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useOutside(open, ref, () => setOpen(false));
   const custom = async () => {
-    setOpen(false);
+    done();
     const v = await promptDialog({
       title: tr('グリッドの細かさ', 'Grid resolution'),
       body: tr('全音符をいくつに分けるか（1〜192）。5連の16分なら 20、7連なら 28、6連なら 24。', 'How many parts to divide a whole note into (1–192). 16th quintuplets: 20, septuplets: 28, sextuplets: 24.'),
@@ -310,6 +314,37 @@ function GridButton() {
     if (v && n >= 1 && n <= 192) setView({ div: n });
   };
   return (
+    <>
+      <div className="t-pop-title">
+        {tr('グリッド', 'Grid')} <span className="mono">{gridLabel(div)}</span>
+      </div>
+      <div className="t-grid-opts">
+        {GRID_DIVS.filter((d) => [4, 8, 12, 16, 24, 32, 48].includes(d)).map((d) => (
+          <button
+            key={d}
+            className={`t-chipbtn mono ${div === d ? 'on' : ''}`}
+            onClick={() => {
+              setView({ div: d });
+              done();
+            }}
+          >
+            {gridLabel(d)}
+          </button>
+        ))}
+        <button className="t-chipbtn" onClick={() => void custom()}>
+          {tr('任意…', 'Custom…')}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function GridButton() {
+  const div = useEditor((s) => s.view.div);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useOutside(open, ref, () => setOpen(false));
+  return (
     <div className="t-tool-wrap" ref={ref}>
       <button className={`t-tool t-grid ${open ? 'on' : ''}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={tr('置く位置の細かさ（グリッド）', 'How finely chips snap (grid)')}>
         <b className="mono">{gridLabel(div)}</b>
@@ -317,26 +352,7 @@ function GridButton() {
       </button>
       {open && (
         <div className="t-pop t-grid-pop">
-          <div className="t-pop-title">
-            {tr('グリッド', 'Grid')} <span className="mono">{gridLabel(div)}</span>
-          </div>
-          <div className="t-grid-opts">
-            {GRID_DIVS.filter((d) => [4, 8, 12, 16, 24, 32, 48].includes(d)).map((d) => (
-              <button
-                key={d}
-                className={`t-chipbtn mono ${div === d ? 'on' : ''}`}
-                onClick={() => {
-                  setView({ div: d });
-                  setOpen(false);
-                }}
-              >
-                {gridLabel(d)}
-              </button>
-            ))}
-            <button className="t-chipbtn" onClick={() => void custom()}>
-              {tr('任意…', 'Custom…')}
-            </button>
-          </div>
+          <GridChoices done={() => setOpen(false)} />
         </div>
       )}
     </div>
@@ -409,6 +425,22 @@ function Palette() {
   }, []);
   const compact = h < 620;
   const zoomBtns = h >= 520;
+  // それでも入らないとき（下のトラック・シートを開いた、iPad mini の横など）は1段ずつ畳む：1 拡大・縮小を外す、
+  // 2 フラム・ベロシティ・エフェクトを「その他」の小窓へ、3 グリッド・強さも。道具が下のトラック・シートに重なって、押すと別の物が開くのを防ぐ
+  const [fold, setFold] = useState(0);
+  const lastH = useRef(-1);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (lastH.current !== h) {
+      lastH.current = h;
+      if (fold !== 0) {
+        setFold(0);
+        return;
+      }
+    }
+    if (fold < 3 && el.scrollHeight > el.clientHeight + 1) setFold(fold + 1);
+  });
   return (
     <nav className={`t-palette ${pen ? 'pen' : ''}`} ref={ref} aria-label={tr('道具', 'Tools')}>
       <ToolBtn
@@ -420,13 +452,18 @@ function Palette() {
       />
       <ToolBtn on={tool === 'select'} icon={Icon.selectBox(20)} label={tr('選ぶ', 'Select')} onClick={() => setTool('select')} title={tr('選ぶ：なぞって範囲・タップで足す／外す', 'Select: drag for a range, tap to add or remove')} />
       <hr />
-      <GridButton />
-      <ToolBtn on={flam} icon={Icon.flam(20)} label={tr('フラム', 'Flam')} onClick={() => toggleFlamMode()} title={tr('フラムで置く（同じレーンに2打をほんの少しずらして置く）', 'Place flams (two notes on the same lane, slightly apart)')} />
-      <hr />
-      <Strength compact={compact} />
-      <ToolBtn on={velMode} icon={Icon.bars(20)} label={tr('ベロシティ', 'Velocity')} onClick={() => toggleVelMode()} title={tr('ベロシティの編集', 'Edit velocity')} />
-      <ToolBtn on={fxOpen} icon={Icon.fx(20)} label={tr('エフェクト', 'Effects')} onClick={() => openFx()} title={tr('エフェクトの編集（スペクトルの列をタップで点を足す・ドラッグで動かす・長押しで消す）', 'Effect editing (tap the spectrum column to add a point, drag to move it, long-press to delete)')} />
-      {zoomBtns && (
+      {fold < 3 && <GridButton />}
+      {fold < 2 && <ToolBtn on={flam} icon={Icon.flam(20)} label={tr('フラム', 'Flam')} onClick={() => toggleFlamMode()} title={FLAM_TITLE()} />}
+      {fold < 3 && <hr />}
+      {fold < 3 && <Strength compact={compact} />}
+      {fold < 2 && (
+        <>
+          <ToolBtn on={velMode} icon={Icon.bars(20)} label={tr('ベロシティ', 'Velocity')} onClick={() => toggleVelMode()} title={tr('ベロシティの編集', 'Edit velocity')} />
+          <ToolBtn on={fxOpen} icon={Icon.fx(20)} label={tr('エフェクト', 'Effects')} onClick={() => openFx()} title={FX_TITLE()} />
+        </>
+      )}
+      {fold >= 2 && <MoreTools level={fold - 1} />}
+      {zoomBtns && fold < 1 && (
         <>
           <hr />
           <ToolBtn icon={Icon.zoomIn(20)} label={tr('拡大', 'Zoom in')} onClick={() => zoomChart(1.25)} />
@@ -434,6 +471,103 @@ function Palette() {
         </>
       )}
     </nav>
+  );
+}
+
+const FLAM_TITLE = () => tr('フラムで置く（同じレーンに2打をほんの少しずらして置く）', 'Place flams (two notes on the same lane, slightly apart)');
+const FX_TITLE = () => tr('エフェクトの編集（スペクトルの列をタップで点を足す・ドラッグで動かす・長押しで消す）', 'Effect editing (tap the spectrum column to add a point, drag to move it, long-press to delete)');
+
+/**
+ * 道具の列から出すポップアップを画面の中に収める。はみ出すなら上下にずらし（なるべく譜面の上端より下）、
+ * それでも入らなければ中をスクロールにする
+ */
+function useKeepInView(open: boolean, pop: React.RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const el = pop.current;
+    const parent = el?.offsetParent;
+    if (!open || !el || !parent) return;
+    const margin = 8;
+    const vh = window.innerHeight;
+    const r = el.getBoundingClientRect();
+    if (r.top >= margin && r.bottom <= vh - margin) return;
+    const area = el.closest('.t-palette')?.getBoundingClientRect();
+    const minTop = area && r.height <= vh - margin - area.top ? area.top : margin;
+    const top = Math.max(minTop, Math.min(r.top, vh - margin - r.height));
+    el.style.top = `${top - parent.getBoundingClientRect().top}px`;
+    el.style.bottom = 'auto';
+    if (top + r.height > vh - margin) {
+      el.style.maxHeight = `${vh - margin - top}px`;
+      el.style.overflowY = 'auto';
+    }
+  }, [open, pop]);
+}
+
+/** 道具の列に入りきらない道具（level 1：フラム・ベロシティ・エフェクト、2：グリッド・強さも）の小窓 */
+function MoreTools({ level }: { level: number }) {
+  const flam = useFlam((s) => s.mode);
+  const velMode = useVel((s) => s.mode);
+  const fxOpen = useFx((s) => s.open);
+  const preset = useVel((s) => s.preset);
+  const vals = useInputSettings((s) => s.velPresets);
+  const names = velPresetNames();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  useOutside(open, ref, () => setOpen(false));
+  useKeepInView(open, pop);
+  const close = () => setOpen(false);
+  const item = (on: boolean, icon: React.ReactNode, label: string, title: string, run: () => void) => (
+    <button
+      className={`t-pop-item ${on ? 'on' : ''}`}
+      role="menuitemcheckbox"
+      aria-checked={on}
+      title={title}
+      onClick={() => {
+        close();
+        run();
+      }}
+    >
+      <span className="t-ck">{icon}</span>
+      <span className="grow">{label}</span>
+      {on && Icon.check(16)}
+    </button>
+  );
+  return (
+    <div className="t-tool-wrap" ref={ref}>
+      <button className={`t-tool ${open || flam || velMode || fxOpen ? 'on' : ''}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={tr('ほかの道具', 'More tools')}>
+        {Icon.dots(20)}
+        <span>{tr('その他', 'More')}</span>
+      </button>
+      {open && (
+        <div className="t-pop t-more-pop" role="menu" ref={pop}>
+          {level >= 2 && (
+            <>
+              <GridChoices done={close} />
+              <div className="t-pop-title">{tr('置く強さ', 'Velocity for new chips')}</div>
+              <div className="t-more-vel">
+                {names.map((n, i) => (
+                  <button
+                    key={n}
+                    className={`t-chipbtn ${preset === i ? 'on' : ''}`}
+                    aria-pressed={preset === i}
+                    onClick={() => {
+                      setPreset(i as 0 | 1 | 2);
+                      close();
+                    }}
+                  >
+                    <b>{n}</b> <span className="mono t-pop-sub">{vals[i]}</span>
+                  </button>
+                ))}
+              </div>
+              <hr className="t-pop-sep" />
+            </>
+          )}
+          {item(flam, Icon.flam(18), tr('フラム', 'Flam'), FLAM_TITLE(), () => toggleFlamMode())}
+          {item(velMode, Icon.bars(18), tr('ベロシティ', 'Velocity'), tr('ベロシティの編集', 'Edit velocity'), () => toggleVelMode())}
+          {item(fxOpen, Icon.fx(18), tr('エフェクト', 'Effects'), FX_TITLE(), () => openFx())}
+        </div>
+      )}
+    </div>
   );
 }
 

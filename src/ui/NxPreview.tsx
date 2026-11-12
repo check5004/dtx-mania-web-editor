@@ -7,6 +7,7 @@ import { CH, chipColor, DRUM_LANES, drumChannel } from '../dtx/model';
 import { useInputSettings } from '../input/settings';
 import { bgaAt } from '../store/bga';
 import { tempoOf } from '../store/derived';
+import { useDevice } from '../store/device';
 import { togglePlay, useEditor } from '../store/editor';
 import { togglePreview, usePreview } from '../store/preview';
 import { formatLevel } from './format';
@@ -91,6 +92,11 @@ export function NxPreview({ full = false }: { full?: boolean }) {
   const cv = useRef<HTMLCanvasElement>(null);
   const speed = usePreview((s) => s.speed);
   const bgaOn = usePreview((s) => s.bga);
+  // 指の画面（タブレット・スマホ）は Space が無いことが多い。全画面では再生の帯が隠れるので ▶ を見出しに出す
+  const touchUi = useDevice((s) => s.tablet);
+  const isPlaying = useEditor((s) => s.playing);
+  // タブレットのパネル・シートの中：見出しと閉じるボタンはパネルの物を使う（こちらの ✕ は効かない）
+  const inPane = touchUi && !full;
   useThumbs((s) => s.ver);
 
   useEffect(() => {
@@ -296,7 +302,12 @@ export function NxPreview({ full = false }: { full?: boolean }) {
   return (
     <div className={`nx-preview ${full ? 'full' : ''}`}>
       <div className="nx-head row">
-        <b>{tr('NX風プレビュー', 'NX-style preview')}</b>
+        {!inPane && <b>{tr('NX風プレビュー', 'NX-style preview')}</b>}
+        {touchUi && full && (
+          <button className="ib tiny" onClick={togglePlay} aria-pressed={isPlaying} aria-label={isPlaying ? tr('停止', 'Stop') : tr('再生', 'Play')}>
+            {isPlaying ? Icon.stop(18) : Icon.play(18)}
+          </button>
+        )}
         <span className="grow" />
         <label className="row lbl" style={{ gap: 6 }} title={tr('落ちてくる速さ（NX のハイスピード）', 'Scroll speed (NX hi-speed)')}>
           {tr('速さ', 'Speed')}
@@ -310,19 +321,26 @@ export function NxPreview({ full = false }: { full?: boolean }) {
         <button className="ib tiny" onClick={() => togglePreview(full ? 'side' : 'full')} title={full ? tr('右のパネルに戻す', 'Back to the right panel') : tr('全画面（Shift+P）', 'Full screen (Shift+P)')}>
           {full ? '⤡' : '⤢'}
         </button>
-        <button className="ib tiny" onClick={() => usePreview.setState({ mode: 'off' })} aria-label={tr('閉じる', 'Close')} title={tr('閉じる（P）', 'Close (P)')}>
-          ✕
-        </button>
+        {!inPane && (
+          <button className="ib tiny" onClick={() => usePreview.setState({ mode: 'off' })} aria-label={tr('閉じる', 'Close')} title={tr('閉じる（P）', 'Close (P)')}>
+            ✕
+          </button>
+        )}
       </div>
       <div ref={wrap} className="nx-canvas" onDoubleClick={togglePlay}>
         <canvas ref={cv} aria-label={tr('NX風プレビュー', 'NX-style preview')} />
       </div>
       <div className="nx-foot lbl">
         {Icon.play(11)}{' '}
-        {tr(
-          'Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。',
-          'Space plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of NX; do the final check in NX.',
-        )}
+        {touchUi
+          ? tr(
+              '再生ボタンで再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。',
+              'The play button plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of NX; do the final check in NX.',
+            )
+          : tr(
+              'Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。',
+              'Space plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of NX; do the final check in NX.',
+            )}
       </div>
     </div>
   );
