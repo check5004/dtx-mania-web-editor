@@ -3334,6 +3334,43 @@ html.phone-land .pg-transport {
   height: 50px;
 }
 
+/* 横：テンポと開始位置の見出しを 1 行に（ボタンが 2 段になると下の図が狭くなる。題と説明は縮めて「…」で切る） */
+html.phone-land .tp-page > .tempo-head {
+  flex-wrap: nowrap;
+  min-height: 48px;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+html.phone-land .tp-page > .tempo-head .vsep {
+  display: none;
+}
+
+html.phone-land .tp-page > .tempo-head .btn.small {
+  flex: none;
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+html.phone-land .tp-page .tempo-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+html.phone-land .tp-page .tempo-h1 {
+  display: flex;
+  min-width: 0;
+}
+
+html.phone-land .tp-page .tempo-head h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+}
+
 html.phone-land .gen-page,
 html.phone-land .ps-page,
 html.phone-land .info-page,
@@ -3595,4 +3632,27 @@ html.phone-land .cut-pfoot .cut-redo {
 
 html.phone-land .cut-pfoot .cut-redo > .lbl {
   flex: none;
+}
+
+/* ---- NX風プレビュー（全画面） ---- */
+
+/* 切り欠き・ホームバーの内側に置く（横で題と ✕ が切り欠きの下に入っていた） */
+html.phone .nx-overlay {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: #000;
+}
+
+/* 縦：見出しを 1 行に（44px のボタンで 2 段・高さ 115px になっていた）。題は出さず、速さのつまみと間を詰める */
+html.phone-port .nx-overlay .nx-head {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 8px;
+}
+
+html.phone-port .nx-overlay .nx-head > b {
+  display: none;
+}
+
+html.phone-port .nx-overlay .nx-head input[type='range'] {
+  width: 56px !important;
 }

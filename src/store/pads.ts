@@ -24,6 +24,17 @@ export function padModeOf(m: InputMode): PadMode {
 
 export function setPadMode(m: PadMode) {
   setInputMode(m === 'step' ? 'key' : m === 'rec' ? 'rec' : 'mouse');
+  // ステップは ▶ に置くので、▶ が譜面の外（パッドのシートの陰など）なら見える所まで送る（見えていれば動かさない）。
+  // パッドを出した直後は譜面の高さが変わるので、大きさが伝わってから（2 フレーム後）
+  if (m === 'step' && typeof requestAnimationFrame === 'function')
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (engine.playing || useAssist.getState().inputMode !== 'key') return;
+        const b = Math.max(0, useEditor.getState().cursorBeat);
+        const vis = visible?.();
+        if (vis && (b < vis.from || b > vis.to)) keepCursorVisible(b);
+      }),
+    );
 }
 
 /** 押している指の数（ステップで、同時に押したパッドを同じ位置に置く） */

@@ -120,7 +120,7 @@ export function TempoPage() {
   const duration = data?.duration ?? 0;
 
   return (
-    <div className="tempo-page">
+    <div className="tempo-page tp-page">
       <header className="tempo-head">
         <button className="btn small ghost" onClick={() => void leaveTempo()}>
           {Icon.back(14)} {tr('エディタに戻る', 'Back to editor')}
