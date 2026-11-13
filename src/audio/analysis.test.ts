@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeAudio, combinedOdf, downbeatPhase, ODF_LAG, pickOnsets, trackBeats, type Onset } from './analysis';
+import { analyzeAudio, combinedOdf, ODF_LAG, pickOnsets, trackBeats, type Onset } from './analysis';
+import { firstDownbeat } from './grid';
 import { eightBeat, synth } from './testSignal';
 
 const SR = 44100;
@@ -70,11 +71,10 @@ describe('原曲の解析', () => {
     for (let i = 1; i < beats.length; i++) expect(beats[i] - beats[i - 1]).toBeCloseTo(0.5, 1);
     // 最初の拍は 0.5 秒付近
     expect(Math.abs(beats[0] - 0.5)).toBeLessThan(0.03);
-    const p = downbeatPhase(beats, data.odf, data.frameRate);
-    // 小節の頭は 0.5 + 2k 秒
-    const head = beats[p];
+    // 小節の頭（曲全体の拍の位置と 1 拍目）は 0.5 + 2k 秒
+    const head = firstDownbeat(data.bars[0], data.start);
     const r = ((head - 0.5) / 2) % 1;
-    expect(Math.min(r, 1 - r)).toBeLessThan(0.03);
+    expect(Math.min(r, 1 - r)).toBeLessThan(0.015);
   });
 });
 

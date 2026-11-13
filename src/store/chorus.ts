@@ -197,6 +197,15 @@ async function loadForAnalysis(a: SongAudio): Promise<string> {
   return key;
 }
 
+/**
+ * 開いている曲の音（和音の入った音）をワーカーに渡し、ワーカーでの名前と、その音の 0 秒が譜面の何秒かを返す。無ければ null。
+ * サビ探しと同じ音なので、ワーカーで測った特徴を使い回せる（テンポの推定で 1 拍目を決める和音の手がかりなど）
+ */
+export async function songAudioKey(): Promise<{ key: string; offset: number } | null> {
+  const a = await songAudio();
+  return a ? { key: await loadForAnalysis(a), offset: a.offset } : null;
+}
+
 // ---- 小節線 ---------------------------------------------------------------------
 
 /** 譜面の小節の頭と拍を、曲の音の秒で（offset は曲の音の 0 秒が譜面の何秒か） */

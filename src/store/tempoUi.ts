@@ -3,14 +3,17 @@
 import { tr, pl } from '../i18n';
 import { produce } from 'immer';
 import { create } from 'zustand';
-import { combinedOdf, downbeatPhase, trackBeats } from '../audio/analysis';
+import { combinedOdf, trackBeats, type AnalysisData } from '../audio/analysis';
 import { engine } from '../audio/engine';
+import { firstDownbeat, guessBars, pickDownbeat, type BarGuess } from '../audio/grid';
+import * as wk from '../audio/workerClient';
 import { fitTaps } from '../assist/tapTempo';
 import { anchorsFromDoc, applyPlan, evaluatePlan, normalizeAnchors, type PlanResult, type TempoAnchor, type TempoPlan } from '../assist/tempoPlan';
 import { CH, drumChannel, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { chooseDialog } from '../ui/dialogs';
 import { useAssist } from './assist';
+import { songAudioKey } from './chorus';
 import { bgmSource, clickTimes, playbackEvents, tempoOf } from './derived';
 import { backToChart, contentEndSec, edit, OPEN_END_SEC, openedDocs, stop as stopChart, toast, undoIfLast, useEditor } from './editor';
 import { editSong, toastSongEdit } from './songSync';
@@ -140,47 +143,88 @@ export function initTempo() {
     view: viewAround(first ? first.t : 0, bpm),
   });
   updateBeats();
+  // 1 拍目は和音の変わり目でも確かめる（曲の音から測るので少し待つ。推定の案のまま触っていなければ、わかったら作り直す）
+  if (fromEstimate) void refineWithChords();
 }
 
-/** 解析の結果から案を作る（いちばん合うBPM、最初の強拍を1小節目） */
+/** 解析の結果から案を作る（いちばん合う BPM、音楽が始まってから最初の 1 拍目を 1 小節目） */
 function estimatePlan(): TempoPlan | null {
   const a = useAssist.getState();
   if (!a.data || a.data.tempo.length === 0) return null;
   const bpm = Math.round(a.data.tempo[0].bpm * 100) / 100;
-  const { downbeats } = computeBeats(bpm);
-  if (downbeats.length === 0) return { bpm, anchors: [{ m: 1, t: a.data.tempo[0].phase }] };
-  const first = firstMusicalDownbeat(downbeats);
+  const g = barsFor(a.data, bpm);
+  const first = g ? firstDownbeat(g, a.data.start) : a.data.tempo[0].phase;
   const r = evaluatePlan(useEditor.getState().doc, { bpm, anchors: [{ m: 1, t: first }] });
-  const m = 1 + r.shift;
-  return { bpm, anchors: [{ m, t: first }] };
+  return { bpm, anchors: [{ m: 1 + r.shift, t: first }] };
 }
 
-/** 音が鳴り始めてからの最初の強拍 */
-function firstMusicalDownbeat(downbeats: number[]): number {
-  const a = useAssist.getState();
-  if (!a.data) return downbeats[0];
-  const odf = a.data.odf.low;
-  const fr = a.data.frameRate;
-  let start = 0;
-  let max = 0;
-  for (let i = 0; i < odf.length; i++) max = Math.max(max, odf[i]);
-  for (let i = 0; i < odf.length; i++) {
-    if (odf[i] > max * 0.3) {
-      start = i / fr;
-      break;
+/** 和音の変わり目（1 拍目の手がかり）。解析の結果・BPM・拍の位置ごと */
+let chordHint: { data: AnalysisData; bpm: number; beat: number; chords: number[] } | null = null;
+let chordAsking: AnalysisData | null = null;
+
+/**
+ * BPM の拍の位置と 1 拍目（src/audio/grid.ts）。解析で出した候補ならそれを、ほかの BPM は測り直す。
+ * 和音の変わり目がわかっていれば、それも合わせて 1 拍目を選ぶ
+ */
+function barsFor(data: AnalysisData, bpm: number): BarGuess | null {
+  const g = data.bars.find((x) => Math.abs(x.bpm - bpm) < 0.005) ?? guessBars(data, [bpm], data.start)[0];
+  if (!g) return null;
+  const h = chordHint;
+  if (h && h.data === data && Math.abs(h.bpm - g.bpm) < 0.005 && Math.abs(h.beat - g.beat) < 1e-6) return { ...g, k: pickDownbeat(g.fit, h.chords) };
+  return g;
+}
+
+/**
+ * いちばん合う BPM の 1 拍目を、和音の変わり目でも確かめる（曲の音の特徴はサビ探しと使い回す）。
+ * わかったとき、推定の案のまま触っていなければ案を作り直す。答えを返す（測れなければ null。ドラムの形だけで決める）
+ */
+export async function refineWithChords(): Promise<number[] | null> {
+  const data = useAssist.getState().data;
+  const g = data?.bars[0];
+  if (!data || !g) return null;
+  if (chordHint?.data === data && chordHint.bpm === g.bpm) return chordHint.chords;
+  if (chordAsking === data) return null;
+  chordAsking = data;
+  try {
+    const bgm = bgmSource(useEditor.getState().doc);
+    const song = await songAudioKey();
+    if (!song || !bgm) return null;
+    // 曲の音の 0 秒は譜面の song.offset 秒、解析した音の 0 秒は原曲（BGM）の頭
+    const shift = song.offset - bgm.sec;
+    const chords = await wk.chordChange(song.key, g.bpm, g.beat - shift, data.start - shift);
+    if (useAssist.getState().data !== data) return null;
+    chordHint = { data, bpm: g.bpm, beat: g.beat, chords };
+    const s = get();
+    if (s.initialized && s.fromEstimate && !s.touched) {
+      const est = estimatePlan();
+      const cur = s.plan.anchors[0];
+      if (est && est.anchors[0] && (est.bpm !== s.plan.bpm || !cur || Math.abs(est.anchors[0].t - cur.t) > 1e-4 || est.anchors[0].m !== cur.m)) {
+        set({ plan: est, view: viewAround(est.anchors[0].t, est.bpm) });
+        updateBeats(true);
+      }
     }
+    return chords;
+  } catch {
+    return null;
+  } finally {
+    if (chordAsking === data) chordAsking = null;
   }
-  return downbeats.find((d) => d >= start - 0.08) ?? downbeats[0];
 }
 
 function computeBeats(bpm: number): { beats: number[]; downbeats: number[] } {
   const a = useAssist.getState();
   if (!a.data) return { beats: [], downbeats: [] };
   const fr = a.data.frameRate;
-  const odf = combinedOdf(a.data.odf);
-  const frames = trackBeats(odf, fr, bpm);
-  const beats = frames.map((f) => f);
-  const phase = downbeatPhase(beats, a.data.odf, fr, 4);
+  const beats = trackBeats(combinedOdf(a.data.odf), fr, bpm);
+  // 小節の頭は、曲全体で推定した 1 拍目にいちばん近い拍から 4 拍ごと
+  const g = barsFor(a.data, bpm);
+  let phase = 0;
+  if (g && beats.length) {
+    const t = firstDownbeat(g, a.data.start);
+    let near = 0;
+    for (let i = 1; i < beats.length; i++) if (Math.abs(beats[i] - t) < Math.abs(beats[near] - t)) near = i;
+    phase = near % 4;
+  }
   const downbeats: number[] = [];
   for (let k = phase; k < beats.length; k += 4) downbeats.push(beats[k]);
   return { beats, downbeats };
@@ -263,6 +307,16 @@ export function resetToEstimate() {
   }
   set({ plan: est, touched: true, fromEstimate: true, view: viewAround(est.anchors[0]?.t ?? 0, est.bpm) });
   updateBeats(true);
+  // 和音の手がかりがまだなら測り、その間に触っていなければ推定をやり直す
+  void refineWithChords().then((chords) => {
+    if (!chords || get().plan !== est) return;
+    const again = estimatePlan();
+    const a0 = again?.anchors[0];
+    const e0 = est.anchors[0];
+    if (!again || !a0 || (e0 && a0.m === e0.m && Math.abs(a0.t - e0.t) < 1e-4)) return;
+    set({ plan: again, view: viewAround(a0.t, again.bpm) });
+    updateBeats(true);
+  });
 }
 
 export function setView(v: { from: number; to: number }) {

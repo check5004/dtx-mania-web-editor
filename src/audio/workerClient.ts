@@ -105,6 +105,11 @@ export function chorus(key: string, grid: ChorusGrid | null, progress?: (p: numb
   return call<ChorusFound>({ type: 'chorus', key, grid: grid ? { bars: [...grid.bars], beats: [...grid.beats] } : null }, [], progress);
 }
 
+/** 和音の変わり目（拍の位置 beat 秒から k 拍目ごと、k = 0〜3。1 拍目を決める手がかり。和音の入った音で） */
+export function chordChange(key: string, bpm: number, beat: number, from: number, progress?: (p: number) => void): Promise<number[]> {
+  return call<number[]>({ type: 'chords', key, bpm, beat, from }, [], progress);
+}
+
 /**
  * スロー再生用に、channels の from〜to サンプル目を rate 倍の速さにする（音程はそのまま）。
  * channels はワーカーへ渡してしまう（呼んだ側では使えなくなる）。ワーカーに音を残さないので、いくつ伸ばしても前の音を追い出さない

@@ -1,6 +1,7 @@
 // 原曲の解析。波形の山、帯域別（低・中・高）の打点の強さ、BPMの推定、拍の追跡。
 // 重い処理（フィルタ・自己相関）はワーカーで、軽い処理（打点の拾い出し・拍の追跡）は画面側でも使う。
 import { biquad, downmix, filtfilt, quantile, resample } from './dsp';
+import { bpmPrior, guessBars, musicStart, type BarGuess } from './grid';
 
 /** 打点の強さを出す細かさ（1秒あたりのフレーム数。5ms刻み） */
 export const FRAME_RATE = 200;
@@ -31,7 +32,12 @@ export interface AnalysisData {
   odf: Record<Band, Float32Array>;
   /** 帯域ごとの音量の包絡（おおむね0〜1） */
   env: Record<Band, Float32Array>;
+  /** BPM の候補（いちばん合うものが先頭。倍・半分は小節の形で決める） */
   tempo: TempoCandidate[];
+  /** BPM の候補ごとの拍の位置と 1 拍目（tempo と同じ順） */
+  bars: BarGuess[];
+  /** 音楽が始まる所（秒。低域がしっかり鳴り始める所） */
+  start: number;
 }
 
 export interface Onset {
@@ -281,7 +287,6 @@ export function estimateTempo(odf: Float32Array, frameRate: number): TempoCandid
     return acfAt(lag);
   };
   const levelScore = (lag: number) => acfAt(lag) + 0.5 * acfFar(2 * lag) + 0.25 * acfFar(4 * lag);
-  const prior = (bpm: number) => Math.exp(-0.5 * (Math.log2(bpm / 130) / 0.85) ** 2);
   const peaks: { lag: number; v: number }[] = [];
   for (let L = lagMin; L <= lagMax; L++) {
     if (acf[L] > acf[L - 1] && acf[L] >= acf[L + 1] && acf[L] > 0) {
@@ -289,7 +294,7 @@ export function estimateTempo(odf: Float32Array, frameRate: number): TempoCandid
       const off = den !== 0 ? (0.5 * (acf[L - 1] - acf[L + 1])) / den : 0;
       const lag = L + Math.max(-0.5, Math.min(0.5, off));
       const bpm = (60 * frameRate) / lag;
-      peaks.push({ lag, v: Math.max(0, levelScore(lag)) * prior(bpm) });
+      peaks.push({ lag, v: Math.max(0, levelScore(lag)) * bpmPrior(bpm) });
     }
   }
   if (peaks.length === 0) return [];
@@ -306,7 +311,7 @@ export function estimateTempo(odf: Float32Array, frameRate: number): TempoCandid
     if (b < 40 || b > 320) continue;
     const r = refineBpm(odf, frameRate, b, 0.003);
     const lag = lagOf(r.bpm);
-    const v = lag <= lagMax ? Math.max(0, levelScore(lag)) * prior(r.bpm) : Math.max(0, acfFar(lag) + 0.5 * acfFar(2 * lag)) * prior(r.bpm);
+    const v = lag <= lagMax ? Math.max(0, levelScore(lag)) * bpmPrior(r.bpm) : Math.max(0, acfFar(lag) + 0.5 * acfFar(2 * lag)) * bpmPrior(r.bpm);
     out.push({ bpm: r.bpm, score: v, kind, phase: r.phase / frameRate });
   }
   const top = Math.max(...out.map((c) => c.score), 1e-9);
@@ -390,27 +395,6 @@ export function trackBeats(odf: Float32Array, frameRate: number, bpm: number, ti
   return beats.slice(a, z).map((i) => i / frameRate);
 }
 
-/** 拍のうち小節の頭（4拍ごと）がどれかを、低域と高域（クラッシュ）の強さで選ぶ */
-export function downbeatPhase(beats: number[], odf: Record<Band, Float32Array>, frameRate: number, perBar = 4): number {
-  const at = (arr: Float32Array, t: number) => {
-    const i = Math.round(t * frameRate);
-    let m = 0;
-    for (let j = i - 2; j <= i + 2; j++) if (j >= 0 && j < arr.length && arr[j] > m) m = arr[j];
-    return m;
-  };
-  let best = 0;
-  let bestS = -1;
-  for (let p = 0; p < perBar; p++) {
-    let s = 0;
-    for (let k = p; k < beats.length; k += perBar) s += at(odf.low, beats[k]) + 0.7 * at(odf.high, beats[k]);
-    if (s > bestS) {
-      bestS = s;
-      best = p;
-    }
-  }
-  return best;
-}
-
 // ---- まとめ ---------------------------------------------------------------------
 
 /** 原曲を解析する（ワーカーで呼ぶ）。channels は元のサンプリング周波数のまま */
@@ -432,8 +416,41 @@ export function analyzeAudio(channels: Float32Array[], sr: number, progress?: (p
     env[b] = r.env;
     progress?.(0.3 + 0.15 * (i + 1));
   });
-  // BPM の推定は帯域をずらす前の立ち上がりで（帯域の重なり方が変わると倍・半分の選び方が変わるため、今までどおりに）
-  const tempo = estimateTempo(combinedOdf(raw), FRAME_RATE);
+  // BPM の候補は帯域をずらす前の立ち上がりの自己相関で（帯域の重なり方が変わると候補の出方が変わるため、今までどおりに）
+  const acf = estimateTempo(combinedOdf(raw), FRAME_RATE);
+  // 倍・半分のどれか、拍の位置、1 拍目は、曲全体の打点をドラムの形に合わせて決める（grid.ts）
+  const start = musicStart(odf.low, FRAME_RATE);
+  const bars = guessBars({ odf, frameRate: FRAME_RATE }, acf.map((c) => c.bpm), start);
+  const tempo = orderTempo(acf, bars);
   progress?.(1);
-  return { duration: mono.length / sr, peakRate: PEAK_RATE, peaks, frameRate: FRAME_RATE, odf, env, tempo };
+  return {
+    duration: mono.length / sr,
+    peakRate: PEAK_RATE,
+    peaks,
+    frameRate: FRAME_RATE,
+    odf,
+    env,
+    tempo,
+    bars: tempo.map((c) => bars.find((g) => g.bpm === c.bpm)!),
+    start,
+  };
+}
+
+/**
+ * BPM の候補を小節の形の点（guessBars）の順に並べ直す。いちばん上を「いちばん合う」、その半分・倍を「半分」「倍」にし、
+ * それ以外（4 分の 1 など）は外す。点はいちばん上を 1 にそろえる
+ */
+export function orderTempo(tempo: readonly TempoCandidate[], bars: readonly BarGuess[]): TempoCandidate[] {
+  const top = bars[0];
+  if (!top) return [...tempo];
+  const out: TempoCandidate[] = [];
+  for (const g of bars) {
+    const c = tempo.find((x) => x.bpm === g.bpm);
+    if (!c) continue;
+    const r = g.bpm / top.bpm;
+    const kind = g === top ? 'best' : Math.abs(r - 0.5) < 0.02 ? 'half' : Math.abs(r - 2) < 0.04 ? 'double' : null;
+    if (!kind) continue;
+    out.push({ bpm: c.bpm, score: top.score > 0 ? Math.max(0, Math.min(1, g.score / top.score)) : c.score, kind, phase: g.beat });
+  }
+  return out;
 }
