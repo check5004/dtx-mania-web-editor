@@ -1467,6 +1467,30 @@ html.phone-port .p-edge-top {
   color: #8b95a4;
 }
 
+/* 縦：選んでいる間は道具の帯（44）の代わりに下に出す。親指が届き、譜面の上には重ねない（PhoneEditor の PSelBar bottom） */
+.p-selbar.dock {
+  flex: none;
+  justify-content: space-between;
+  height: 44px;
+  max-width: none;
+  padding: 0 6px;
+  border: 0;
+  border-top: 1px solid #1e242d;
+  border-radius: 0;
+  background: #0e1217;
+  box-shadow: none;
+}
+
+@media (max-width: 400px) {
+  .p-selbar.dock {
+    padding: 0 3px;
+  }
+
+  .p-selbar.dock .p-ib {
+    width: 35px;
+  }
+}
+
 /* ---- 候補（ui/phone/PhoneCands）：点線の候補を隠さないように、譜面の上には重ねない ----
    TAB補完は譜面の下の端の細い帯（点線は置いた小節より先＝上に出るので、下の端なら隠れない。譜面の大きさは変えない）。
    小節の生成・フレーズ候補は譜面の下に並べるパネル（道具の帯の代わり。譜面を縮める） */
@@ -2288,6 +2312,39 @@ html.phone .toast {
   padding: 10px 14px;
 }
 
+/* 知らせは 2 行までに縮める（文を押すと全文・もう一度で縮める）。どの知らせにも × があるので、どれも指で押せる（App.tsx の ToastItem） */
+html.phone .toast.p-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+html.phone .toast.p-toast > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.45;
+}
+
+html.phone .toast.p-toast.open > span:first-child {
+  display: block;
+  -webkit-line-clamp: none;
+}
+
+/* ボタン 2 つの知らせは、文と × を 1 段目、ボタンを 2 段目に（× が 2 段目に落ちないように） */
+html.phone .toast.p-toast.two-actions > span:first-child {
+  flex: 1 1 calc(100% - 50px);
+}
+
+html.phone .toast.p-toast .toast-sub {
+  display: inline;
+  margin-left: 4px;
+}
+
 html.phone-land .toasts {
   bottom: calc(12px + env(safe-area-inset-bottom));
 }
@@ -2737,6 +2794,26 @@ html.phone .p-chart .rec-badge.key {
 .ph-main .pwa-hint,
 .ph-main .local-card {
   margin: 0;
+}
+
+/* ホーム画面に追加の案内：「曲を開く」を最初の画面に入れるため、よい点と手順は畳んでおき、下のボタンで開く（InstallCard） */
+.ph-main .pwa-hint.ios.p-folded {
+  gap: 2px;
+  padding-bottom: 4px;
+}
+
+.ph-main .pwa-hint-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  margin-left: 32px;
+  padding: 0 8px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
 }
 
 /* ---- 設定（スマホ：一覧から 1 つずつ開く） ---- */
@@ -3415,6 +3492,104 @@ html.phone-port .lib-tr > :nth-child(n + 4) {
 html.phone-port .lib-detail {
   max-height: 34vh;
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 難易度ガイドラインは横向きの画面（設定の一覧からも開ける）。縦の見出しのボタンは 1 行に収める */
+html.phone-port .lib-page .lib-guide {
+  display: none;
+}
+
+/*
+ * 絞り込み（LibraryPage の phoneSide）：1 行目に サンプル／キット と出典の選び、2 行目に楽器と音色タグの小さなボタンを横に並べ、
+ * 指で横に送る。縦に並べた一覧（150px の箱）より低くして、音の一覧に高さを回す。保存先の箱は一覧のいちばん下
+ */
+html.phone-port .lib-side.p-lib-side {
+  max-height: none;
+  overflow: visible;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.p-lib-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.p-lib-row .seg {
+  flex: none;
+  width: auto;
+}
+
+html.phone-port .lib-page .p-lib-row .p-lib-src {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+}
+
+.p-lib-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 12px;
+  scrollbar-width: none;
+}
+
+.p-lib-chips::-webkit-scrollbar {
+  display: none;
+}
+
+html.phone-port .p-lib-chips .lib-side-row {
+  flex: none;
+  gap: 6px;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line3);
+  border-radius: 17px;
+  font-size: 13px;
+}
+
+html.phone-port .p-lib-chips .lib-side-row > .grow {
+  flex: none;
+}
+
+html.phone-port .p-lib-chips .lib-side-row.on {
+  border-color: var(--accent);
+}
+
+.p-lib-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--line3);
+}
+
+.p-lib-tag {
+  flex: none;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line3);
+  border-radius: 15px;
+  background: none;
+  color: var(--text3);
+  font: inherit;
+  font-size: 12px;
+}
+
+.p-lib-tag.on {
+  border-color: var(--accent);
+  background: #14222b;
+  color: var(--accent);
+}
+
+.p-lib-note {
+  margin: 0;
+  padding: 0 12px;
+  line-height: 1.7;
 }
 
 /*

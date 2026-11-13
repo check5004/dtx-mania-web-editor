@@ -17,7 +17,7 @@ import { useFind } from '../../store/find';
 import { usePreview } from '../../store/preview';
 import { unsavedText, useUnsaved } from '../../store/unsaved';
 import { toggleVelMode, useVel } from '../../store/velocity';
-import { ChartCanvas, lowerBelowTopCover } from '../ChartCanvas';
+import { ChartCanvas, lowerBelowTopCover, measureFitPx } from '../ChartCanvas';
 import { ContextMenuHost } from '../ContextMenu';
 import { SpecialPopoverHost } from '../SpecialUi';
 import { FindPanel } from '../FindPanel';
@@ -65,6 +65,40 @@ function useAudioColsByOrientation(portrait: boolean) {
       if (s.audioCols !== prev.audioCols) audioColsMem[key] = s.audioCols;
     });
   }, [key]);
+}
+
+/** 横で縮めた大きさ（before: 縮める前、set: 縮めた大きさ）と、この横の間にもう決めたか */
+let landZoom: { before: number; set: number } | null = null;
+let landFitted = false;
+
+/**
+ * 横では、1 小節が入らなければ入るまで縮める（高さ 331px ほどで、1 拍 88px だと 3 拍ほどしか入らない）。
+ * 横の間に一度だけ（ほかの画面から戻っても、横でピンチした大きさは変えない）。縦に戻したとき、縮めた大きさのままなら元に戻す
+ */
+function useFitMeasureInLandscape(portrait: boolean) {
+  useEffect(() => {
+    if (portrait) {
+      const z = landZoom;
+      landZoom = null;
+      landFitted = false;
+      if (z && Math.abs(useEditor.getState().view.pxPerBeat - z.set) < 0.05) setView({ pxPerBeat: z.before });
+      return;
+    }
+    if (landFitted) return;
+    // 向きを変えた直後は譜面の高さが変わっている途中なので、大きさが決まってから（2 フレーム後）
+    let raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => {
+        const fit = measureFitPx();
+        if (fit === null) return;
+        landFitted = true;
+        const px = useEditor.getState().view.pxPerBeat;
+        if (px <= fit) return;
+        landZoom = { before: px, set: fit };
+        setView({ pxPerBeat: fit });
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [portrait]);
 }
 
 // ---- 縦：上のバー -------------------------------------------------------------------------
@@ -322,7 +356,7 @@ function PTabs() {
   );
 }
 
-// ---- 選んでいるとき（譜面の上端に浮かせる） ------------------------------------------------------
+// ---- 選んでいるとき（縦は道具の帯の代わりに下へ、横は譜面の上端に浮かせる） ------------------------------------
 
 function nudge(dBeat: -1 | 0 | 1, dLane: -1 | 0 | 1) {
   const s = useEditor.getState();
@@ -330,7 +364,11 @@ function nudge(dBeat: -1 | 0 | 1, dLane: -1 | 0 | 1) {
   if (!ok) toast(dLane ? tr('これ以上レーンを動かせません', "Can't move the lanes any further") : tr('これ以上動かせません', "Can't move any further"), 'info', 1800);
 }
 
-function PSelBar() {
+/**
+ * 選んだチップのバー。縦（bottom）は道具の帯の代わりに出す（親指が届き、譜面に重ならない）。
+ * 横は譜面の上端に浮かせ、選んだチップがバーの陰になったら下へ送る
+ */
+function PSelBar({ bottom = false }: { bottom?: boolean }) {
   const sel = useEditor((s) => s.selection);
   const doc = useEditor((s) => s.doc);
   const wrap = useRef<HTMLDivElement>(null);
@@ -338,7 +376,7 @@ function PSelBar() {
   useEffect(() => {
     const el = wrap.current;
     const chart = el?.parentElement;
-    if (!el || !chart || sel.length === 0) return;
+    if (bottom || !el || !chart || sel.length === 0) return;
     const ids = new Set(sel);
     const beats = chipViews(doc)
       .filter((v) => ids.has(v.c.id))
@@ -347,7 +385,7 @@ function PSelBar() {
     const bar = el.querySelector('.p-selbar');
     const cover = (bar ?? el).getBoundingClientRect().bottom - chart.getBoundingClientRect().top;
     lowerBelowTopCover(Math.min(...beats), Math.max(...beats), cover);
-  }, [sel, doc]);
+  }, [sel, doc, bottom]);
   if (sel.length === 0) return null;
   const n = sel.length;
   const btn = (icon: React.ReactNode, label: string, onClick: (e: React.MouseEvent<HTMLButtonElement>) => void, cls = '') => (
@@ -355,35 +393,39 @@ function PSelBar() {
       {icon}
     </button>
   );
+  const bar = (
+    <div className={`p-selbar ${bottom ? 'dock' : ''}`} role="toolbar" aria-label={tr('選んだチップ', 'Selected chips')} onPointerDown={(e) => e.stopPropagation()}>
+      <span className="p-selbar-count">
+        <b className="mono">{n}</b>
+        <span>{tr('個', n > 1 ? 'chips' : 'chip')}</span>
+      </span>
+      <i className="p-vsep" />
+      {btn(Icon.arrowUp(19), tr('後へ（グリッド1つ）', 'Later by one grid step'), () => nudge(1, 0))}
+      {btn(Icon.arrowDown(19), tr('前へ（グリッド1つ）', 'Earlier by one grid step'), () => nudge(-1, 0))}
+      {btn(Icon.arrowLeft(19), tr('左のレーンへ', 'Lane to the left'), () => nudge(0, -1))}
+      {btn(Icon.arrowRight(19), tr('右のレーンへ', 'Lane to the right'), () => nudge(0, 1))}
+      <i className="p-vsep" />
+      {btn(Icon.copy(19), tr('コピー', 'Copy'), () => toast(tr(`${copySelection()}個をコピーしました（貼り付けは長押しのメニュー）`, `Copied ${n} (paste from the long-press menu)`), 'ok', 2500))}
+      {btn(
+        Icon.trash(19),
+        tr('削除', 'Delete'),
+        () => {
+          deleteChips([...sel]);
+          toast(tr(`${n}個のチップを消しました`, `Deleted ${n} chip${n > 1 ? 's' : ''}`), 'info', 3500, { label: tr('元に戻す', 'Undo'), run: undo });
+        },
+        'danger',
+      )}
+      {btn(Icon.dots(19), tr('その他（強さ・フラム・切り取り・レーン・種類）', 'More (velocity, flam, cut, lane, type)'), (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        openCtxMenu({ kind: 'chips', ids: [...sel], anchor: sel[0] }, r.left, r.bottom, true);
+      })}
+      {btn(Icon.close(19), tr('選ぶのをやめる', 'Clear the selection'), () => useEditor.setState({ selection: [] }))}
+    </div>
+  );
+  if (bottom) return bar;
   return (
     <div className="p-selbar-wrap" ref={wrap}>
-      <div className="p-selbar" role="toolbar" aria-label={tr('選んだチップ', 'Selected chips')} onPointerDown={(e) => e.stopPropagation()}>
-        <span className="p-selbar-count">
-          <b className="mono">{n}</b>
-          <span>{tr('個', n > 1 ? 'chips' : 'chip')}</span>
-        </span>
-        <i className="p-vsep" />
-        {btn(Icon.arrowUp(19), tr('後へ（グリッド1つ）', 'Later by one grid step'), () => nudge(1, 0))}
-        {btn(Icon.arrowDown(19), tr('前へ（グリッド1つ）', 'Earlier by one grid step'), () => nudge(-1, 0))}
-        {btn(Icon.arrowLeft(19), tr('左のレーンへ', 'Lane to the left'), () => nudge(0, -1))}
-        {btn(Icon.arrowRight(19), tr('右のレーンへ', 'Lane to the right'), () => nudge(0, 1))}
-        <i className="p-vsep" />
-        {btn(Icon.copy(19), tr('コピー', 'Copy'), () => toast(tr(`${copySelection()}個をコピーしました（貼り付けは長押しのメニュー）`, `Copied ${n} (paste from the long-press menu)`), 'ok', 2500))}
-        {btn(
-          Icon.trash(19),
-          tr('削除', 'Delete'),
-          () => {
-            deleteChips([...sel]);
-            toast(tr(`${n}個のチップを消しました`, `Deleted ${n} chip${n > 1 ? 's' : ''}`), 'info', 3500, { label: tr('元に戻す', 'Undo'), run: undo });
-          },
-          'danger',
-        )}
-        {btn(Icon.dots(19), tr('その他（強さ・フラム・切り取り・レーン・種類）', 'More (velocity, flam, cut, lane, type)'), (e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          openCtxMenu({ kind: 'chips', ids: [...sel], anchor: sel[0] }, r.left, r.bottom, true);
-        })}
-        {btn(Icon.close(19), tr('選ぶのをやめる', 'Clear the selection'), () => useEditor.setState({ selection: [] }))}
-      </div>
+      {bar}
     </div>
   );
 }
@@ -494,12 +536,14 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
   const findOpen = useFind((s) => s.open);
   const dock = usePhoneDock();
   const previewMode = usePreview((s) => s.mode);
+  const hasSel = useEditor((s) => s.selection.length > 0);
   // レーンの幅を変えるもの（原曲の列・強さの列・BGA の列）が変わったら決め直す
   useAssist((s) => s.audioCols);
   useVel((s) => s.lanes.length);
   useBga((s) => `${s.show}|${s.wide}`);
   useEditor((s) => hasBga(s.doc));
   useAudioColsByOrientation(portrait);
+  useFitMeasureInLandscape(portrait);
   // スマホのプレビューは全画面だけ（右のパネルのプレビューは使わない）
   useEffect(() => {
     if (usePreview.getState().mode === 'side') usePreview.setState({ mode: 'off' });
@@ -508,7 +552,7 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
   const chart = (
     <section className="chart-area p-chart">
       <ChartCanvas />
-      <PSelBar />
+      {!portrait && <PSelBar />}
       <PhoneTabBar />
       {findOpen && <FindPanel />}
     </section>
@@ -526,7 +570,8 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
           <PTop />
           {chart}
           {docks}
-          {!tab && !velMode && !dock && <PTools />}
+          {/* 選んでいる間は、道具の帯の代わりに選んだチップのバー（高さは同じ 44 なので譜面は動かない） */}
+          {hasSel ? <PSelBar bottom /> : !tab && !velMode && !dock && <PTools />}
           <PTransport />
           <PSheet />
           <PTabs />

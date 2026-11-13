@@ -15,7 +15,6 @@ import { Icon } from '../icons';
 import { LangSwitch } from '../LangSwitch';
 import { LocalStorageCard } from '../LocalStorage';
 import { InstallCard } from '../pwa/InstallCard';
-import { SafariNotice } from '../SafariNotice';
 import { ago, artColor } from '../tablet/HomeTablet';
 import { openFilesPicker } from '../tablet/shared';
 import { LogoMark } from '../LogoMark';
@@ -252,7 +251,7 @@ export function HomePhone() {
           </>
         ) : (
           <>
-            <SafariNotice />
+            {/* 「Safari ではまだ確かめていません」の案内は出さない（iPhone の Safari で音が鳴るのは 2026-11-10 に実機で確かめた。PC・iPad のホームは出す） */}
             <InstallCard />
             {title}
             {starts}

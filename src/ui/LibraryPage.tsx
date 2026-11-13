@@ -8,7 +8,7 @@ import { addWav } from '../edit/rim';
 import { INSTS, instInfo } from '../library/analyze';
 import type { Inst, LibraryKit } from '../library/db';
 import { playAudition, useStopAuditionOnClose } from '../store/audition';
-import { NO_FOLDER_PICK } from '../store/device';
+import { NO_FOLDER_PICK, useDevice } from '../store/device';
 import { backToChart, edit, openPage, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
 import { kitFile, setKit, useKit } from '../store/kit';
 import {
@@ -38,6 +38,7 @@ import {
   toggleFav,
   useLibrary,
   type LibItem,
+  type LibSource,
 } from '../store/library';
 import { chooseDialog, confirmDialog, promptDialog } from './dialogs';
 import { AuditionButton } from './Audition';
@@ -122,6 +123,8 @@ export function LibraryPage() {
   const counts = new Map<string, number>();
   for (const it of all) counts.set(it.inst, (counts.get(it.inst) ?? 0) + 1);
   const tags = [...new Set([...TAG_PRESETS, ...st.samples.flatMap((x) => x.tags)])];
+  // スマホの縦は、絞り込みを 2 行（サンプル／キットと出典・楽器と音色タグの小さなボタン）にして、一覧に高さを回す
+  const phonePort = useDevice((d) => d.phone && d.portrait);
 
   const startImport = async () => {
     const mode = await chooseDialog({
@@ -145,6 +148,108 @@ export function LibraryPage() {
     if (mode) await pickAndImport(mode, fileInput.current);
   };
 
+  const seg = (
+    <div className="seg full">
+      <button className={st.tab === 'samples' ? 'on' : ''} onClick={() => useLibrary.setState({ tab: 'samples' })}>
+        {tr('サンプル', 'Samples')}
+      </button>
+      <button className={st.tab === 'kits' ? 'on' : ''} onClick={() => useLibrary.setState({ tab: 'kits' })}>
+        {tr('キット', 'Kits')}
+      </button>
+    </div>
+  );
+  const store = (
+    <div className="lib-store">
+      {st.storage && (
+        <div>
+          {tr('保存先: ブラウザ内（', 'Stored in: this browser (')}
+          {mb(st.storage.usage)}
+          {st.storage.quota ? tr(` / 空き ${mb(Math.max(0, st.storage.quota - st.storage.usage))}`, ` / ${mb(Math.max(0, st.storage.quota - st.storage.usage))} free`) : ''}
+          {tr('）', ')')}
+        </div>
+      )}
+      <div>{tr(`参照モードの曲フォルダ: ${st.folders.length}件`, `Reference-mode song folders: ${st.folders.length}`)}</div>
+      {st.needPermission.length > 0 && (
+        <button className="btn small" style={{ marginTop: 6 }} onClick={() => void grantFolders()}>
+          {tr('参照フォルダを読む許可を出す', 'Allow reading the reference folders')}
+        </button>
+      )}
+      <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+        {st.storage && !st.storage.persisted && (
+          <button
+            className="btn small ghost"
+            onClick={async () =>
+              toast(
+                (await requestPersist())
+                  ? tr('消えないように保存する設定にしました', 'Storage is now set to persist')
+                  : tr('ブラウザが永続化を許可しませんでした（ZIPでバックアップしておくと安心です）', "The browser didn't allow persistent storage (backing up as a ZIP is a good idea)"),
+                'info',
+                6000,
+              )
+            }
+          >
+            {tr('消えないようにする', 'Keep it from being cleared')}
+          </button>
+        )}
+        <button className="btn small ghost" onClick={() => zipInput.current?.click()}>
+          {tr('ZIPから戻す', 'Restore from ZIP')}
+        </button>
+      </div>
+    </div>
+  );
+  // スマホの縦の絞り込み：1 行目 サンプル／キットと出典、2 行目 楽器と音色タグの小さなボタン（指で横に送る）
+  const favN = st.samples.filter((x) => x.fav).length;
+  const phoneSide = (
+    <aside className="lib-side p-lib-side">
+      <div className="p-lib-row">
+        {seg}
+        {st.tab === 'samples' && (
+          <select
+            className="field p-lib-src"
+            value={st.song ? `song:${st.song}` : st.source}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.startsWith('song:')) useLibrary.setState({ song: v.slice(5), source: 'all' });
+              else useLibrary.setState({ source: v as LibSource, song: null });
+            }}
+            aria-label={tr('出典で絞り込む', 'Filter by source')}
+          >
+            <option value="all">{tr(`出典：すべて（${all.length}）`, `Source: all (${all.length})`)}</option>
+            <option value="builtin">{tr(`標準キット（${st.builtins.length}）`, `Built-in kits (${st.builtins.length})`)}</option>
+            <option value="imported">{tr(`取り込んだ曲（${songs.length}曲）`, `Imported songs (${songs.length})`)}</option>
+            <option value="fav">{tr(`お気に入り（${favN}）`, `Favorites (${favN})`)}</option>
+            {songs.map((x) => (
+              <option key={x} value={`song:${x}`}>
+                {tr(`曲：${x}`, `Song: ${x}`)}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {st.tab === 'samples' ? (
+        <div className="p-lib-chips" role="group" aria-label={tr('楽器と音色タグで絞り込む', 'Filter by instrument and tone tag')}>
+          <SideRow on={st.inst === 'all'} color="#E7EBF1" label={tr('すべて', 'All')} n={all.length} onClick={() => useLibrary.setState({ inst: 'all' })} />
+          {INSTS.map((i) => (
+            <SideRow key={i.id} on={st.inst === i.id} color={i.color} label={i.label} n={counts.get(i.id) ?? 0} onClick={() => useLibrary.setState({ inst: i.id })} />
+          ))}
+          {tags.length > 0 && <i className="p-lib-sep" />}
+          {tags.map((t) => (
+            <button key={t} className={`p-lib-tag ${st.tag === t ? 'on' : ''}`} onClick={() => useLibrary.setState({ tag: st.tag === t ? null : t })}>
+              {tagLabel(t)}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="lbl p-lib-note">
+          {tr(
+            'キットは「レーンとサンプルの対応表」です。譜面のキットのタブで選ぶと、これから置くチップにその音を使います。',
+            'A kit maps lanes to samples. Choose one on the Kit tab of the chart screen to use its sounds for the chips you place from then on.',
+          )}
+        </p>
+      )}
+    </aside>
+  );
+
   return (
     <div className="lib-page">
       <header className="tempo-head">
@@ -158,7 +263,7 @@ export function LibraryPage() {
           <input value={st.q} onChange={(e) => useLibrary.setState({ q: e.target.value })} placeholder={tr('名前・曲名・タグで検索', 'Search by name, song or tag')} />
         </label>
         <span className="grow" />
-        <button className="btn small ghost" onClick={() => openPage('guideline')} title={tr('手元の曲のレベル帯ごとの集計と基準文', 'Stats and guideline text by level band, from your local songs')}>
+        <button className="btn small ghost lib-guide" onClick={() => openPage('guideline')} title={tr('手元の曲のレベル帯ごとの集計と基準文', 'Stats and guideline text by level band, from your local songs')}>
           {tr('難易度ガイドライン', 'Difficulty guidelines')}
         </button>
         <button className="btn small" onClick={() => void exportZip()} disabled={st.samples.length === 0} title={tr('ライブラリ全体を ZIP に書き出します', 'Export the whole library as a ZIP')}>
@@ -199,106 +304,67 @@ export function LibraryPage() {
         />
       </header>
       <div className="lib-body">
-        <aside className="lib-side scroll">
-          <div className="seg full">
-            <button className={st.tab === 'samples' ? 'on' : ''} onClick={() => useLibrary.setState({ tab: 'samples' })}>
-              {tr('サンプル', 'Samples')}
-            </button>
-            <button className={st.tab === 'kits' ? 'on' : ''} onClick={() => useLibrary.setState({ tab: 'kits' })}>
-              {tr('キット', 'Kits')}
-            </button>
-          </div>
-          {st.tab === 'samples' && (
-            <>
-              <div className="lib-h">{tr('楽器（自動判定）', 'Instrument (auto-detected)')}</div>
-              <SideRow on={st.inst === 'all'} color="#E7EBF1" label={tr('すべて', 'All')} n={all.length} onClick={() => useLibrary.setState({ inst: 'all' })} />
-              {INSTS.map((i) => (
-                <SideRow key={i.id} on={st.inst === i.id} color={i.color} label={i.label} n={counts.get(i.id) ?? 0} onClick={() => useLibrary.setState({ inst: i.id })} />
-              ))}
-              <div className="lib-h">{tr('出典', 'Source')}</div>
-              <SideRow on={st.source === 'all' && !st.song} label={tr('すべて', 'All')} n={all.length} onClick={() => useLibrary.setState({ source: 'all', song: null })} />
-              <SideRow on={st.source === 'builtin'} label={tr('標準キット', 'Built-in kits')} n={st.builtins.length} onClick={() => useLibrary.setState({ source: 'builtin', song: null })} />
-              <SideRow
-                on={st.source === 'imported' && !st.song}
-                label={tr('取り込んだ曲', 'Imported songs')}
-                n={songs.length}
-                unit={tr('曲', '')}
-                onClick={() => useLibrary.setState({ source: 'imported', song: null })}
-              />
-              <SideRow on={st.source === 'fav'} label={tr('お気に入り', 'Favorites')} n={st.samples.filter((x) => x.fav).length} onClick={() => useLibrary.setState({ source: 'fav', song: null })} />
-              {songs.length > 0 && (
-                <select
-                  className="field"
-                  style={{ marginTop: 6, height: 28 }}
-                  value={st.song ?? ''}
-                  onChange={(e) => useLibrary.setState({ song: e.target.value || null, source: 'all' })}
-                  aria-label={tr('曲で絞り込む', 'Filter by song')}
-                >
-                  <option value="">{tr('曲で絞り込む…', 'Filter by song…')}</option>
-                  {songs.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <div className="lib-h">{tr('音色タグ', 'Tone tags')}</div>
-              <div className="lib-tags">
-                {tags.map((t) => (
-                  <button key={t} className={st.tag === t ? 'on' : ''} onClick={() => useLibrary.setState({ tag: st.tag === t ? null : t })}>
-                    {tagLabel(t)}
-                  </button>
+        {phonePort ? (
+          phoneSide
+        ) : (
+          <aside className="lib-side scroll">
+            {seg}
+            {st.tab === 'samples' && (
+              <>
+                <div className="lib-h">{tr('楽器（自動判定）', 'Instrument (auto-detected)')}</div>
+                <SideRow on={st.inst === 'all'} color="#E7EBF1" label={tr('すべて', 'All')} n={all.length} onClick={() => useLibrary.setState({ inst: 'all' })} />
+                {INSTS.map((i) => (
+                  <SideRow key={i.id} on={st.inst === i.id} color={i.color} label={i.label} n={counts.get(i.id) ?? 0} onClick={() => useLibrary.setState({ inst: i.id })} />
                 ))}
-              </div>
-            </>
-          )}
-          {st.tab === 'kits' && (
-            <p className="lbl" style={{ lineHeight: 1.7 }}>
-              {tr(
-                'キットは「レーンとサンプルの対応表」です。譜面のキットのタブで選ぶと、これから置くチップにその音を使います。',
-                'A kit maps lanes to samples. Choose one on the Kit tab of the chart screen to use its sounds for the chips you place from then on.',
-              )}
-            </p>
-          )}
-          <span className="grow" />
-          <div className="lib-store">
-            {st.storage && (
-              <div>
-                {tr('保存先: ブラウザ内（', 'Stored in: this browser (')}
-                {mb(st.storage.usage)}
-                {st.storage.quota ? tr(` / 空き ${mb(Math.max(0, st.storage.quota - st.storage.usage))}`, ` / ${mb(Math.max(0, st.storage.quota - st.storage.usage))} free`) : ''}
-                {tr('）', ')')}
-              </div>
+                <div className="lib-h">{tr('出典', 'Source')}</div>
+                <SideRow on={st.source === 'all' && !st.song} label={tr('すべて', 'All')} n={all.length} onClick={() => useLibrary.setState({ source: 'all', song: null })} />
+                <SideRow on={st.source === 'builtin'} label={tr('標準キット', 'Built-in kits')} n={st.builtins.length} onClick={() => useLibrary.setState({ source: 'builtin', song: null })} />
+                <SideRow
+                  on={st.source === 'imported' && !st.song}
+                  label={tr('取り込んだ曲', 'Imported songs')}
+                  n={songs.length}
+                  unit={tr('曲', '')}
+                  onClick={() => useLibrary.setState({ source: 'imported', song: null })}
+                />
+                <SideRow on={st.source === 'fav'} label={tr('お気に入り', 'Favorites')} n={st.samples.filter((x) => x.fav).length} onClick={() => useLibrary.setState({ source: 'fav', song: null })} />
+                {songs.length > 0 && (
+                  <select
+                    className="field"
+                    style={{ marginTop: 6, height: 28 }}
+                    value={st.song ?? ''}
+                    onChange={(e) => useLibrary.setState({ song: e.target.value || null, source: 'all' })}
+                    aria-label={tr('曲で絞り込む', 'Filter by song')}
+                  >
+                    <option value="">{tr('曲で絞り込む…', 'Filter by song…')}</option>
+                    {songs.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <div className="lib-h">{tr('音色タグ', 'Tone tags')}</div>
+                <div className="lib-tags">
+                  {tags.map((t) => (
+                    <button key={t} className={st.tag === t ? 'on' : ''} onClick={() => useLibrary.setState({ tag: st.tag === t ? null : t })}>
+                      {tagLabel(t)}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-            <div>{tr(`参照モードの曲フォルダ: ${st.folders.length}件`, `Reference-mode song folders: ${st.folders.length}`)}</div>
-            {st.needPermission.length > 0 && (
-              <button className="btn small" style={{ marginTop: 6 }} onClick={() => void grantFolders()}>
-                {tr('参照フォルダを読む許可を出す', 'Allow reading the reference folders')}
-              </button>
+            {st.tab === 'kits' && (
+              <p className="lbl" style={{ lineHeight: 1.7 }}>
+                {tr(
+                  'キットは「レーンとサンプルの対応表」です。譜面のキットのタブで選ぶと、これから置くチップにその音を使います。',
+                  'A kit maps lanes to samples. Choose one on the Kit tab of the chart screen to use its sounds for the chips you place from then on.',
+                )}
+              </p>
             )}
-            <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-              {st.storage && !st.storage.persisted && (
-                <button
-                  className="btn small ghost"
-                  onClick={async () =>
-                    toast(
-                      (await requestPersist())
-                        ? tr('消えないように保存する設定にしました', 'Storage is now set to persist')
-                        : tr('ブラウザが永続化を許可しませんでした（ZIPでバックアップしておくと安心です）', "The browser didn't allow persistent storage (backing up as a ZIP is a good idea)"),
-                      'info',
-                      6000,
-                    )
-                  }
-                >
-                  {tr('消えないようにする', 'Keep it from being cleared')}
-                </button>
-              )}
-              <button className="btn small ghost" onClick={() => zipInput.current?.click()}>
-                {tr('ZIPから戻す', 'Restore from ZIP')}
-              </button>
-            </div>
-          </div>
-        </aside>
+            <span className="grow" />
+            {store}
+          </aside>
+        )}
 
         <main className="lib-main scroll">
           {st.importing && (
@@ -381,6 +447,7 @@ export function LibraryPage() {
           ) : (
             <KitsList />
           )}
+          {phonePort && store}
         </main>
 
         <aside className="lib-detail scroll">

@@ -627,6 +627,19 @@ export function visibleBeats(): { from: number; to: number } {
   return visibleBeatsFor(viewport.h);
 }
 
+/**
+ * いま見ている所の 1 小節と少しの余白が、譜面の高さに入る 1 拍の大きさ（px）。譜面の高さがまだ分からなければ null。
+ * スマホの横（高さ 331px ほど）で、既定の大きさ（1 拍 88px）だと 1 小節も入らないので縮めるのに使う
+ */
+export function measureFitPx(): number | null {
+  const avail = liveChartH() - GEO.head - GEO.bottom;
+  if (avail < 60) return null;
+  const s = useEditor.getState();
+  const tm = tempoOf(s.doc);
+  const beats = Math.max(1, tm.measureBeats(tm.locate(Math.max(0, s.view.scrollBeat)).m));
+  return Math.floor((avail / (beats + 0.3)) * 10) / 10;
+}
+
 function visibleBeatsFor(h: number, cover = bottomCover): { from: number; to: number } {
   const s = useEditor.getState();
   const scroll = engine.playing && viewport.follow !== null ? viewport.follow : s.view.scrollBeat;

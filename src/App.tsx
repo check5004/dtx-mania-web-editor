@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { tr } from './i18n';
 import { useLang } from './i18n/useLang';
 import { startAutosave } from './app/fileActions';
-import { dismissToast, useEditor } from './store/editor';
+import { dismissToast, useEditor, type Toast } from './store/editor';
 import { useDevice } from './store/device';
 import './store/stems';
 import './store/kit';
@@ -20,40 +20,52 @@ import { SongsPage } from './ui/nxlib/SongsPage';
 import { UpdateNotice } from './ui/pwa/UpdateNotice';
 import { VideoExtractHost } from './ui/VideoExtract';
 
+/**
+ * 知らせ 1 つ。スマホでは譜面を隠さないように 2 行までに縮め（文を押すと全文・もう一度で縮める）、
+ * どの知らせにも × を付けて指で閉じられるようにする（phone.css の .p-toast）
+ */
+function ToastItem({ t, phone }: { t: Toast; phone: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`toast ${t.level} ${t.action || t.action2 ? 'has-action' : ''} ${t.action && t.action2 ? 'two-actions' : ''}${phone ? ` p-toast${open ? ' open' : ''}` : ''}`}>
+      {/* 2 行目からは小さく（「保存しました」と、そのあとにすること） */}
+      <span onClick={phone ? () => setOpen((o) => !o) : undefined}>
+        {t.text.split('\n')[0]}
+        {t.text.includes('\n') && <span className="toast-sub">{t.text.slice(t.text.indexOf('\n') + 1)}</span>}
+      </span>
+      {[t.action, t.action2].map(
+        (a, i) =>
+          a && (
+            <button
+              key={i}
+              className="toast-action"
+              onClick={() => {
+                dismissToast(t.id);
+                a.run();
+              }}
+            >
+              {a.label}
+            </button>
+          ),
+      )}
+      {/* ボタンのある知らせは長めに出すので、× で閉じられるように（スマホはどの知らせも） */}
+      {(phone || t.action || t.action2) && (
+        <button className="toast-close" onClick={() => dismissToast(t.id)} aria-label={tr('閉じる', 'Close')} title={tr('閉じる', 'Close')}>
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Toasts() {
   const toasts = useEditor((s) => s.toasts);
+  const phone = useDevice((s) => s.phone);
   return (
     <div className="toasts" aria-live="polite">
       <UpdateNotice />
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.level} ${t.action || t.action2 ? 'has-action' : ''} ${t.action && t.action2 ? 'two-actions' : ''}`}>
-          {/* 2 行目からは小さく（「保存しました」と、そのあとにすること） */}
-          <span>
-            {t.text.split('\n')[0]}
-            {t.text.includes('\n') && <span className="toast-sub">{t.text.slice(t.text.indexOf('\n') + 1)}</span>}
-          </span>
-          {[t.action, t.action2].map(
-            (a, i) =>
-              a && (
-                <button
-                  key={i}
-                  className="toast-action"
-                  onClick={() => {
-                    dismissToast(t.id);
-                    a.run();
-                  }}
-                >
-                  {a.label}
-                </button>
-              ),
-          )}
-          {/* ボタンのある知らせは長めに出すので、× で閉じられるように */}
-          {(t.action || t.action2) && (
-            <button className="toast-close" onClick={() => dismissToast(t.id)} aria-label={tr('閉じる', 'Close')} title={tr('閉じる', 'Close')}>
-              ×
-            </button>
-          )}
-        </div>
+        <ToastItem key={t.id} t={t} phone={phone} />
       ))}
     </div>
   );
