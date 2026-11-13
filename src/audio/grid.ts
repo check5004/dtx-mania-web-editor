@@ -1,8 +1,10 @@
 // 曲全体の拍と小節の頭を推定する：BPM の倍・半分のどれか、拍の位置、どの拍が 1 拍目か。
 // 打点の強さ（低・中・高の帯域）を曲全体で小節の長さにたたみ、よくあるドラムの形
 // （キックが 1・3 拍目、スネアが 2・4 拍目、1 拍目にシンバル）にいちばん合う所を探す。
-// 形だけだと 1 拍目と 3 拍目の違いが小さいので、和音（クロマ）があれば和音の変わり目も手がかりにする。
-// テスト曲 6 曲で BPM・1 小節目の頭とも 6 曲が作者の譜面と合った（前の推定は BPM 5 曲・頭 3/5 曲）。
+// 形だけだと 1 拍目と 3 拍目はほとんど差が出ないので、和音（クロマ）とベースの音があれば、
+// それが変わる所（前の 1 小節と後の 1 小節がいちばん違う拍）も手がかりにする。
+// テスト曲 6 曲と README のデモ曲で BPM・1 小節目の頭とも作者の譜面と合う（前の推定は BPM 5 曲・頭 3/5 曲。
+// 和音を 2 拍ずつ比べていた v0.53.0 はデモ曲で頭を 3 拍目にし、テスト曲 2 曲も僅差だった）。
 import type { Band } from './analysis';
 import type { FrameFeatures } from './features';
 
@@ -171,34 +173,53 @@ export function firstDownbeat(g: Pick<BarGuess, 'bpm' | 'beat' | 'k'>, from: num
   return t;
 }
 
+/** 和音の変わり目を比べる長さ（拍）。和音もベースの音も小節の頭で変わりやすいので、1 小節ずつ比べる */
+export const CHORD_SPAN = 4;
+
 /**
- * 和音の変わり目：拍の位置から k 拍目（k = 0〜3。4 拍ごと）の拍で、前の 2 拍と後の 2 拍の和音（クロマ）が
- * どれだけ違うかを、from〜to 秒の間で足したもの。和音は小節の頭で変わりやすい。
- * ドラムだけの音では意味が無いので、和音の入った音（原曲・ドラム抜き）で測る
+ * 和音の変わり目：拍の位置から k 拍目（k = 0〜3。4 拍ごと）の拍で、前の 1 小節と後の 1 小節の和音（クロマ）と
+ * ベースの音（低い音のクロマ）がどれだけ違うかを、from〜to 秒の間で足したもの。
+ * 本当の 1 拍目なら前後の窓がちょうど 1 小節ずつになり、違いがいちばん大きい（3 拍目だと窓が小節をまたいで、
+ * 前後に同じ和音が混ざる）。2 拍ずつ比べると、小節の途中で変わるメロディーに引っぱられた。
+ * ドラムだけの音では意味が無いので、和音の入った音（原曲・ドラム抜き）で測る。
+ * ベースのクロマが無ければ（古い形の特徴）和音だけで測る
  */
-export function chordChange(f: Pick<FrameFeatures, 'rate' | 'frames' | 'offset' | 'chroma'>, bpm: number, beat: number, from: number, to: number): number[] {
+export function chordChange(
+  f: Pick<FrameFeatures, 'rate' | 'frames' | 'offset' | 'chroma'> & Partial<Pick<FrameFeatures, 'bass'>>,
+  bpm: number,
+  beat: number,
+  from: number,
+  to: number,
+): number[] {
   const out = [0, 0, 0, 0];
   if (!(bpm > 0) || f.frames === 0) return out;
   const len = 60 / bpm;
+  const W = CHORD_SPAN;
   const v = new Float64Array(12);
   const w = new Float64Array(12);
-  const chromaOf = (t0: number, t1: number, dst: Float64Array) => {
+  /** t0〜t1 秒の 12 音の和を長さ 1 にそろえる */
+  const sumOf = (src: Float32Array, t0: number, t1: number, dst: Float64Array) => {
     dst.fill(0);
     const a = Math.max(0, Math.ceil(t0 * f.rate - f.offset));
     const b = Math.min(f.frames - 1, Math.ceil(t1 * f.rate - f.offset) - 1);
-    for (let k = a; k <= b; k++) for (let c = 0; c < 12; c++) dst[c] += f.chroma[k * 12 + c];
+    for (let k = a; k <= b; k++) for (let c = 0; c < 12; c++) dst[c] += src[k * 12 + c];
     let s = 0;
     for (let c = 0; c < 12; c++) s += dst[c] * dst[c];
     s = Math.sqrt(s) + 1e-9;
     for (let c = 0; c < 12; c++) dst[c] /= s;
   };
-  for (let i = Math.ceil((Math.max(0, from) - beat) / len) + 2; beat + (i + 2) * len <= to; i++) {
-    const t = beat + i * len;
-    chromaOf(t - 2 * len, t, v);
-    chromaOf(t, t + 2 * len, w);
+  /** t 秒の前と後の W 拍の違い（1 − 似ている度合い） */
+  const change = (src: Float32Array, t: number) => {
+    sumOf(src, t - W * len, t, v);
+    sumOf(src, t, t + W * len, w);
     let d = 0;
     for (let c = 0; c < 12; c++) d += v[c] * w[c];
-    out[((i % 4) + 4) % 4] += 1 - d;
+    return 1 - d;
+  };
+  for (let i = Math.ceil((Math.max(0, from) - beat) / len) + W; beat + (i + W) * len <= to; i++) {
+    const t = beat + i * len;
+    // ベースの無い曲では低い音はキックぐらいで、小節ごとにほとんど変わらず和音の違いの邪魔をしない（それぞれをそろえずに足す）
+    out[((i % 4) + 4) % 4] += change(f.chroma, t) + (f.bass ? change(f.bass, t) : 0);
   }
   return out;
 }

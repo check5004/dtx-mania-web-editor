@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeAudio } from './analysis';
-import { computeFrameFeatures } from './features';
+import { computeFrameFeatures, type FrameFeatures } from './features';
 import { chordChange, firstDownbeat, guessBars, pickDownbeat } from './grid';
 import { eightBeat, synth, type SynthHit } from './testSignal';
 
@@ -43,6 +43,39 @@ function addChords(x: Float32Array, sr: number, bpm: number, bars: number, lead:
         const env = Math.min(1, i / 200, (n - i) / 200);
         x[a + i] += 0.08 * env * Math.sin((2 * Math.PI * f * i) / sr);
       }
+    }
+  }
+}
+
+/** 1 小節ごとに変わるベース（C・F・G・A。和音の根音） */
+function addBass(x: Float32Array, sr: number, bpm: number, bars: number, lead: number) {
+  const bar = 240 / bpm;
+  const roots = [65.41, 87.31, 98.0, 110.0];
+  for (let b = 0; b < bars; b++) {
+    const a = Math.round((lead + b * bar) * sr);
+    const n = Math.round(bar * sr);
+    const f = roots[b % 4];
+    for (let i = 0; i < n && a + i < x.length; i++) {
+      const env = Math.min(1, i / 200, (n - i) / 200);
+      x[a + i] += 0.2 * env * (Math.sin((2 * Math.PI * f * i) / sr) + 0.5 * Math.sin((4 * Math.PI * f * i) / sr));
+    }
+  }
+}
+
+/**
+ * 大きなメロディー。音は小節の途中（3 拍目）でだけ変わり、小節の頭ではそのまま続く
+ * （前の 2 拍と後の 2 拍を比べると、3 拍目のほうが変わって見える）
+ */
+function addMelody(x: Float32Array, sr: number, bpm: number, bars: number, lead: number) {
+  const half = 120 / bpm;
+  const notes = [659.25, 783.99, 880.0, 587.33, 523.25, 698.46, 987.77];
+  for (let h = 0; h < bars * 2; h++) {
+    const a = Math.round((lead + h * half) * sr);
+    const n = Math.round(half * sr);
+    const f = notes[Math.floor((h + 1) / 2) % notes.length];
+    for (let i = 0; i < n && a + i < x.length; i++) {
+      const env = Math.min(1, i / 200, (n - i) / 200);
+      x[a + i] += 0.25 * env * Math.sin((2 * Math.PI * f * i) / sr);
     }
   }
 }
@@ -100,6 +133,23 @@ describe('拍の位置と 1 小節目の頭', () => {
     const k = pickDownbeat(g.fit, chords);
     expect(offBy(firstDownbeat(g, data.start, k), lead, 2)).toBeLessThan(0.015);
   });
+
+  it('メロディーが小節の途中で変わっても、和音とベースが変わる小節の頭を 1 拍目にする', () => {
+    // README のデモ曲では、和音を 2 拍ずつ比べるとメロディーに引っぱられて 3 拍目を 1 拍目にしていた
+    const bpm = 120;
+    const lead = 0.5;
+    const bars = 14;
+    const x = synth(rock(bpm, bars, lead, true), SR, 30);
+    addChords(x, SR, bpm, bars, lead);
+    addBass(x, SR, bpm, bars, lead);
+    addMelody(x, SR, bpm, bars, lead);
+    const data = analyzeAudio([x], SR);
+    const g = data.bars[0];
+    expect(g.bpm).toBeCloseTo(bpm, 0);
+    const chords = chordChange(computeFrameFeatures([x], SR), g.bpm, g.beat, data.start, data.duration);
+    const k = pickDownbeat(g.fit, chords);
+    expect(offBy(firstDownbeat(g, data.start, k), lead, 2)).toBeLessThan(0.015);
+  });
 });
 
 describe('1 拍目の選び方', () => {
@@ -127,5 +177,50 @@ describe('1 拍目の選び方', () => {
     }
     const chg = chordChange({ rate, frames, offset: 0, chroma }, 120, 0.2, 0, 30);
     expect(chg.indexOf(Math.max(...chg))).toBe(1);
+  });
+
+  it('ベースの音（低い音のクロマ）も足す。ベースだけが小節の頭で変わっても見つける', () => {
+    const rate = 10;
+    const frames = 300;
+    // 和音（上のクロマ）は 2 拍ごとに 2 つを行き来する（小節の頭では見分けられない）
+    const chroma = new Float32Array(frames * 12);
+    const bass = new Float32Array(frames * 12);
+    for (let f = 0; f < frames; f++) {
+      const t = f / rate;
+      const half = Math.floor((t - 0.7) / 1);
+      chroma[f * 12 + (((half % 2) + 2) % 2) * 7] = 1;
+      const bar = Math.floor((t - 0.7) / 2);
+      bass[f * 12 + (((bar % 3) + 3) % 3) * 5] = 1;
+    }
+    const without = chordChange({ rate, frames, offset: 0, chroma }, 120, 0.2, 0, 30);
+    expect(Math.max(...without) - Math.min(...without)).toBeLessThan(0.01);
+    const chg = chordChange({ rate, frames, offset: 0, chroma, bass }, 120, 0.2, 0, 30);
+    expect(chg.indexOf(Math.max(...chg))).toBe(1);
+  });
+});
+
+describe('ベースのクロマ', () => {
+  it('低い音（40〜200Hz）だけを音名に分ける', () => {
+    const sr = 22050;
+    const tone = (hz: number[]) => {
+      const x = new Float32Array(sr * 3);
+      for (let i = 0; i < x.length; i++) for (const f of hz) x[i] += 0.3 * Math.sin((2 * Math.PI * f * i) / sr);
+      return computeFrameFeatures([x], sr);
+    };
+    const sum = (f: FrameFeatures, a: Float32Array) => {
+      const s = new Array(12).fill(0);
+      for (let k = 0; k < f.frames; k++) for (let c = 0; c < 12; c++) s[c] += a[k * 12 + c];
+      return s;
+    };
+    // G2（98Hz）のベースだけと、A5（880Hz）のメロディーを足したもの
+    const bass = tone([98]);
+    const both = tone([98, 880]);
+    const b = sum(bass, bass.bass);
+    expect(b.indexOf(Math.max(...b))).toBe(7);
+    // メロディーは低い音のクロマに入らない（ふつうのクロマには入る）
+    const b2 = sum(both, both.bass);
+    for (let c = 0; c < 12; c++) expect(Math.abs(b2[c] - b[c])).toBeLessThan(b[7] * 0.01);
+    const c2 = sum(both, both.chroma);
+    expect(c2.indexOf(Math.max(...c2))).toBe(9);
   });
 });

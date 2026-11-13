@@ -22,6 +22,8 @@ export interface FrameFeatures {
   offset: number;
   /** frames × 12（C, C#, …, B の強さ） */
   chroma: Float32Array;
+  /** frames × 12。低い音（40〜200Hz：ベースと低い和音）だけのクロマ。ベースの音は小節の頭で変わりやすい（1 拍目の手がかり） */
+  bass: Float32Array;
   /** frames × FEAT_BANDS（帯域の音量、dB） */
   bands: Float32Array;
   /** 打点のフレーム（1秒あたり）。フレーム f の中心は (f + fluxOffset) / fluxRate 秒 */
@@ -36,17 +38,19 @@ export function computeFrameFeatures(channels: Float32Array[], sr: number, progr
   const x = resample(downmix(channels), sr, FEAT_SR);
   const frames = Math.max(0, Math.floor((x.length - N) / HOP) + 1);
   const chroma = new Float32Array(frames * 12);
+  const bass = new Float32Array(frames * 12);
   const bands = new Float32Array(frames * FEAT_BANDS);
   const win = new Float32Array(N);
   for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
   const binHz = FEAT_SR / N;
-  // クロマ：65Hz（C2）〜2.1kHz の成分を音名に振り分ける
+  // クロマ：65Hz（C2）〜2.1kHz の成分を音名に振り分ける。ベースのクロマは 40〜200Hz
   const pc = new Int8Array(N / 2).fill(-1);
+  const pcBass = new Int8Array(N / 2).fill(-1);
   for (let k = 1; k < N / 2; k++) {
     const f = k * binHz;
-    if (f < 65 || f > 2100) continue;
-    const midi = 69 + 12 * Math.log2(f / 440);
-    pc[k] = ((Math.round(midi) % 12) + 12) % 12;
+    const name = ((Math.round(69 + 12 * Math.log2(f / 440)) % 12) + 12) % 12;
+    if (f >= 65 && f <= 2100) pc[k] = name;
+    if (f >= 40 && f <= 200) pcBass[k] = name;
   }
   // 音色：60Hz〜5kHz を対数で区切る
   const edges: number[] = [];
@@ -63,8 +67,11 @@ export function computeFrameFeatures(channels: Float32Array[], sr: number, progr
     const co = f * 12;
     for (let k = 1; k < N / 2; k++) {
       const p = pc[k];
-      if (p < 0) continue;
-      chroma[co + p] += Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      const q = pcBass[k];
+      if (p < 0 && q < 0) continue;
+      const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      if (p >= 0) chroma[co + p] += mag;
+      if (q >= 0) bass[co + q] += mag;
     }
     const bo = f * FEAT_BANDS;
     for (let b = 0; b < FEAT_BANDS; b++) {
@@ -77,7 +84,7 @@ export function computeFrameFeatures(channels: Float32Array[], sr: number, progr
     if (progress && f % 500 === 0) progress((0.5 * f) / Math.max(1, frames));
   }
   const fl = computeFlux(channels, sr, (p) => progress?.(0.5 + 0.5 * p));
-  return { rate: FEAT_SR / HOP, frames, offset: N / 2 / HOP, chroma, bands, ...fl };
+  return { rate: FEAT_SR / HOP, frames, offset: N / 2 / HOP, chroma, bass, bands, ...fl };
 }
 
 /** 帯域ごとの音の立ち上がり（対数の音量の増え方）。22.05kHz、1024点、256 ずつ */

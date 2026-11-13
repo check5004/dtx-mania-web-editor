@@ -160,7 +160,8 @@ function estimatePlan(): TempoPlan | null {
 
 /** 和音の変わり目（1 拍目の手がかり）。解析の結果・BPM・拍の位置ごと */
 let chordHint: { data: AnalysisData; bpm: number; beat: number; chords: number[] } | null = null;
-let chordAsking: AnalysisData | null = null;
+/** 測っている最中の和音の変わり目（同じ解析の結果をもう一度聞かれたら、同じ答えを待たせる） */
+let chordAsking: { data: AnalysisData; answer: Promise<number[] | null> } | null = null;
 
 /**
  * BPM の拍の位置と 1 拍目（src/audio/grid.ts）。解析で出した候補ならそれを、ほかの BPM は測り直す。
@@ -176,15 +177,25 @@ function barsFor(data: AnalysisData, bpm: number): BarGuess | null {
 
 /**
  * いちばん合う BPM の 1 拍目を、和音の変わり目でも確かめる（曲の音の特徴はサビ探しと使い回す）。
- * わかったとき、推定の案のまま触っていなければ案を作り直す。答えを返す（測れなければ null。ドラムの形だけで決める）
+ * わかったとき、推定の案のまま触っていなければ案を作り直す。答えを返す（測れなければ null。ドラムの形だけで決める）。
+ * 測っている最中にもう一度呼ばれたら、同じ答えを待つ（おまかせで準備は、テンポ合わせを始めたときに測り始めた分を
+ * 待ってから反映する。前は待たずに null が返り、ドラムの形だけの案を反映していた）
  */
-export async function refineWithChords(): Promise<number[] | null> {
+export function refineWithChords(): Promise<number[] | null> {
   const data = useAssist.getState().data;
   const g = data?.bars[0];
-  if (!data || !g) return null;
-  if (chordHint?.data === data && chordHint.bpm === g.bpm) return chordHint.chords;
-  if (chordAsking === data) return null;
-  chordAsking = data;
+  if (!data || !g) return Promise.resolve(null);
+  if (chordHint?.data === data && chordHint.bpm === g.bpm) return Promise.resolve(chordHint.chords);
+  if (chordAsking?.data === data) return chordAsking.answer;
+  const answer = askChords(data, g);
+  chordAsking = { data, answer };
+  void answer.finally(() => {
+    if (chordAsking?.answer === answer) chordAsking = null;
+  });
+  return answer;
+}
+
+async function askChords(data: AnalysisData, g: BarGuess): Promise<number[] | null> {
   try {
     const bgm = bgmSource(useEditor.getState().doc);
     const song = await songAudioKey();
@@ -206,8 +217,6 @@ export async function refineWithChords(): Promise<number[] | null> {
     return chords;
   } catch {
     return null;
-  } finally {
-    if (chordAsking === data) chordAsking = null;
   }
 }
 
