@@ -6,8 +6,10 @@ import { SLOT_KEYS, type LibSong } from '../../nxlib/scan';
 import { ensureNxPerm, rescanNx, setNxView, useNxLib } from '../../nxlib/store';
 import { addableSlots, chartCount, chartIn, filterCounts, type NxFilter } from '../../nxlib/view';
 import { Icon } from '../icons';
-import { FILTER_COLOR, NxPickButton, NxPromises, filterName } from './SongsPage';
+import { FILTER_COLOR, NxPickButton, NxPromises, filterName, useSyncedSet } from './SongsPage';
 import { SLOT_CLASS } from './parts';
+import { songKey, usePcSync } from '../../sync/store';
+import { SyncedTiles, SyncNextChip } from '../sync/home';
 
 export function NxHomeCard() {
   const supported = useNxLib((s) => s.supported);
@@ -116,14 +118,18 @@ function NxHomeReady() {
   const thumbs = useNxLib((s) => s.thumbs);
   const drafts = useNxLib((s) => s.drafts);
   const [q, setQ] = useState('');
-  const counts = useMemo(() => filterCounts(songs, drafts), [songs, drafts]);
+  const syncOn = usePcSync((s) => s.settings.on);
+  const synced = useSyncedSet();
+  const counts = useMemo(() => filterCounts(songs, drafts, synced), [songs, drafts, synced]);
+  // 同期で変わった曲があれば、最近変わった曲の代わりに出す
+  const showSynced = useMemo(() => !!synced && songs.some((s) => synced.has(songKey(s))), [songs, synced]);
   const recent = useMemo(() => [...songs].sort((a, b) => b.updated - a.updated).slice(0, 6), [songs]);
   const charts = useMemo(() => chartCount(songs), [songs]);
   const open = (p: Parameters<typeof setNxView>[0] = {}) => {
     setNxView({ q: '', box: null, filter: null, ...p });
     void openNxPage();
   };
-  const quick: NxFilter[] = ['missing', 'checks', 'draft'];
+  const quick: NxFilter[] = syncOn ? ['synced', 'drive', 'checks'] : ['missing', 'checks', 'draft'];
   const time = at ? new Date(at).toLocaleString(locale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
   return (
     <section className="nx-home">
@@ -147,6 +153,7 @@ function NxHomeReady() {
             {tr(`${time} に読み込み`, `Read ${time}`)}
           </span>
         )}
+        <SyncNextChip />
       </div>
       {perm !== 'granted' && (
         <div className="nx-home-perm">
@@ -192,11 +199,14 @@ function NxHomeReady() {
           {scan ? tr(`読み込み中… ${scan.songs}`, `Reading… ${scan.songs}`) : tr('読み直す', 'Reload')}
         </button>
       </div>
-      <div className="nx-home-sub">
-        <span className="lbl">{tr('最近変わった曲', 'Recently changed')}</span>
-        <span className="lbl">{tr('押すと開きます', 'Press to open')}</span>
-      </div>
-      {recent.length > 0 ? (
+      {showSynced && <SyncedTiles thumbs={thumbs} />}
+      {!showSynced && (
+        <div className="nx-home-sub">
+          <span className="lbl">{tr('最近変わった曲', 'Recently changed')}</span>
+          <span className="lbl">{tr('押すと開きます', 'Press to open')}</span>
+        </div>
+      )}
+      {showSynced ? null : recent.length > 0 ? (
         <div className="nx-tiles">
           {recent.map((s) => (
             <button key={s.id} className="nx-tile" onClick={() => void openNxSong(s)} title={s.path.join('/')}>

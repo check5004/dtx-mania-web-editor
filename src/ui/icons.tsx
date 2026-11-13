@@ -491,6 +491,32 @@ export const Icon = {
       <path d="m5.7 8 1.7 1.7 3-3.3" />
     </Svg>
   ),
+  /** まとめる（2 本が 1 本に） */
+  merge: (s?: number) => (
+    <Svg size={s}>
+      <path d="M4.5 2.5v3.2a3 3 0 0 0 3 3h0a3 3 0 0 1 3 3v2.3M11.5 2.5v3.2a3 3 0 0 1-3 3" />
+    </Svg>
+  ),
+  /** 遊ぶ（成績・トロフィー） */
+  trophy: (s?: number) => (
+    <Svg size={s}>
+      <path d="M5 2.8h6v3.4a3 3 0 0 1-6 0zM5 4H3v1a2 2 0 0 0 2 2M11 4h2v1a2 2 0 0 1-2 2M8 9.2v2.6M5.6 13.2h4.8" />
+    </Svg>
+  ),
+  /** あとで（時計） */
+  clock: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="8" cy="8" r="5.6" />
+      <path d="M8 5v3.2l2 1.3" />
+    </Svg>
+  ),
+  /** PC */
+  pc: (s?: number) => (
+    <Svg size={s}>
+      <rect x="2.2" y="3" width="11.6" height="7.6" rx="1.2" />
+      <path d="M6 13.2h4M8 10.6v2.6" />
+    </Svg>
+  ),
   /** 読み直す */
   refresh: (s?: number) => (
     <Svg size={s}>

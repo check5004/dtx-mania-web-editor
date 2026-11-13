@@ -94,8 +94,12 @@ describe('しぼりこみ・並べ替え', () => {
 
   it('しぼりこみの数', () => {
     expect(warnCount(songs[2])).toBe(1);
-    expect(filterCounts(songs, { b: ['e.dtx'] })).toEqual({ missing: 2, edited: 1, ai: 1, drive: 1, draft: 1, checks: 1 });
+    expect(filterCounts(songs, { b: ['e.dtx'] })).toEqual({ missing: 2, edited: 1, ai: 1, drive: 1, synced: 0, draft: 1, checks: 1 });
     expect(viewSongs(songs, { ...q, filter: 'ai' }).map((s) => s.id)).toEqual(['b']);
+    // 同期で変わった曲（場所の鍵:曲のフォルダの並び）
+    const synced = new Set([`${songs[0].root}:${songs[0].path.join('/')}`]);
+    expect(filterCounts(songs, {}, synced).synced).toBe(1);
+    expect(viewSongs(songs, { ...q, filter: 'synced', synced }).map((s) => s.id)).toEqual([songs[0].id]);
   });
 });
 
@@ -141,7 +145,9 @@ describe('表示の文字', () => {
     expect(levelText(8.25)).toBe('8.25');
     expect(levelText(null)).toBe('?');
     expect(bytesText(500)).toBe('1 KB');
+    expect(bytesText(0)).toBe('0 KB');
     expect(bytesText(24 * 1024 * 1024)).toBe('24 MB');
+    expect(bytesText(6.6 * 1024 * 1024)).toBe('6.6 MB');
     expect(bytesText(1.3 * 1024 * 1024 * 1024)).toBe('1.3 GB');
   });
 });

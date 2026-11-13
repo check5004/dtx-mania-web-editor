@@ -17,6 +17,8 @@ export const LINK_FILE = '.dtxe-drive.json';
 export const AUTOSAVE_DIR = '.dtxe-autosave';
 const ROOT_NAME = 'DTX Web Editor';
 const ROOT_QUERY = `appProperties has { key='dtxe' and value='root' } and mimeType = '${FOLDER_MIME}' and trashed = false`;
+/** 曲のフォルダ（「DTX Web Editor」の直下にも、PC どうしの同期の「DTXFiles/<BOX>/」の中にもある） */
+export const SONG_QUERY = `appProperties has { key='dtxe' and value='song' } and mimeType = '${FOLDER_MIME}' and trashed = false`;
 
 /** Drive と合わせるファイルか（つなぎの記録・自動保存・書き込み途中のファイル・OS のファイルは除く） */
 export function syncedPath(path: string): boolean {
@@ -49,6 +51,14 @@ export interface DriveLink {
   syncedAt: number;
   /** 動画（.mp4 など）は送らない（大きい曲を初めて送るときに「動画を除いて送る」を選んだ）。動画はこの端末の曲フォルダに残る */
   noVideo?: boolean;
+  /** PC どうしの同期（src/sync/）：前に合わせたときの成績（譜面のパスの小文字 → score.ini の中身）。両方で遊んだら、ここから増えた分を足す */
+  scores?: Record<string, string>;
+  /** scores の中身を取ったときのファイルの MD5（違えば取り直す。ほかの取り込みで変わったとき） */
+  scoresMd5?: Record<string, string>;
+  /** PC どうしの同期：成績だけ合わせる曲（作るファイルは送りも取りもしない） */
+  play?: boolean;
+  /** PC どうしの同期：初めて合わせたときに聞いて、まだ答えていないファイル（鍵） */
+  ask?: string[];
 }
 
 export function newLink(folderId: string, name: string): DriveLink {
@@ -68,6 +78,10 @@ export function parseLink(text: string): DriveLink | null {
       autosave: j.autosave && typeof j.autosave === 'object' ? j.autosave : undefined,
       syncedAt: Number(j.syncedAt) || 0,
       ...(j.noVideo === true ? { noVideo: true } : {}),
+      ...(j.scores && typeof j.scores === 'object' ? { scores: j.scores } : {}),
+      ...(j.scoresMd5 && typeof j.scoresMd5 === 'object' ? { scoresMd5: j.scoresMd5 } : {}),
+      ...(j.play === true ? { play: true } : {}),
+      ...(Array.isArray(j.ask) ? { ask: j.ask.filter((x): x is string => typeof x === 'string') } : {}),
     };
   } catch {
     return null;
@@ -123,6 +137,8 @@ export interface RemoteEntry {
   md5: string;
   size: number;
   modifiedTime: string;
+  /** 送った PC の名前（PC どうしの同期で送ったファイル） */
+  dev?: string;
 }
 
 export interface LocalEntry {
@@ -241,13 +257,17 @@ function songOf(f: DriveFile): DriveSong {
   return { id: f.id, name: f.name, modifiedTime: f.modifiedTime ?? '', info };
 }
 
-/** Drive の曲の一覧（新しい順） */
+/**
+ * Drive の曲の一覧（新しい順）。「DTX Web Editor」の直下の曲と、PC どうしの同期で「DTXFiles/<BOX>/」に置いた曲（印 dtxe=song）。
+ * 印の無い古い曲のフォルダ（直下）も出す
+ */
 export async function listDriveSongs(): Promise<DriveSong[]> {
   const roots = await listFiles(ROOT_QUERY);
-  const out: DriveSong[] = [];
-  for (const r of roots) for (const f of await listChildren(r.id)) if (f.mimeType === FOLDER_MIME) out.push(songOf(f));
+  const out = new Map<string, DriveSong>();
+  for (const f of await listFiles(SONG_QUERY)) out.set(f.id, songOf(f));
+  for (const r of roots) for (const f of await listChildren(r.id)) if (f.mimeType === FOLDER_MIME && !f.appProperties?.dtxe) out.set(f.id, songOf(f));
   const t = (s: DriveSong) => s.info.u ?? (Date.parse(s.modifiedTime) || 0);
-  return out.sort((a, b) => t(b) - t(a));
+  return [...out.values()].sort((a, b) => t(b) - t(a));
 }
 
 /**
@@ -302,7 +322,7 @@ export async function listTree(folderId: string): Promise<DriveTree> {
       // Google ドキュメントなど（中身を取れない）は見ない
       if (f.mimeType.startsWith('application/vnd.google-apps')) continue;
       if (!syncedPath(path)) continue;
-      const e: RemoteEntry = { id: f.id, path, md5: f.md5Checksum ?? '', size: Number(f.size ?? 0), modifiedTime: f.modifiedTime ?? '' };
+      const e: RemoteEntry = { id: f.id, path, md5: f.md5Checksum ?? '', size: Number(f.size ?? 0), modifiedTime: f.modifiedTime ?? '', ...(f.appProperties?.dev ? { dev: f.appProperties.dev } : {}) };
       // 同じ名前が2つあれば新しい方
       const old = files.get(key);
       if (!old || old.modifiedTime < e.modifiedTime) files.set(key, e);
@@ -453,6 +473,8 @@ export interface PushOptions {
   progress?: (p: SyncProgress | null) => void;
   /** 自動保存のとき：ファイルが前に合わせた時のままなら、Drive の中身を見ずに控えだけ送る */
   quick?: boolean;
+  /** quick で、ファイルが変わっていたら送らずにやめる（PC どうしの同期で合わせる曲。曲のファイルは同期が送る） */
+  quickOnly?: boolean;
 }
 
 export interface PushResult {
@@ -495,6 +517,7 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
     }
     return { link, ...NONE };
   }
+  if (o.quickOnly) return { link, ...NONE, skipped: true };
   if (link) {
     const f = await getFile(link.folderId);
     if (!f || f.trashed) link = null; // Drive で消された

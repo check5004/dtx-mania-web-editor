@@ -17,6 +17,8 @@ import { SetupHost } from './ui/SetupProgress';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
 import { initNxLib } from './nxlib/store';
+import { initPcSync } from './sync/store';
+import { PcSyncHost } from './ui/sync/host';
 import { SongsPage } from './ui/nxlib/SongsPage';
 import { UpdateNotice } from './ui/pwa/UpdateNotice';
 import { VideoExtractHost } from './ui/VideoExtract';
@@ -82,6 +84,7 @@ export function App() {
   useEffect(() => void initLocalSongs(), []);
   useEffect(() => initDrive(), []);
   useEffect(() => void initNxLib(), []);
+  useEffect(() => initPcSync(), []);
   return (
     <>
       {screen === 'home' ? <Home /> : screen === 'songs' ? <SongsPage /> : <Editor />}
@@ -89,6 +92,7 @@ export function App() {
       {phone && <div className="p-edge-top" aria-hidden="true" />}
       {/* おまかせで準備の間の画面（準備の途中で聞くことがあれば、その上に出す） */}
       <SetupHost />
+      <PcSyncHost />
       <DialogHost />
       <VideoExtractHost />
       <Toasts />

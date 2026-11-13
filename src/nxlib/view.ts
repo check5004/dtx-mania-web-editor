@@ -4,8 +4,9 @@ import { relDtxPath } from './parse';
 import { checkLevel, SLOT_KEYS, type LibBox, type LibChart, type LibSong, type SlotKey } from './scan';
 
 export type NxSort = 'updated' | 'title' | 'artist' | 'bpm' | 'level' | 'checks';
-export type NxFilter = 'missing' | 'edited' | 'ai' | 'drive' | 'draft' | 'checks';
-export const NX_FILTERS: readonly NxFilter[] = ['missing', 'edited', 'ai', 'drive', 'draft', 'checks'];
+export type NxFilter = 'missing' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
+/** synced（同期で変わった曲）は PC どうしの同期をしているときだけ出す */
+export const NX_FILTERS: readonly NxFilter[] = ['missing', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
 
 /** BOX のしぼりこみ：null はすべて、'' は BOX の外、ほかは BOX の鍵 */
 export interface NxQuery {
@@ -15,6 +16,8 @@ export interface NxQuery {
   filter: NxFilter | null;
   /** 曲の id → 保存していない続きのある譜面 */
   drafts: Readonly<Record<string, readonly string[]>>;
+  /** 同期で変わった曲（場所の鍵:曲のフォルダの並び。src/sync/store.ts の syncedSongs） */
+  synced?: ReadonlySet<string>;
 }
 
 export const SLOT_LABEL: Record<SlotKey, string> = { BSC: 'BASIC', ADV: 'ADVANCED', EXT: 'EXTREME', MAS: 'MASTER' };
@@ -64,7 +67,7 @@ export function warnCount(s: LibSong): number {
   return s.checks.filter((c) => checkLevel(c.kind) === 'warn').length;
 }
 
-export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts']): boolean {
+export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts'], synced?: NxQuery['synced']): boolean {
   switch (f) {
     case 'missing':
       return addableSlots(s).length > 0;
@@ -73,7 +76,10 @@ export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts']): b
     case 'ai':
       return s.charts.some((c) => c.head.ai);
     case 'drive':
-      return s.drive?.state === 'linked';
+      // 成績だけ合わせている曲（PC どうしの同期）は入れない
+      return s.drive?.state === 'linked' && !s.drive.play;
+    case 'synced':
+      return !!synced?.has(`${s.root}:${s.path.join('/')}`);
     case 'draft':
       return (drafts[s.id]?.length ?? 0) > 0;
     case 'checks':
@@ -132,7 +138,7 @@ export function compareSongs(sort: NxSort): (a: LibSong, b: LibSong) => number {
 }
 
 export function viewSongs(songs: readonly LibSong[], o: NxQuery): LibSong[] {
-  return songs.filter((s) => inBox(s, o.box) && (!o.filter || hasFilter(s, o.filter, o.drafts)) && matchQuery(s, o.q)).sort(compareSongs(o.sort));
+  return songs.filter((s) => inBox(s, o.box) && (!o.filter || hasFilter(s, o.filter, o.drafts, o.synced)) && matchQuery(s, o.q)).sort(compareSongs(o.sort));
 }
 
 /** BOX ごとの曲の数（中の BOX の曲も数える）。'' は BOX の外 */
@@ -145,9 +151,9 @@ export function boxCounts(songs: readonly LibSong[]): Map<string, number> {
   return m;
 }
 
-export function filterCounts(songs: readonly LibSong[], drafts: NxQuery['drafts']): Record<NxFilter, number> {
+export function filterCounts(songs: readonly LibSong[], drafts: NxQuery['drafts'], synced?: NxQuery['synced']): Record<NxFilter, number> {
   const out = Object.fromEntries(NX_FILTERS.map((f) => [f, 0])) as Record<NxFilter, number>;
-  for (const s of songs) for (const f of NX_FILTERS) if (hasFilter(s, f, drafts)) out[f]++;
+  for (const s of songs) for (const f of NX_FILTERS) if (hasFilter(s, f, drafts, synced)) out[f]++;
   return out;
 }
 
@@ -307,6 +313,8 @@ export function levelText(level: number | null): string {
 /** 大きさ（「412 MB」「1.3 GB」） */
 export function bytesText(n: number): string {
   if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
-  if (n >= 1 << 20) return `${Math.round(n / (1 << 20))} MB`;
-  return `${Math.max(1, Math.round(n / 1024))} KB`;
+  // 10 MB より小さいときは小数 1 けた（空きと大きさを比べるとき、丸めで同じに見えないように）
+  if (n >= 1 << 20) return n < 10 * (1 << 20) ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.round(n / (1 << 20))} MB`;
+  // 0 は 0 KB（中身があれば 1 KB より小さくても 1 KB）
+  return `${n > 0 ? Math.max(1, Math.round(n / 1024)) : 0} KB`;
 }

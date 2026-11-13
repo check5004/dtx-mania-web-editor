@@ -19,6 +19,8 @@ import { InstallCard } from './pwa/InstallCard';
 import { LogoMark } from './LogoMark';
 import { HomeLinks } from './HomeLinks';
 import { NxHomeCard } from './nxlib/NxHomeCard';
+import { SyncChip } from './sync/parts';
+import { PcSyncBanner } from './sync/home';
 
 function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
@@ -161,6 +163,7 @@ function HomeDesktop() {
         </span>
         <span className="lbl hide-narrow">{tr('DTXMania 向けのドラム譜面エディタ', 'Drum chart editor for DTXMania')}</span>
         <span className="grow" />
+        <SyncChip />
         <LangSwitch small />
         {hasDoc && (
           <button className="btn small" onClick={() => useEditor.setState({ screen: 'editor' })}>
@@ -170,6 +173,7 @@ function HomeDesktop() {
       </header>
       <main className="home-main">
         <SafariNotice />
+        <PcSyncBanner />
         <div>
           <h1>{tr('新しい譜面をつくる・続きを編集する', 'Start a new chart or continue editing')}</h1>
           <p className="lbl" style={{ fontSize: 12.5 }}>

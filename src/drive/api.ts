@@ -6,7 +6,7 @@ import { tr } from '../i18n';
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 export const FOLDER_MIME = 'application/vnd.google-apps.folder';
-const FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,appProperties,description,trashed';
+const FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,appProperties,description,trashed,parents';
 const SMALL = 5 * 1024 * 1024;
 
 export interface DriveFile {
@@ -19,6 +19,7 @@ export interface DriveFile {
   appProperties?: Record<string, string>;
   description?: string;
   trashed?: boolean;
+  parents?: string[];
 }
 
 export class DriveError extends Error {
@@ -155,7 +156,7 @@ export async function createFolder(name: string, parent: string | null, extra: {
   });
 }
 
-export async function updateMeta(id: string, meta: Partial<Pick<DriveFile, 'name' | 'description' | 'appProperties'>>): Promise<DriveFile> {
+export async function updateMeta(id: string, meta: Partial<Pick<DriveFile, 'name' | 'description' | 'appProperties' | 'modifiedTime'>>): Promise<DriveFile> {
   return json<DriveFile>(`${API}/files/${encodeURIComponent(id)}?fields=${FIELDS}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
@@ -169,6 +170,56 @@ export async function trashFile(id: string): Promise<void> {
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify({ trashed: true }),
   });
+}
+
+/** Drive の中で写す（落とさずに。控えを作るとき） */
+export async function copyFile(id: string, meta: { name: string; parents: string[]; appProperties?: Record<string, string> }): Promise<DriveFile> {
+  return json<DriveFile>(`${API}/files/${encodeURIComponent(id)}/copy?fields=${FIELDS}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify(meta),
+  });
+}
+
+/** 別のフォルダへ動かす（名前も変えられる） */
+export async function moveFile(id: string, to: string, from: readonly string[], name?: string): Promise<DriveFile> {
+  const p = new URLSearchParams({ addParents: to, fields: FIELDS });
+  const rm = from.filter((x) => x !== to);
+  if (rm.length) p.set('removeParents', rm.join(','));
+  return json<DriveFile>(`${API}/files/${encodeURIComponent(id)}?${p}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify(name ? { name } : {}),
+  });
+}
+
+// ---- 変わった物だけを聞く（changes） ----------------------------------------------------
+
+export interface DriveChange {
+  fileId: string;
+  removed?: boolean;
+  file?: DriveFile;
+}
+
+/** 今からの変化を聞くための印 */
+export async function startPageToken(): Promise<string> {
+  const j = await json<{ startPageToken?: string }>(`${API}/changes/startPageToken`);
+  if (!j.startPageToken) throw new DriveError('no startPageToken', 0);
+  return j.startPageToken;
+}
+
+/** 印のあとに変わったファイル（このアプリが見られる物だけ）と、次の印 */
+export async function listChanges(token: string): Promise<{ changes: DriveChange[]; next: string }> {
+  const changes: DriveChange[] = [];
+  let page = token;
+  for (;;) {
+    const p = new URLSearchParams({ pageToken: page, pageSize: '1000', spaces: 'drive', includeRemoved: 'true', fields: `nextPageToken,newStartPageToken,changes(fileId,removed,file(${FIELDS}))` });
+    const j = await json<{ changes?: DriveChange[]; nextPageToken?: string; newStartPageToken?: string }>(`${API}/changes?${p}`);
+    changes.push(...(j.changes ?? []));
+    if (j.newStartPageToken) return { changes, next: j.newStartPageToken };
+    if (!j.nextPageToken) return { changes, next: page };
+    page = j.nextPageToken;
+  }
 }
 
 export function mimeOf(name: string): string {
@@ -201,6 +252,8 @@ export interface UploadOpts {
   parent?: string;
   data: Blob;
   appProperties?: Record<string, string>;
+  /** Drive に書く更新時刻（この PC でファイルを直した時刻。PC どうしでどちらが新しいかを比べる） */
+  modifiedTime?: string;
   /** 送ったバイト数（このファイルの中で） */
   onProgress?: (sent: number) => void;
 }
@@ -209,6 +262,7 @@ export interface UploadOpts {
 export async function upload(o: UploadOpts): Promise<DriveFile> {
   const meta: Record<string, unknown> = o.id ? {} : { name: o.name, ...(o.parent ? { parents: [o.parent] } : {}) };
   if (o.appProperties) meta.appProperties = o.appProperties;
+  if (o.modifiedTime) meta.modifiedTime = o.modifiedTime;
   const mime = mimeOf(o.name);
   if (o.data.size <= SMALL) {
     const boundary = `dtxe${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;

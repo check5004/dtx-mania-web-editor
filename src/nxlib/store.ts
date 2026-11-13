@@ -503,6 +503,32 @@ export async function refreshNxFolder(rootKey: string, rel: readonly string[]): 
   if (!scanning) void runChecks(run);
 }
 
+/** 1 曲のフォルダを一覧から外す（PC どうしの同期で、ほかの PC で消した曲を消した） */
+export async function dropNxFolder(rootKey: string, rel: readonly string[]): Promise<void> {
+  const prefix = songIdOf(rootKey, [...rel], 0).replace(/#0$/, '#');
+  const st = get();
+  if (!st.songs.some((s) => s.id.startsWith(prefix))) return;
+  const songs = st.songs.filter((s) => !s.id.startsWith(prefix));
+  set({ songs, ...(st.sel?.startsWith(prefix) ? { sel: null } : {}) });
+  await saveList({ at: st.at || Date.now(), songs, boxes: st.boxes, folders: st.folders });
+}
+
+/** 曲のフォルダの、一覧の場所の鍵と場所からの並び（一覧の場所の外なら null） */
+export async function nxPlaceOf(dir: FileSystemDirectoryHandle): Promise<{ root: string; path: string[] } | null> {
+  const place = get().place;
+  if (!place || !(await isGranted(place.root))) return null;
+  if (!rootDirs.size) await resolveRoots(place);
+  for (const [key, root] of rootDirs) {
+    try {
+      const rel = await root.resolve(dir);
+      if (rel) return { root: key, path: rel };
+    } catch {
+      // 見られない
+    }
+  }
+  return null;
+}
+
 /** 保存したフォルダが一覧の場所の中なら、その曲を読み直す（一覧に無ければ足す） */
 export async function noteSavedNxFolder(dir: FileSystemDirectoryHandle): Promise<boolean> {
   const place = get().place;

@@ -39,6 +39,9 @@ import { bumpLocal, initLocalSongs, refreshLocalSongs } from '../store/localSong
 import { chooseDialog, confirmDialog } from '../ui/dialogs';
 import { askDriveFirst } from '../ui/DriveFirstDialog';
 import { useNxLib } from '../nxlib/store';
+import { kindOf } from '../sync/kind';
+import { addSyncSong, onPcSyncReport, pcSyncPlace, syncSaved, syncTake, usePcSync } from '../sync/store';
+import type { RunReport } from '../sync/types';
 import { formatLevel } from '../ui/format';
 import { autosaveNow, autosaveSnapshot, confirmDiscard, moveToOwnSongFolder, openFolder, openRecent, recentIdFor, reopenFromFolder, save, setBeforeSave } from './fileActions';
 import { fewText } from './songPlace';
@@ -175,6 +178,12 @@ async function push(kind: PushKind): Promise<void> {
   const folder = ed().folder;
   const auth = useDriveAuth.getState();
   if (!folder?.dir || !auth.connected) return;
+  // PC どうしの同期で合わせる曲（DTXMania の曲の中）：保存したら同期で送る。自動保存は控えだけ
+  const pcPlace = kind === 'autosave' ? null : await pcSyncPlace(folder);
+  if (pcPlace) {
+    await pcPush(folder, pcPlace, kind);
+    return;
+  }
   if (kind === 'save' && !auth.onSave) return;
   if (kind === 'autosave' && (!auth.autosave || !folder.drive)) return;
   if (kind === 'save' && (await skipped(folder))) return;
@@ -201,6 +210,7 @@ async function push(kind: PushKind): Promise<void> {
       create: kind !== 'autosave',
       noVideo,
       quick: kind === 'autosave',
+      quickOnly: kind === 'autosave' && (await pcSyncPlace(folder)) !== null,
       resolve: kind === 'autosave' ? undefined : askConflict('push'),
       sameName: kind === 'autosave' ? undefined : askSameName,
       autosave: snap && ed().folder === folder ? { ...snap, savedAt: Date.now() } : null,
@@ -254,6 +264,69 @@ async function push(kind: PushKind): Promise<void> {
       });
     }
   }
+}
+
+// ---- PC どうしの同期で合わせる曲 -------------------------------------------------------
+
+/** 同期で書いた .dtxe-drive.json を、開いている曲のファイルの一覧に入れ直す（Drive の曲の id を読む） */
+async function relink(folder: SongFolder): Promise<DriveLink | null> {
+  if (!folder.dir) return null;
+  try {
+    const fh = await folder.dir.getFileHandle('.dtxe-drive.json');
+    const f = await fh.getFile();
+    folder.files.set('.dtxe-drive.json', { path: '.dtxe-drive.json', name: '.dtxe-drive.json', size: f.size, getFile: () => fh.getFile() });
+  } catch {
+    folder.files.delete('.dtxe-drive.json');
+  }
+  const link = await readLink(folder);
+  folder.drive = link?.folderId;
+  return link;
+}
+
+/** 保存した・「Google Drive にも保存する」：その曲だけ同期する */
+async function pcPush(folder: SongFolder, place: { root: string; path: string[] }, kind: PushKind) {
+  const waiting = pendingSignIn;
+  pendingSignIn = null;
+  if (waiting) await waiting;
+  if (!tokenValid()) {
+    set({ status: 'auth' });
+    return;
+  }
+  const title = currentInfo(folder)?.t.trim() || folder.name;
+  set({ status: 'busy', doing: 'up', error: '' });
+  let rep: RunReport | null;
+  if (kind === 'manual' && (await readDriveSkip(folder))) {
+    // 「同期しない」にしてあった曲を押して送る：同期に足す
+    await addSyncSong({ root: place.root, path: place.path, title });
+    rep = await syncSaved({ root: place.root, path: place.path, title });
+  } else rep = await syncSaved({ root: place.root, path: place.path, title });
+  await notePcReport(folder, rep, kind === 'manual');
+}
+
+/** 開いている曲の同期の結果を、エディタの Drive の印に映す（Drive の方が新しい譜面は「取り込む」を勧める） */
+async function notePcReport(folder: SongFolder, rep: RunReport | null, tell: boolean) {
+  if (ed().folder !== folder) return;
+  if (!rep) {
+    const st = usePcSync.getState();
+    set({ status: st.status === 'auth' ? 'auth' : 'error', error: st.error, doing: null });
+    return;
+  }
+  const link = await relink(folder);
+  const s = rep.songs[0];
+  const newer = (s?.wait ?? []).filter((p) => kindOf(p) === 'make');
+  set({ linked: !!link, status: s?.error ? 'error' : newer.length ? 'newer' : link ? 'ok' : 'none', error: s?.error ?? '', at: Date.now(), conflicts: [], newer, doing: null, skip: !link && (await readDriveSkip(folder)) });
+  if (newer.length) newerToast(newer);
+  if (tell && s && !s.error) toast(s.sent.length ? tr(`同期しました（${s.sent.length} 個送りました）`, `Synced (${s.sent.length} ${pl(s.sent.length, 'file')} sent)`) : tr('同期しました（Drive と同じでした）', 'Synced (already the same as Drive)'), 'ok', 4000);
+}
+
+/** 5 分ごとなどの同期で、開いている曲に Drive の新しい譜面があった：「取り込む」を勧める */
+export function notePcWaiting(paths: string[]) {
+  const make = paths.filter((p) => kindOf(p) === 'make');
+  if (!make.length) return;
+  const st = useDriveSync.getState();
+  if (st.status === 'newer' && st.newer.join('\n') === make.join('\n')) return;
+  set({ status: 'newer', newer: make });
+  newerToast(make);
 }
 
 // ---- 曲フォルダでない・ほかの曲が入っている -------------------------------------------
@@ -391,6 +464,20 @@ export function pullNow() {
 async function pullCurrent() {
   const folder = ed().folder;
   if (!folder?.dir) return;
+  const pcPlace = await pcSyncPlace(folder);
+  if (pcPlace) {
+    // PC どうしの同期で合わせる曲：同期で取り込む（成績はまとめ、両方で直した譜面は新しい方＋控え）
+    if (!(await confirmDiscard())) return;
+    const fileName = ed().meta.fileName;
+    set({ status: 'busy', doing: 'down', error: '' });
+    const rep = await syncTake({ ...pcPlace, title: currentInfo(folder)?.t.trim() || folder.name });
+    await notePcReport(folder, rep, false);
+    const s = rep?.songs[0];
+    const got = (s?.got.length ?? 0) + (s?.scoresGot.length ?? 0);
+    if (rep) toast(got ? tr(`同期で ${got} 個取り込みました`, `Got ${got} ${pl(got, 'file')} by syncing`) : tr('Google Drive と同じでした', 'Already the same as Google Drive'), 'ok', 4000);
+    if (s?.got.length && ed().folder === folder) await reopenFromFolder(folder, fileName);
+    return;
+  }
   const link = await readLink(folder);
   if (!link) return;
   if (!(await confirmDiscard())) return;
@@ -725,7 +812,10 @@ async function onFolder(folder: SongFolder | null) {
   set({ linked: true, status: busy ? 'busy' : 'ok', at: link.syncedAt, conflicts: [], newer: [], junk: [], error: '', skip: false });
   if (!useDriveAuth.getState().connected || !tokenValid() || busy || Date.now() - (synced.get(link.folderId) ?? 0) < 30_000) return;
   try {
-    const { newer, junk } = await remoteChanges(folder, link);
+    const r = await remoteChanges(folder, link);
+    const { junk } = r;
+    // PC どうしの同期で合わせる曲は、成績（score.ini・ghost）は同期が合わせるので、譜面・音だけ知らせる
+    const newer = (await pcSyncPlace(folder)) ? r.newer.filter((p) => kindOf(p) === 'make') : r.newer;
     if (ed().folder !== folder) return;
     noteJunk(folder, junk);
     if (!newer.length) return;
@@ -762,12 +852,31 @@ export function initDrive(): () => void {
     if (document.visibilityState === 'hidden') flushAutosave();
   };
   document.addEventListener('visibilitychange', onHide);
+  // PC どうしの同期（開いたとき・5 分ごと）で、開いている曲に Drive の新しい譜面があった：「取り込む」を勧める
+  const b = onPcSyncReport((rep, o) => {
+    if (o.why === 'save' || o.take || !rep.songs.length) return;
+    void notePcRun(rep);
+  });
   return () => {
     a();
+    b();
     document.removeEventListener('visibilitychange', onHide);
     setBeforeSave(null);
     started = false;
   };
+}
+
+/** 同期の結果のうち、開いている曲の分をエディタの Drive の印に映す */
+async function notePcRun(rep: RunReport) {
+  const folder = ed().folder;
+  const place = await pcSyncPlace(folder);
+  if (!folder || !place) return;
+  const same = (p?: string[]) => !!p && p.length === place.path.length && p.every((x, i) => x.toLowerCase() === place.path[i].toLowerCase());
+  const s = rep.songs.find((x) => x.root === place.root && same(x.path));
+  if (!s) return;
+  const wait = s.wait.filter((p) => kindOf(p) === 'make');
+  if (wait.length) notePcWaiting(wait);
+  else if (s.got.length || s.scoresGot.length || s.sent.length) await notePcReport(folder, { ...rep, songs: [s] }, false);
 }
 
 async function continueAfterRedirect(r: Resume) {

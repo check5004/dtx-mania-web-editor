@@ -6,6 +6,7 @@ import { canRedirect, loadGis, setPrefs, signOut, useDriveAuth } from '../drive/
 import { confirmDialog } from './dialogs';
 import { Icon } from './icons';
 import { sizeText } from './LocalStorage';
+import { PcSyncSettingsCard } from './sync/home';
 
 /** ホームの「データはどこに置くか」の一行（Drive につないでいれば、そう書く） */
 export function PrivacyLine() {
@@ -136,6 +137,7 @@ export function DriveSettings() {
           )}
         </p>
       </section>
+      <PcSyncSettingsCard />
       {a.connected && (
         <section className="card">
           <h3>{tr('Drive の曲を点検する', 'Check the songs on Drive')}</h3>

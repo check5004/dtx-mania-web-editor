@@ -23,14 +23,33 @@ export class FakeDrive {
   private seq = 0;
   private clock = Date.parse('2026-11-07T00:00:00Z');
   private sessions = new Map<string, { id?: string; meta: Record<string, unknown>; size: number }>();
+  /** 変わったファイルの id（changes の印は、この並びの長さ） */
+  changeLog: string[] = [];
+
+  /** clock を渡すと、その時計で時刻を付ける（PC の時計と合わせる試験） */
+  constructor(private readonly clockFn?: () => number) {}
 
   private now() {
+    if (this.clockFn) return new Date(this.clockFn()).toISOString();
     this.clock += 1000;
     return new Date(this.clock).toISOString();
   }
 
+  private touch(id: string) {
+    this.changeLog.push(id);
+  }
+
+  /** 自分か、上のフォルダのどれかがゴミ箱にある */
+  inTrash(f: FakeFile): boolean {
+    for (let x: FakeFile | undefined = f, n = 0; x && n < 64; n++) {
+      if (x.trashed) return true;
+      x = x.parents[0] ? this.files.get(x.parents[0]) : undefined;
+    }
+    return false;
+  }
+
   private meta(f: FakeFile) {
-    const out: Record<string, unknown> = { id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime, trashed: !!f.trashed };
+    const out: Record<string, unknown> = { id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime, trashed: this.inTrash(f), parents: [...f.parents] };
     if (f.appProperties) out.appProperties = f.appProperties;
     if (f.description !== undefined) out.description = f.description;
     if (f.content) {
@@ -41,22 +60,46 @@ export class FakeDrive {
   }
 
   /** 別の端末が Drive のファイルを書き換えたことにする */
-  setContent(id: string, content: Uint8Array) {
+  setContent(id: string, content: Uint8Array, modifiedTime?: string) {
     const f = this.files.get(id)!;
     f.content = content;
-    f.modifiedTime = this.now();
+    f.modifiedTime = modifiedTime ?? this.now();
+    this.touch(id);
   }
 
   add(f: Partial<FakeFile> & { name: string; parents: string[] }): FakeFile {
-    const file: FakeFile = { id: `f${++this.seq}`, mimeType: f.content ? 'application/octet-stream' : FOLDER, modifiedTime: this.now(), ...f };
+    const file: FakeFile = { id: `f${++this.seq}`, mimeType: f.content ? 'application/octet-stream' : FOLDER, ...f, modifiedTime: f.modifiedTime ?? this.now() };
     this.files.set(file.id, file);
+    this.touch(file.id);
     return file;
+  }
+
+  /** ゴミ箱に移す（別の PC が消したことにする） */
+  trash(id: string) {
+    this.files.get(id)!.trashed = true;
+    this.touch(id);
   }
 
   /** パス（親の名前をたどる）→ ファイル */
   byPath(path: string): FakeFile | undefined {
-    for (const f of this.files.values()) if (!f.trashed && this.pathOf(f) === path) return f;
+    for (const f of this.files.values()) if (!this.inTrash(f) && this.pathOf(f) === path) return f;
     return undefined;
+  }
+
+  /** フォルダの中のファイルのパス（ゴミ箱の物は除く。試験で中身を見る） */
+  tree(prefix: string): string[] {
+    const out: string[] = [];
+    for (const f of this.files.values()) {
+      if (f.mimeType === FOLDER || this.inTrash(f)) continue;
+      const p = this.pathOf(f);
+      if (p.startsWith(`${prefix}/`)) out.push(p.slice(prefix.length + 1));
+    }
+    return out.sort();
+  }
+
+  text(path: string): string | undefined {
+    const f = this.byPath(path);
+    return f?.content ? new TextDecoder().decode(f.content) : undefined;
   }
 
   pathOf(f: FakeFile): string {
@@ -78,12 +121,23 @@ export class FakeDrive {
   }
 
   private query(q: string): FakeFile[] {
-    const all = [...this.files.values()];
-    let m = /^'([^']+)' in parents and trashed = false$/.exec(q);
-    if (m) return all.filter((f) => f.parents.includes(m![1]) && !f.trashed);
-    m = /^appProperties has \{ key='(\w+)' and value='(\w+)' \} and mimeType = '([^']+)' and trashed = false$/.exec(q);
-    if (m) return all.filter((f) => f.appProperties?.[m![1]] === m![2] && f.mimeType === m![3] && !f.trashed);
-    throw new Error(`fake Drive: unknown query: ${q}`);
+    let rest = q;
+    const tests: ((f: FakeFile) => boolean)[] = [];
+    const take = (re: RegExp, fn: (m: RegExpExecArray) => (f: FakeFile) => boolean) => {
+      for (;;) {
+        const m = re.exec(rest);
+        if (!m) return;
+        tests.push(fn(m));
+        rest = rest.slice(0, m.index) + rest.slice(m.index + m[0].length);
+      }
+    };
+    take(/'([^']+)' in parents/, (m) => (f) => f.parents.includes(m[1]));
+    take(/appProperties has \{ key='(\w+)' and value='(\w+)' \}/, (m) => (f) => f.appProperties?.[m[1]] === m[2]);
+    take(/mimeType = '([^']+)'/, (m) => (f) => f.mimeType === m[1]);
+    take(/name = '([^']+)'/, (m) => (f) => f.name === m[1]);
+    take(/trashed = false/, () => (f) => !this.inTrash(f));
+    if (rest.replace(/\s|and/g, '')) throw new Error(`fake Drive: unknown query: ${q}`);
+    return [...this.files.values()].filter((f) => tests.every((t) => t(f)));
   }
 
   private async bytes(body: unknown): Promise<Uint8Array> {
@@ -108,15 +162,17 @@ export class FakeDrive {
   }
 
   private write(id: string | undefined, meta: Record<string, unknown>, content: Uint8Array): FakeFile {
+    const mt = typeof meta.modifiedTime === 'string' ? meta.modifiedTime : undefined;
     if (id) {
       const f = this.files.get(id);
       if (!f || f.trashed) throw new Error('404');
       f.content = content;
-      f.modifiedTime = this.now();
-      if (meta.appProperties) f.appProperties = meta.appProperties as Record<string, string>;
+      f.modifiedTime = mt ?? this.now();
+      if (meta.appProperties) f.appProperties = { ...f.appProperties, ...(meta.appProperties as Record<string, string>) };
+      this.touch(f.id);
       return f;
     }
-    return this.add({ name: String(meta.name), parents: (meta.parents as string[]) ?? [], content, mimeType: 'application/octet-stream', appProperties: meta.appProperties as Record<string, string> | undefined });
+    return this.add({ name: String(meta.name), parents: (meta.parents as string[]) ?? [], content, mimeType: 'application/octet-stream', appProperties: meta.appProperties as Record<string, string> | undefined, modifiedTime: mt });
   }
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
@@ -127,7 +183,13 @@ export class FakeDrive {
     // 再開できる送り方の送り先（upload_id 付き）は、ログインの印なしで送れる（Google と同じ）
     if (!url.searchParams.get('upload_id') && headers.Authorization !== `Bearer ${this.token}`) return this.json({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
     const path = url.pathname;
-    if (path === '/drive/v3/about') return this.json({ user: { emailAddress: 'tate@example.com', displayName: 'Tate' } });
+    if (path === '/drive/v3/about') return this.json({ user: { emailAddress: 'tate@example.com', displayName: 'Tate' }, storageQuota: { limit: String(15 * 2 ** 30), usage: String(2 ** 30) } });
+    if (path === '/drive/v3/changes/startPageToken') return this.json({ startPageToken: String(this.changeLog.length) });
+    if (path === '/drive/v3/changes') {
+      const from = Number(url.searchParams.get('pageToken'));
+      const ids = [...new Set(this.changeLog.slice(from))];
+      return this.json({ changes: ids.map((id) => ({ fileId: id, removed: !this.files.has(id), file: this.files.has(id) ? this.meta(this.files.get(id)!) : undefined })), newStartPageToken: String(this.changeLog.length) });
+    }
     if (path === '/drive/v3/files' && method === 'GET') {
       const list = this.query(url.searchParams.get('q') ?? '');
       return this.json({ files: list.map((f) => this.meta(f)) });
@@ -137,7 +199,15 @@ export class FakeDrive {
       const f = this.add({ name: String(meta.name), parents: (meta.parents as string[]) ?? ['root'], mimeType: String(meta.mimeType), appProperties: meta.appProperties as Record<string, string> | undefined, description: meta.description as string | undefined });
       return this.json(this.meta(f));
     }
-    let m = /^\/drive\/v3\/files\/([^/]+)$/.exec(path);
+    let m = /^\/drive\/v3\/files\/([^/]+)\/copy$/.exec(path);
+    if (m && method === 'POST') {
+      const src = this.files.get(decodeURIComponent(m[1]));
+      if (!src) return this.notFound();
+      const meta = JSON.parse(String(init.body)) as Record<string, unknown>;
+      const f = this.add({ name: String(meta.name ?? src.name), parents: (meta.parents as string[]) ?? src.parents, mimeType: src.mimeType, content: src.content, appProperties: (meta.appProperties as Record<string, string> | undefined) ?? src.appProperties });
+      return this.json(this.meta(f));
+    }
+    m = /^\/drive\/v3\/files\/([^/]+)$/.exec(path);
     if (m) {
       const f = this.files.get(decodeURIComponent(m[1]));
       if (!f) return this.notFound();
@@ -145,8 +215,13 @@ export class FakeDrive {
       if (method === 'GET') return this.json(this.meta(f));
       if (method === 'PATCH') {
         const meta = JSON.parse(String(init.body)) as Partial<FakeFile>;
+        const add = url.searchParams.get('addParents');
+        const rm = url.searchParams.get('removeParents');
+        if (add || rm) f.parents = [...f.parents.filter((p) => !(rm ?? '').split(',').includes(p)), ...(add && !f.parents.includes(add) ? [add] : [])];
+        const mt = meta.modifiedTime;
         Object.assign(f, meta);
-        f.modifiedTime = this.now();
+        f.modifiedTime = mt ?? this.now();
+        this.touch(f.id);
         return this.json(this.meta(f));
       }
     }

@@ -52,6 +52,8 @@ export interface LibDrive {
   bytes: number;
   /** 動画を除いて送っている */
   noVideo?: boolean;
+  /** PC どうしの同期で、成績だけ合わせている（譜面・音は送っていない） */
+  play?: boolean;
 }
 
 export interface LibSong {
@@ -307,10 +309,10 @@ async function readDrive(files: ReadonlyMap<string, FileSystemFileHandle>): Prom
   const fh = files.get(LINK_NAME);
   if (!fh) return null;
   try {
-    const j = JSON.parse(await (await fh.getFile()).text()) as { folderId?: string; skip?: boolean; noVideo?: boolean; files?: Record<string, { size?: number }> };
+    const j = JSON.parse(await (await fh.getFile()).text()) as { folderId?: string; skip?: boolean; noVideo?: boolean; play?: boolean; files?: Record<string, { size?: number }> };
     if (typeof j.folderId === 'string' && j.folderId) {
       const bytes = Object.values(j.files ?? {}).reduce((a, f) => a + (Number(f?.size) || 0), 0);
-      return { state: 'linked', bytes, ...(j.noVideo ? { noVideo: true } : {}) };
+      return { state: 'linked', bytes, ...(j.noVideo ? { noVideo: true } : {}), ...(j.play === true ? { play: true } : {}) };
     }
     if (j.skip) return { state: 'skip', bytes: 0 };
   } catch {

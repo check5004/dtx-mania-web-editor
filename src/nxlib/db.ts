@@ -71,6 +71,16 @@ export function saveList(l: NxList): Promise<void> {
   return put({ id: 'list', ...l });
 }
 
+/** ほかの物（PC どうしの同期の記録 sync:state・sync:log など）。読めなければ null */
+export async function loadKv<T>(id: string): Promise<T | null> {
+  const r = await get<{ id: string; v: T }>(id);
+  return r && 'v' in r ? r.v : null;
+}
+
+export function saveKv<T>(id: string, v: T): Promise<void> {
+  return put({ id, v } as unknown as Rec);
+}
+
 const THUMB = 'thumb:';
 
 export async function loadThumbs(): Promise<Map<string, { sig: string; blob: Blob }>> {

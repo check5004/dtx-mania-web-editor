@@ -28,6 +28,36 @@ DTXMania の DTXFiles のように曲を集めたフォルダを曲フォルダ�
   - 全部送る／この曲は Drive に送らない（印を書く。次からも聞かない）／あとで（閉じる。次の保存でまた聞く）。
   - 空きが足りない送り方は選べない。自動保存（`kind: 'autosave'`）はつないでいない曲を作らないので聞かない。
 
+## PC どうしの同期（v0.54.0〜）
+
+作る PC と遊ぶ PC が別のとき、「DTXMania の曲」（`src/nxlib/`）で覚えたゲームの曲を、同じ Google アカウントの Drive で合わせる（[説明書](manual.md#pc-どうしの同期google-drive)）。上の「保存した曲だけ送る」とは別の道で、曲のフォルダの `.dtxe-drive.json` は同じ物を使う（どちらから送っても、つなぎの記録は 1 つ）。
+
+- Drive の置き方: 「DTX Web Editor/DTXFiles/<BOX のフォルダ>/<曲のフォルダ>」（`libPath`。DTXMania の曲と同じ並び。ゲームのフォルダを選んだときは DTXFiles の中から）。曲のフォルダに `appProperties.dtxe = 'song'`（iPad の「Drive から開く」でも見つかる）、成績だけの曲は `play = '1'`、ファイルに送った PC の名前 `dev`。「DTX Web Editor」の直下の曲（iPad・前の版）は、`importBox` の BOX へ取り、Drive でも動かす。
+- 控え: 両方で直したファイルの残さなかった方を「DTX Web Editor/控え/<日付>/<曲>/」へ（`dtxe = 'bak'`）。30 日より古い控えは片付ける。戻すのは `restoreBackup`（控えの版を新しい方として送る）。
+- PC の印: 「DTX Web Editor/.sync/<pcId>.json」（`dtxe = 'pc'`）を同期のたびに書き、その時刻で PC の時計と Drive の時計の差を測る（ずれていれば、両方で直したファイルの新しい方を決めずに聞く）。
+- 変化: Drive の changes で、ほかの PC が変えた曲だけ中を読み直す（この PC が書いた物は `mine` で除く）。設定が変わったとき（`settingsSig`）は全部読み直す。
+- 決め方（`planSong`、1 曲のファイルごと）: この PC の今・Drive の今・前に合わせたとき（`.dtxe-drive.json` の `files`）の 3 つで比べる。大きさと更新時刻が記録と同じならそのまま、違えば MD5。
+  - 片方だけ変わった → そちらへ合わせる。両方で変わった作るファイル → 新しく直した方（`keepLocal`・`keepRemote`）で、もう一方は控え。初めて合わせる曲で、この PC の版がほかの PC の作るファイルを置きかえるとき・時計がずれているときは聞く（`ask`）。
+  - 遊ぶファイル（`kindOf` が `play`：`*.score.ini`・`*.ghost`）は別の扱い。score.ini は `mergeScoreIni`（回数は前にまとめた成績 `scores` から増えた分を足す。無ければ多い方。いい記録は良い方）、ゴーストはまとめた score.ini で良い方を選んだ側から。
+  - 消えた: 記録にあって片方で消えた → もう一方も消す（Drive はゴミ箱、PC は消す）。消えた側で直していたら戻す。一度にたくさん消えていたら消さずに戻す（`guardMass`）。成績は消さない。曲のフォルダごと消えたときは聞く。
+  - 開いている曲（エディタで開いている）は、この PC の作るファイルを書きかえない（`wait`。エディタで「取り込む」→ `syncTake`）。DTXMania が開いていて書けないファイルは `later`（次の同期で）。
+- いつ: アプリを開いたとき・開いている間 5 分ごと・曲を保存したとき（その曲だけ、`syncSaved`）・「今すぐ同期」（`syncNow`。押した操作の中でログインとフォルダの許可を聞く）。開いたとき・5 分ごとはログインの小窓を出せないので、切れていたら帯で知らせる。
+- 記録: 設定は localStorage `dtxe.pcsync`、状態（`SyncState`：Drive の曲の索引・changes の印・聞いたことの答え）と同期の記録（30 日）は IndexedDB。
+- 大きさ: 設定の画面で、合わせる曲の大きさを数え（`measureSongs`）、Drive の空き（`about.storageQuota`）と比べる。全部の曲が空きに入らなければ選べない。
+
+| 何 | どこ |
+| --- | --- |
+| 型・聞くこと・同期の結果 | `src/sync/types.ts` |
+| 作るファイル・遊ぶファイルの見分け | `src/sync/kind.ts` |
+| score.ini を読む・まとめる | `src/sync/scoreIni.ts` |
+| 1 曲のファイルをどうするか | `src/sync/plan.ts` |
+| 同期の本体（Drive の置き方・控え・PC の印・初めての比べ・実行） | `src/sync/engine.ts` |
+| いつ動かすか・状態・記録・設定 | `src/sync/store.ts` |
+| 画面（設定・容量の警告・初めての確認・記録・帯・一覧の印・曲の「同期」） | `src/ui/sync/`、`src/sync.css` |
+| エディタで開いている曲との行き来（「取り込む」） | `src/app/driveActions.ts` |
+
+試験: `src/sync/plan.test.ts`・`src/sync/scoreIni.test.ts`・`src/sync/engine.test.ts`（偽の Drive と、メモリの中のフォルダ `src/sync/memfs.testutil.ts` で 2 台・3 台の PC）。画面は、Playwright で 2 つのブラウザ（作る PC・遊ぶ PC。別々の OPFS に偽の DTXMania のフォルダ）と、Node の偽の Drive 1 つをつないで確かめた（初めての同期・成績の行き来・両方で直した譜面・容量の警告・ログイン切れ・開いている曲の「取り込む」）。
+
 ## コードの場所
 
 | 何 | どこ |

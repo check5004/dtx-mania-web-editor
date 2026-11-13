@@ -16,6 +16,9 @@ import { LangSwitch } from '../LangSwitch';
 import { LogoMark } from '../LogoMark';
 import { NxDetail, NxScanInfo } from './NxDetail';
 import { songPills, SlotChips, Thumb, updText } from './parts';
+import { songKey, syncedSongs, usePcSync } from '../../sync/store';
+import { recentChanges, scopeName, type RecentChange } from '../sync/common';
+import { SyncChip, SyncSideCard, syncedFolders, withSyncPills } from '../sync/parts';
 
 const ROW = 62;
 
@@ -28,7 +31,9 @@ export function filterName(f: NxFilter): string {
     case 'ai':
       return tr('AI で作った難易度あり', 'Has AI-made difficulties');
     case 'drive':
-      return tr('Google Drive にある', 'On Google Drive');
+      return usePcSync.getState().settings.on ? tr('同期する曲', 'Synced songs') : tr('Google Drive にある', 'On Google Drive');
+    case 'synced':
+      return tr('同期で変わった曲', 'Changed by sync');
     case 'draft':
       return tr('保存していない続き', 'Unsaved changes');
     case 'checks':
@@ -36,7 +41,19 @@ export function filterName(f: NxFilter): string {
   }
 }
 
-export const FILTER_COLOR: Record<NxFilter, string> = { missing: '#b78cff', edited: '#4cc2ff', ai: '#c9b3ff', drive: '#5bd69a', draft: '#ffc768', checks: '#ff9a5c' };
+export const FILTER_COLOR: Record<NxFilter, string> = { missing: '#b78cff', edited: '#4cc2ff', ai: '#c9b3ff', drive: '#5bd69a', synced: '#5fd4cf', draft: '#ffc768', checks: '#ff9a5c' };
+
+/** 出すしぼりこみ（「同期で変わった曲」は PC どうしの同期をしているときだけ） */
+export function shownFilters(syncOn: boolean): NxFilter[] {
+  return NX_FILTERS.filter((f) => f !== 'synced' || syncOn);
+}
+
+/** 同期で変わった曲（しぼりこみ・数） */
+export function useSyncedSet(): ReadonlySet<string> | undefined {
+  const on = usePcSync((s) => s.settings.on);
+  const log = usePcSync((s) => s.log);
+  return useMemo(() => (on ? syncedSongs(log) : undefined), [on, log]);
+}
 
 function sortName(s: NxSort): string {
   switch (s) {
@@ -64,7 +81,8 @@ function useView() {
   const box = useNxLib((s) => s.box);
   const filter = useNxLib((s) => s.filter);
   const drafts = useNxLib((s) => s.drafts);
-  return useMemo(() => viewSongs(songs, { q, sort, box, filter, drafts }), [songs, q, sort, box, filter, drafts]);
+  const synced = useSyncedSet();
+  return useMemo(() => viewSongs(songs, { q, sort, box, filter, drafts, synced }), [songs, q, sort, box, filter, drafts, synced]);
 }
 
 function permText(st: Pick<NxState, 'perm'>, atStart: boolean): string {
@@ -102,7 +120,7 @@ export function SongsPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (document.querySelector('.modal-back')) return;
+      if (document.querySelector('.modal-back, .ps-drawer-back')) return;
       const t = e.target as HTMLElement | null;
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
       const st = useNxLib.getState();
@@ -331,6 +349,7 @@ function NxTop() {
         </span>
       )}
       <span className="grow" />
+      <SyncChip />
       {place && (
         <button
           className="btn"
@@ -438,7 +457,10 @@ function NxTool({ searchRef, shown }: { searchRef: React.RefObject<HTMLInputElem
   const at = useNxLib((s) => s.at);
   const changed = useNxLib((s) => s.changed);
   const prevFolders = useNxLib((s) => s.folders);
-  const counts = useMemo(() => (filter ? filterCounts(songs, drafts) : null), [filter, songs, drafts]);
+  const synced = useSyncedSet();
+  const syncOn = usePcSync((s) => s.settings.on);
+  const counts = useMemo(() => (filter ? filterCounts(songs, drafts, synced) : null), [filter, songs, drafts, synced]);
+  const syncN = useMemo(() => (syncOn ? syncedFolders(songs).n : 0), [syncOn, songs]);
   const n = songs.length;
   const charts = useMemo(() => chartCount(songs), [songs]);
   const time = at ? new Date(at).toLocaleString(locale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
@@ -496,6 +518,7 @@ function NxTool({ searchRef, shown }: { searchRef: React.RefObject<HTMLInputElem
       ) : (
         <span className="lbl nx-count">
           {shown !== n ? tr(`${shown} 曲 / ${n} 曲`, `${shown} of ${n} songs`) : tr(`${n.toLocaleString()} 曲 · 譜面 ${charts.toLocaleString()}`, `${n.toLocaleString()} ${pl(n, 'song')} · ${charts.toLocaleString()} ${pl(charts, 'chart')}`)}
+          {syncOn && shown === n && tr(` · 同期する曲 ${syncN}`, ` · ${syncN} synced`)}
           {time && shown === n && tr(` · ${time} に読み込み`, ` · read ${time}`)}
           {changed > 0 && changed < n && shown === n && tr(`（変わった曲 ${changed} を読み直し）`, ` (${changed} changed ${pl(changed, 'song')} re-read)`)}
           {checking && tr(` · 点検中 ${checking.done}/${checking.total}`, ` · checking ${checking.done}/${checking.total}`)}
@@ -514,8 +537,10 @@ function NxSide() {
   const place = useNxLib((s) => s.place);
   const perm = useNxLib((s) => s.perm);
   const scan = useNxLib((s) => s.scan);
+  const syncOn = usePcSync((s) => s.settings.on);
+  const synced = useSyncedSet();
   const bc = useMemo(() => boxCounts(songs), [songs]);
-  const fc = useMemo(() => filterCounts(songs, drafts), [songs, drafts]);
+  const fc = useMemo(() => filterCounts(songs, drafts, synced), [songs, drafts, synced]);
   const outsideN = bc.get('') ?? 0;
   return (
     <nav className="nx-side scroll">
@@ -543,7 +568,7 @@ function NxSide() {
       <div className="nx-sh" style={{ marginTop: 6 }}>
         {tr('しぼりこみ', 'Filters')}
       </div>
-      {NX_FILTERS.map((f) => (
+      {shownFilters(syncOn).map((f) => (
         <button
           key={f}
           className={`nx-si ${filter === f ? 'on' : ''}`}
@@ -555,6 +580,7 @@ function NxSide() {
           <span className="n">{scan?.first ? '—' : fc[f]}</span>
         </button>
       ))}
+      <SyncSideCard />
       {place && (
         <div className="nx-where">
           <div className="h">
@@ -590,6 +616,9 @@ function SongRows({ list, skeleton, issues }: { list: LibSong[]; skeleton: numbe
   const sel = useNxLib((s) => s.sel);
   const thumbs = useNxLib((s) => s.thumbs);
   const drafts = useNxLib((s) => s.drafts);
+  const syncOn = usePcSync((s) => s.settings.on);
+  const log = usePcSync((s) => s.log);
+  const changes = useMemo(() => (syncOn ? recentChanges(log) : null), [syncOn, log]);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -613,7 +642,7 @@ function SongRows({ list, skeleton, issues }: { list: LibSong[]; skeleton: numbe
     <div className="nx-rows scroll" ref={ref} onScroll={(e) => setTop(e.currentTarget.scrollTop)} role="listbox" aria-label={tr('曲の一覧', 'Song list')}>
       <div style={{ height: (list.length + skeleton) * ROW, position: 'relative' }}>
         {list.slice(start, end).map((s, i) => (
-          <SongRow key={s.id} s={s} y={(start + i) * ROW} on={s.id === sel} thumb={thumbs[s.id]} draft={(drafts[s.id]?.length ?? 0) > 0} issues={issues} />
+          <SongRow key={s.id} s={s} y={(start + i) * ROW} on={s.id === sel} thumb={thumbs[s.id]} draft={(drafts[s.id]?.length ?? 0) > 0} issues={issues} sync={changes ? { change: changes.get(songKey(s)) } : undefined} />
         ))}
         {Array.from({ length: skeleton }, (_, i) => (
           <div key={`sk${i}`} className="nx-row skel" style={{ top: (list.length + i) * ROW }} aria-hidden="true">
@@ -634,8 +663,8 @@ function SongRows({ list, skeleton, issues }: { list: LibSong[]; skeleton: numbe
   );
 }
 
-function SongRow({ s, y, on, thumb, draft, issues }: { s: LibSong; y: number; on: boolean; thumb?: string; draft: boolean; issues: boolean }) {
-  const pills = songPills(s, draft, issues);
+function SongRow({ s, y, on, thumb, draft, issues, sync }: { s: LibSong; y: number; on: boolean; thumb?: string; draft: boolean; issues: boolean; sync?: { change?: RecentChange } }) {
+  const pills = sync && !issues ? withSyncPills(songPills(s, draft, issues), s, sync.change) : songPills(s, draft, issues);
   const more = s.charts.filter((c) => !c.slot).length;
   return (
     <div
@@ -653,6 +682,7 @@ function SongRow({ s, y, on, thumb, draft, issues }: { s: LibSong; y: number; on
           <span className="name">{s.title || tr('曲名なし', 'Untitled')}</span>
           {pills.map((p, i) => (
             <span key={i} className={`nx-pill ${p.k}`} title={p.title}>
+              {p.icon === 'cloud' ? Icon.cloud(10) : p.icon === 'down' ? Icon.arrowDown(10) : null}
               {p.label}
             </span>
           ))}
@@ -697,8 +727,12 @@ function NxFoot() {
       live = false;
     };
   }, [connected]);
-  const linked = songs.filter((s) => s.drive?.state === 'linked');
+  const syncOn = usePcSync((s) => s.settings.on);
+  const syncPc = usePcSync((s) => s.settings.pc);
+  const syncScope = usePcSync((s) => s.settings.scope);
+  const linked = songs.filter((s) => s.drive?.state === 'linked' && !s.drive.play);
   const bytes = linked.reduce((a, s) => a + (s.drive?.bytes ?? 0), 0);
+  const synced = useMemo(() => syncedFolders(songs), [songs]);
   return (
     <footer className="nx-statusbar">
       {place && (
@@ -713,6 +747,13 @@ function NxFoot() {
         Google Drive{tr('：', ': ')}
         {scan?.first ? (
           <b>{tr('読み込みでは何も送りません', 'nothing is sent while reading')}</b>
+        ) : connected && syncOn ? (
+          <>
+            <b>{tr('PC どうしで同期', 'synced between PCs')}</b>
+            {syncPc && tr(`（${syncPc}）`, ` (${syncPc})`)}
+            {tr(` · ${scopeName({ scope: syncScope })} ${synced.n}（${bytesText(synced.bytes)}）`, ` · ${scopeName({ scope: syncScope })}: ${synced.n} (${bytesText(synced.bytes)})`)}
+            {free !== null && tr(` · 空き ${bytesText(Math.max(0, free))}`, ` · ${bytesText(Math.max(0, free))} free`)}
+          </>
         ) : connected ? (
           <>
             <b>{tr('保存した曲だけ送る', 'only songs you save are sent')}</b>

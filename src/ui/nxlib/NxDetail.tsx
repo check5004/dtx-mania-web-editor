@@ -12,6 +12,8 @@ import { addableSlots, bytesText, bpmText, canOpen, chartIn, levelText, setDefFo
 import { AuditionButton, AuditionProgress } from '../Audition';
 import { Icon } from '../icons';
 import { SLOT_COLOR, Thumb } from './parts';
+import { usePcSync } from '../../sync/store';
+import { SyncSongSection } from '../sync/parts';
 
 const SLOT_TO: Record<SlotKey, Slot> = { BSC: 'BASIC', ADV: 'ADVANCED', EXT: 'EXTREME', MAS: 'MASTER' };
 
@@ -36,6 +38,7 @@ export function NxDetail({ s }: { s: LibSong }) {
   const songs = useNxLib((st) => st.songs);
   const place = useNxLib((st) => st.place);
   const driveOn = useDriveAuth((a) => a.connected);
+  const syncOn = usePcSync((st) => st.settings.on);
   const [big, setBig] = useState<string | null>(null);
 
   // 大きい画像（許可があるときだけ。無ければ小さい画像）
@@ -170,6 +173,8 @@ export function NxDetail({ s }: { s: LibSong }) {
         </div>
       )}
 
+      {syncOn && <SyncSongSection s={s} />}
+
       <div className="nx-info">
         <div className="k">
           <span>{tr('フォルダ', 'Folder')}</span>
@@ -202,7 +207,8 @@ export function NxDetail({ s }: { s: LibSong }) {
                 : tr('まだ開いていません（作業ファイルなし）', 'Not opened yet (no work file)')}
           </div>
         </div>
-        <div className="k">
+        {/* PC どうしの同期をしているときは、上の「同期」に出す */}
+        <div className="k" hidden={syncOn}>
           <span>Drive</span>
           <div className="v">
             {s.drive?.state === 'linked' ? (
