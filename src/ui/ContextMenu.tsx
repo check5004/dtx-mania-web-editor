@@ -746,11 +746,17 @@ function FxSubmenu({ ids }: { ids: number[] }) {
       const m = menuEl.getBoundingClientRect();
       const r = r0.getBoundingClientRect();
       const f = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
       let left = m.right + 4;
-      if (left + f.width > window.innerWidth - 8) left = m.left - 4 - f.width;
-      if (left < 8) left = Math.max(8, window.innerWidth - 8 - f.width);
+      if (left + f.width > vw - 8) left = m.left - 4 - f.width;
       let top = r.top - 6;
-      if (top + f.height > window.innerHeight - 8) top = window.innerHeight - 8 - f.height;
+      if (left < 8) {
+        // 左右どちらにも入らない（iPad mini の縦・スマホなど）：メニューに重ねるが、行の下（入らなければ上）に出して
+        // 押した行は隠さない（指はもう一度押して閉じるので、行が小メニューの下に隠れると閉じられない）
+        left = Math.max(8, Math.min(m.left, vw - 8 - f.width));
+        top = r.bottom + 4 + f.height <= vh - 8 ? r.bottom + 4 : r.top - 4 - f.height;
+      } else if (top + f.height > vh - 8) top = vh - 8 - f.height;
       if (top < 8) top = 8;
       setAt((cur) => (cur && cur.left === left && cur.top === top ? cur : { left, top }));
     };
