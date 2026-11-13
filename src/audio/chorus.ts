@@ -1,14 +1,17 @@
 // サビを探す（曲情報の「サビから試聴を作る」）。
-// 1. 小節ごとに聞こえ方をまとめる：拍ごとの和音（クロマ）と音色（帯域ごとの音量）。features.ts の特徴から。
-// 2. 小節どうしの近さから曲を部分に分け、同じに聞こえる部分に同じ印を付ける
+// 1. 小節線を音の打点に合わせる（gridOffset。小節を 4 等分した所の立ち上がりがいちばん強くなるずらし、±80ms まで）。
+//    譜面の小節線や、テンポ推定の 1 小節目の頭は数 ms〜数十 ms ずれることがあり、ずれたままだと小節の特徴が揺れて答えが変わる。
+// 2. 小節ごとに聞こえ方をまとめる：拍ごとの和音（クロマ）と音色（帯域ごとの音量）、ドラムの形（16 分ごとの低・中・高の立ち上がり）。
+//    フレームは小節に重なっている割合で数える（小節線が少しずれても特徴が少ししか変わらない）。features.ts の特徴から。
+// 3. 小節どうしの近さから曲を部分に分け、同じに聞こえる部分に同じ印を付ける
 //    （McFee & Ellis 2014「Analyzing song structure with spectral clustering」を小節の単位で。繰り返しのつながりと隣の小節のつながりを
-//    合わせたグラフのラプラシアンの固有ベクトルを k-means で分ける）。分け方の細かさ（印の数 4〜6）を変えて 3 回やり、多い答えにする。
-// 3. 印ごとに「盛り上がり（1.3〜5 kHz の明るさと音量）・繰り返しの数・1 回の長さ」から点を出し、前奏・後奏だけの印は下げる。
-//    いちばんの印の、前奏の後の最初の所をサビにする。
-// 4. 選んだ所が 16 小節より長ければ、前の部分（Bメロ）とくっついていないか、細かく分けた印で見直す（後ろの方が盛り上がっていれば後ろから）。
-// 5. 始まりは、分け目の 1 小節前〜3 小節後で、小節の頭がいちばん強く叩かれている所（クラッシュとキック）に直す
-//    （分け目は前の部分の終わりのフィルを含んで 1〜2 小節早くなりやすい）。
-// 作者が作った試聴（DTXMania の曲 6 曲の pre.ogg）の位置で確かめた（4 曲は小節までぴったり、2 曲は 1 小節ずれ）。
+//    合わせたグラフのラプラシアンの固有ベクトルを k-means で分ける）。つながりの濃さ（3 通り）と印の数（4〜8）を変えて最大 15 回分ける。
+// 4. 分け方ごとに、印の点「盛り上がり（1.3〜5 kHz の明るさと音量）・繰り返しの数・1 回の長さ、前奏・後奏だけの印は下げる」で
+//    いちばんの印を選ぶ。いちばんの印の小節を、ほかの分け方とよく重なる分け方どうしで多数決し、半分より多くがサビにした所をサビの所にする。
+//    前奏の後の最初の所がサビ。1 回の分け方で決めると、小節線が数 ms ずれただけで別の部分（Aメロ・間奏）を選ぶことがあった。
+// 5. 始まりは、分け目の 1 小節前〜1 小節後で直す：小節の頭の叩かれ方・前の小節が曲の中で 1 回きり（サビの前のフィル・きっかけ）か・
+//    サビのドラムの形がその小節から始まるか（分け目はサビの前のフィルの小節を含んで 1 小節早くなりやすい）。
+// 作者が作った試聴（DTXMania の曲 6 曲の pre.ogg）の位置と、README のデモ曲で確かめた（7 曲とも小節までぴったり。小節線を ±60ms ずらしても同じ）。
 // 小節は譜面の小節線（音に合っていれば）。合っていなければ音から拍を追って 4 拍ごとに区切る（estimateBars）。
 // 画面の外（テスト・ワーカー）でも動くよう、DOM を使わない。
 import { estimateTempo, trackBeats } from './analysis';
@@ -30,12 +33,12 @@ export interface ChorusPart {
   end: number;
   /** 同じに聞こえる部分は同じ番号 */
   label: number;
-  /** サビの印か */
+  /** サビの所か */
   chorus: boolean;
 }
 
 export interface ChorusPick {
-  /** 曲の音の秒 */
+  /** 曲の音の秒（bars の小節の頭。打点に合わせたずれは足さない） */
   start: number;
   end: number;
   /** bars の何番目の小節から始まるか */
@@ -50,14 +53,17 @@ export interface ChorusResult {
   repeats: ChorusPick[];
   /** ほかの候補（違う部分。よい順に最大 2 つ） */
   others: ChorusPick[];
-  /** 曲の部分（色分けして見せる。サビの印の所は chorus） */
+  /** 曲の部分（色分けして見せる。サビの所は chorus） */
   parts: ChorusPart[];
 }
 
-/** 決めた値（6 曲で確かめた） */
+/** 決めた値（6 曲とデモ曲で確かめた） */
 export const CHORUS = {
-  /** 印の数（分け方の細かさ）。それぞれで選び、多い答えにする */
-  ks: [4, 5, 6],
+  /** 印の数（分け方の細かさ） */
+  ks: [4, 5, 6, 7, 8],
+  /** つながりの濃さ：小節ごとに、互いに近い小節を n/16・n/12・n/9 個（n は小節の数。2 個より少なくしない） */
+  neighborDivs: [16, 12, 9],
+  neighborMin: 2,
   /** 盛り上がりの重み：明るさ（4 dB で 1）と音量（3 dB で 1） */
   bright: 1,
   loud: 0.5,
@@ -69,12 +75,16 @@ export const CHORUS = {
   edge: 1,
   /** 前奏とみなす長さ（秒。曲の 10% より短ければ 10%） */
   introSec: 20,
-  /** 始まりを直すとき、元の分け目から 1 小節離れるごとに引く値と、直すのに要る強さ（log2 の比） */
-  shift: 0.15,
-  accentMin: 0.6,
-  /** サビの部分がこれより長ければ（小節）、前後の部分とくっついていないか細かい印（fine）で見直す */
-  longBars: 16,
-  fine: [7, 8],
+  /** 小節線を打点に合わせるとき、探すずれの幅（秒） */
+  gridSearch: 0.08,
+  /** 始まりを直すときの重み：頭の叩かれ方（log2 の比）・前の小節が 1 回きりか・サビのドラムの形が始まるか・元の分け目から 1 小節離れるごとに引く値 */
+  startAccent: 0.15,
+  startUnique: 1,
+  startGroove: 3,
+  startShift: 0.05,
+  /** サビのほかの所の頭を 1 回目に合わせるとき、探す幅（小節）と、動かすのに要る良さ（距離の平均の比） */
+  alignBars: 4,
+  alignGain: 0.7,
   /** これより近い（小節）サビの所は、同じかたまり（ほかの所に挙げない） */
   sameBlock: 12,
   /** 譜面の拍が、音から追った拍にこれだけ乗っていれば、譜面の小節線を使う（6 曲で 0.62〜0.99、ずらした線は 0.36 まで） */
@@ -97,9 +107,24 @@ interface BarFeat {
   bright: Float64Array;
   /** 小節の頭の叩かれ方（高い帯域と低い帯域の立ち上がり。中央値との比の log2 の和） */
   accent: Float64Array;
+  /** n × RD：ドラムの形（16 分の 16 か所 × 低・中・高の帯域の立ち上がり。長さ 1） */
+  rhythm: Float64Array;
 }
 
+/** 1 小節の和音を見る区切り（拍ごと） */
 const SLOTS = 4;
+/** 小節の頭の叩かれ方を見る幅（秒、前後に三角の重み） */
+const ACCENT_WIN = 0.08;
+/** ドラムの形：16 分の数と、打点の帯域（features.ts の FLUX_EDGES の番号）。低（キック・ベース）・中（スネア・タム）・高（ハイハット・シンバル） */
+const RSTEPS = 16;
+const RGROUPS: readonly [number, number][] = [
+  [0, 1],
+  [2, 4],
+  [6, 7],
+];
+const RD = RSTEPS * RGROUPS.length;
+/** ドラムの形で 16 分の打点を見る幅（秒、前後に三角の重み） */
+const RHYTHM_WIN = 0.03;
 
 function median(a: ArrayLike<number>): number {
   const s = Array.from(a).sort((x, y) => x - y);
@@ -128,21 +153,27 @@ function barFeatures(inp: ChorusInput): BarFeat {
   const alo = new Float64Array(n);
   const t0 = new Float64Array(n);
   const t1 = new Float64Array(n);
-  const fr = (a: number, b: number) => {
-    let lo = Math.max(0, Math.ceil(frameAt(a)));
-    const hi = Math.min(f.frames - 1, Math.ceil(frameAt(b)) - 1);
-    if (hi < lo) lo = hi;
-    return [Math.max(0, lo), Math.max(0, hi)];
+  // 区間 [a, b) に重なっているフレームと、重なっている割合（フレームは中心の前後 1/2 フレーム）
+  const span = (a: number, b: number): [number, number, Float64Array] => {
+    const fa = frameAt(a);
+    const fb = frameAt(b);
+    const lo = Math.max(0, Math.floor(fa - 0.5));
+    const hi = Math.min(f.frames - 1, Math.ceil(fb + 0.5));
+    const w = new Float64Array(Math.max(0, hi - lo + 1));
+    for (let k = lo; k <= hi; k++) w[k - lo] = Math.max(0, Math.min(k + 0.5, fb) - Math.max(k - 0.5, fa));
+    return [lo, hi, w];
   };
-  // 小節の頭の前後 60ms で、帯域の立ち上がりの和のいちばん大きい所
-  const acc = (t: number, b0: number, b1: number) => {
-    const a = Math.max(0, Math.trunc((t - 0.06) * f.fluxRate - f.fluxOffset));
-    const z = Math.min(f.fluxFrames, Math.trunc((t + 0.06) * f.fluxRate - f.fluxOffset) + 1);
+  // 時刻 t の前後 r 秒（三角の重み）で、帯域 b0〜b1 の立ち上がりの和のいちばん大きい所
+  const onset = (t: number, b0: number, b1: number, r0: number) => {
+    const c = t * f.fluxRate - f.fluxOffset;
+    const r = r0 * f.fluxRate;
     let m = 0;
-    for (let k = a; k < z; k++) {
+    for (let k = Math.max(0, Math.floor(c - r)); k <= Math.min(f.fluxFrames - 1, Math.ceil(c + r)); k++) {
+      const w = 1 - Math.abs(k - c) / r;
+      if (w <= 0) continue;
       let s = 0;
       for (let b = b0; b <= b1; b++) s += f.flux[k * NF + b];
-      if (s > m) m = s;
+      if (s * w > m) m = s * w;
     }
     return m;
   };
@@ -152,12 +183,12 @@ function barFeatures(inp: ChorusInput): BarFeat {
     t0[u] = a;
     t1[u] = b;
     for (let q = 0; q < SLOTS; q++) {
-      const [lo, hi] = fr(a + ((b - a) * q) / SLOTS, a + ((b - a) * (q + 1)) / SLOTS);
+      const [lo, hi, w] = span(a + ((b - a) * q) / SLOTS, a + ((b - a) * (q + 1)) / SLOTS);
       const o = (u * SLOTS + q) * 12;
       let s = 0;
       for (let c = 0; c < 12; c++) {
         let v = 0;
-        for (let k = lo; k <= hi; k++) v += f.chroma[k * 12 + c];
+        for (let k = lo; k <= hi; k++) v += w[k - lo] * f.chroma[k * 12 + c];
         v = Math.log1p((100 * v) / cmax);
         C[o + c] = v;
         s += v * v;
@@ -165,25 +196,29 @@ function barFeatures(inp: ChorusInput): BarFeat {
       s = Math.sqrt(s) + 1e-9;
       for (let c = 0; c < 12; c++) C[o + c] /= s;
     }
-    const [lo, hi] = fr(a, b);
+    const [lo, hi, w] = span(a, b);
     let pw = 0;
     let ph = 0;
+    let cnt = 0;
     for (let k = lo; k <= hi; k++) {
+      const wk = w[k - lo];
+      if (wk <= 0) continue;
+      cnt += wk;
       for (let c = 0; c < NB; c++) {
         const v = f.bands[k * NB + c];
-        T[u * NB + c] += v;
-        const p = 10 ** (v / 10);
+        T[u * NB + c] += wk * v;
+        const p = wk * 10 ** (v / 10);
         pw += p;
         if (c >= HI0) ph += p;
       }
     }
-    const cnt = hi - lo + 1;
+    cnt ||= 1;
     for (let c = 0; c < NB; c++) T[u * NB + c] /= cnt;
     loud[u] = 10 * Math.log10(pw / (cnt * NB) + 1e-12);
     bright[u] = 10 * Math.log10(ph / (cnt * (NB - HI0)) + 1e-12);
     if (NF >= 8) {
-      ahi[u] = acc(a, NF - 2, NF - 1);
-      alo[u] = acc(a, 0, 1);
+      ahi[u] = onset(a, NF - 2, NF - 1, ACCENT_WIN);
+      alo[u] = onset(a, 0, 1, ACCENT_WIN);
     }
   }
   // 和音：曲全体の平均を引いて長さ 1。音色：帯域ごとに平均 0・ばらつき 1 にして長さ 1。合わせて長さ 1
@@ -217,7 +252,34 @@ function barFeatures(inp: ChorusInput): BarFeat {
     bright[u] -= mb;
     accent[u] = Math.log2(Math.max(1e-3, (ahi[u] / mh) * (alo[u] / mlo)));
   }
-  return { n, index: Int32Array.from(idx), t0, t1, x, d: D, loud, bright, accent };
+  // ドラムの形：16 分ごとの低・中・高の立ち上がりを、帯域ごとの曲全体の平均で割って log1p、小節ごとに長さ 1
+  const rhythm = new Float64Array(n * RD);
+  if (NF >= 8) {
+    const gm = RGROUPS.map(() => 0);
+    for (let u = 0; u < n; u++) {
+      for (let q = 0; q < RSTEPS; q++) {
+        const t = t0[u] + ((t1[u] - t0[u]) * q) / RSTEPS;
+        RGROUPS.forEach(([b0, b1], g) => {
+          const v = onset(t, b0, b1, RHYTHM_WIN);
+          rhythm[u * RD + g * RSTEPS + q] = v;
+          gm[g] += v / (n * RSTEPS);
+        });
+      }
+    }
+    for (let u = 0; u < n; u++) {
+      let s = 0;
+      for (let g = 0; g < RGROUPS.length; g++) {
+        for (let q = 0; q < RSTEPS; q++) {
+          const o = u * RD + g * RSTEPS + q;
+          rhythm[o] = Math.log1p(rhythm[o] / (gm[g] + 1e-12));
+          s += rhythm[o] * rhythm[o];
+        }
+      }
+      s = Math.sqrt(s) + 1e-9;
+      for (let k = 0; k < RD; k++) rhythm[u * RD + k] /= s;
+    }
+  }
+  return { n, index: Int32Array.from(idx), t0, t1, x, d: D, loud, bright, accent, rhythm };
 }
 
 // ---- 固有値（対称行列。JAMA の tred2・tql2 と同じ手順） ------------------------------------
@@ -385,8 +447,13 @@ export function symEig(a: Float64Array, n: number): { values: Float64Array; vect
 
 // ---- 部分に分ける ---------------------------------------------------------------------
 
-/** 繰り返しと隣のつながりのグラフのラプラシアンの固有ベクトル（小さい順、n×n の列） */
-function structureVectors(bf: BarFeat): Float64Array {
+/** 繰り返しの線を残す斜めの中央値の幅（前後の小節数） */
+const DIAG_MED = 2;
+/** 固有ベクトルを時間の向きにならす中央値の幅（前後の小節数） */
+const VEC_MED = 2;
+
+/** 繰り返しと隣のつながりのグラフのラプラシアンの固有ベクトル（小さい順、n×n の列）。kk はつながりの濃さ（互いに近い小節の数） */
+function structureVectors(bf: BarFeat, kk: number): Float64Array {
   const { n, x, d: D } = bf;
   const dist = new Float64Array(n * n);
   for (let i = 0; i < n; i++) {
@@ -400,8 +467,7 @@ function structureVectors(bf: BarFeat): Float64Array {
       dist[j * n + i] = s;
     }
   }
-  // 互いに近い k 個に入る組（すぐ隣は除く）
-  const kk = Math.max(3, Math.round(2 * Math.log2(n)));
+  // 互いに近い kk 個に入る組（すぐ隣は除く）
   const nb = new Uint8Array(n * n);
   const order = Array.from({ length: n }, (_, j) => j);
   for (let i = 0; i < n; i++) {
@@ -425,7 +491,7 @@ function structureVectors(bf: BarFeat): Float64Array {
     for (let j = 0; j < n; j++) {
       let ones = 0;
       let len = 0;
-      for (let q = -2; q <= 2; q++) {
+      for (let q = -DIAG_MED; q <= DIAG_MED; q++) {
         const a = i + q;
         const b = j + q;
         if (a < 0 || b < 0 || a >= n || b >= n) continue;
@@ -467,7 +533,7 @@ function structureVectors(bf: BarFeat): Float64Array {
   const L = new Float64Array(n * n);
   for (let i = 0; i < n; i++) {
     const di = 1 / Math.sqrt(deg[i] + 1e-9);
-    for (let j = 0; j < n; j++) L[i * n + j] = (i === j ? 1 : 0) - di * A[i * n + j] / Math.sqrt(deg[j] + 1e-9);
+    for (let j = 0; j < n; j++) L[i * n + j] = (i === j ? 1 : 0) - (di * A[i * n + j]) / Math.sqrt(deg[j] + 1e-9);
   }
   // 丸めの差で非対称にならないように
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) L[i * n + j] = L[j * n + i] = (L[i * n + j] + L[j * n + i]) / 2;
@@ -530,7 +596,7 @@ function labelBars(V: Float64Array, n: number, K: number): Int32Array {
     let s = 0;
     for (let c = 0; c < K; c++) {
       const w: number[] = [];
-      for (let q = Math.max(0, i - 2); q <= Math.min(n - 1, i + 2); q++) w.push(V[q * n + c]);
+      for (let q = Math.max(0, i - VEC_MED); q <= Math.min(n - 1, i + VEC_MED); q++) w.push(V[q * n + c]);
       const v = median(w);
       X[i * K + c] = v;
       s += v * v;
@@ -565,7 +631,6 @@ interface LabelScore {
   segs: Seg[];
 }
 
-/** 印ごとのサビらしさ（よい順） */
 /** 小節ごとの盛り上がり（明るさと音量） */
 function barEnergy(bf: BarFeat): Float64Array {
   const energy = new Float64Array(bf.n);
@@ -574,6 +639,7 @@ function barEnergy(bf: BarFeat): Float64Array {
   return energy;
 }
 
+/** 印ごとのサビらしさ（よい順。4 小節より短い所は数えない） */
 function scoreLabels(bf: BarFeat, segs: Seg[], duration: number): LabelScore[] {
   const { n } = bf;
   const energy = barEnergy(bf);
@@ -605,104 +671,264 @@ function scoreLabels(bf: BarFeat, segs: Seg[], duration: number): LabelScore[] {
   return out.sort((a, b) => b.score - a.score);
 }
 
-/** 分け目を、小節の頭がいちばん強く叩かれている所に直す（1 小節前〜3 小節後） */
-function refineStart(bf: BarFeat, s0: number): number {
-  let best = s0;
-  let bv = -Infinity;
-  for (let b = Math.max(0, s0 - 1); b <= Math.min(bf.n - 1, s0 + 3); b++) {
-    const v = bf.accent[b] - CHORUS.shift * Math.abs(b - s0);
-    if (v > bv) {
-      bv = v;
-      best = b;
-    }
-  }
-  return bf.accent[best] >= CHORUS.accentMin ? best : s0;
-}
-
-/**
- * 長すぎる部分（CHORUS.longBars 小節より長い）は、サビの前の部分（Bメロ）や後の部分とくっついていることがある。
- * 細かく分けた印（7 と 8）がそろって切れる所があれば 2 つの部分とみなし、後ろの方が盛り上がっていれば後ろから始める
- */
-function splitLong(seg: Seg, fine: Int32Array[], energy: Float64Array): Seg {
-  if (seg.b - seg.a <= CHORUS.longBars || fine.length < 2) return seg;
-  const cuts = (lab: Int32Array) => {
-    const out: number[] = [];
-    for (let i = seg.a + 4; i <= seg.b - 4; i++) if (lab[i] !== lab[i - 1]) out.push(i);
-    return out;
-  };
-  const other = cuts(fine[1]);
-  const mean = (a: number, b: number) => {
-    let v = 0;
-    for (let i = a; i < b; i++) v += energy[i];
-    return v / Math.max(1, b - a);
-  };
-  let best = -1;
-  let jump = 0;
-  for (const i of cuts(fine[0])) {
-    if (!other.some((j) => Math.abs(j - i) <= 1)) continue;
-    const d = mean(i, seg.b) - mean(seg.a, i);
-    if (d > jump) {
-      jump = d;
-      best = i;
-    }
-  }
-  return best >= 0 ? { a: best, b: seg.b, label: seg.label } : seg;
-}
-
 /** 前奏の後の最初の所（無ければ最初） */
 function firstAfterIntro(bf: BarFeat, segs: Seg[], duration: number): Seg {
   const from = Math.max(CHORUS.introSec, 0.1 * duration);
   return segs.find((s) => bf.t0[s.a] >= from) ?? segs[0];
 }
 
+/** 1 回分の分け方 */
+interface Run {
+  /** 印の数 */
+  K: number;
+  segs: Seg[];
+  /** 印ごとの点（よい順） */
+  scores: LabelScore[];
+}
+
+/** つながりの濃さ（CHORUS.neighborDivs）と印の数（CHORUS.ks）を変えて分ける */
+function partitions(bf: BarFeat, duration: number): Run[] {
+  const { n } = bf;
+  const runs: Run[] = [];
+  const kks = [...new Set(CHORUS.neighborDivs.map((d) => Math.max(CHORUS.neighborMin, Math.round(n / d))))];
+  for (const kk of kks) {
+    const V = structureVectors(bf, kk);
+    for (const K of CHORUS.ks) {
+      if (K >= n / 2) continue;
+      const segs = segments(labelBars(V, n, K));
+      const scores = scoreLabels(bf, segs, duration);
+      if (scores.length) runs.push({ K, segs, scores });
+    }
+  }
+  return runs;
+}
+
+/**
+ * 小節ごとに、いちばんの印に入れた分け方の割合（0〜1）。ほかの分け方といちばん重なる分け方（真ん中）と、
+ * 半分以上重なる分け方だけで数える（違う部分をいちばんにした分け方は、数えるとサビの所をぼかすだけなので数えない）
+ */
+function consensus(runs: Run[], n: number): Float64Array {
+  const sets = runs.map((r) => {
+    const m = new Uint8Array(n);
+    for (const s of r.scores[0].segs) for (let i = s.a; i < s.b; i++) m[i] = 1;
+    return m;
+  });
+  const iou = (a: Uint8Array, b: Uint8Array) => {
+    let both = 0;
+    let any = 0;
+    for (let i = 0; i < n; i++) {
+      both += a[i] & b[i];
+      any += a[i] | b[i];
+    }
+    return any ? both / any : 0;
+  };
+  let mid = 0;
+  let midSum = -1;
+  for (let i = 0; i < sets.length; i++) {
+    let s = 0;
+    for (let j = 0; j < sets.length; j++) s += iou(sets[i], sets[j]);
+    if (s > midSum + 1e-9) {
+      midSum = s;
+      mid = i;
+    }
+  }
+  const group = sets.filter((s) => iou(s, sets[mid]) >= 0.5);
+  const member = new Float64Array(n);
+  for (const s of group) for (let u = 0; u < n; u++) member[u] += s[u] / group.length;
+  return member;
+}
+
+/** サビの所：半分より多くの分け方がいちばんの印に入れた小節のつながり（2 小節以上） */
+function chorusSegs(member: Float64Array): Seg[] {
+  const out: Seg[] = [];
+  for (let i = 0; i < member.length; ) {
+    if (member[i] <= 0.5) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < member.length && member[j] > 0.5) j++;
+    if (j - i >= 2) out.push({ a: i, b: j, label: 0 });
+    i = j;
+  }
+  return out;
+}
+
+/** サビのドラムの形（サビの所の、最初と最後を除いた小節の、次元ごとの中央値。長さ 1） */
+function grooveOf(bf: BarFeat, occ: Seg[]): Float64Array {
+  const cols: number[][] = Array.from({ length: RD }, () => []);
+  for (const o of occ) for (let u = o.a + 1; u < o.b - 1; u++) for (let k = 0; k < RD; k++) cols[k].push(bf.rhythm[u * RD + k]);
+  const g = new Float64Array(RD);
+  let s = 0;
+  for (let k = 0; k < RD; k++) {
+    g[k] = median(cols[k]);
+    s += g[k] * g[k];
+  }
+  s = Math.sqrt(s) + 1e-9;
+  for (let k = 0; k < RD; k++) g[k] /= s;
+  return g;
+}
+
+/** 小節 u と、ほかの所（4 小節以上離れた所）でいちばん似た小節との遠さ（距離の 2 乗、1 まで）。フィル・きっかけの小節は曲の中で 1 回きりなので遠い */
+function uniqueness(bf: BarFeat, u: number): number {
+  const { n, x, d: D } = bf;
+  let m = Infinity;
+  for (let v = 0; v < n; v++) {
+    if (Math.abs(v - u) < 4) continue;
+    let s = 0;
+    for (let k = 0; k < D; k++) s += (x[u * D + k] - x[v * D + k]) ** 2;
+    if (s < m) m = s;
+  }
+  return Math.min(1, m);
+}
+
+/**
+ * サビの頭を、分け目 s0 の 1 小節前〜1 小節後で直す：頭の叩かれ方・前の小節が 1 回きりか・サビのドラムの形がその小節から始まるか。
+ * 曲の最初の小節の前は、1 回きりでドラムの形も無いとみなす
+ */
+function refineStart(bf: BarFeat, groove: Float64Array, s0: number): number {
+  const { n } = bf;
+  const fit = (u: number) => {
+    if (u < 0) return 0;
+    let v = 0;
+    for (let k = 0; k < RD; k++) v += bf.rhythm[u * RD + k] * groove[k];
+    return v;
+  };
+  const uniq = (u: number) => (u < 0 ? 1 : uniqueness(bf, u));
+  let best = s0;
+  let bv = -Infinity;
+  for (let s = Math.max(0, s0 - 1); s <= Math.min(n - 1, s0 + 1); s++) {
+    const v = CHORUS.startAccent * bf.accent[s] + CHORUS.startUnique * (uniq(s - 1) - uniq(s)) + CHORUS.startGroove * (fit(s) - fit(s - 1)) - CHORUS.startShift * Math.abs(s - s0);
+    if (v > bv) {
+      bv = v;
+      best = s;
+    }
+  }
+  return best;
+}
+
+/**
+ * サビのほかの所の頭 s1 を、1 回目のサビ（小節 first から len 小節。8 小節まで見る）と小節ごとにいちばんよく並ぶ所に合わせる
+ * （前後 CHORUS.alignBars 小節）。並び方がはっきり良いとき（距離の平均が CHORUS.alignGain 倍より小さい）だけ動かす。
+ * 分け目が前の部分（間奏・Cメロ）の終わりを含んで、2〜3 小節ずれることがある
+ */
+function alignRepeat(bf: BarFeat, first: number, len: number, s1: number): number {
+  const { n, x, d: D } = bf;
+  const L = Math.max(4, Math.min(8, len));
+  const dist = (s: number) => {
+    let t = 0;
+    let c = 0;
+    for (let j = 0; j < L && s + j < n && first + j < n; j++) {
+      let v = 0;
+      for (let k = 0; k < D; k++) v += (x[(first + j) * D + k] - x[(s + j) * D + k]) ** 2;
+      t += v;
+      c++;
+    }
+    return c >= 4 ? t / c : Infinity;
+  };
+  let best = s1;
+  let bv = Infinity;
+  for (let s = Math.max(0, s1 - CHORUS.alignBars); s <= Math.min(n - 1, s1 + CHORUS.alignBars); s++) {
+    if (Math.abs(s - first) < L) continue;
+    const v = dist(s);
+    if (v < bv) {
+      bv = v;
+      best = s;
+    }
+  }
+  return bv < CHORUS.alignGain * dist(s1) ? best : s1;
+}
+
+/** 小節線と音の打点のずれ（秒）。小節を 4 等分した所の立ち上がりの和がいちばん大きくなるずらし（±CHORUS.gridSearch。同じなら小さい方） */
+export function gridOffset(f: ChorusFeatures, bars: readonly number[]): number {
+  const NF = Math.round(f.flux.length / Math.max(1, f.fluxFrames));
+  if (NF < 1 || f.fluxFrames < 4) return 0;
+  const env = new Float64Array(f.fluxFrames);
+  for (let k = 0; k < f.fluxFrames; k++) {
+    let v = 0;
+    for (let b = 0; b < NF; b++) v += f.flux[k * NF + b];
+    env[k] = v;
+  }
+  const at = (t: number) => {
+    const c = t * f.fluxRate - f.fluxOffset;
+    const k = Math.floor(c);
+    if (k < 0 || k + 1 >= env.length) return 0;
+    return env[k] + (env[k + 1] - env[k]) * (c - k);
+  };
+  const pts: number[] = [];
+  for (let i = 0; i + 1 < bars.length; i++) for (let q = 0; q < 4; q++) pts.push(bars[i] + ((bars[i + 1] - bars[i]) * q) / 4);
+  let best = 0;
+  let bv = -Infinity;
+  const steps = Math.round(CHORUS.gridSearch / 0.002);
+  for (let i = -steps; i <= steps; i++) {
+    const d = i * 0.002;
+    let s = 0;
+    for (const t of pts) s += at(t + d);
+    if (bv === -Infinity || s > bv * (1 + 1e-9) || (s >= bv * (1 - 1e-9) && Math.abs(d) < Math.abs(best))) {
+      bv = s;
+      best = d;
+    }
+  }
+  return best;
+}
+
 export function findChorus(inp: ChorusInput): ChorusResult {
   const empty: ChorusResult = { best: null, repeats: [], others: [], parts: [] };
-  const bf = barFeatures(inp);
+  // 小節線を打点に合わせて特徴を取る。答えの時刻は元の小節線で返す
+  const off = gridOffset(inp.feat, inp.bars);
+  const bf = barFeatures(off ? { ...inp, bars: inp.bars.map((t) => t + off) } : inp);
   const n = bf.n;
   if (n < 12) return empty;
-  const V = structureVectors(bf);
-  const energy = barEnergy(bf);
-  // 長すぎる部分を分け直すための、細かい印
-  const fine = CHORUS.fine.filter((K) => K < n / 2).map((K) => labelBars(V, n, K));
-  const pick = (seg0: Seg, score: number): ChorusPick => {
-    const seg = splitLong(seg0, fine, energy);
-    const s = refineStart(bf, seg.a);
-    return { start: bf.t0[s], end: bf.t1[Math.max(s, seg.b - 1)], bar: bf.index[s], score };
-  };
-  const runs = CHORUS.ks
-    .filter((K) => K < n / 2)
-    .map((K) => {
-      const lab = labelBars(V, n, K);
-      const segs = segments(lab);
-      const scores = scoreLabels(bf, segs, inp.duration);
-      const top = scores[0];
-      const best = top ? pick(firstAfterIntro(bf, top.segs, inp.duration), top.score) : null;
-      return { K, segs, scores, best };
-    })
-    .filter((r) => r.best);
+  const runs = partitions(bf, inp.duration);
   if (!runs.length) return empty;
-  // 多い答え（同じ数なら点の高い方）
-  const votes = new Map<number, { n: number; score: number }>();
-  for (const r of runs) {
-    const v = votes.get(r.best!.bar) ?? { n: 0, score: -Infinity };
-    votes.set(r.best!.bar, { n: v.n + 1, score: Math.max(v.score, r.best!.score) });
-  }
-  const winBar = [...votes.entries()].sort((a, b) => b[1].n - a[1].n || b[1].score - a[1].score)[0][0];
-  const run = runs.filter((r) => r.best!.bar === winBar).sort((a, b) => b.best!.score - a.best!.score)[0];
-  const top = run.scores[0];
-  const best = run.best!;
-  // 同じサビのほかの所（近い所は同じかたまりとみなして 1 つに）
+  const member = consensus(runs, n);
+  const occ = chorusSegs(member);
+  if (!occ.length) return empty;
+  const groove = grooveOf(bf, occ);
+  /** 所 seg を、頭を小節 s に直して答えの形に */
+  const pickAt = (seg: Seg, s: number, score: number): ChorusPick => {
+    const e = Math.max(s, seg.b - 1);
+    return { start: inp.bars[bf.index[s]], end: inp.bars[bf.index[e] + 1], bar: bf.index[s], score };
+  };
+  const pick = (seg: Seg, score: number) => pickAt(seg, refineStart(bf, groove, seg.a), score);
+  const score = runs.reduce((a, r) => a + r.scores[0].score, 0) / runs.length;
+  const firstSeg = firstAfterIntro(bf, occ, inp.duration);
+  const first = refineStart(bf, groove, firstSeg.a);
+  const best = pickAt(firstSeg, first, score);
+  // 同じサビのほかの所（頭は 1 回目のサビに小節ごとに並ぶ所に合わせる。近い所は同じかたまりとみなして 1 つに）
   const kept = [best];
   const repeats: ChorusPick[] = [];
-  for (const p of top.segs.map((s) => pick(s, top.score)).sort((a, b) => a.start - b.start)) {
+  const again = occ
+    .filter((seg) => seg !== firstSeg)
+    .map((seg) => {
+      const s1 = refineStart(bf, groove, seg.a);
+      const s = alignRepeat(bf, first, firstSeg.b - first, s1);
+      // 1 回目に合わせて動かした分は、終わりも動かす
+      return pickAt({ ...seg, b: Math.min(n, seg.b + s - s1) }, s, score);
+    });
+  for (const p of again.sort((a, b) => a.start - b.start)) {
     if (kept.some((k) => Math.abs(k.bar - p.bar) < CHORUS.sameBlock)) continue;
     kept.push(p);
     repeats.push(p);
   }
-  const others = run.scores
-    .slice(1, 3)
+  // 見せる分け方：いちばんの印がサビの所といちばん合う回（同じなら印の数が 6 に近い回）
+  const agree = (r: Run) => {
+    let a = 0;
+    for (const s of r.scores[0].segs) for (let i = s.a; i < s.b; i++) a += member[i] > 0.5 ? 1 : -1;
+    return a - Math.abs(r.K - 6) * 0.1;
+  };
+  const rep = runs.reduce((a, r) => (agree(r) > agree(a) ? r : a), runs[0]);
+  // ほかの候補：その分け方の 2 番目より下の印（サビの所と重なるだけの印は除く）
+  const others = rep.scores
+    .slice(1)
+    .filter((l) => !l.segs.every((s) => occ.some((o) => s.a < o.b && o.a < s.b)))
+    .slice(0, 2)
     .map((l) => pick(firstAfterIntro(bf, l.segs, inp.duration), l.score));
-  const parts: ChorusPart[] = run.segs.map((s) => ({ start: bf.t0[s.a], end: bf.t1[s.b - 1], label: s.label, chorus: s.label === top.label }));
+  const parts: ChorusPart[] = rep.segs.map((s) => {
+    let inC = 0;
+    for (let i = s.a; i < s.b; i++) if (member[i] > 0.5) inC++;
+    return { start: inp.bars[bf.index[s.a]], end: inp.bars[bf.index[s.b - 1] + 1], label: s.label, chorus: inC * 2 > s.b - s.a };
+  });
   return { best, repeats, others, parts };
 }
 

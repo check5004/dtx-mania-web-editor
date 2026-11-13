@@ -1,7 +1,7 @@
 // サビを探す（src/audio/chorus.ts）。本物の曲 6 曲での確かめは試作のときに行った（ファイルの頭のコメント）。
 // ここでは作った特徴（前奏・A・サビ・A・サビ・間奏・サビ・後奏）で、決まりどおりに動くかを見る。
 import { describe, expect, it } from 'vitest';
-import { findChorus, findChorusAuto, gridMatch, symEig, type ChorusFeatures } from './chorus';
+import { findChorus, findChorusAuto, gridMatch, gridOffset, symEig, type ChorusFeatures } from './chorus';
 
 /** 毎回同じ乱数 */
 function rng(seed: number) {
@@ -108,6 +108,21 @@ describe('サビを探す', () => {
     // サビの印の部分は 3 か所
     const chorusParts = r.parts.filter((p) => p.chorus);
     expect(chorusParts.length).toBe(3);
+  });
+
+  it('小節線が打点から少しずれていても、同じ小節を選ぶ（答えの時刻は渡した小節線のまま）', () => {
+    for (const ms of [-40, -24, -10, -4, 4, 10, 24, 40]) {
+      const bars = song.bars.map((t) => t + ms / 1000);
+      const r = findChorus({ feat: song.feat, duration: song.duration, bars });
+      expect(r.best!.bar).toBe(song.chorusBars[0]);
+      expect(r.best!.start).toBeCloseTo(bars[song.chorusBars[0]], 9);
+      expect(r.repeats.map((p) => p.bar)).toEqual(song.chorusBars.slice(1));
+    }
+  });
+
+  it('小節線と打点のずれを測る', () => {
+    expect(Math.abs(gridOffset(song.feat, song.bars))).toBeLessThanOrEqual(0.006);
+    for (const ms of [-60, -30, 20, 50]) expect(Math.abs(gridOffset(song.feat, song.bars.map((t) => t + ms / 1000)) + ms / 1000)).toBeLessThanOrEqual(0.006);
   });
 
   it('小節が少なすぎれば探さない', () => {
