@@ -158,7 +158,7 @@ export function HomePhone() {
           icon={Icon.wave(20)}
           tone="blue"
           title={tr('原曲の音声ファイルから', 'From an audio file')}
-          sub={tr('WAV・OGG・MP3・動画（MP4）の音を BGM にして新しい譜面。DTX ならそのまま開きます', 'New chart with a WAV, OGG, MP3 or the audio of a video (MP4) as BGM. A DTX opens as is')}
+          sub={tr('WAV・OGG・MP3・動画（MP4）か、Moises のステムをまとめて選ぶと、おまかせで準備。DTX ならそのまま開きます', 'Pick a WAV, OGG, MP3, a video (MP4) or Moises stems together to set it up for you. A DTX opens as is')}
           tag={tr('おすすめ', 'Recommended')}
           onClick={() => audioInput.current?.click()}
         />
@@ -175,6 +175,7 @@ export function HomePhone() {
         ref={audioInput}
         type="file"
         accept={IS_IOS ? undefined : '.ogg,.wav,.mp3,.m4a,.flac,.opus,.mp4,.m4v,.mov,.webm,.mkv,.dtx'}
+        multiple
         hidden
         onChange={(e) => {
           void openPickedFiles([...(e.target.files ?? [])]);

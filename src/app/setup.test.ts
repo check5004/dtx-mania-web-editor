@@ -158,3 +158,34 @@ describe('準備の流れ', () => {
     expect(fa.saved).toBe(0);
   });
 });
+
+describe('テンポを聴いて直す（準備中の画面・エディタの帯）', () => {
+  it('×2・÷2・1 拍ずらすと、すぐ譜面に入る（小節番号は原曲を置けるいちばん小さい番号）', async () => {
+    const { parseDtx } = await import('../dtx/parse');
+    const { useTempo } = await import('../store/tempoUi');
+    const { scaleTempo, shiftHead, simpleHead } = await import('./setupTempo');
+    const { tempoSummary } = await import('./setup');
+    const doc = parseDtx('#TITLE: x\n#BPM: 120\n#WAV01: song.ogg\n#BGMWAV: 01\n#00101: 01\n').doc;
+    useEditor.setState({ doc, screen: 'editor' });
+    // 曲の頭（6.934 秒）を 5 小節目に：0 小節目の頭が原曲の頭とほぼ同じ
+    useTempo.setState({ plan: { bpm: 173, anchors: [{ m: 5, t: 6.934 }] } });
+    const bgm = () => useEditor.getState().doc.chips.filter((c) => c.ch === 1).map((c) => c.m);
+    scaleTempo(2);
+    expect(simpleHead()).toEqual({ m: 10, t: 6.934, bpm: 346 });
+    expect(useEditor.getState().doc.fields['BPM']).toBe('346');
+    expect(bgm()).toEqual([0]);
+    scaleTempo(0.5);
+    expect(simpleHead()).toEqual({ m: 5, t: 6.934, bpm: 173 });
+    expect(useEditor.getState().doc.fields['BPM']).toBe('173');
+    // 1 拍後ろ：0 小節目の頭が原曲の頭より後ろになるので、小節番号を 1 つ増やす
+    shiftHead(1);
+    expect(simpleHead()?.m).toBe(6);
+    expect(simpleHead()?.t).toBeCloseTo(6.934 + 60 / 173, 6);
+    expect(bgm()).toEqual([0]);
+    shiftHead(-1);
+    expect(simpleHead()?.m).toBe(5);
+    expect(simpleHead()?.t).toBeCloseTo(6.934, 6);
+    expect(tempoSummary()?.chip).toContain('005');
+    expect(tempoSummary()?.chip).toContain('0:06.934');
+  });
+});

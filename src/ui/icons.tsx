@@ -199,6 +199,12 @@ export const Icon = {
       <path d="M2.8 12.2v1.3h10.4v-1.3" />
     </Svg>
   ),
+  video: (s?: number) => (
+    <Svg size={s}>
+      <rect x="1.8" y="3.8" width="8.8" height="8.4" rx="1.5" />
+      <path d="m10.6 7 3.6-2.2v6.4L10.6 9z" />
+    </Svg>
+  ),
   wave: (s?: number) => (
     <Svg size={s}>
       <path d="M2 8h1.5M4.5 5v6M7 3v10M9.5 6v4M12 4.5v7M14 8h.5" />

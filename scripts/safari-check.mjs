@@ -28,7 +28,7 @@ export const GESTURE_OK = {
   'src/store/editor.ts#previewFile': 'previewWav（操作の中）から。頭で ensure してから読み込む',
   'src/store/hits.ts#previewVoice': 'レーン・特殊ノーツの音（previewLane・previewKind から）。キー・パッド・試し打ち（パッドは指が触れたとき。Safari は指を離したときにも出力を起こす）・種類の設定の試聴ボタン',
   'src/store/hits.ts#previewVoice>then': '内蔵キットの音の読み込みを待って鳴らす。出力は previewVoice の頭（操作の中）で用意してある',
-  'src/store/tempoUi.ts#playPlan': 'テンポ合わせの ▶',
+  'src/store/tempoUi.ts#playPlan': 'テンポ合わせの ▶・おまかせで準備の「クリックと聴く」（toggleListen を押した中。×2・1 拍で直したときの聴き直しも同じタップの中）',
   'src/store/assist.ts#setBandFilter': '帯域のボタン・スペクトルの見出しのクリック',
   'src/store/audition.ts#playAudition': '試聴の ▶。最初の await の前に ensure',
   'src/store/flam.ts#previewFlam': 'フラムにする操作（Alt+F・右クリック）',

@@ -3,7 +3,6 @@ import { tr, pl, isJa } from '../i18n';
 import { zipSync } from 'fflate';
 import { readAudioTags } from '../fs/tags';
 import { virtualSound } from '../audio/sounds';
-import { detectStemKind } from '../audio/stems';
 import { importStems } from '../store/stems';
 import { isVideoName, VIDEO_ACCEPT } from '../audio/videoAudio';
 import { extractWithProgress } from '../store/videoExtract';
@@ -82,6 +81,8 @@ import { carrySoundKeys, keepSoundKey } from '../fs/soundKey';
 import { engine } from '../audio/engine';
 import { tempoCandidates } from '../audio/workerClient';
 import type { TempoCandidate } from '../audio/analysis';
+import type { StemKind } from '../store/sidecar';
+import type { SetupSource } from './setup';
 
 const get = useEditor.getState;
 
@@ -486,16 +487,27 @@ export async function openFolder(folder: SongFolder, restore?: Map<string, { tex
   }
   const labels = await readSetDefLabels(folder);
   if (list.length === 0) {
+    // DTX が無い：音（原曲・動画・分けてあるステム）があれば、おまかせで準備する（src/app/setup.ts）。
+    // 「自分で入れる」なら今までの画面で、選び直した原曲・ステムの種類を使う
+    const { offerSetup, setupSourceOfFolder } = await import('./setupEntry');
+    const src = await setupSourceOfFolder(folder);
+    let manual: SetupSource | null = null;
+    if (src) {
+      const ans = await offerSetup(src);
+      if (!ans) return;
+      manual = ans.src;
+    }
     // 動画も原曲の候補にする（作るときに音を取り出す）。背景動画にもできる
     const videos = [...folder.files.values()]
       .filter((f) => isVideoName(f.name))
       .map((f) => f.path)
       .sort((a, b) => a.localeCompare(b));
+    const original = manual?.original ? manual.paths.get(manual.original) : undefined;
     const asked = await newSongDialog({
       title: tr(`「${folder.name}」に新しい譜面を作る`, `Create a new chart in "${folder.name}"`),
       audioFiles: [...audioFiles(folder).map((f) => f.path), ...videos],
       movies: videos,
-      defaults: { title: folder.name },
+      defaults: { title: folder.name, ...(original ? { bgmFile: original } : {}) },
       guessBpm: bpmGuesser(async (name) => findFile(folder, name)?.getFile()),
     });
     if (!asked) return;
@@ -504,6 +516,7 @@ export async function openFolder(folder: SongFolder, restore?: Map<string, { tex
     const doc = createDoc(info);
     const meta = newMeta('mstr.dtx', folder);
     openDocument(doc, meta, folder, { dirty: true });
+    if (manual?.kind === 'stems') await importStems(manual.stems.map((x) => x.file), { kinds: stemKinds(manual) });
     return;
   }
   let file = list[0];
@@ -680,6 +693,11 @@ export function nxSafeFiles(files: File[]): File[] {
   });
 }
 
+/** おまかせで準備の画面で決めたステムの種類と名前 */
+function stemKinds(src: SetupSource): Map<File, { kind: StemKind; name: string }> {
+  return new Map(src.stems.map((x) => [x.file, { kind: x.kind, name: x.name }]));
+}
+
 /** 落としたファイル（DTX・音声・動画）から開く */
 export async function openDroppedFiles(files: File[]) {
   if (files.length === 0) return;
@@ -698,35 +716,30 @@ export async function openDroppedFiles(files: File[]) {
     toast(tr('DTXか音声ファイル（WAV・OGG・MP3）か動画（MP4）を選んでください', 'Choose a DTX, an audio file (WAV, OGG, MP3) or a video (MP4)'), 'warn');
     return;
   }
-  // ステム分離ソフトで分けたファイル（drums・bass…）をまとめて落としたら、ステムとして読み込む
-  const kinds = new Set(audio.map((f) => detectStemKind(f.name)));
-  if (audio.length >= 2 && kinds.size >= 2) {
-    const asStems = await chooseDialog({
-      title: tr(`音声ファイルが ${audio.length} 個あります`, `${audio.length} audio files`),
-      body: tr(
-        'ステム（楽器ごとに分けた音）として読み込むと、楽器ごとに鳴らし分け、ドラム抜きのBGMを書き出せます。',
-        'Loading them as stems (one file per instrument) lets you play instruments separately and export a no-drums BGM.',
-      ),
-      options: [
-        { label: tr('ステムとして読み込む（おすすめ）', 'Load as stems (recommended)'), sub: audio.map((f) => f.name).join(tr('、', ', ')), value: true },
-        { label: tr('1つを原曲にする', 'Use one as the original'), sub: tr('ほかのファイルは曲フォルダに置くだけにします', 'The other files are just put in the song folder'), value: false },
-      ],
+  // おまかせで準備（原曲・動画・分けてあるステムから、打ち込みを始められる所まで。src/app/setup.ts）。
+  // 「自分で入れる」なら今までの画面で、選び直した原曲・ステムの種類を使う
+  const { offerSetup, setupSourceOf } = await import('./setupEntry');
+  const src = setupSourceOf(files);
+  if (!src) return;
+  const ans = await offerSetup(src);
+  if (!ans) return;
+  const manual = ans.src;
+  if (manual.kind === 'stems') {
+    // ステム（楽器ごとに分けた音）：原曲は一緒に入れた物だけ。メトロノーム・クリックは読み込まない
+    const named = nxSafeFiles(manual.original ? [manual.original] : []);
+    const info = await newSongDialog({
+      title: tr('新しい譜面をつくる（ステムから）', 'Create a new chart (from stems)'),
+      audioFiles: named.map((f) => f.name),
+      defaults: { title: manual.title, ...(named[0] ? { bgmFile: named[0].name } : {}) },
+      guessBpm: bpmGuesser(async (name) => named.find((f) => f.name === name)),
     });
-    if (asStems === null || asStems === undefined) return;
-    if (asStems) {
-      const info = await newSongDialog({
-        title: tr('新しい譜面をつくる（ステムから）', 'Create a new chart (from stems)'),
-        audioFiles: [],
-        defaults: { title: audio[0].name.replace(/\s*[([].*$/, '').replace(/\.[^.]+$/, '') },
-      });
-      if (!info) return;
-      openDocument(createDoc(info), newMeta('mstr.dtx', null), folderFromFiles([], info.title || tr('新しい曲', 'New song')), { dirty: true });
-      await importStems(audio);
-      return;
-    }
+    if (!info) return;
+    openDocument(createDoc(info), newMeta('mstr.dtx', null), folderFromFiles(named, info.title || tr('新しい曲', 'New song')), { dirty: true });
+    await importStems(manual.stems.map((x) => x.file), { kinds: stemKinds(manual) });
+    return;
   }
   // 音声ファイルのタグ（曲名・アーティスト・BPM）があれば最初から入れておく（MP4 の動画のタグも読める）
-  const first = audio[0] ?? videos[0];
+  const first = manual.original ?? audio[0] ?? videos[0];
   const tags = await readAudioTags(first);
   // 曲フォルダには NX で読める名前で置く（背景動画にする動画も）
   const named = nxSafeFiles(files);
@@ -741,7 +754,7 @@ export async function openDroppedFiles(files: File[]) {
       title: tags?.title || first.name.replace(/\.[^.]+$/, ''),
       artist: tags?.artist || tags?.albumArtist || undefined,
       bpm: tags?.bpm ? Math.round(tags.bpm * 100) / 100 : undefined,
-      bgmFile: (namedAudio[0] ?? namedVideos[0])?.name,
+      bgmFile: (pairs.find((x) => x.from === manual.original)?.to ?? namedAudio[0] ?? namedVideos[0])?.name,
     },
     guessBpm: bpmGuesser(async (name) => namedAudio.find((f) => f.name === name)),
   });

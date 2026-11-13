@@ -2,7 +2,7 @@
 // 使い方:
 //   node scripts/readme/demo-song.mjs
 //   npx vite --port 5173 &              （開発サーバー。アプリと同じ store を import して画面を整える）
-//   DPR=1.5 node scripts/readme/shots.mjs editor,stems,tempo,songinfo,library,preview,velocity,fx,ipad,home,ai
+//   DPR=1.5 node scripts/readme/shots.mjs editor,stems,tempo,songinfo,library,preview,velocity,fx,ipad,home,ai,setup
 //   DPR=2 node scripts/readme/shots.mjs tab,gen,iphone      （切り抜きとスマホは 2 倍）
 //   node scripts/readme/devices.mjs                          （iPad と iPhone を 1 枚に並べる）
 //   python3 scripts/readme/shrink.py                         （256 色の PNG にして docs/readme/shots/ へ）
@@ -292,6 +292,44 @@ if (want('ai')) {
   await page.getByText('ADVANCED', { exact: true }).first().click();
   await page.waitForTimeout(1500);
   await shot(page, 'ai');
+  await ctx.close();
+}
+
+if (want('setup')) {
+  // おまかせで準備：原曲の音声ファイル 1 つから。最初の画面（やることを全部入れた状態）と、終わってエディタが開いた所の帯。
+  // 曲情報（ネットの検索）とステム分解（時間がかかる）は外して始める
+  const { cpSync } = await import('node:fs');
+  const dir = path.join(path.dirname(SONG), 'setup');
+  mkdirSync(dir, { recursive: true });
+  const audio = path.join(dir, 'Neon Skyline.ogg');
+  cpSync(path.join(SONG, 'bgm.ogg'), audio);
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(() => {
+    try {
+      localStorage.setItem('dtxe.lang', 'ja');
+    } catch {}
+  });
+  const page = await ctx.newPage();
+  await setup(page);
+  page.on('pageerror', (e) => console.log('pageerror', String(e).slice(0, 200)));
+  await page.goto(URL);
+  await page.waitForTimeout(1500);
+  await page.locator('input[type=file][accept*=".zip"]').first().setInputFiles(audio);
+  const sheet = page.locator('.modal.setup-sheet');
+  await sheet.waitFor({ timeout: 15000 });
+  // 長さを読むまで待つ
+  await page.waitForTimeout(1500);
+  const box = await sheet.boundingBox();
+  await shot(page, 'setup', { x: box.x - 24, y: box.y - 24, width: box.width + 48, height: box.height + 48 });
+  await sheet.locator('label:has-text("曲名・アーティスト・画像") input').uncheck();
+  await sheet.locator('label:has-text("ステム分解") input').uncheck();
+  await sheet.locator('button.setup-go').click();
+  await page.locator('.setup-ready').waitFor({ timeout: 240000 });
+  await page.waitForTimeout(2500);
+  // 帯と、その下の曲の頭の小節
+  const band = await page.locator('.setup-ready').boundingBox();
+  const chart = await page.locator('.chart-area').first().boundingBox();
+  await shot(page, 'setup-ready', { x: band.x - 70, y: chart.y, width: band.width + 140, height: band.y + band.height - chart.y + 200 });
   await ctx.close();
 }
 

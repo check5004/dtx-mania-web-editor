@@ -14,12 +14,13 @@ import { readAudioTags } from '../fs/tags';
 import { useAssist } from '../store/assist';
 import { makeChorusPreview, useChorus } from '../store/chorus';
 import { drumStatusText, holdDrums, setDrumSource, setDrumsEnabled, useDrums } from '../store/drums';
-import { createDoc, openDocument, openedDocs, stop, useEditor } from '../store/editor';
+import { tempoOf } from '../store/derived';
+import { createDoc, openDocument, openedDocs, setCursorBeat, setView, stop, useEditor } from '../store/editor';
 import { cancelSeparation, formatSec, registerDrumlessBgm, startSeparation, useSeparate } from '../store/separate';
 import type { StemKind } from '../store/sidecar';
 import { lookupSong, stopLookup, useSongInfo } from '../store/songinfo';
 import { importStems, useStems } from '../store/stems';
-import { applyTempo, bpmText, initTempo, refineWithChords, useTempo } from '../store/tempoUi';
+import { applyTempo, bpmText, initTempo, refineWithChords, stopPlan, useTempo } from '../store/tempoUi';
 import { failText } from '../store/videoExtract';
 import { autosaveNow, closeDocument, freePath, holdAutosave, newMeta, nxSafeFiles, saveAfterSetup } from './fileActions';
 import { applySongInfo, defaultInfoPick } from './songInfoApply';
@@ -45,6 +46,8 @@ export interface SetupSource {
   stems: SetupStem[];
   /** 使わない音（メトロノーム・クリック）。BGM にも試聴にも混ぜない */
   unused: SetupStem[];
+  /** 原曲にできる音（音声が 2 つ以上あってステムではないとき、画面で選び直せる。original もこの中） */
+  choices: File[];
   /** 曲名の案 */
   title: string;
   /** DTX の無い曲フォルダを開いたとき：その曲フォルダと、ファイルの曲フォルダの中のパス */
@@ -70,6 +73,7 @@ function sourceOf(files: File[], folder: SongFolder | null, paths: Map<File, str
         movie: videos[0] ?? null,
         stems: rest.filter((i) => !plan.items[i]!.guide).map(pick),
         unused: rest.filter((i) => plan.items[i]!.guide).map(pick),
+        choices: [],
         title: plan.title || baseName((original ?? audio[0]).name),
         folder,
         paths,
@@ -78,12 +82,24 @@ function sourceOf(files: File[], folder: SongFolder | null, paths: Map<File, str
   }
   const original = audio[0] ?? videos[0];
   if (!original) return null;
-  return { kind: audio[0] ? 'audio' : 'video', original, movie: videos[0] ?? null, stems: [], unused: [], title: baseName(original.name), folder, paths };
+  return { kind: audio[0] ? 'audio' : 'video', original, movie: videos[0] ?? null, stems: [], unused: [], choices: audio, title: baseName(original.name), folder, paths };
 }
 
 /** 落とした・選んだファイルから、何から始めるかを決める（音声も動画も無ければ null） */
 export function setupSourceOf(files: File[]): SetupSource | null {
   return sourceOf(files, null, new Map());
+}
+
+/** 原曲を選び直す（音声が 2 つ以上あるとき。曲名もその名前に。曲フォルダから始めたときはフォルダの名前のまま） */
+export function withOriginal(src: SetupSource, file: File): SetupSource {
+  return { ...src, original: file, title: src.folder ? src.title : baseName(file.name) };
+}
+
+/** ゲームの BGM（ドラム抜き）のファイル名の案（ステムから始めるときの画面に出す） */
+export function plannedBgmName(src: SetupSource): string {
+  if (!src.original) return `${nxSafeBase(src.title, 'bgm')}_nodrums.ogg`;
+  const name = src.paths.get(src.original) ?? nxSafeFiles([src.original])[0].name;
+  return `${nxSafeBase(baseName(name), 'bgm')}_drumless.ogg`;
 }
 
 /** DTX の無い曲フォルダから、何から始めるかを決める（音声も動画も無ければ null） */
@@ -117,6 +133,8 @@ export interface SetupStep {
   t0: number;
   /** かかった秒 */
   sec: number;
+  /** 終わったときの短い結果（エディタの「準備ができました」の帯） */
+  chip: string;
 }
 
 /** 最初に作る難易度 */
@@ -142,6 +160,8 @@ export interface SetupState {
   status: 'idle' | 'running' | 'done' | 'error';
   /** 曲名（画面の見出し） */
   title: string;
+  /** 作る難易度 */
+  difficulty: SetupDifficulty;
   steps: SetupStep[];
   /** 続けられなかったとき（動画に音が無いなど。譜面は作っていない） */
   error: string | null;
@@ -149,7 +169,7 @@ export interface SetupState {
   ready: { docs: number; saved: boolean } | null;
 }
 
-const IDLE: SetupState = { status: 'idle', title: '', steps: [], error: null, ready: null };
+const IDLE: SetupState = { status: 'idle', title: '', difficulty: 'MASTER', steps: [], error: null, ready: null };
 export const useSetup = create<SetupState>(() => IDLE);
 const get = useSetup.getState;
 const set = useSetup.setState;
@@ -175,16 +195,62 @@ function begin(id: SetupStepId, note: string) {
   upd(id, { state: 'run', note, progress: null, t0: Date.now() });
 }
 
-function finish(id: SetupStepId, state: 'done' | 'fail' | 'skip', note: string) {
+function finish(id: SetupStepId, state: 'done' | 'fail' | 'skip', note: string, chip = '') {
   const st = get().steps.find((x) => x.id === id);
-  upd(id, { state, note, progress: null, sec: st?.t0 ? (Date.now() - st.t0) / 1000 : 0 });
+  upd(id, { state, note, chip, progress: null, sec: st?.t0 ? (Date.now() - st.t0) / 1000 : 0 });
 }
 
-/** 曲の中の時刻（0:01.395） */
+/** 項目の名前（準備の画面・エディタの帯） */
+export function stepLabel(id: SetupStepId): string {
+  switch (id) {
+    case 'video':
+      return tr('動画から音を取り出す', 'Take the audio out of the video');
+    case 'stems':
+      return tr('ステムから BGM を作る', 'Make the BGM from the stems');
+    case 'info':
+      return tr('曲名・アーティスト・画像', 'Title, artist and images');
+    case 'tempo':
+      return tr('テンポと曲の頭', 'Tempo and where the song starts');
+    case 'preview':
+      return tr('試聴（サビ）', 'Preview (chorus)');
+    case 'separate':
+      return tr('ステム分解（ドラムとドラム抜き）', 'Stem separation (drums and no drums)');
+    case 'drums':
+      return tr('ドラムの打点', 'Drum hits');
+  }
+}
+
+/** 曲の中の時刻（0:01.395。前なら -0:00.200） */
 export function clock(sec: number): string {
-  const s = Math.max(0, sec);
+  const s = Math.abs(sec);
   const m = Math.floor(s / 60);
-  return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`;
+  return `${sec < 0 ? '-' : ''}${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`;
+}
+
+/** 小節番号（エディタと同じ 3 桁） */
+export const measureLabel = (m: number) => String(m).padStart(3, '0');
+
+/** 決めたテンポと曲の頭（いちばん前の小節の頭）。案に曲の頭が無ければ null */
+export function tempoSummary(): { bpm: number; m: number; t: number; note: string; chip: string } | null {
+  const plan = useTempo.getState().plan;
+  const a0 = normalizeAnchors(plan.anchors)[0];
+  if (!a0) return null;
+  const bpm = bpmText(plan.bpm);
+  const mm = measureLabel(a0.m);
+  return {
+    bpm: plan.bpm,
+    m: a0.m,
+    t: a0.t,
+    note: tr(`${bpm} BPM · 曲の頭（${clock(a0.t)}）を ${mm} 小節に`, `${bpm} BPM · the song starts at ${clock(a0.t)}, at measure ${mm}`),
+    chip: tr(`${bpm} BPM · ${mm} 小節 ${clock(a0.t)}`, `${bpm} BPM · measure ${mm} at ${clock(a0.t)}`),
+  };
+}
+
+/** テンポを聴いて直したら、準備の結果も書き直す */
+export function refreshTempoStep() {
+  const st = get().steps.find((x) => x.id === 'tempo');
+  const s = tempoSummary();
+  if (st?.state === 'done' && s) upd('tempo', { note: s.note, chip: s.chip });
 }
 
 // ---- やめる ---------------------------------------------------------------------
@@ -273,6 +339,7 @@ function release(id: number) {
 async function cleanUp(run: Run) {
   if (run.id === runId) {
     stop();
+    if (useTempo.getState().playing) stopPlan();
     // 作りかけの曲の採譜はしない
     setDrumSource(null);
     release(run.id);
@@ -311,8 +378,8 @@ export async function runSetup(src: SetupSource, o: SetupOptions): Promise<boole
   const id = ++runId;
   const run: Run = { id, docs: null, folder: src.folder, before: new Set(src.folder?.files.keys() ?? []) };
   current = run;
-  const steps = plannedSteps(src, o).map((s): SetupStep => ({ id: s, state: 'wait', note: '', progress: null, t0: 0, sec: 0 }));
-  set({ status: 'running', title: src.title, steps, error: null, ready: null });
+  const steps = plannedSteps(src, o).map((s): SetupStep => ({ id: s, state: 'wait', note: '', progress: null, t0: 0, sec: 0, chip: '' }));
+  set({ status: 'running', title: src.title, difficulty: o.difficulty, steps, error: null, ready: null });
   holdAutosave(true);
   holdDrums(true);
   void keepAwake(true);
@@ -334,7 +401,12 @@ export async function runSetup(src: SetupSource, o: SetupOptions): Promise<boole
       }
       audio = r.file;
       movie = video;
-      finish('video', 'done', tr(`${audio.name}（${formatSec(r.seconds)}）。動画は背景動画にも`, `${audio.name} (${formatSec(r.seconds)}). The video is also the background movie`));
+      finish(
+        'video',
+        'done',
+        tr(`${audio.name}（${formatSec(r.seconds)}）。動画は背景動画にも`, `${audio.name} (${formatSec(r.seconds)}). The video is also the background movie`),
+        tr('動画の音を原曲に', 'Video audio as the original'),
+      );
     }
 
     // 2. 譜面を作って開く（タグがあれば曲名・アーティスト・BPM も）
@@ -395,6 +467,7 @@ export async function runSetup(src: SetupSource, o: SetupOptions): Promise<boole
     check(id);
     // 最近の曲にも控えを残す（いつもは打ち込みの途中で自動保存が残す）
     void autosaveNow(true);
+    showSongStart();
     set({ status: 'done', ready: { docs: openedDocs, saved } });
     return true;
   } catch (e) {
@@ -414,10 +487,30 @@ export async function runSetup(src: SetupSource, o: SetupOptions): Promise<boole
   }
 }
 
+/** 打ち込みを始める所（曲の頭の小節）を見せ、▶ もそこに置く。手前の 1 小節も見えるように */
+function showSongStart() {
+  const m = tempoSummary()?.m ?? 1;
+  const t = tempoOf(useEditor.getState().doc);
+  setCursorBeat(t.measureStart(m));
+  setView({ scrollBeat: Math.max(-0.5, t.measureStart(Math.max(0, m - 1)) - 0.5) });
+}
+
 /** 準備の結果を閉じる（帯を閉じた・別の曲を開いた） */
 export function dismissSetup() {
-  if (get().status !== 'running') set(IDLE);
+  if (get().status === 'running') return;
+  set(IDLE);
+  // 帯の「クリックと聴く」で鳴らしていたら止める（帯を閉じると止めるボタンが無くなる）
+  if (useTempo.getState().playing) stopPlan();
 }
+
+// 別の譜面を開いたら（ほかの難易度に切り替えたときも）、帯は閉じる
+useEditor.subscribe(() => {
+  const s = get();
+  if (s.status === 'done' && s.ready && s.ready.docs !== openedDocs) {
+    set(IDLE);
+    if (useTempo.getState().playing) stopPlan();
+  }
+});
 
 // ---- 項目 ---------------------------------------------------------------------
 
@@ -444,7 +537,7 @@ async function stemsStep(id: number, src: SetupSource, title: string) {
       drums >= 2 ? tr(`ドラム ${drums} 本は合わせて解析に`, `the ${drums} drum stems are analyzed together`) : '',
       bgm ? tr(`ゲームの BGM は ${bgm}（ドラム抜き）`, `the game BGM is ${bgm} (no drums)`) : tr('ドラム以外のステムが無いので、BGM は作っていません', 'no BGM was made because there are no stems other than drums'),
     ].filter(Boolean);
-    finish('stems', 'done', parts.join(tr('・', ', ')));
+    finish('stems', 'done', parts.join(tr('・', ', ')), bgm ? tr(`ステム ${n} 本・BGM はドラム抜き`, `${n} stems, BGM without drums`) : tr(`ステム ${n} 本`, `${n} stems`));
   } finally {
     stopTick();
   }
@@ -477,6 +570,7 @@ async function infoStep(id: number, ai: boolean) {
     'info',
     'done',
     [[f['TITLE'], f['ARTIST']].filter(Boolean).join(' / '), extra.length ? tr(`${extra.join('・')}も入れました`, `added ${extra.join(' and ')}`) : '', missed].filter(Boolean).join(' · '),
+    art ? tr('曲名・アーティスト・画像', 'Title, artist and images') : tr('曲名・アーティスト', 'Title and artist'),
   );
 }
 
@@ -508,9 +602,8 @@ async function tempoStep(id: number) {
   await refineWithChords();
   check(id);
   if (!applyTempo({ quiet: true })) return finish('tempo', 'fail', tr('1 小節目の頭が原曲の始まりから遠く、BGM を置けませんでした', 'Measure 1 is too far from the start of the original to place the BGM'));
-  const plan = useTempo.getState().plan;
-  const a0 = normalizeAnchors(plan.anchors)[0];
-  finish('tempo', 'done', tr(`${bpmText(plan.bpm)} BPM · 1 小節目は ${clock(a0?.t ?? 0)} から`, `${bpmText(plan.bpm)} BPM · measure 1 starts at ${clock(a0?.t ?? 0)}`));
+  const sum = tempoSummary();
+  finish('tempo', 'done', sum?.note ?? `${bpmText(useTempo.getState().plan.bpm)} BPM`, sum?.chip ?? '');
 }
 
 async function previewStep(id: number) {
@@ -528,7 +621,8 @@ async function previewStep(id: number) {
   }
   check(id);
   if (!r) return finish('preview', 'fail', useChorus.getState().error ?? tr('試聴を作れませんでした', "Couldn't make the preview"));
-  finish('preview', 'done', tr(`${clock(r.start)} からのサビを試聴（${r.file}）に`, `The chorus from ${clock(r.start)} is the preview (${r.file})`));
+  const at = clock(Math.round(r.start * 10) / 10).slice(0, -2);
+  finish('preview', 'done', tr(`${clock(r.start)} からのサビを試聴（${r.file}）に`, `The chorus from ${clock(r.start)} is the preview (${r.file})`), tr(`試聴はサビ ${at} から`, `Preview: chorus from ${at}`));
 }
 
 async function separateStep(id: number) {
@@ -554,6 +648,7 @@ async function separateStep(id: number) {
     'done',
     tr(`ドラムとドラム抜きに分けました${sec ? `（${formatSec(sec)}）` : ''}`, `Split into drums and no drums${sec ? ` (${formatSec(sec)})` : ''}`) +
       (bgm ? tr(`。ゲームの BGM は ${bgm}`, `. The game BGM is ${bgm}`) : ''),
+    tr('ドラム・ドラム抜き', 'Drums and no drums'),
   );
 }
 
@@ -575,5 +670,5 @@ async function drumsStep(id: number) {
   );
   const d = useDrums.getState();
   if (!ok) return finish('drums', 'fail', d.error ?? tr('採譜できませんでした', "Couldn't transcribe the drums"));
-  finish('drums', 'done', tr(`${d.name} から拾って「原曲の打点」の列に`, `From ${d.name}, shown in the "original hits" columns`));
+  finish('drums', 'done', tr(`${d.name} から拾って「原曲の打点」の列に`, `From ${d.name}, shown in the "original hits" columns`), tr('ドラムの打点', 'Drum hits'));
 }

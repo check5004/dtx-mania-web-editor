@@ -33,6 +33,7 @@ import { Drawer } from '../tablet/TabletEditor';
 import { PhoneGenDock, PhonePhraseDock, PhoneTabBar, usePhoneDock } from './PhoneCands';
 import { DiffMenu, GridPick, MetronomeButton, PosBox, SpeedPick, StrengthPick, VolumeButton } from './PhoneParts';
 import { KIND_ROW_H, kindRows, PhonePads, PhoneTracks, PhoneVelocity, usePadKinds } from './PhoneSheets';
+import { SetupReady } from '../SetupReady';
 
 /** 下のタブ（デザインの並び） */
 function phoneTabs(): { id: PhoneTab; label: string }[] {
@@ -552,6 +553,7 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
   const chart = (
     <section className="chart-area p-chart">
       <ChartCanvas />
+      <SetupReady />
       {!portrait && <PSelBar />}
       <PhoneTabBar />
       {findOpen && <FindPanel />}

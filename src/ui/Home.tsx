@@ -214,8 +214,8 @@ function HomeDesktop() {
             <h3>{tr('原曲の音声ファイルから', 'From the song audio file')}</h3>
             <p>
               {tr(
-                '原曲（WAV・OGG・MP3）をここにドロップすると、その曲をBGMにした新しい譜面を作ります。動画（MP4）なら音を取り出して原曲にします。DTXファイルを落とすとそのまま開きます。',
-                'Drop the original song (WAV, OGG or MP3) here to start a new chart with it as the BGM. A video (MP4) gives its audio as the original. Drop a DTX file to open it as is.',
+                '原曲（WAV・OGG・MP3）か動画（MP4）を選ぶかここに落とすと、曲名・テンポ・試聴・ステム分解まで「おまかせで準備」して打ち込みを始められます。Moises などで分けたステムは、まとめて選んでください。DTXファイルを落とすとそのまま開きます。',
+                'Choose or drop the original song (WAV, OGG or MP3) or a video (MP4) here, and "Set up for me" gets the title, tempo, preview and stem separation ready so you can start placing notes. Choose stems split with an app like Moises all together. Drop a DTX file to open it as is.',
               )}
             </p>
             <div className="actions">
@@ -227,6 +227,7 @@ function HomeDesktop() {
               ref={audioInput}
               type="file"
               accept=".ogg,.wav,.mp3,.m4a,.flac,.opus,.mp4,.m4v,.mov,.webm,.mkv,.dtx,.zip"
+              multiple
               hidden
               onChange={(e) => {
                 void openPickedFiles([...(e.target.files ?? [])]);

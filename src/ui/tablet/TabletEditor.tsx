@@ -56,6 +56,7 @@ import { SaveSheet } from './SaveSheet';
 import { SelectionBar } from './SelectionBar';
 import { tabletPanels, tabletSave } from './shared';
 import { LogoMark } from '../LogoMark';
+import { SetupReady } from '../SetupReady';
 
 const TOP_H = 56;
 const TRANSPORT_H = 60;
@@ -942,6 +943,7 @@ export function TabletEditor({ folderInput }: { folderInput: React.RefObject<HTM
         <Palette />
         <section className="chart-area t-chart">
           <ChartCanvas />
+          <SetupReady />
           <SelectionBar />
           {findOpen && <FindPanel />}
           {phraseOpen && !findOpen && <PhrasePanel />}

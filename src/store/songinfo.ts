@@ -143,7 +143,7 @@ async function loadClues(k: string) {
 }
 
 /** 音声ファイルの長さ（秒）。ブラウザの audio 要素で頭だけ読む。分からなければ 0 */
-function audioDuration(file: Blob): Promise<number> {
+export function audioDuration(file: Blob): Promise<number> {
   return new Promise((resolve) => {
     if (typeof Audio === 'undefined') return resolve(0);
     const url = URL.createObjectURL(file);

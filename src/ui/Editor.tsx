@@ -65,6 +65,7 @@ import { PanelRail, VSplitter } from './Splitter';
 import { Transport } from './Transport';
 import { useDevice } from '../store/device';
 import { TabletEditor } from './tablet/TabletEditor';
+import { SetupReady } from './SetupReady';
 import { PhoneEditor } from './phone/PhoneEditor';
 import { LandscapeOnly } from './phone/LandscapeOnly';
 import { tabletSave } from './tablet/shared';
@@ -430,6 +431,7 @@ export function Editor() {
             {hasLeft && <VSplitter side="left" open={cols.leftOpen} />}
             <section className="chart-area">
               <ChartCanvas />
+              <SetupReady />
               {findOpen && <FindPanel />}
               {phraseOpen && !findOpen && <PhrasePanel />}
             </section>

@@ -169,8 +169,8 @@ export function HomeTablet() {
             </div>
             <p className="lbl">
               {tr(
-                'WAV・OGG・MP3 を選ぶと、その曲を BGM にした新しい譜面を作ります。動画（MP4）なら音を取り出して BGM にします。DTX を選ぶとそのまま開きます。',
-                'Pick a WAV, OGG or MP3 to start a new chart with it as the BGM. A video (MP4) gives its audio as the BGM. Pick a DTX to open it as is.',
+                'WAV・OGG・MP3 か動画（MP4）を選ぶと、曲名・テンポ・試聴まで「おまかせで準備」して打ち込みを始められます。Moises で分けたステムは、まとめて選んでください。DTX を選ぶとそのまま開きます。',
+                'Pick a WAV, OGG, MP3 or a video (MP4), and "Set up for me" gets the title, tempo and preview ready so you can start placing notes. Pick stems split with Moises all together. Pick a DTX to open it as is.',
               )}
             </p>
             <div className="th-actions">
@@ -182,6 +182,7 @@ export function HomeTablet() {
               ref={audioInput}
               type="file"
               accept={IS_IOS ? undefined : '.ogg,.wav,.mp3,.m4a,.flac,.opus,.mp4,.m4v,.mov,.webm,.mkv,.dtx'}
+              multiple
               hidden
               onChange={(e) => {
                 void openPickedFiles([...(e.target.files ?? [])]);

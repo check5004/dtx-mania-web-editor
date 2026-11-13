@@ -13,6 +13,7 @@ import { LocalCopyChip } from './ui/LocalStorage';
 import { initDrive } from './app/driveActions';
 import { DriveProgressChip } from './ui/DriveUi';
 import { DialogHost } from './ui/dialogs';
+import { SetupHost } from './ui/SetupProgress';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
 import { initNxLib } from './nxlib/store';
@@ -86,6 +87,8 @@ export function App() {
       {screen === 'home' ? <Home /> : screen === 'songs' ? <SongsPage /> : <Editor />}
       {/* スマホの縦：画面の上端に上のバーと同じ色の帯（iOS の Safari が上端にかけるぼかしを消す。phone.css の .p-edge-top） */}
       {phone && <div className="p-edge-top" aria-hidden="true" />}
+      {/* おまかせで準備の間の画面（準備の途中で聞くことがあれば、その上に出す） */}
+      <SetupHost />
       <DialogHost />
       <VideoExtractHost />
       <Toasts />

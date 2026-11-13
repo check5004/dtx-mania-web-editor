@@ -33,6 +33,19 @@ vi.mock('../ui/dialogs', () => ({
   promptDialog: async () => null,
 }));
 
+// おまかせで準備の画面：ふだんは「自分で入れる」を選んだことにする（今までの新しい譜面のダイアログへ進む）
+const setupMock = vi.hoisted(() => ({ srcs: [] as unknown[], answer: 'manual' as 'manual' | 'cancel' }));
+vi.mock('./setupEntry', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./setupEntry')>();
+  return {
+    ...real,
+    offerSetup: async (src: import('./setup').SetupSource) => {
+      setupMock.srcs.push(src);
+      return setupMock.answer === 'manual' ? { mode: 'manual' as const, src, opts: {} as never } : null;
+    },
+  };
+});
+
 // 動画から音を取り出す（取り出したことにする）
 const ex = vi.hoisted(() => ({ calls: [] as string[], ok: true }));
 vi.mock('../store/videoExtract', () => ({
@@ -60,6 +73,18 @@ describe('動画から新しい譜面を作る', () => {
     dlg.answer = (o) => ({ title: 'MV', artist: '', bpm: 120, bgmFile: o.defaults.bgmFile, movieFile: o.movies?.[0] });
     ex.calls = [];
     ex.ok = true;
+    setupMock.srcs = [];
+    setupMock.answer = 'manual';
+  });
+
+  it('開くと、まずおまかせで準備の画面を出す（閉じたら新しい譜面のダイアログも出さず、何も作らない）', async () => {
+    setupMock.answer = 'cancel';
+    await openDroppedFiles([file('MV.mp4')]);
+    expect(setupMock.srcs).toHaveLength(1);
+    expect(setupMock.srcs[0]).toMatchObject({ kind: 'video', title: 'MV' });
+    expect(dlg.asked).toBeNull();
+    expect(ex.calls).toEqual([]);
+    expect(useEditor.getState().screen).toBe('home');
   });
 
   it('MP4 だけを開くと、音を取り出した OGG を原曲に、動画を BGA の動画（#AVI01・ch54・原曲と同じ所）にする', async () => {
