@@ -198,8 +198,9 @@ const browserTools: AgentTools = {
 /**
  * 曲情報を調べる。useAi が true で AI のキーがあれば、Web 検索するエージェントに頼む。
  * そうでなければ、タグと iTunes（無料）だけで案を出す。
+ * quiet：AI の費用を確かめない（おまかせで準備。準備の画面で AI を使うと選んである）
  */
-export async function lookupSong(useAiAgent: boolean): Promise<void> {
+export async function lookupSong(useAiAgent: boolean, opts: { quiet?: boolean } = {}): Promise<void> {
   if (get().status === 'running') return;
   ensureClues();
   // 手がかりの読み込みを待つ
@@ -275,7 +276,7 @@ export async function lookupSong(useAiAgent: boolean): Promise<void> {
     }
 
     const est = taskCostEstimate('songinfo') ?? 0.05;
-    const session = await beginAi('songinfo', est);
+    const session = await beginAi('songinfo', est, opts.quiet);
     if (!session) {
       set({ status: 'idle', steps: [] });
       return;

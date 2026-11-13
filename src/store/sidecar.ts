@@ -175,6 +175,9 @@ export interface SidecarState extends SidecarData {
   loadSeq: number;
 }
 
+/** 解析元を「ドラムのステムを全部合わせた音」にする印（analysisStem に入れる。キック・スネア…と細かく分けたステム） */
+export const DRUMS_SUM = '*drums';
+
 export const emptySidecar = (): SidecarData => ({ sections: [], sectionColors: {}, youtube: null, anchors: [], stems: [], analysisStem: null, mix: null, auto: [], fullMix: null, special: null, fx: null });
 
 export const useSidecar = create<SidecarState>(() => ({ ...emptySidecar(), dirty: false, changed: [], loadSeq: 0 }));
@@ -427,7 +430,8 @@ export function parseSidecar(text: string): SidecarData | null {
       // 前の版で種類が分からず「その他」になっていたステムは、ファイル名から付け直す
       out.stems = renameOldOtherStems(out.stems);
     }
-    if (typeof j.analysisStem === 'string' && out.stems.some((t) => t.file === j.analysisStem)) out.analysisStem = j.analysisStem;
+    if (typeof j.analysisStem === 'string' && (out.stems.some((t) => t.file === j.analysisStem) || (j.analysisStem === DRUMS_SUM && out.stems.some((t) => t.kind === 'drums'))))
+      out.analysisStem = j.analysisStem;
     if (typeof j.fullMix === 'string' && j.fullMix.trim()) out.fullMix = j.fullMix;
     if (j.special && typeof j.special === 'object') out.special = parseSpecial(j.special);
     if (j.fx && typeof j.fx === 'object') out.fx = parseFxSide(j.fx);

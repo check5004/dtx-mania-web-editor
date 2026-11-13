@@ -465,13 +465,17 @@ function diffParts(d: TempoDiff): string[] {
   return out;
 }
 
-/** 案をエディタ（譜面）に反映する。反映できなければ false（譜面がもう案のとおりなら何も変えずに true） */
-export function applyTempo(): boolean {
+/**
+ * 案をエディタ（譜面）に反映する。反映できなければ false（譜面がもう案のとおりなら何も変えずに true）。
+ * quiet なら知らせない（おまかせで準備。結果は準備の画面に出す）
+ */
+export function applyTempo(opts: { quiet?: boolean } = {}): boolean {
   const s = get();
   const doc = useEditor.getState().doc;
   const r = planResult();
   const anchors = normalizeAnchors(s.plan.anchors);
   if (anchors.length && !r.bgm) {
+    if (opts.quiet) return false;
     toast(
       tr(
         `1小節目の頭が原曲の始まりから遠いため、BGMを置けません。小節番号を ${r.shift} 個うしろにしてください。`,
@@ -487,6 +491,7 @@ export function applyTempo(): boolean {
   const res = d.any ? editSong(tr('テンポ合わせを反映', 'Apply tempo map'), (dd) => applyPlan(dd, r, null)) : null;
   setAnchors(anchors);
   set({ touched: false, fromEstimate: false, applied: true });
+  if (opts.quiet) return true;
   if (!res?.ok) {
     toast(tr('エディタの譜面は、もうこの案のとおりです', 'The editor’s chart already matches this plan'), 'ok');
     return true;

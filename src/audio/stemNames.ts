@@ -77,6 +77,8 @@ interface Word {
   label: readonly [string, string] | null;
   /** 短くて別の意味もある略語（Dr・Ba・Vo など）。ほかに当たる語が無いときだけ使う */
   weak: boolean;
+  /** 曲の音ではない（メトロノーム・クリック）。BGM にも試聴にも混ぜない */
+  guide?: boolean;
 }
 
 const B = '(?<![a-z])';
@@ -90,6 +92,9 @@ const ja = (src: string, kind: StemKind, label: readonly [string, string] | null
 
 // 日本語のファイル名の語（照合に使うので訳さない） i18n-ignore-start
 const WORDS: Word[] = [
+  // 曲の音ではないもの（Moises などが出すメトロノーム・クリック）
+  { ...en('metronomes?|click[ _-]?tracks?|clicks?|count[ _-]?ins?', 'other', ['メトロノーム', 'Metronome']), guide: true },
+  { ...ja('メトロノーム|クリック|カウント', 'other'), guide: true },
   // 「〜抜き」はその楽器ではない（ドラム抜きの BGM など）
   en('(?:no|without|minus)[ _-]?drums?|drum[ _-]?less|nodrums?', 'other', ['ドラム抜き', 'No drums']),
   ja('ドラム(?:抜き?|ぬき|なし|無し?|レス|オフ)|ノードラム', 'other'),
@@ -102,6 +107,7 @@ const WORDS: Word[] = [
   head('kick', 'drums', ['キック', 'Kick']),
   en('bd|kd', 'drums', ['キック', 'Kick'], true),
   head('snare', 'drums', ['スネア', 'Snare']),
+  en('rim[ _-]?(?:clicks?|shots?)|cross[ _-]?sticks?', 'drums', ['リム', 'Rim']),
   en('sd|snr', 'drums', ['スネア', 'Snare'], true),
   en('hi[ _-]?hats?', 'drums', ['ハイハット', 'Hi-hat']),
   en('hh|hats?', 'drums', ['ハイハット', 'Hi-hat'], true),
@@ -270,6 +276,9 @@ function plainName(p: Prep, hints: string[]): string {
   return (kept.length ? kept : toks).join(' ').trim() || p.tidy.trim() || tr('ステム', 'Stem');
 }
 
+/** 決め手の語から種類（と、曲の音ではないか） */
+const fromWord = (w: Word | undefined, name: string): StemGuess => ({ kind: w?.kind ?? 'other', name, known: !!w, ...(w?.guide ? { guide: true } : {}) });
+
 function guessOne(p: Prep, others: Prep[], hints: string[]): StemGuess {
   const whole = pick(findWords(p.f.s));
   if (others.length && p.toks.length) {
@@ -280,22 +289,26 @@ function guessOne(p: Prep, others: Prep[], hints: string[]): StemGuess {
       const pb = p.toks[p.toks.length - 1 - T].b;
       const sub = p.f.s.slice(pa, pb);
       const h = pick(findWords(sub));
-      if (h && ONLY_SEP_DIGITS.test(sub.slice(0, h.a)) && AFTER_WORD.test(sub.slice(h.b))) return { kind: h.w.kind, name: wordName(p, pa, h, true) };
+      if (h && ONLY_SEP_DIGITS.test(sub.slice(0, h.a)) && AFTER_WORD.test(sub.slice(h.b))) return fromWord(h.w, wordName(p, pa, h, true));
       const text = p.tidy
         .slice(p.f.at[pa], p.f.at[pb])
         .replace(new RegExp(`^\\d{1,3}[${SEP}]+(?=\\S)`), '')
         .replace(/\s+/g, ' ')
         .trim();
-      return { kind: (h ?? whole)?.w.kind ?? 'other', name: text || plainName(p, hints) };
+      return fromWord((h ?? whole)?.w, text || plainName(p, hints));
     }
   }
-  if (whole) return { kind: whole.w.kind, name: wordName(p, 0, whole, true) };
-  return { kind: 'other', name: plainName(p, hints) };
+  if (whole) return fromWord(whole.w, wordName(p, 0, whole, true));
+  return fromWord(undefined, plainName(p, hints));
 }
 
 export interface StemGuess {
   kind: StemKind;
   name: string;
+  /** 楽器の語から決めた（false：知らない名前なので「その他」にした） */
+  known: boolean;
+  /** 曲の音ではない（メトロノーム・クリック）。BGM にも試聴にも混ぜない */
+  guide?: boolean;
 }
 
 export interface GuessOptions {
@@ -365,4 +378,65 @@ export function renameOldOtherStems(stems: StemTrack[]): StemTrack[] {
     const i = old.indexOf(t);
     return i < 0 ? t : { ...t, kind: g[i].kind, name: g[i].name };
   });
+}
+
+export interface StemFilePlan {
+  /** 原曲（ステムに分ける前の音）らしいファイルの番号。無ければ null */
+  original: number | null;
+  /** ファイルごとの種類と名前（original の所は null） */
+  items: (StemGuess | null)[];
+  /** ステムとして扱うか（楽器の語から 2 種類以上見分けられた。メトロノームなどは数えない） */
+  isStems: boolean;
+  /** 曲名の案：原曲のファイル名、無ければステムの名前に共通の頭（Moises の「曲.m4a_ドラム_mixed」の「曲」）。分からなければ空 */
+  title: string;
+}
+
+/** 名前の頭に付いた元のファイルの拡張子（Moises の「曲.m4a_ドラム」） */
+const AUDIO_TOKEN = /^(?:m4a|mp3|wav|flac|ogg|opus|aac|aiff?|mp4|mov|webm)$/;
+
+/** ステムの名前に共通の頭（曲名）。拡張子・_mixed などは除く */
+function sharedTitle(fileNames: string[]): string {
+  const list = fileNames.map(prep).filter((p) => p.toks.length);
+  if (list.length < 2) return '';
+  const [L] = commonEnds(list);
+  const p = list[0];
+  let n = L;
+  while (n > 0 && (AUDIO_TOKEN.test(p.toks[n - 1].s) || NOISE.test(p.toks[n - 1].s))) n--;
+  if (!n) return '';
+  // 頭のかっこ（【MV】曲）から、最後の語のすぐ後ろの閉じかっこまで
+  const end = p.f.at[p.toks[n - 1].b];
+  const close = /^[)）\]】」』〕〉》]*/.exec(p.tidy.slice(end))![0].length;
+  return p.tidy.slice(0, end + close).trim();
+}
+
+/**
+ * まとめて入れた音のファイルが、分けてあるステム（Moises などの書き出し）かを見る。
+ * 原曲が一緒にあれば見つける（楽器の語が無く、ほかの 2 本以上がその名前で始まる。Moises：曲.m4a と 曲.m4a_ドラム_mixed.mp3）
+ */
+export function planStemFiles(fileNames: string[], o: GuessOptions = {}): StemFilePlan {
+  const base = (f: string) =>
+    tidyName((f.split(/[\\/]/).pop() ?? f).replace(/\.[a-z0-9]{1,5}$/i, ''))
+      .toLowerCase()
+      .trim();
+  const bases = fileNames.map(base);
+  let original: number | null = null;
+  let most = 1;
+  bases.forEach((b, i) => {
+    if (b.length < 2 || guessStems([fileNames[i]])[0].known) return;
+    const n = bases.filter((x, j) => j !== i && x.length > b.length && x.startsWith(b)).length;
+    if (n > most) {
+      most = n;
+      original = i;
+    }
+  });
+  const rest = fileNames.map((f, i) => ({ f, i })).filter((x) => x.i !== original);
+  const guesses = guessStems(
+    rest.map((x) => x.f),
+    o,
+  );
+  const items: (StemGuess | null)[] = fileNames.map(() => null);
+  rest.forEach((x, k) => (items[x.i] = guesses[k]));
+  const kinds = new Set(guesses.filter((g) => g.known && !g.guide).map((g) => g.kind));
+  const title = original !== null ? prep(fileNames[original]).tidy.trim() : sharedTitle(rest.map((x) => x.f));
+  return { original, items, isStems: kinds.size >= 2, title };
 }

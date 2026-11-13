@@ -12,7 +12,7 @@ import { openPhoneTab } from '../../store/device';
 import { currentBeat, openPage, playFrom, setMix, setView, toast, useEditor } from '../../store/editor';
 import { glowsDiff, useGlowDiffs } from '../../store/glow';
 import { useSidecar } from '../../store/sidecar';
-import { chooseAnalysisStem, effectiveAnalysisStem, soloOnly, useStems } from '../../store/stems';
+import { analysisMark, chooseAnalysisStem, soloOnly, useStems } from '../../store/stems';
 import { setPreset, useVel, velPresetNames } from '../../store/velocity';
 import { useInputSettings } from '../../input/settings';
 import { pickBgmFile } from '../../app/fileActions';
@@ -328,8 +328,8 @@ export function TrackLine({ row, analysis = false, sub = true }: { row: TrackRow
   const on = rowAudible(row);
   const { muted, soloed, gain, maxGain, defGain } = trackMix(row, mix);
   const why = silentWhy(row, mix, on, muted, soloed);
-  const eff = analysis ? effectiveAnalysisStem() : null;
-  const isAnalysis = analysis && (row.type === 'stem' ? eff?.file === row.id : row.type === 'orig' ? eff === null : false);
+  const mark = analysis && (row.type === 'stem' || row.type === 'orig') ? analysisMark(row.id) : null;
+  const isAnalysis = !!mark?.on;
   return (
     <div className={`p-trk-row ${on ? '' : 'off'}`} style={{ ['--c' as string]: row.color }} title={why ? tr(`鳴っていません${why}`, `Not playing${why}`) : undefined} onPointerUp={releaseFocus}>
       <span className="p-trk-bar" />
@@ -353,10 +353,7 @@ export function TrackLine({ row, analysis = false, sub = true }: { row: TrackRow
         (row.type === 'orig' || row.type === 'stem' ? (
           <button
             className={`p-radio ${isAnalysis ? 'on' : ''}`}
-            onClick={() => {
-              if (row.type === 'orig') chooseAnalysisStem(null);
-              else chooseAnalysisStem(isAnalysis && !eff?.auto ? null : row.id);
-            }}
+            onClick={() => chooseAnalysisStem(mark?.next ?? null)}
             aria-pressed={isAnalysis}
             aria-label={tr(`${row.name}を解析元にする（波形・原曲の打点・BPM推定）`, `Use ${row.name} as the analysis source (waveform, hits, BPM estimate)`)}
             title={tr('解析元（波形・原曲の打点・BPM推定に使う音）', 'Analysis source (the audio used for the waveform, hits and BPM estimate)')}

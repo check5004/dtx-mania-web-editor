@@ -12,7 +12,7 @@ import { AUDIO_EXT, findFile, folderFromFiles, putFile, type SongFolder } from '
 import { setAnalysisProvider, syncAnalysis, useAssist, type AnalysisSource } from './assist';
 import { bgmSource, setPlaybackTransform, tempoOf, wavPath } from './derived';
 import { edit, openedDocs, prepareSounds, restartIfPlaying, setMix, toast, useEditor } from './editor';
-import { rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
+import { DRUMS_SUM, rememberMix, setAnalysisStem, setStems, useSidecar, type ListenPreset, type SavedMix, type StemKind, type StemTrack } from './sidecar';
 import { glowReflected } from './glow';
 import { editBgm, editBgmBack, siblingNote, type SiblingChange } from './songBgm';
 import { editBack } from './siblings';
@@ -261,34 +261,100 @@ function applyStrips() {
 
 /**
  * 解析（波形・原曲の打点・BPM推定）に使うステム。選んだものが無く、原曲のファイルも
- * 鳴らせないときは、ドラム、無ければ最初のステムを使う（ステムだけ読み込んでも波形が出るように）。
+ * 鳴らせないときは、ドラム（ドラムが何本もあれば合わせた音）、無ければ最初のステムを使う（ステムだけ読み込んでも波形が出るように）。
+ * file が DRUMS_SUM なら、ドラムのステムを全部合わせた音
  */
 export function effectiveAnalysisStem(): { file: string; auto: boolean } | null {
   const chosen = useSidecar.getState().analysisStem;
+  if (chosen === DRUMS_SUM && drumStems().length) return { file: DRUMS_SUM, auto: false };
   if (chosen && loaded.has(chosen) && tracks().some((t) => t.file === chosen)) return { file: chosen, auto: false };
   const bgm = bgmSource(useEditor.getState().doc);
   if (bgm && engine.buffer(bgm.wav)) return null;
   const ready = readyStems();
+  if (drumStems().length >= 2) return { file: DRUMS_SUM, auto: true };
   const t = ready.find((x) => x.kind === 'drums') ?? ready[0];
   return t ? { file: t.file, auto: true } : null;
+}
+
+/** 読み込めているドラムのステム */
+function drumStems(): StemTrack[] {
+  return readyStems().filter((t) => t.kind === 'drums');
+}
+
+let drumsSum: { sig: string; src: AnalysisSource } | null = null;
+
+/** ドラムのステムを全部合わせた音（解析に使う。音量・パンは使わず、頭のずれは入れる） */
+function drumsSumSource(): AnalysisSource | null {
+  const list = drumStems();
+  if (!list.length) return null;
+  if (list.length === 1) return trackAudio(list[0].file);
+  const sig = list.map((t) => `${loaded.get(t.file)!.key}:${t.offsetMs}`).join('+');
+  if (drumsSum?.sig === sig) return drumsSum.src;
+  const bufs = list.map((t) => loaded.get(t.file)!.buf);
+  const sr = bufs[0].sampleRate;
+  const chans = Math.max(...bufs.map((b) => Math.min(2, b.numberOfChannels)));
+  const len = Math.max(...bufs.map((b) => (b.sampleRate === sr ? b.length : Math.round((b.length * sr) / b.sampleRate))));
+  const out = engine.workCtx().createBuffer(chans, len, sr);
+  for (let c = 0; c < chans; c++) {
+    const y = out.getChannelData(c);
+    for (const b of bufs) {
+      const x = b.getChannelData(Math.min(c, b.numberOfChannels - 1));
+      if (b.sampleRate === sr) {
+        for (let i = 0; i < x.length && i < len; i++) y[i] += x[i];
+      } else {
+        // サンプリング周波数が違うステムは、近い所を拾って合わせる（解析に使うだけ）
+        const r = b.sampleRate / sr;
+        for (let i = 0; i < len; i++) {
+          const j = Math.floor(i * r);
+          if (j >= x.length) break;
+          y[i] += x[j];
+        }
+      }
+    }
+  }
+  const src: AnalysisSource = {
+    key: `stems-sum:${sig}`,
+    buf: out,
+    name: tr(`ドラム（${list.map((t) => t.name).join('・')} を合わせた音）`, `Drums (${list.map((t) => t.name).join(', ')} combined)`),
+  };
+  drumsSum = { sig, src };
+  return src;
 }
 
 setAnalysisProvider(() => {
   const eff = effectiveAnalysisStem();
   if (!eff) return null;
+  if (eff.file === DRUMS_SUM) return drumsSumSource();
   const l = loaded.get(eff.file);
   const t = tracks().find((x) => x.file === eff.file);
   if (!l || !t) return null;
   return { key: `stem:${l.key}:${t.offsetMs}`, buf: l.buf, name: tr(`${t.name}（${t.file.split('/').pop()}）`, `${t.name} (${t.file.split('/').pop()})`) };
 });
 
-/** トラックの音（スペクトルに出すとき）。'orig' は原曲、それ以外はステムのファイル */
+/**
+ * 解析元の印（◉）をこのトラックに付けるか（ドラムを合わせた音のときは、ドラムのトラック全部に付ける）と、
+ * 押したら何を解析元にするか（undefined は変えない）。id は 'orig' かステムのファイル
+ */
+export function analysisMark(id: string): { on: boolean; sum: boolean; next: string | null } {
+  const eff = effectiveAnalysisStem();
+  if (id === 'orig') return { on: eff === null, sum: false, next: null };
+  const t = tracks().find((x) => x.file === id);
+  const sum = eff?.file === DRUMS_SUM && t?.kind === 'drums';
+  if (sum) return { on: true, sum: true, next: id };
+  if (eff?.file !== id) return { on: false, sum: false, next: id };
+  // 選んであるドラム 1 本を押すと、ドラムを全部合わせた音に（ドラムが 1 本なら原曲に）戻す
+  if (eff.auto) return { on: true, sum: false, next: id };
+  return { on: true, sum: false, next: t?.kind === 'drums' && drumStems().length >= 2 ? DRUMS_SUM : null };
+}
+
+/** トラックの音（スペクトルに出すとき）。'orig' は原曲、DRUMS_SUM はドラムを合わせた音、それ以外はステムのファイル */
 export function trackAudio(id: string): AnalysisSource | null {
   if (id === 'orig') {
     const bgm = bgmSource(useEditor.getState().doc);
     const got = bgm ? engine.buffer(bgm.wav) : null;
     return got ? { key: got.key, buf: got.buf, name: tr('原曲', 'Original') } : null;
   }
+  if (id === DRUMS_SUM) return drumsSumSource();
   const l = loaded.get(id);
   const t = tracks().find((x) => x.file === id);
   if (!l || !t) return null;
@@ -297,8 +363,11 @@ export function trackAudio(id: string): AnalysisSource | null {
 
 // ---- 追加・変更 -----------------------------------------------------------------
 
-/** ステムのファイルを読み込む（曲フォルダの stems/ にコピーし、作業ファイルに記録する） */
-export async function importStems(files: File[]): Promise<number> {
+/**
+ * ステムのファイルを読み込む（曲フォルダの stems/ にコピーし、作業ファイルに記録する）。
+ * kinds：決めてある種類と名前（無いファイルはファイル名から決める）。quiet：読み込んだ知らせを出さない
+ */
+export async function importStems(files: File[], o: { kinds?: Map<File, { kind: StemKind; name: string }>; quiet?: boolean } = {}): Promise<number> {
   const audio = files.filter((f) => AUDIO_EXT.test(f.name));
   if (audio.length === 0) {
     toast(tr('音声ファイル（WAV・OGG・MP3・FLAC）を選んでください', 'Choose audio files (WAV, OGG, MP3, FLAC)'), 'warn');
@@ -332,8 +401,8 @@ export async function importStems(files: File[]): Promise<number> {
         path = stemFilePath(f.name, [...list.map((t) => t.file), ...[...folder.files.values()].map((x) => x.path)]);
         if ((await putFile(folder, path, f)) === 'memory') memory++;
       }
-      const { kind, name } = guesses[i];
-      const t: StemTrack = { file: path, name, kind, gain: 1, pan: 0, mute: false, solo: false, offsetMs: 0 };
+      const { kind, name } = o.kinds?.get(f) ?? guesses[i];
+      const t: StemTrack = { file: path, name: uniqueStemName(name, list.map((x) => x.name)), kind, gain: 1, pan: 0, mute: false, solo: false, offsetMs: 0 };
       list.push(t);
       added.push(t);
     }
@@ -344,12 +413,14 @@ export async function importStems(files: File[]): Promise<number> {
   // ステムの合計が原曲なので、初めてステムを入れたら原曲のトラックは消しておく（下のトラックで鳴らせる）
   if (firstStems && added.length) setMix({ origMute: true, origSolo: false });
   if (!useSidecar.getState().analysisStem) {
-    const drums = list.find((t) => t.kind === 'drums');
-    if (drums) setAnalysisStem(drums.file);
+    const drums = list.filter((t) => t.kind === 'drums');
+    // キック・スネア…と分けたステムは、合わせた音を解析に使う
+    if (drums.length) setAnalysisStem(drums.length >= 2 ? DRUMS_SUM : drums[0].file);
   }
   ensureBgmAnchor();
   await syncStems();
   checkLengths();
+  if (o.quiet) return added.length;
   toast(
     tr(
       `ステムを ${added.length} 本読み込みました：${added.map((t) => t.name).join('・')}${memory ? '（曲フォルダへは保存するときに書き出します）' : reused === added.length ? '（曲フォルダの stems/ にあるファイルを使います）' : '（曲フォルダの stems/ にコピー）'}。名前と種類はトラックの ✎ で変えられます`,
@@ -419,7 +490,11 @@ export function updateStem(file: string, patch: Partial<StemTrack>) {
 export function removeStem(file: string) {
   setStems(tracks().filter((t) => t.file !== file));
   if (tracks().length === 0) setMix({ origMute: false });
-  if (useSidecar.getState().analysisStem === file) setAnalysisStem(tracks().find((t) => t.kind === 'drums')?.file ?? null);
+  const an = useSidecar.getState().analysisStem;
+  if (an === file || (an === DRUMS_SUM && !tracks().some((t) => t.kind === 'drums'))) {
+    const drums = tracks().filter((t) => t.kind === 'drums');
+    setAnalysisStem(drums.length >= 2 ? DRUMS_SUM : (drums[0]?.file ?? null));
+  }
   void syncStems();
 }
 
@@ -697,6 +772,8 @@ export interface ExportOptions {
   fileName: string;
   /** 書き出したあとエディタ（譜面）に反映するか：BGM（#WAV と ch01）・試聴（#PREVIEW）・しない（ファイルだけ） */
   register: 'bgm' | 'preview' | 'none';
+  /** 書き出した知らせを出さない（おまかせで準備。結果は準備の画面に出す） */
+  quiet?: boolean;
 }
 
 /** 範囲（ステムの頭からの秒） */
@@ -812,6 +889,7 @@ export async function exportStems(o: ExportOptions): Promise<string[]> {
       : '';
   // ほかの難易度にも入れたら、それも伝える（書き終わるのを待つ。同じファイルに書き出し直しただけなら、もう入っている）
   const rec = reflect === 'none' ? null : sget().reflected[reflect];
+  if (o.quiet) return written;
   const sib = rec && rec !== recBefore ? await rec.siblings?.done : null;
   toast(
     reflect === 'bgm'

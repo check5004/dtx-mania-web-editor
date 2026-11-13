@@ -15,8 +15,8 @@ import { deskTracksHeight, SEEK_CLOSED_H, togglePanel, useLayout } from '../stor
 import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
   anySolo,
+  analysisMark,
   chooseAnalysisStem,
-  effectiveAnalysisStem,
   importStems,
   PEAK_RATE,
   setChartTrack,
@@ -1140,9 +1140,9 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
     );
   }
 
-  // 解析元（波形・原曲の打点・BPM推定に使う音）
-  const eff = effectiveAnalysisStem();
-  const isAnalysis = row.type === 'stem' ? eff?.file === row.id : row.type === 'orig' ? eff === null : false;
+  // 解析元（波形・原曲の打点・BPM推定に使う音。ドラムを合わせた音なら、ドラムのトラック全部）
+  const mark = row.type === 'stem' || row.type === 'orig' ? analysisMark(row.id) : null;
+  const isAnalysis = !!mark?.on;
   const audio = row.type === 'orig' || row.type === 'stem' ? trackAudio(row.id) : null;
   const specOn = !!audio && waveMode === 'spec' && (specSource ? specSource === audio.key : audio.key === srcKey);
 
@@ -1195,14 +1195,13 @@ function TrackHead({ row, h }: { row: Row; h: number }) {
       {row.type === 'orig' || row.type === 'stem' ? (
         <button
           className={`radio-btn small ${isAnalysis ? 'on' : ''}`}
-          onClick={() => {
-            if (row.type === 'orig') chooseAnalysisStem(null);
-            else chooseAnalysisStem(isAnalysis && !eff?.auto ? null : row.id);
-          }}
+          onClick={() => chooseAnalysisStem(mark?.next ?? null)}
           title={
-            isAnalysis
-              ? tr('解析元：波形・原曲の打点・BPM推定をこのトラックから作っています', 'Analysis source: the waveform, detected hits and BPM estimate come from this track')
-              : tr('解析元にする（波形・原曲の打点・BPM推定をこのトラックから作る）', 'Use as the analysis source (the waveform, detected hits and BPM estimate come from this track)')
+            mark?.sum
+              ? tr('解析元：ドラムのトラックを全部合わせた音から、波形・原曲の打点・BPM推定を作っています（クリックでこのトラックだけにする）', 'Analysis source: the waveform, detected hits and BPM estimate come from all the drum tracks combined (click to use only this track)')
+              : isAnalysis
+                ? tr('解析元：波形・原曲の打点・BPM推定をこのトラックから作っています', 'Analysis source: the waveform, detected hits and BPM estimate come from this track')
+                : tr('解析元にする（波形・原曲の打点・BPM推定をこのトラックから作る）', 'Use as the analysis source (the waveform, detected hits and BPM estimate come from this track)')
           }
           aria-label={tr(`${row.name}を解析元にする`, `Use ${row.name} as the analysis source`)}
           aria-pressed={isAnalysis}

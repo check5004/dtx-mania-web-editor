@@ -54,6 +54,14 @@ interface Source {
 /** いまの解析元の音（assist が渡す） */
 let source: Source | null = null;
 let running = '';
+/** 採譜を待たせる（おまかせで準備のステム分解の間：分けたドラムで採譜するので、先に原曲で採譜しない） */
+let held = false;
+
+/** 採譜を待たせる・待たせるのをやめる（やめたら、今の解析元の音を採譜する） */
+export function holdDrums(on: boolean) {
+  held = on;
+  if (!on) requestDrums();
+}
 
 /** 解析元の音が決まった・変わった（null で無し） */
 export function setDrumSource(src: Source | null) {
@@ -69,7 +77,7 @@ export function setDrumSource(src: Source | null) {
 /** 解析元の音を採譜する（同じ音はやり直さない） */
 export function requestDrums() {
   const src = source;
-  if (!src || !get().enabled) return;
+  if (!src || !get().enabled || held) return;
   const cur = get();
   if (cur.key === src.key && (cur.status === 'ready' || cur.status === 'loading')) return;
   if (running === src.key) return;

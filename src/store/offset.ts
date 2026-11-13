@@ -12,7 +12,7 @@ import { bgmSource, tempoOf } from './derived';
 import { drumHitsByClass, readyDrums, type DrumHitsByClass } from './drums';
 import { toast, useEditor } from './editor';
 import { editSong, toastSongEdit } from './songSync';
-import { setAnchors, useSidecar } from './sidecar';
+import { DRUMS_SUM, setAnchors, useSidecar } from './sidecar';
 import { effectiveAnalysisStem, trackAudio, updateStem } from './stems';
 import { useTempo } from './tempoUi';
 
@@ -239,12 +239,16 @@ export function stemLag(): StemLag | null {
 export function fixStemLag(): boolean {
   const s = stemLagWarn();
   if (!s || s.lag === null) return false;
-  const t = useSidecar.getState().stems.find((x) => x.file === s.file);
+  // ドラムを合わせた音なら、ドラムのステムを全部同じだけ動かす
+  const all = useSidecar.getState().stems;
+  const targets = s.file === DRUMS_SUM ? all.filter((x) => x.kind === 'drums') : all.filter((x) => x.file === s.file);
+  const t = targets[0];
   if (!t) return false;
   const next = Math.round(t.offsetMs - s.lag * 1000);
-  updateStem(s.file, { offsetMs: next });
+  for (const x of targets) updateStem(x.file, { offsetMs: Math.round(x.offsetMs - s.lag * 1000) });
+  const name = targets.map((x) => x.name).join(tr('・', ', '));
   toast(
-    tr(`ステム（${t.name}）の頭のずれを ${t.offsetMs} → ${next}ms にしました。打点は採譜し直してから出ます`, `Changed the start offset of the stem (${t.name}) from ${t.offsetMs} to ${next}ms. Hits appear after transcribing again`),
+    tr(`ステム（${name}）の頭のずれを ${t.offsetMs} → ${next}ms にしました。打点は採譜し直してから出ます`, `Changed the start offset of the stem (${name}) from ${t.offsetMs} to ${next}ms. Hits appear after transcribing again`),
     'ok',
     6000,
   );

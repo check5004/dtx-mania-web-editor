@@ -455,7 +455,7 @@ export async function removeRecentSong(song: RecentSong): Promise<boolean> {
 }
 
 /** 開いている譜面を閉じる（本体から消した曲を開いていたとき） */
-function closeDocument() {
+export function closeDocument() {
   const doc = emptyDoc();
   useEditor.setState({ screen: 'home', page: 'chart', doc, savedDoc: doc, savedHistory: 0, folder: null, past: [], future: [], selection: [], meta: { fileName: 'new.dtx', encoding: 'shift_jis', warnings: [], hasRandom: false, siblings: [] } });
 }
@@ -536,7 +536,7 @@ export async function reopenFromFolder(folder: SongFolder, fileName: string, res
   else await openFolder(folder);
 }
 
-function newMeta(fileName: string, folder: SongFolder | null): DocMeta {
+export function newMeta(fileName: string, folder: SongFolder | null): DocMeta {
   return {
     fileName,
     encoding: 'shift_jis',
@@ -663,7 +663,7 @@ export async function switchDifficulty(fileName: string) {
  * 新しい曲に置く音声ファイル・動画を、NX（Shift_JIS）で読める名前にする（譜面に書く名前が「?」になって、NX が原曲・試聴・
  * 背景動画を読めなくならないように）。同じ名前になったら番号を付ける
  */
-function nxSafeFiles(files: File[]): File[] {
+export function nxSafeFiles(files: File[]): File[] {
   const audio = (f: File) => AUDIO_EXT.test(f.name) || isVideoName(f.name);
   // もう読める名前のファイルは、そのままの名前で先に取っておく
   const taken = new Set(files.filter((f) => !audio(f) || isNxSafeName(f.name)).map((f) => f.name.toLowerCase()));
@@ -798,7 +798,7 @@ export function pickBgmFile() {
 }
 
 /** 同じ名前の別のファイルがあれば、名前の後ろに番号を付ける */
-function freePath(folder: SongFolder, name: string): string {
+export function freePath(folder: SongFolder, name: string): string {
   if (!findFile(folder, name)) return name;
   const dot = name.lastIndexOf('.');
   const base = dot > 0 ? name.slice(0, dot) : name;
@@ -1631,6 +1631,22 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
   }
 }
 
+/**
+ * おまかせで準備のあと：曲を保存する。PC の曲フォルダならそこへ（いつもの保存）、それ以外は曲フォルダごと本体に入れて保存する。
+ * 保存できたら true（本体が使えない・空きが無いなどは false。譜面は開いたまま）
+ */
+export async function saveAfterSetup(): Promise<boolean> {
+  const s = get();
+  const folder = s.folder;
+  if (!folder || s.screen !== 'editor') return false;
+  if (isDiskFolder(folder) && !folder.local) {
+    await save();
+    return !isDirty(get());
+  }
+  if (!(await checkLocal()) || !(await promoteToLocal(folder))) return false;
+  return saveLocalQuiet();
+}
+
 /** 本体の曲を、確かめずに本体へ保存する（書き出したとき。Shift_JIS で） */
 async function saveLocalQuiet(): Promise<boolean> {
   const s = get();
@@ -1684,6 +1700,13 @@ export async function downloadDtx() {
 
 let autosaveTimer = 0;
 let lastAutosaved: DtxDoc | null = null;
+/** おまかせで準備の間は自動保存しない（やめたら何も残さないように。終わったら saveAfterSetup で保存する） */
+let autosaveHeld = false;
+
+/** 自動保存を止める・止めるのをやめる */
+export function holdAutosave(on: boolean) {
+  autosaveHeld = on;
+}
 
 /** 最後にこのブラウザへ自動保存した時刻（タブレットの「保存と書き出し」に出す） */
 export let lastAutosaveAt = 0;
@@ -1719,13 +1742,13 @@ async function autosaveEntryWithArt(s: EditorState): Promise<RecentEntry> {
 /** いまの譜面の控え（Drive の自動保存に送る）。保存済みなら null */
 export function autosaveSnapshot(): { fileName: string; text: string; sidecar?: string } | null {
   const s = get();
-  if (s.screen !== 'editor' || !isDirty(s)) return null;
+  if (s.screen !== 'editor' || !isDirty(s) || autosaveHeld) return null;
   return { fileName: s.meta.fileName, text: serializeDtx(withSongEnd(s.doc)), sidecar: sidecarIsEmpty() ? undefined : serializeSidecar(sidecarData()) };
 }
 
 export async function autosaveNow(saved = false) {
   const s = get();
-  if (s.screen !== 'editor') return;
+  if (s.screen !== 'editor' || autosaveHeld) return;
   if (!saved && s.doc === lastAutosaved) return;
   lastAutosaved = s.doc;
   lastAutosaveAt = Date.now();
@@ -1752,7 +1775,7 @@ export function startAutosave() {
   // メモリにだけある曲フォルダ（ZIP・落としたファイル・新しい曲）を開いたら、音ごと本体に入れる
   const c = useEditor.subscribe((s, prev) => {
     const folder = s.folder;
-    if (!folder || folder === prev.folder || folder.dir) return;
+    if (!folder || folder === prev.folder || folder.dir || autosaveHeld) return;
     void checkLocal().then((ok) => {
       if (ok && get().folder === folder) void promoteToLocal(folder);
     });

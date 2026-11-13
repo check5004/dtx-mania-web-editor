@@ -268,15 +268,19 @@ const stageText = (k: SepProgress['stage']): string =>
     run: tr('分解しています…', 'Splitting…'),
   })[k];
 
-/** 原曲を分解して、ステムのトラックにする */
-export async function startSeparation(): Promise<boolean> {
+/**
+ * 原曲を分解して、ステムのトラックにする。outputs：分け方（無ければ選んである分け方。選んだ分け方は変えない）。
+ * quiet：終わった・やめた知らせを出さない（おまかせで準備。結果は準備の画面に出す）
+ */
+export async function startSeparation(o: { outputs?: SepOutputs; quiet?: boolean } = {}): Promise<boolean> {
   if (separating()) return false;
   const src = separationSource();
   if ('error' in src) {
     set({ phase: 'error', error: src.error });
     return false;
   }
-  const { model: modelId, outputs, replace } = get();
+  const { model: modelId, replace } = get();
+  const outputs = o.outputs ?? get().outputs;
   const model = SEP_MODELS[modelId];
   const plan = plannedFiles(modelId, outputs, src.base);
   const t0 = performance.now();
@@ -343,7 +347,7 @@ export async function startSeparation(): Promise<boolean> {
     }
     const folder = useEditor.getState().folder;
     if (folder) for (const f of files) await putFile(folder, `stems/${f.name}`, f);
-    const n = await importStems(files);
+    const n = await importStems(files, { quiet: o.quiet });
     const drums = useSidecar.getState().stems.find((t) => t.file.toLowerCase() === `stems/${plan[0].name}`.toLowerCase() && t.kind === 'drums');
     if (drums) chooseAnalysisStem(drums.file);
     // 分けた元（ドラム入りの原曲）は、完全な原曲として覚えておく（分け直す・試聴・曲を直すときの元。src/store/fullMix.ts）
@@ -355,14 +359,14 @@ export async function startSeparation(): Promise<boolean> {
       detail: '',
       last: { model: modelId, outputs, backend: r.backend, precision: r.precision, gpu: r.gpu, seconds, songSec, files: files.map((f) => f.name) },
     });
-    toast(tr(`${model.name} で ${n} 本に分けました（${formatSec(seconds)}）`, `Split into ${n} ${pl(n, 'stem')} with ${model.name} (${formatSec(seconds)})`), 'ok', 6000);
+    if (!o.quiet) toast(tr(`${model.name} で ${n} 本に分けました（${formatSec(seconds)}）`, `Split into ${n} ${pl(n, 'stem')} with ${model.name} (${formatSec(seconds)})`), 'ok', 6000);
     void refreshSavedModels();
     return true;
   } catch (e) {
     const err = e as SeparateError;
     if (err?.code === 'abort') {
       set({ phase: 'idle', progress: 0, detail: '', error: null });
-      toast(tr('分解を中止しました', 'Canceled the separation'), 'info');
+      if (!o.quiet) toast(tr('分解を中止しました', 'Canceled the separation'), 'info');
       return false;
     }
     let msg = err?.message || String(e);
@@ -392,18 +396,19 @@ export function drumlessBgmName(): string {
 
 /**
  * 分けたステムのうちドラム以外を1本にまとめて書き出し、エディタ（譜面）の BGM（#WAV）に反映する。
- * 音量は原曲のまま（揃えない）。元の原曲のファイルは消さない。書いたファイル名を返す
+ * 音量は原曲のまま（揃えない）。元の原曲のファイルは消さない。書いたファイル名を返す。
+ * quiet：知らせを出さない（おまかせで準備）
  */
-export async function registerDrumlessBgm(fileName = drumlessBgmName()): Promise<string | null> {
+export async function registerDrumlessBgm(fileName = drumlessBgmName(), o: { quiet?: boolean } = {}): Promise<string | null> {
   const stems = useSidecar.getState().stems;
   const mine = new Set((get().last?.files ?? []).map((f) => `stems/${f}`.toLowerCase()));
   const pool = mine.size ? stems.filter((t) => mine.has(t.file.toLowerCase())) : stems;
   const include = pool.filter((t) => t.kind !== 'drums').map((t) => t.file);
   if (!include.length) {
-    toast(tr('ドラム以外のステムがありません', 'There are no stems other than drums'), 'warn');
+    if (!o.quiet) toast(tr('ドラム以外のステムがありません', 'There are no stems other than drums'), 'warn');
     return null;
   }
-  const written = await exportStems({ mode: 'bgm', include, useTrackSettings: false, normalize: false, range: 'song', format: 'ogg', fileName, register: 'bgm' });
+  const written = await exportStems({ mode: 'bgm', include, useTrackSettings: false, normalize: false, range: 'song', format: 'ogg', fileName, register: 'bgm', quiet: o.quiet });
   if (!written.length) return null;
   set({ bgmSet: written[0] });
   return written[0];

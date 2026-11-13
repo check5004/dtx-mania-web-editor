@@ -4,14 +4,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { YtPick } from '../ai/songAgent';
 import { itunesSearch, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type StoreHit } from '../ai/songInfo';
 import { formatUsd, modelLabel } from '../ai/tasks';
-import { setField } from '../edit/ops';
 import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { useDevice } from '../store/device';
 import { goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion, type SuggestSource } from '../store/songinfo';
-import { alignSongFields, editSong, setSongField, songFieldLabel, toastSongEdit, useOtherDiffs, useSongFieldSplits, type FieldSplit } from '../store/songSync';
-import { ART_PRESETS, artPreset, loadArtImage, saveArt, writeArtCentered, type ArtPreset } from './artExport';
+import { alignSongFields, setSongField, songFieldLabel, toastSongEdit, useOtherDiffs, useSongFieldSplits, type FieldSplit } from '../store/songSync';
+import { ART_PRESETS, artPreset, loadArtImage, saveArt, type ArtPreset } from './artExport';
+import { applySongInfo, infoChanges } from '../app/songInfoApply';
 import { PreviewTools } from './ChorusPreview';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -72,7 +72,6 @@ const groups = (): { id: string; title: string; fields: FieldDef[] }[] => [
 
 const KNOWN = new Set(groups().flatMap((g) => g.fields.map((f) => f.key)));
 const SKIP = /^(WAV|VOLUME|WAVVOL|PAN|WAVPAN|BPM|BMP|BMPTEX|AVI|AVIPAN|BGA|BGAPAN|SIZE)[0-9A-Z]{2}$/;
-const INFO_FIELDS: InfoField[] = ['TITLE', 'ARTIST', 'GENRE', 'COMMENT', 'PANEL'];
 const fieldLabel = (k: InfoField): string =>
   ({ TITLE: tr('曲名', 'Title'), ARTIST: tr('アーティスト', 'Artist'), GENRE: tr('ジャンル', 'Genre'), COMMENT: tr('コメント', 'Comment'), PANEL: tr('パネル', 'Panel') })[k];
 /** 案の出どころの表示 */
@@ -485,10 +484,7 @@ function ResultView({ result }: { result: LookupResult }) {
   const fields = useEditor((s) => s.doc.fields);
   const yt = useSidecar((s) => s.youtube);
   const curId = yt ? youtubeId(yt.url) : null;
-  const changes = INFO_FIELDS.filter((k) => {
-    const v = result.fields[k]?.value;
-    return v && v.trim() !== (fields[k] ?? '').trim();
-  });
+  const changes = infoChanges(result, fields);
   const firstYt = result.youtube[0] ?? null;
   const [useFields, setUseFields] = useState(true);
   const [useYt, setUseYt] = useState(true);
@@ -501,49 +497,7 @@ function ResultView({ result }: { result: LookupResult }) {
 
   const applyAll = async () => {
     setBusy(true);
-    const done: string[] = [];
-    const failed: string[] = [];
-    // 譜面に入れる値（曲情報の欄と、書き出した画像のファイル名）。最後に1つの変更にまとめる（Ctrl+Z で一度に戻る）
-    const put: Record<string, string> = {};
-    try {
-      if (useFields && changes.length) {
-        for (const k of changes) put[k] = result.fields[k]!.value.trim();
-        done.push(tr(`${changes.length}項目`, `${changes.length} ${pl(changes.length, 'field')}`));
-      }
-      if (useYt && canYt && firstYt) {
-        setYoutube({ url: firstYt.url, offset: yt?.offset ?? 0 });
-        done.push(tr('参照映像', 'reference video'));
-      }
-      if (useJacket && result.jacket) {
-        try {
-          put.PREIMAGE = (await writeArtCentered(result.jacket, artPreset('pre-sq'))).name;
-          done.push('#PREIMAGE');
-        } catch (e) {
-          failed.push(tr(`ジャケット（${(e as Error).message}）`, `cover art (${(e as Error).message})`));
-        }
-      }
-      if (useBg && firstYt) {
-        const cand: ArtCandidate = { url: `https://i.ytimg.com/vi/${firstYt.id}/hqdefault.jpg`, big: `https://i.ytimg.com/vi/${firstYt.id}/maxresdefault.jpg`, label: '', source: 'youtube' };
-        for (const id of ['stage', 'bg']) {
-          try {
-            put[artPreset(id).key] = (await writeArtCentered(cand, artPreset(id))).name;
-            done.push(`#${artPreset(id).key}`);
-          } catch (e) {
-            failed.push(tr(`${artPreset(id).key}（${(e as Error).message}）`, `${artPreset(id).key} (${(e as Error).message})`));
-            break;
-          }
-        }
-      }
-    } finally {
-      setBusy(false);
-    }
-    // 曲のもの（曲名・画像など）なので、同じだったほかの難易度にも入れる
-    const keys = Object.keys(put);
-    const r = keys.length
-      ? editSong(tr('曲情報をまとめて設定', 'Set song info in bulk'), (d) => {
-          for (const k of keys) setField(d, k, put[k]);
-        })
-      : null;
+    const { done, failed, edit } = await applySongInfo(result, { fields: useFields, youtube: useYt, jacket: useJacket, bg: useBg }).finally(() => setBusy(false));
     // 済んだものは外す（もう一度押して同じ画像を重ねて書き出さないように）
     setUseFields(false);
     setUseYt(false);
@@ -553,7 +507,7 @@ function ResultView({ result }: { result: LookupResult }) {
     if (failed.length) toast(tr(`設定できなかったもの: ${failed.join('、')}`, `Couldn't set: ${failed.join(', ')}`), 'warn', 8000);
     if (done.length) {
       const text = tr(`${done.join('・')} を設定しました（曲名などは Ctrl+Z で戻せます）`, `Set ${done.join(', ')} (Ctrl+Z undoes the title and other fields)`);
-      if (r) void toastSongEdit(r, text, 'ok', 6000);
+      if (edit) void toastSongEdit(edit, text, 'ok', 6000);
       else toast(text, 'ok', 6000);
     } else if (!failed.length) toast(tr('変わるものはありません', 'Nothing to change'), 'info');
   };

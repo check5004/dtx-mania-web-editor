@@ -9,9 +9,10 @@ import { drumChannel } from '../dtx/model';
 import { toggleLoop, useAssist } from '../store/assist';
 import { bgmSource, tempoOf } from '../store/derived';
 import { backToChart, goToStart, playFrom, setCursorBeat, setMix, toast, togglePause, togglePlay, useEditor } from '../store/editor';
-import { sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
+import { DRUMS_SUM, sectionColor, useSidecar, type StemTrack } from '../store/sidecar';
 import {
   audioReflected,
+  analysisMark,
   chooseAnalysisStem,
   effectiveAnalysisStem,
   defaultExportName,
@@ -294,7 +295,7 @@ function TrackHead({ t }: { t: StemTrack }) {
   useSidecar((s) => s.analysisStem);
   useStems((s) => s.version);
   const eff = effectiveAnalysisStem();
-  const analysis = eff?.file ?? null;
+  const mark = analysisMark(t.file);
   const listen = useStems((s) => s.listen);
   const comparePan = listen === 'compare' && t.kind === 'drums';
   const status = useStems((s) => s.status[t.file]);
@@ -336,15 +337,17 @@ function TrackHead({ t }: { t: StemTrack }) {
         </button>
         <span className="grow" />
         <button
-          className={`radio-btn ${analysis === t.file ? 'on' : ''}`}
-          onClick={() => chooseAnalysisStem(analysis === t.file && !eff?.auto ? null : t.file)}
+          className={`radio-btn ${mark.on ? 'on' : ''}`}
+          onClick={() => chooseAnalysisStem(mark.next)}
           title={
-            analysis === t.file && eff?.auto
-              ? tr('原曲のファイルが無いので、このトラックから波形・原曲の打点を作っています（クリックで固定）', 'There is no original file, so the waveform and hits are made from this track (click to pin it)')
-              : tr('波形・原曲の打点・BPM推定をこのトラックから作る', 'Make the waveform, hits and BPM estimate from this track')
+            mark.sum
+              ? tr('ドラムのトラックを全部合わせた音から、波形・原曲の打点・BPM推定を作っています（クリックでこのトラックだけにする）', 'The waveform, hits and BPM estimate come from all the drum tracks combined (click to use only this track)')
+              : mark.on && eff?.auto
+                ? tr('原曲のファイルが無いので、このトラックから波形・原曲の打点を作っています（クリックで固定）', 'There is no original file, so the waveform and hits are made from this track (click to pin it)')
+                : tr('波形・原曲の打点・BPM推定をこのトラックから作る', 'Make the waveform, hits and BPM estimate from this track')
           }
           aria-label={tr(`${t.name}を解析に使う`, `Use ${t.name} for analysis`)}
-          aria-pressed={analysis === t.file}
+          aria-pressed={mark.on}
         />
         <button className={`ms m ${t.mute ? 'on' : ''}`} onClick={() => updateStem(t.file, { mute: !t.mute })} aria-label={tr(`${t.name}をミュート`, `Mute ${t.name}`)}>
           M
@@ -615,9 +618,11 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
             }
             c.globalAlpha = 1;
           }
-          const note =
-            analysis === t.file
-              ? tr('解析元: 波形・原曲の打点・BPM推定に使います', 'Analysis source: used for the waveform, hits and BPM estimate')
+          const isAn = analysis === t.file || (analysis === DRUMS_SUM && t.kind === 'drums');
+          const note = isAn
+            ? analysis === DRUMS_SUM
+              ? tr('解析元: ドラムを全部合わせた音を、波形・原曲の打点・BPM推定に使います', 'Analysis source: all drums combined are used for the waveform, hits and BPM estimate')
+              : tr('解析元: 波形・原曲の打点・BPM推定に使います', 'Analysis source: used for the waveform, hits and BPM estimate')
               : (() => {
                   const inf = stemInfo(t.file);
                   return inf && inf.shortBy > 0.01
@@ -626,7 +631,7 @@ function Lanes({ total, zoom }: { total: number; zoom: Zoom }) {
                 })();
           if (note) {
             c.font = '11px system-ui, sans-serif';
-            c.fillStyle = analysis === t.file ? '#CBB8FF' : '#FFC768';
+            c.fillStyle = isAn ? '#CBB8FF' : '#FFC768';
             c.fillText(note, 10, top + 13);
           }
         });

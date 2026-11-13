@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseSidecar, serializeSidecar, emptySidecar } from '../store/sidecar';
 import { detectStemKind, guessStems, isKindLabel, stemDisplayName, stemFilePath, uniqueStemName } from './stems';
-import { renameOldOtherStems } from './stemNames';
+import { planStemFiles, renameOldOtherStems } from './stemNames';
 import type { StemTrack } from '../store/sidecar';
 
 const names = (files: string[], o = {}) => guessStems(files, o).map((g) => `${g.kind}:${g.name}`);
@@ -122,5 +122,52 @@ describe('ステム', () => {
     const withSe = { ...d, mix: { ...d.mix, se: 0.4, seMute: true, seSolo: false } };
     expect(parseSidecar(serializeSidecar(withSe))!.mix).toEqual(withSe.mix);
     expect(back.mix!.se).toBeUndefined();
+  });
+});
+
+describe('分けてあるステムから始める（Moises など）', () => {
+  const moises = (title: string, parts: string[]) => parts.map((p) => `${title}.m4a_${p}_mixed.mp3`.normalize('NFD'));
+
+  it('Moises の 4 本と原曲：原曲を見つけ、4 本をステムにする', () => {
+    const title = '【MV】Neon Skyline【オリジナル】';
+    const files = [`${title}.m4a`.normalize('NFD'), ...moises(title, ['その他', 'ドラム', 'ベース', 'ボーカル1'])];
+    const p = planStemFiles(files);
+    expect(p.original).toBe(0);
+    expect(p.isStems).toBe(true);
+    expect(p.items.map((g) => (g ? `${g.kind}:${g.name}:${g.known}` : null))).toEqual([null, 'other:その他:true', 'drums:ドラム:true', 'bass:ベース:true', 'vocals:ボーカル1:true']);
+    expect(p.title).toBe(title);
+    // 原曲が無ければ、ステムの名前に共通の頭（.m4a と _mixed は除く）
+    expect(planStemFiles(files.slice(1)).title).toBe(title);
+  });
+
+  it('細かく分けたステム：ドラムの部品は全部ドラム、メトロノームは使わない、知らない名前は分かる', () => {
+    const files = moises('Neon Skyline', ['キック', 'スネア', 'タム', 'ハイハット', 'シンバル', 'ベース', 'ボーカル1', 'ボーカル2', 'エレキギター', 'ピアノ', 'ストリングス', 'メトロノーム', 'テルミン']);
+    const p = planStemFiles(files);
+    expect(p.original).toBeNull();
+    expect(p.isStems).toBe(true);
+    const g = p.items.map((x) => x!);
+    expect(g.slice(0, 5).every((x) => x.kind === 'drums' && x.known)).toBe(true);
+    expect(g.map((x) => x.name)).toEqual(['キック', 'スネア', 'タム', 'ハイハット', 'シンバル', 'ベース', 'ボーカル1', 'ボーカル2', 'エレキギター', 'ピアノ', 'ストリングス', 'メトロノーム', 'テルミン']);
+    expect(g[11].guide).toBe(true);
+    expect(g.filter((x) => x.guide)).toHaveLength(1);
+    expect(g[12]).toMatchObject({ kind: 'other', known: false });
+    // 英語の名前・クリック
+    const en = planStemFiles(['Song - Drums.mp3', 'Song - Bass.mp3', 'Song - Click.mp3', 'Song - Other.mp3']);
+    expect(en.items.map((x) => `${x!.kind}:${!!x!.guide}`)).toEqual(['drums:false', 'bass:false', 'other:true', 'other:false']);
+    // リムショットはクリックではない
+    expect(detectStemKind('Song - Rim Click.wav')).toBe('drums');
+  });
+
+  it('分離ソフトの名前もステム。1 本だけ・楽器の語が 1 種類だけならステムにしない', () => {
+    expect(planStemFiles(['drums.wav', 'bass.wav', 'other.wav', 'vocals.wav'])).toMatchObject({ isStems: true, title: '' });
+    expect(planStemFiles(['Neon Skyline_drums.ogg', 'Neon Skyline_nodrums.ogg']).title).toBe('Neon Skyline');
+    expect(planStemFiles(['Neon Skyline (Drums).wav', 'Neon Skyline (Bass).wav', 'Neon Skyline (Other).wav']).title).toBe('Neon Skyline');
+    expect(planStemFiles(['Song_drums.ogg', 'Song_nodrums.ogg']).isStems).toBe(true);
+    expect(planStemFiles(['Neon Skyline.mp3']).isStems).toBe(false);
+    const two = planStemFiles(['Neon Skyline.mp3', 'Neon Skyline (Instrumental).mp3']);
+    expect(two.isStems).toBe(false);
+    expect(two.original).toBeNull();
+    // ボーカル 1〜3 は原曲と見ない
+    expect(planStemFiles(['Song - Vocals.mp3', 'Song - Vocals 2.mp3', 'Song - Vocals 3.mp3', 'Song - Drums.mp3']).original).toBeNull();
   });
 });
