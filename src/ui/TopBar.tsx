@@ -47,7 +47,7 @@ import { openTap } from '../store/tapTempo';
 import { mirrorSelection, openFind } from '../store/find';
 import { HistoryButton } from './HistoryButton';
 import { togglePreview, usePreview } from '../store/preview';
-import { bgaVisible, hasBga, useBga } from '../store/bga';
+import { bgaVisible, useBga } from '../store/bga';
 import { promptDialog } from './dialogs';
 import { openPhrase } from '../store/phrase';
 import { openMeasureGenAtCursor } from '../store/measureGen';
@@ -206,8 +206,9 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         '-',
         ...GRID_DIVS.map((d) => ({ label: tr(`グリッド ${gridLabel(d)}`, `Grid ${gridLabel(d)}`), checked: s().view.div === d, run: () => setView({ div: d }) })),
         '-',
-        { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ show: !useBga.getState().show }), disabled: hasBga(s().doc) && !useDevice.getState().phone },
-        { label: tr('BGA の列を広げてサムネイルを出す', 'Widen BGA columns to show thumbnails'), checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, show: true }) },
+        // BGA の列：決めていなければ、BGA のある曲で原曲の列に重ならずに入るときだけ出す。押すと出す・隠すを決める（BGA タブで「自動」に戻せる）
+        { label: tr('BGA・動画の列を出す', 'Show BGA and movie columns'), checked: bgaVisible(), run: () => useBga.setState({ column: bgaVisible() ? 'hide' : 'show' }) },
+        { label: tr('BGA の列を広げてサムネイルを出す', 'Widen BGA columns to show thumbnails'), checked: useBga.getState().wide, run: () => useBga.setState({ wide: !useBga.getState().wide, column: 'show' }) },
         '-',
         // 特殊ノーツ（クラップなど）：分けて見せるか、種類ごとの列にするか（重ねるときは行き先のレーンに描く）
         { label: tr('特殊ノーツ（クラップなど）を分けて見せる', 'Show special notes (claps etc.) separately'), checked: !specialOff(), run: () => setSpecialOff(!specialOff()) },

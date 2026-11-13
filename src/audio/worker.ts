@@ -17,6 +17,8 @@ export type WorkerRequest =
   | { id: number; type: 'features'; key: string }
   /** スロー再生用に伸ばす。音は伸ばす所（from〜to サンプル目）の前後を少し足したものを毎回渡す（ワーカーに音を残さない） */
   | { id: number; type: 'stretch'; channels: Float32Array[]; sr: number; rate: number; from: number; to: number }
+  /** BPM の候補だけ（新しい譜面を作る前に原曲から推定する。音はワーカーに残さない） */
+  | { id: number; type: 'tempo'; channels: Float32Array[]; sr: number }
   | { id: number; type: 'alignRef'; key: string }
   | { id: number; type: 'alignProbe'; key: string; pcm: Float32Array; sr: number }
   | { id: number; type: 'alignLocal'; key: string; probe: number; v: number; os: number[]; fine?: boolean };
@@ -61,6 +63,10 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     if (req.type === 'stretch') {
       const r = wsola(req.channels, req.sr, req.rate, req.from, req.to);
       post({ id: req.id, ok: true, result: { channels: r.channels, fromSample: r.fromSample, sr: req.sr } }, r.channels.map((c) => c.buffer as ArrayBuffer));
+      return;
+    }
+    if (req.type === 'tempo') {
+      post({ id: req.id, ok: true, result: analyzeAudio(req.channels, req.sr).tempo });
       return;
     }
     const src = store.get(req.key);

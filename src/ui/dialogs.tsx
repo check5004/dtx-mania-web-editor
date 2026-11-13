@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import type { NewSongInfo } from '../store/editor';
 import { audioNameFor, isVideoName, NX_MOVIE_EXT } from '../audio/videoAudio';
+import type { TempoCandidate } from '../audio/analysis';
 
 export interface ChoiceOption<T> {
   label: string;
@@ -12,10 +13,10 @@ export interface ChoiceOption<T> {
 }
 
 type Spec =
-  | { kind: 'confirm'; title: string; body: string; ok: string; cancel?: string; danger?: boolean }
+  | { kind: 'confirm'; title: string; body: string; ok: string; cancel?: string; danger?: boolean; alt?: string }
   | { kind: 'choose'; title: string; body?: string; options: ChoiceOption<unknown>[] }
   | { kind: 'prompt'; title: string; body?: string; value: string; ok: string }
-  | { kind: 'newSong'; title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> }
+  | { kind: 'newSong'; title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo>; guessBpm?: (file: string) => Promise<TempoCandidate[]> }
   | { kind: 'custom'; render: (done: (v: unknown) => void) => ReactNode; className?: string };
 
 interface DialogState {
@@ -40,14 +41,21 @@ function close(v: unknown) {
 export const confirmDialog = (o: { title: string; body: string; ok: string; cancel?: string; danger?: boolean }) =>
   open<boolean>({ kind: 'confirm', ...o }).then((v) => v === true);
 
+/** 確認にもう1つの道を足す（「保存して続ける」と「保存せずに続ける」など）。ok → 'ok'、alt → 'alt'、やめる・Esc → null */
+export const confirmAltDialog = (o: { title: string; body: string; ok: string; alt: string; cancel?: string }) =>
+  open<unknown>({ kind: 'confirm', ...o }).then((v): 'ok' | 'alt' | null => (v === true ? 'ok' : v === 'alt' ? 'alt' : null));
+
 export const chooseDialog = <T,>(o: { title: string; body?: string; options: ChoiceOption<T>[] }) =>
   open<T | null>({ kind: 'choose', ...o });
 
 export const promptDialog = (o: { title: string; body?: string; value: string; ok: string }) =>
   open<string | null>({ kind: 'prompt', ...o });
 
-/** 新しい譜面の情報を聞く。audioFiles は原曲の候補（動画なら、作るときに音を取り出す）、movies は背景動画にできる動画 */
-export const newSongDialog = (o: { title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo> }) =>
+/**
+ * 新しい譜面の情報を聞く。audioFiles は原曲の候補（動画なら、作るときに音を取り出す）、movies は背景動画にできる動画。
+ * guessBpm を渡すと、選んだ原曲から BPM を推定して入れる（自分で入れた・タグにあった BPM は書き換えない）
+ */
+export const newSongDialog = (o: { title: string; audioFiles: string[]; movies?: string[]; defaults: Partial<NewSongInfo>; guessBpm?: (file: string) => Promise<TempoCandidate[]> }) =>
   open<NewSongInfo | null>({ kind: 'newSong', ...o });
 
 /**
@@ -82,6 +90,11 @@ export function DialogHost() {
               <button className="btn ghost" onClick={() => close(false)}>
                 {spec.cancel ?? tr('やめる', 'Cancel')}
               </button>
+              {spec.alt && (
+                <button className="btn" onClick={() => close('alt')}>
+                  {spec.alt}
+                </button>
+              )}
               <button className={`btn ${spec.danger ? 'danger' : 'primary'}`} autoFocus onClick={() => close(true)}>
                 {spec.ok}
               </button>
@@ -153,6 +166,26 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
   const [artist, setArtist] = useState(d.artist ?? '');
   const [bpm, setBpm] = useState(String(d.bpm ?? 120));
   const [bgm, setBgm] = useState(d.bgmFile ?? spec.audioFiles[0] ?? '');
+  // 原曲から推定した BPM の候補（null は推定中）。自分で入れた・タグにあった BPM は書き換えない
+  const typed = useRef(d.bpm !== undefined);
+  const [guess, setGuess] = useState<TempoCandidate[] | null>([]);
+  const guessBpm = spec.guessBpm;
+  useEffect(() => {
+    if (!guessBpm || !bgm || isVideoName(bgm)) {
+      setGuess([]);
+      return;
+    }
+    let live = true;
+    setGuess(null);
+    void guessBpm(bgm).then((list) => {
+      if (!live) return;
+      setGuess(list);
+      if (list[0] && !typed.current) setBpm(String(list[0].bpm));
+    });
+    return () => {
+      live = false;
+    };
+  }, [bgm, guessBpm]);
   // 背景動画にするか（触るまでは、NX で流れる形式ならオン）
   const [movieOn, setMovieOn] = useState<boolean | null>(null);
   const bpmNum = Number(bpm);
@@ -181,7 +214,39 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
         <span className="lbl">{tr('アーティスト', 'Artist')}</span>
         <input className="field" value={artist} onChange={(e) => setArtist(e.target.value)} />
         <span className="lbl">BPM</span>
-        <input className="field mono" value={bpm} onChange={(e) => setBpm(e.target.value)} inputMode="decimal" />
+        <input
+          className="field mono"
+          value={bpm}
+          onChange={(e) => {
+            typed.current = true;
+            setBpm(e.target.value);
+          }}
+          inputMode="decimal"
+        />
+        {guess === null && (
+          <span className="lbl" style={{ gridColumn: 2 }}>
+            {tr('原曲から BPM を推定しています…', 'Estimating the BPM from the original…')}
+          </span>
+        )}
+        {guess && guess.length > 0 && (
+          <span className="new-bpm-cands" style={{ gridColumn: 2 }}>
+            <span className="lbl">{tr('原曲から推定:', 'Estimated from the original:')}</span>
+            {guess.map((c) => (
+              <button
+                key={c.kind}
+                type="button"
+                className={`btn small ghost ${Math.abs(bpmNum - c.bpm) < 0.005 ? 'on' : ''}`}
+                onClick={() => {
+                  typed.current = true;
+                  setBpm(String(c.bpm));
+                }}
+              >
+                {c.bpm}
+                {c.kind === 'half' ? tr('（半分）', ' (half)') : c.kind === 'double' ? tr('（倍）', ' (double)') : ''}
+              </button>
+            ))}
+          </span>
+        )}
         <span className="lbl">{tr('原曲（BGM）', 'Original (BGM)')}</span>
         <select className="field" value={bgm} onChange={(e) => setBgm(e.target.value)}>
           <option value="">{tr('なし', 'None')}</option>

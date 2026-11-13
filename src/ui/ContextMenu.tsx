@@ -346,7 +346,7 @@ function ChipMenu({ ids, anchor, seq }: { ids: number[]; anchor: number; seq: nu
       )}
       {drums.length > 0 && !useDevice.getState().phone && (
         <>
-          <FxTemplateBlock ids={drumIds} />
+          <FxSubmenu ids={drumIds} />
           <Sep />
         </>
       )}
@@ -707,6 +707,133 @@ function FxIcon({ t }: { t: FxTemplate }) {
   );
 }
 
+/** 選んだチップの小節の範囲（「003〜004」など） */
+function fxRange(doc: DtxDoc, ids: number[]): string {
+  const want = new Set(ids);
+  const ms = doc.chips.filter((c) => want.has(c.id)).map((c) => c.m);
+  return ms.length ? `${toMeasure(Math.min(...ms))}${Math.max(...ms) !== Math.min(...ms) ? `〜${toMeasure(Math.max(...ms))}` : ''}` : '';
+}
+
+/**
+ * チップのメニューのエフェクトは小メニューに入れる（テンプレートを並べるとメニューが画面の高さを超えるため）。
+ * マウスは行に乗せると開き、ほかの項目に移ると閉じる。指は押すと開く・もう一度押すと閉じる。
+ * メニューの右に出し、足りなければ左に出す。小メニューはメニューの中の要素なので、押しても外を押したことにならない
+ */
+function FxSubmenu({ ids }: { ids: number[] }) {
+  const doc = useEditor((s) => s.doc);
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  const row = useRef<HTMLButtonElement>(null);
+  const fly = useRef<HTMLDivElement>(null);
+  const timer = useRef(0);
+  const byMouse = useRef(false);
+  const touch = useDevice((s) => s.tablet);
+  const later = (fn: () => void, ms: number) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(fn, ms);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  // 置く所：メニューの右（足りなければ左）。縦は行に合わせて、画面の中に収める
+  useLayoutEffect(() => {
+    const el = fly.current;
+    const r0 = row.current;
+    const menuEl = r0?.closest('.ctx-menu');
+    if (!open || !el || !r0 || !menuEl) {
+      setAt(null);
+      return;
+    }
+    const place = () => {
+      const m = menuEl.getBoundingClientRect();
+      const r = r0.getBoundingClientRect();
+      const f = el.getBoundingClientRect();
+      let left = m.right + 4;
+      if (left + f.width > window.innerWidth - 8) left = m.left - 4 - f.width;
+      if (left < 8) left = Math.max(8, window.innerWidth - 8 - f.width);
+      let top = r.top - 6;
+      if (top + f.height > window.innerHeight - 8) top = window.innerHeight - 8 - f.height;
+      if (top < 8) top = 8;
+      setAt((cur) => (cur && cur.left === left && cur.top === top ? cur : { left, top }));
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(el);
+    ro.observe(menuEl);
+    // メニューの中をスクロールしたら行に付いていく
+    menuEl.addEventListener('scroll', place);
+    return () => {
+      ro.disconnect();
+      menuEl.removeEventListener('scroll', place);
+    };
+  }, [open]);
+  // マウスでほかの項目に移ったら閉じる（小メニューへ斜めに動かす間に閉じないよう少し待つ）
+  useEffect(() => {
+    const menuEl = row.current?.closest('.ctx-menu');
+    if (!open || !menuEl) return;
+    const over = (e: Event) => {
+      if ((e as PointerEvent).pointerType !== 'mouse') return;
+      const t = e.target as Node;
+      if (row.current?.contains(t) || fly.current?.contains(t)) window.clearTimeout(timer.current);
+      else later(() => setOpen(false), 260);
+    };
+    menuEl.addEventListener('pointerover', over);
+    return () => menuEl.removeEventListener('pointerover', over);
+  }, [open]);
+  const range = fxRange(doc, ids);
+  return (
+    <>
+      <button
+        ref={row}
+        className={`ctx-item ctx-sub-item ${open ? 'open' : ''}`}
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onPointerDown={(e) => {
+          byMouse.current = e.pointerType === 'mouse';
+        }}
+        onPointerEnter={(e) => {
+          if (e.pointerType === 'mouse') later(() => setOpen(true), 140);
+        }}
+        onClick={() => {
+          window.clearTimeout(timer.current);
+          // マウスは乗せた時点で開いているので、押しても閉じない（指・キーは押すたびに開く／閉じる）
+          setOpen((o) => (byMouse.current ? true : !o));
+          byMouse.current = false;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            setOpen(true);
+            requestAnimationFrame(() => fly.current?.querySelector<HTMLButtonElement>('button')?.focus());
+          }
+        }}
+      >
+        <span className="ctx-ic">{Icon.fx(12)}</span>
+        <span className="ctx-label">{tr('エフェクト', 'Effect')}</span>
+        <span className="key">{tr(`${range} 小節`, `m. ${range}`)}</span>
+        <span className="ctx-sub-arrow" aria-hidden="true">
+          ›
+        </span>
+      </button>
+      {open && (
+        <div
+          ref={fly}
+          className={`ctx-menu wide ctx-flyout ${touch ? 'touch' : ''}`}
+          role="menu"
+          style={{ left: at?.left ?? 0, top: at?.top ?? 0, visibility: at ? 'visible' : 'hidden' }}
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowLeft') return;
+            e.preventDefault();
+            setOpen(false);
+            row.current?.focus();
+          }}
+        >
+          <FxTemplateBlock ids={ids} />
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * 選んだチップのメニューのエフェクト：テンプレートでカーブを引く（選んだチップで決まるのは時間の範囲だけ）。
  * 下にテンプレートの説明（マウスを乗せたもの）と「エフェクトの編集を開く」
@@ -714,9 +841,7 @@ function FxIcon({ t }: { t: FxTemplate }) {
 function FxTemplateBlock({ ids }: { ids: number[] }) {
   const [hover, setHover] = useState<FxTemplateId>('close');
   const doc = useEditor((s) => s.doc);
-  const want = new Set(ids);
-  const ms = doc.chips.filter((c) => want.has(c.id)).map((c) => c.m);
-  const range = ms.length ? `${toMeasure(Math.min(...ms))}${Math.max(...ms) !== Math.min(...ms) ? `〜${toMeasure(Math.max(...ms))}` : ''}` : '';
+  const range = fxRange(doc, ids);
   return (
     <>
       <div className="ctx-sec ctx-fx">

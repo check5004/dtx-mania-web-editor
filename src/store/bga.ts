@@ -31,13 +31,24 @@ interface BgaState {
   layer: number;
   /** 動画のチャンネル（54 か 5A） */
   movieCh: number;
-  /** 譜面に BGA 列を出す（BGA が無い曲でも） */
-  show: boolean;
+  /**
+   * 譜面の BGA 列：auto＝BGA のある曲で、原曲の列（打点・波形）に重ならずに入るときだけ出す（スマホは出さない）、
+   * show＝いつも出す（BGA が無い曲でも。狭ければ原曲の波形の右側に重ねる）、hide＝出さない
+   */
+  column: BgaColumn;
   /** 列を広げてサムネイルを出す */
   wide: boolean;
 }
 
-export const useBga = create<BgaState>(() => ({ kind: 'bmp', no: null, layer: 0x04, movieCh: 0x54, show: false, wide: false }));
+export type BgaColumn = 'auto' | 'show' | 'hide';
+
+export const useBga = create<BgaState>(() => ({ kind: 'bmp', no: null, layer: 0x04, movieCh: 0x54, column: 'auto', wide: false }));
+
+/** PC の譜面の幅で、BGA の列を原曲の列（打点・波形）に重ねずに入れられるか。ChartCanvas が幅を測るたびに入れる（測る前は入るとする） */
+export const useBgaRoom = create<{ fits: boolean }>(() => ({ fits: true }));
+export function setBgaFits(fits: boolean) {
+  if (useBgaRoom.getState().fits !== fits) useBgaRoom.setState({ fits });
+}
 
 const hasCache = new WeakMap<DtxDoc, boolean>();
 
@@ -51,10 +62,26 @@ export function hasBga(doc: DtxDoc): boolean {
   return v;
 }
 
-/** BGA の列を出すか。スマホは譜面の幅が足りないので、表示メニューで出したときだけ */
+/**
+ * BGA の列を出すか。決めていなければ（auto）、BGA のある曲で、PC では原曲の列に重ならずに入るときだけ。
+ * スマホは譜面の幅が足りないので、表示メニューで出したときだけ
+ */
 export function bgaVisible(): boolean {
-  if (useDevice.getState().phone) return useBga.getState().show;
-  return useBga.getState().show || hasBga(useEditor.getState().doc);
+  const c = useBga.getState().column;
+  if (c !== 'auto') return c === 'show';
+  const dev = useDevice.getState();
+  if (dev.phone) return false;
+  // タブレットはレーンを狭めて BGA の列を入れる
+  return hasBga(useEditor.getState().doc) && (dev.tablet || useBgaRoom.getState().fits);
+}
+
+/** BGA のある曲なのに、PC の譜面の幅が足りなくて列を隠しているか（auto のとき。画面で使う） */
+export function useBgaFolded(): boolean {
+  const fits = useBgaRoom((s) => s.fits);
+  const column = useBga((s) => s.column);
+  const desk = useDevice((s) => !s.phone && !s.tablet);
+  const has = useEditor((s) => hasBga(s.doc));
+  return column === 'auto' && desk && has && !fits;
 }
 
 const matCache = new WeakMap<DtxDoc, Material[]>();
@@ -116,7 +143,7 @@ export function addMaterials(kind: MaterialKind, paths: string[]): number {
       n++;
     }
   });
-  if (first !== null) useBga.setState({ kind, no: first, show: true });
+  if (first !== null) useBga.setState({ kind, no: first, column: 'show' });
   return n;
 }
 
@@ -130,7 +157,7 @@ export function setMaterialPath(key: string, path: string) {
 
 /** 置くときの素材を選ぶ */
 export function pickMaterial(kind: MaterialKind, no: number) {
-  useBga.setState({ kind, no, show: true });
+  useBga.setState({ kind, no, column: 'show' });
 }
 
 /** BGA 列のその位置に、選んでいる素材を置く */

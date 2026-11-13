@@ -20,6 +20,7 @@ import { editSong, onlyThisAction, songSiblingNote } from './songSync';
 import { isFullMixPath, planBgmSwap, rememberFullMix } from './fullMix';
 import { nxSafeBase, nxSafeName } from '../fs/nxName';
 import { isDrumlessName } from '../separate/names';
+import { soundKey } from '../fs/soundKey';
 
 interface Loaded {
   key: string;
@@ -120,7 +121,7 @@ export async function syncStems() {
       loaded.delete(t.file);
       continue;
     }
-    const key = `${folder?.name}|${ff.path}|${ff.size}|${ff.ver ?? 0}`;
+    const key = soundKey(folder, ff);
     const cur = loaded.get(t.file);
     if (cur && cur.key === key) {
       if (cur.offsetMs !== t.offsetMs) {

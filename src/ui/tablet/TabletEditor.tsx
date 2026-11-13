@@ -926,7 +926,7 @@ export function TabletEditor({ folderInput }: { folderInput: React.RefObject<HTM
   // レーンの幅を変えるもの（音声の列・強さの列・BGA の列）が変わったら決め直す
   useAssist((s) => s.audioCols);
   useVel((s) => s.lanes.length);
-  useBga((s) => `${s.show}|${s.wide}`);
+  useBga((s) => `${s.column}|${s.wide}`);
   useEditor((s) => hasBga(s.doc));
   // ベロシティ・エフェクトの編集はパネルを重ねない（重ねるとベロシティの列・カーブの列が隠れる。レーンを細くして、列とパネルを並べる）
   const overlay = !portrait && !fxOpen && !velMode && panel !== null && panelOverlays(vw);

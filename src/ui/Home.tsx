@@ -39,6 +39,71 @@ function ago(t: number): string {
   return new Date(t).toLocaleDateString(locale());
 }
 
+/** 最近の曲の最初に出す数（3 列で 2 行） */
+const RECENT_TOP = 6;
+
+/**
+ * 最近の曲の 1 曲。画像（#PREIMAGE など。自動保存のときに作っておいたもの）・曲名・アーティスト・BPM・Lv・場所・いつ。
+ * Lv と「いつ」は切らない（長いアーティスト名・ファイル名のほうを詰める）
+ */
+function RecentCard({ song, onRemoved }: { song: RecentSong; onRemoved: () => void }) {
+  // 曲ごとに1つ（いちばん新しい難易度を出す。未保存はどれかの難易度に保存していない変更があるとき）
+  const r = song.latest;
+  const unsaved = song.entries.filter((x) => !x.saved).map((x) => x.fileName);
+  const art = song.entries.find((x) => x.art)?.art;
+  return (
+    <div style={{ position: 'relative' }}>
+      <button className="recent-item" style={{ width: '100%' }} onClick={() => void openRecent(r)}>
+        <span className="song-art recent-art">{art ? <img src={art} alt="" /> : Icon.file(16)}</span>
+        <span className="recent-text">
+          <span className="ellipsis recent-title">{r.title || tr('無題', 'Untitled')}</span>
+          <span className="lbl recent-line">
+            <span className="ellipsis">{r.artist || tr('アーティスト未設定', 'No artist')}</span>
+            {r.bpm && <span className="keep">· {r.bpm} BPM</span>}
+            <span className="keep">· Lv {formatLevel(r.level)}</span>
+          </span>
+          <span className="lbl recent-line">
+            {r.local && (
+              <span className="pill local mini keep" title={tr(`音ごと${localPlace()}に保存しています`, `Kept in ${localPlace()} with its audio`)}>
+                {localBadge()}
+              </span>
+            )}
+            {r.drive && (
+              <span className="pill drive mini keep" title={tr('Google Drive にも保存しています', 'Also saved on Google Drive')}>
+                Drive
+              </span>
+            )}
+            <span className="ellipsis">
+              {r.folderName ? `${r.folderName}/` : ''}
+              {r.fileName}
+            </span>
+            <span className="keep">· {ago(r.updatedAt)}</span>
+          </span>
+        </span>
+        {unsaved.length > 0 && (
+          <span className="pill warn" title={tr(`保存していない変更: ${unsaved.join('、')}`, `Unsaved changes: ${unsaved.join(', ')}`)}>
+            {tr('未保存', 'Unsaved')}
+          </span>
+        )}
+      </button>
+      <button
+        className="ib recent-x"
+        title={
+          r.local
+            ? tr(`一覧から消す（${localPlace()}に保存した音も消します）`, `Remove from the list (the audio kept in ${localPlace()} is removed too)`)
+            : tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')
+        }
+        aria-label={tr('一覧から消す', 'Remove from the list')}
+        onClick={async () => {
+          if (await removeRecentSong(song)) onRemoved();
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 export function Home() {
   const tablet = useDevice((s) => s.tablet);
   const phone = useDevice((s) => s.phone);
@@ -49,6 +114,7 @@ function HomeDesktop() {
   const folderInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
   const [recent, setRecent] = useState<RecentSong[]>([]);
+  const [allRecent, setAllRecent] = useState(false);
   const [over, setOver] = useState(false);
   const hasDoc = useEditor((s) => s.doc.header.length > 0 || s.doc.chips.length > 0);
   const direct = supportsDirectWrite();
@@ -59,6 +125,32 @@ function HomeDesktop() {
   useEffect(() => {
     void listRecentSongs().then(setRecent);
   }, [localVer]);
+
+  // 最近の曲：続きを開くのがいちばん多いので、あれば最初に出す（2 行まで。残りは「すべて表示」）
+  const shown = allRecent ? recent : recent.slice(0, RECENT_TOP);
+  const recentSection = (
+    <section>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>{tr('最近の曲', 'Recent songs')}</h3>
+        <span className="lbl">{tr('ブラウザ内に自動保存されています', 'Autosaved in this browser')}</span>
+        <span className="grow" />
+        {recent.length > RECENT_TOP && (
+          <button className="btn small ghost" onClick={() => setAllRecent(!allRecent)} aria-expanded={allRecent}>
+            {allRecent ? tr('少なく表示', 'Show fewer') : tr(`すべて表示（${recent.length} 曲）`, `Show all (${recent.length} ${pl(recent.length, 'song')})`)}
+          </button>
+        )}
+      </div>
+      {recent.length === 0 ? (
+        <p className="lbl">{tr('まだありません。譜面を開くか作ると、ここに並びます。', 'Nothing yet. Charts you open or create will appear here.')}</p>
+      ) : (
+        <div className="recent-list">
+          {shown.map((song) => (
+            <RecentCard key={song.key} song={song} onRemoved={async () => setRecent(await listRecentSongs())} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
 
   return (
     <div className="home">
@@ -85,6 +177,7 @@ function HomeDesktop() {
           </p>
         </div>
         <InstallCard />
+        {recent.length > 0 && recentSection}
         {!direct && (
           <div className="notice">
             <span style={{ flex: 'none' }}>{Icon.warn(14)}</span>
@@ -176,73 +269,7 @@ function HomeDesktop() {
 
         <NxHomeCard />
 
-        <section>
-          <div className="row" style={{ marginBottom: 10 }}>
-            <h3 style={{ margin: 0, fontSize: 15 }}>{tr('最近の曲', 'Recent songs')}</h3>
-            <span className="lbl">{tr('ブラウザ内に自動保存されています', 'Autosaved in this browser')}</span>
-          </div>
-          {recent.length === 0 ? (
-            <p className="lbl">{tr('まだありません。譜面を開くか作ると、ここに並びます。', 'Nothing yet. Charts you open or create will appear here.')}</p>
-          ) : (
-            <div className="recent-list">
-              {recent.map((song) => {
-                // 曲ごとに1つ（いちばん新しい難易度を出す。未保存はどれかの難易度に保存していない変更があるとき）
-                const r = song.latest;
-                const unsaved = song.entries.filter((x) => !x.saved).map((x) => x.fileName);
-                return (
-                  <div key={song.key} style={{ position: 'relative' }}>
-                    <button className="recent-item" style={{ width: '100%' }} onClick={() => void openRecent(r)}>
-                      <span className="song-art" style={{ width: 40, height: 40 }}>
-                        {Icon.file(16)}
-                      </span>
-                      <span style={{ minWidth: 0, flex: 1 }}>
-                        <span className="ellipsis" style={{ display: 'block', fontWeight: 600 }}>
-                          {r.title || tr('無題', 'Untitled')}
-                        </span>
-                        <span className="lbl ellipsis" style={{ display: 'block' }}>
-                          {[r.artist || tr('アーティスト未設定', 'No artist'), r.bpm && `${r.bpm} BPM`, `Lv ${formatLevel(r.level)}`].filter(Boolean).join(' · ')}
-                        </span>
-                        <span className="lbl ellipsis" style={{ display: 'block' }}>
-                          {r.local && (
-                            <span className="pill local mini" title={tr(`音ごと${localPlace()}に保存しています`, `Kept in ${localPlace()} with its audio`)}>
-                              {localBadge()}
-                            </span>
-                          )}
-                          {r.drive && (
-                            <span className="pill drive mini" title={tr('Google Drive にも保存しています', 'Also saved on Google Drive')}>
-                              Drive
-                            </span>
-                          )}
-                          {r.folderName ? `${r.folderName}/` : ''}
-                          {r.fileName} · {ago(r.updatedAt)}
-                        </span>
-                      </span>
-                      {unsaved.length > 0 && (
-                        <span className="pill warn" title={tr(`保存していない変更: ${unsaved.join('、')}`, `Unsaved changes: ${unsaved.join(', ')}`)}>
-                          {tr('未保存', 'Unsaved')}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      className="ib"
-                      style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24 }}
-                      title={
-                        r.local
-                          ? tr(`一覧から消す（${localPlace()}に保存した音も消します）`, `Remove from the list (the audio kept in ${localPlace()} is removed too)`)
-                          : tr('一覧から消す（曲フォルダのファイルは消えません）', 'Remove from the list (files in the song folder are kept)')
-                      }
-                      onClick={async () => {
-                        if (await removeRecentSong(song)) setRecent(await listRecentSongs());
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        {recent.length === 0 && recentSection}
 
         <LocalStorageCard />
         <DriveHomeCard />

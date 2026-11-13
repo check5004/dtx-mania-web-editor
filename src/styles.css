@@ -1416,6 +1416,24 @@ body.resizing-y * {
   color: var(--text2);
 }
 
+/* 右のパネルのいちばん下の「操作のしかた」：見出しを押すと畳む・開く */
+.help-card-head {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.help-card-head[aria-expanded='true'] {
+  margin-bottom: 8px;
+}
+
+.help-card-head:hover .lbl {
+  color: var(--text);
+}
+
 .kit-row {
   display: grid;
   grid-template-columns: 8px 64px minmax(0, 1fr) 38px 26px;
@@ -1618,8 +1636,17 @@ input[type='range'] {
   margin: 0 0 12px;
 }
 
+/* 新しい譜面のダイアログ：原曲から推定した BPM の候補 */
+.new-bpm-cands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
@@ -1784,6 +1811,53 @@ input[type='range'] {
   background: var(--card);
   text-align: left;
   min-width: 0;
+}
+
+/* PC のホームの最近の曲（ui/Home の RecentCard）：3 列・画像・Lv といつは切らない */
+.home-main .recent-list {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.home-main .recent-item {
+  padding-right: 32px;
+}
+
+.recent-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+}
+
+.recent-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.recent-title {
+  font-weight: 600;
+}
+
+.recent-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.recent-line > .keep {
+  flex: none;
+}
+
+.recent-x {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 24px;
+  height: 24px;
 }
 
 .recent-item:hover {
@@ -8497,6 +8571,34 @@ html body:has(.cut-back) .toasts {
   color: #e9c68e;
   font-size: 11px;
   line-height: 1.6;
+}
+
+/* チップのメニューの「エフェクト ›」：テンプレートは横に出す小メニューに（メニューを画面より高くしない） */
+.ctx-item.ctx-sub-item .ctx-ic {
+  color: #ffb547;
+}
+
+.ctx-item.ctx-sub-item.open {
+  background: #1f2732;
+  color: var(--text);
+}
+
+.ctx-sub-arrow {
+  flex: none;
+  width: 10px;
+  margin-left: 2px;
+  color: var(--mute);
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+
+.ctx-sub-item.open .ctx-sub-arrow {
+  color: var(--text);
+}
+
+.ctx-flyout {
+  z-index: 91;
 }
 
 .ctx-fx-shapes {

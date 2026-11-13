@@ -1,7 +1,7 @@
 // 解析ワーカーへの窓口。要求ごとに Promise を返す。
 import { tr, getLang, subscribeLang } from '../i18n';
 import type { AlignSearch, LocalSim } from './align';
-import type { AnalysisData } from './analysis';
+import type { AnalysisData, TempoCandidate } from './analysis';
 import type { FrameFeatures } from './features';
 import type { SpecMode, SpectroData, SpectroZones } from './spectro';
 
@@ -67,6 +67,17 @@ export async function loadAudio(key: string, buf: AudioBuffer): Promise<void> {
   loaded.add(key);
   // ワーカーは7曲まで持つ（原曲とステムの解析）
   while (loaded.size > 7) loaded.delete(loaded.values().next().value!);
+}
+
+/** BPM の候補（いちばん合うもの・半分・倍）。新しい譜面を作る前に原曲から推定する（音は 1 本にまとめて渡し、ワーカーに残さない） */
+export function tempoCandidates(buf: AudioBuffer): Promise<TempoCandidate[]> {
+  const n = Math.min(2, buf.numberOfChannels);
+  const mono = new Float32Array(buf.length);
+  for (let c = 0; c < n; c++) {
+    const x = buf.getChannelData(c);
+    for (let i = 0; i < x.length; i++) mono[i] += x[i] / n;
+  }
+  return call<TempoCandidate[]>({ type: 'tempo', channels: [mono], sr: buf.sampleRate }, [mono.buffer]);
 }
 
 export function analyze(key: string, progress?: (p: number) => void): Promise<AnalysisData> {

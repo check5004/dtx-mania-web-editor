@@ -72,7 +72,7 @@ import { noteId, noteRim, type ProposedNote } from '../edit/merge';
 import { rimWavs } from '../dtx/rim';
 import { GenBadge } from './GenBadge';
 import { gotoNextIssue, issuesOf, useCheck, type Issue } from '../store/check';
-import { bgaChipLabel, bgaVisible, materials, placeBga, useBga } from '../store/bga';
+import { bgaChipLabel, bgaVisible, materials, placeBga, setBgaFits, useBga } from '../store/bga';
 import { thumb, useThumbs } from './thumbs';
 import { drumHitsByClass, drumStatusText, readyDrums, useDrums } from '../store/drums';
 import { DRUM_CLASSES, CLASS_LABEL, type DrumClass } from '../bench/classes';
@@ -184,11 +184,13 @@ function applyGeo(w: number): boolean {
   const land = phone && !dev.portrait;
   const a = useAssist.getState();
   const v = useVel.getState();
-  const bga = bgaVisible() ? bgaW() + 6 : 0;
   // 特殊ノーツの列（種類ごと。列に分けないときは無し）
   const doc = useEditor.getState().doc;
   const sp = specialColumns(doc);
   const n = sp.length;
+  // PC：BGA の列が原曲の列に重ならずに入るか（決めていなければ、入らないときは隠す。store/bga の bgaVisible）
+  if (!tablet && !phone) setBgaFits(deskCoreW(n, a.audioCols) + BGA_GAP + bgaW() + deskVelW(v) <= w - DESK_GEO.miniW - 16);
+  const bga = bgaVisible() ? bgaW() + 6 : 0;
   const fx = tablet && useFx.getState().open;
   const key = `${tablet}|${phone}|${land}|${w}|${a.audioCols}|${v.mode ? v.lanes.length : 0}|${bga}|${fx}|${specialLayout(doc).key}|${sp.map((k) => k.id + k.dest + k.color + k.code).join(',')}`;
   if (key === geoKey) return false;
@@ -255,11 +257,36 @@ function applyGeo(w: number): boolean {
     GEO.chipHW = Math.max(8, Math.round((GEO.laneW - 10) / 2));
     GEO.graceHW = Math.max(6, Math.round(GEO.chipHW * 0.7));
     GEO.chipH = 12;
-  } else if (n) {
-    // デスクトップ：RD の右に種類ごとの列（レーンと同じ幅）。BGM・SE から右をその分ずらす
-    GEO.spX = GEO.laneX + GEO.laneW * 10 + 4;
-    GEO.spW = GEO.laneW;
-    const shift = GEO.spW * n + 4;
+  } else {
+    // 右の全体図の下に隠れないよう、はみ出す分だけ ベロシティのレーン → 原曲の波形の列 → ドラムのレーン の順に狭める
+    // （狭めすぎない。BGA の列は自動ならその前に隠している。スペクトルの列はその残りに広がる）
+    let over = deskCoreW(n, a.audioCols) + bga + deskVelW(v) - (w - GEO.miniW - 16);
+    if (over > 0 && v.mode && v.lanes.length) {
+      const per = Math.min(DESK_GEO.velW - VEL_W_MIN, Math.ceil(over / v.lanes.length));
+      GEO.velW = DESK_GEO.velW - per;
+      over -= per * v.lanes.length;
+    }
+    if (over > 0 && a.audioCols) {
+      const d = Math.min(DESK_GEO.waveW - WAVE_W_MIN, over);
+      GEO.waveW = DESK_GEO.waveW - d;
+      over -= d;
+    }
+    // ドラムのレーンは、狭めれば全部入るときだけ狭める（入らないなら狭めずに、パネルを閉じれば見える）。
+    // ベロシティの編集では、いちばん右のベロシティのレーンを見せるため、狭められるだけ狭める
+    const d = over > 0 ? Math.min(DESK_GEO.laneW - LANE_W_MIN, Math.ceil(over / (10 + n))) : 0;
+    if (d > 0 && (v.mode || d * (10 + n) >= over)) {
+      GEO.laneW = DESK_GEO.laneW - d;
+      GEO.chipHW = Math.round((GEO.laneW - 6) / 2);
+      GEO.graceHW = Math.max(6, Math.round(GEO.chipHW * 0.7));
+    }
+    // レーンの右の列：RD の右に特殊ノーツの種類ごとの列（レーンと同じ幅）、その右に BGM・SE と原曲の列
+    let x = GEO.laneX + GEO.laneW * 10 + 4;
+    if (n) {
+      GEO.spX = x;
+      GEO.spW = GEO.laneW;
+      x += GEO.spW * n + 4;
+    }
+    const shift = x - DESK_GEO.bgmX;
     GEO.bgmX += shift;
     GEO.hitsX += shift;
     GEO.waveX += shift;
@@ -269,6 +296,24 @@ function applyGeo(w: number): boolean {
   GEN_CX = GEO.loopW + GEO.genW / 2;
   return true;
 }
+
+/** PC で、譜面の左端から原曲の列（波形はいちばん細いとき）の右端まで。原曲の列が無ければ BGM・SE の列の右端まで */
+function deskCoreW(specialCols: number, audioCols: boolean): number {
+  const shift = specialCols ? DESK_GEO.laneW * specialCols + 4 : 0;
+  return shift + (audioCols ? DESK_GEO.waveX + DESK_GEO.waveW : DESK_GEO.bgmX + DESK_GEO.bgmW);
+}
+
+/** PC でベロシティのレーンを狭めずに並べる幅（編集していなければ 0） */
+function deskVelW(v: { mode: boolean; lanes: readonly unknown[] }): number {
+  return v.mode ? DESK_GEO.velGap + v.lanes.length * DESK_GEO.velW : 0;
+}
+
+/** ベロシティのレーンをいちばん狭めたときの幅 */
+const VEL_W_MIN = 60;
+/** PC で原曲の波形の列をいちばん狭めたときの幅 */
+const WAVE_W_MIN = 60;
+/** PC でドラムのレーンをいちばん狭めたときの幅（ふつうは 40） */
+const LANE_W_MIN = 32;
 
 /** スペクトルを出すときの列の最大幅（画面に余裕があれば広げる） */
 const SPEC_W_MAX = 196;

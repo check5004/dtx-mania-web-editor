@@ -8,7 +8,7 @@ import { serializeHeader } from '../dtx/serialize';
 import { parseDtx } from '../dtx/parse';
 import { freeWavNumber, setField, setFieldComment } from '../edit/ops';
 import type { HeaderLine } from '../dtx/model';
-import { addMaterials, hasBga, IMAGE_EXT, materialFile, materials, MOVIE_EXT, pickMaterial, removeMaterial, setMaterialPath, useBga, type Material, type MaterialKind } from '../store/bga';
+import { addMaterials, IMAGE_EXT, materialFile, materials, MOVIE_EXT, pickMaterial, removeMaterial, setMaterialPath, useBga, useBgaFolded, type BgaColumn, type Material, type MaterialKind } from '../store/bga';
 import { BGA_CHANNELS } from '../dtx/model';
 import { thumb, useThumbs } from './thumbs';
 import { audioFiles, findFile } from '../fs/folder';
@@ -742,6 +742,8 @@ function BgaTab() {
   const doc = useEditor((s) => s.doc);
   const folder = useEditor((s) => s.folder);
   const st = useBga();
+  // 幅が足りなくて BGA の列を隠しているか（パネルの幅・ベロシティの編集で変わるので、譜面の幅が変わるたびに見る）
+  const folded = useBgaFolded();
   useThumbs((s) => s.ver);
   const mats = materials(doc);
   const bmps = mats.filter((m) => m.kind === 'bmp');
@@ -789,12 +791,29 @@ function BgaTab() {
           ))}
         </select>
       </div>
-      <label className="row lbl" style={{ gap: 6 }}>
-        <input type="checkbox" checked={st.show || hasBga(doc)} disabled={hasBga(doc)} onChange={(e) => useBga.setState({ show: e.target.checked })} />
-        {tr('譜面の右に BGA の列を出す', 'Show BGA columns right of the chart')}
-      </label>
+      <div className="form-grid" style={{ marginBottom: 4 }}>
+        <span className="lbl">{tr('BGA の列', 'BGA columns')}</span>
+        <select
+          className="field"
+          value={st.column}
+          onChange={(e) => useBga.setState({ column: e.target.value as BgaColumn })}
+          title={tr('自動：BGA のある曲で、原曲の打点・波形に重ならずに入るときだけ譜面の右に出します', 'Auto: shown right of the chart for songs with BGA, when they fit without covering the original audio columns')}
+        >
+          <option value="auto">{tr('自動', 'Auto')}</option>
+          <option value="show">{tr('出す', 'Show')}</option>
+          <option value="hide">{tr('出さない', 'Hide')}</option>
+        </select>
+      </div>
+      {folded && (
+        <p className="lbl" style={{ margin: '0 0 6px', lineHeight: 1.6 }}>
+          {tr(
+            '譜面の幅が足りないので、原曲の打点・波形に重ならないよう BGA の列を隠しています。パネルを閉じるか、「出す」で原曲の波形の右側に重ねて出せます。',
+            "The chart is too narrow, so the BGA columns are hidden to keep them off the original audio's hits and waveform. Close a panel, or choose Show to draw them over the right side of the waveform.",
+          )}
+        </p>
+      )}
       <label className="row lbl" style={{ gap: 6, marginBottom: 6 }}>
-        <input type="checkbox" checked={st.wide} onChange={(e) => useBga.setState({ wide: e.target.checked, show: true })} />
+        <input type="checkbox" checked={st.wide} onChange={(e) => useBga.setState({ wide: e.target.checked, column: 'show' })} />
         {tr('列を広げて画像のサムネイルを出す', 'Widen the columns to show image thumbnails')}
       </label>
       <p className="lbl" style={{ margin: '0 0 10px', lineHeight: 1.6 }}>

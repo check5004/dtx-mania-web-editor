@@ -55,6 +55,7 @@ import { bgmSource, tempoOf } from './derived';
 import { addDocFixer, addPlayDocTransform, addSoundDocs, edit, fileBuffer, lastHistory, prepareSounds, recordSide, refreshPlayback, toast, undoIfLast, useEditor } from './editor';
 import { setFxSide, useSidecar } from './sidecar';
 import { toggleVelMode, useVel } from './velocity';
+import { soundKey } from '../fs/soundKey';
 
 // ---- 状態 -------------------------------------------------------------------------
 
@@ -229,7 +230,7 @@ function queued<T>(job: () => Promise<T>): Promise<T> {
 function origKey(orig: string): string | null {
   const s = useEditor.getState();
   const f = findFile(s.folder, orig, s.doc.fields['PATH_WAV'] ?? '');
-  if (f) return `${s.folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}`;
+  if (f) return soundKey(s.folder, f);
   const vs = virtualSound(orig);
   return vs ? virtualKey(vs) : null;
 }

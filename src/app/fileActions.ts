@@ -68,7 +68,7 @@ import { loadSidecar, markSidecarSaved, markSidecarUnsaved, serializeSidecar, si
 import { readSidecarFor, recentSidecarOf, type RecentSidecar } from '../store/sidecarFile';
 import { FX_NAME_RE } from '../fx/model';
 import { afterSaveFx, fxBeforeSave } from './fxSave';
-import { chooseDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
+import { chooseDialog, confirmAltDialog, confirmDialog, newSongDialog, promptDialog } from '../ui/dialogs';
 import { readZip, songFoldersOf } from '../fs/zip';
 import { sortByDifficulty } from '../gen/diffTabs';
 import { LINK_FILE, syncedPath, writeDriveSkip } from '../drive/sync';
@@ -77,21 +77,44 @@ import { useNxLib } from '../nxlib/store';
 import { nxSaveDialog } from '../ui/nxlib/NxSaveDialog';
 import { chartRefs, dirLabel, isLibraryLook, lookAtFolder, otherSongsIn, songFilesOf, songFolderName, subFolder } from '../fs/songDir';
 import { chooseSongDir, fewText, makeSongDir, pickDir, pickSongPlace, type SongPlace } from './songPlace';
+import { recentArt } from './recentArt';
+import { carrySoundKeys, keepSoundKey } from '../fs/soundKey';
+import { engine } from '../audio/engine';
+import { tempoCandidates } from '../audio/workerClient';
+import type { TempoCandidate } from '../audio/analysis';
 
 const get = useEditor.getState;
 
-export async function confirmDiscard(): Promise<boolean> {
+/**
+ * 保存していない変更があれば、ほかを開く前に聞く：保存して続ける（おすすめ）・保存せずに続ける・やめる。
+ * 保存の途中でやめた・保存できなかったら続けない。
+ * gesture: 続きでフォルダを選ぶ・許可を聞く（クリック・タップの中でしかできない）。保存に時間がかかって
+ * 操作の中でなくなったら、もう一度押してもらう
+ */
+export async function confirmDiscard(opts: { gesture?: boolean } = {}): Promise<boolean> {
   const s = get();
   // 作業ファイル（セクション・ステムの音量など）だけを変えたときも聞く
   if (s.screen !== 'editor' || !hasUnsaved(s)) return true;
-  return confirmDialog({
+  const c = await confirmAltDialog({
     title: tr('保存していない変更があります', 'You have unsaved changes'),
     body: tr(
-      '開き直すと、いまの変更は「最近の曲」の自動保存にだけ残ります。続けますか？',
-      'If you open something else, your current changes are kept only in the "Recent songs" autosave. Continue?',
+      '保存せずに続けると、いまの変更は「最近の曲」の自動保存にだけ残ります。',
+      'If you continue without saving, your current changes are kept only in the "Recent songs" autosave.',
     ),
-    ok: tr('続ける', 'Continue'),
+    ok: tr('保存して続ける', 'Save and continue'),
+    alt: tr('保存せずに続ける', 'Continue without saving'),
   });
+  if (c === 'alt') return true;
+  if (c !== 'ok') return false;
+  await save();
+  if (get().screen === 'editor' && hasUnsaved(get())) return false;
+  if (!opts.gesture || inGesture()) return true;
+  return confirmDialog({ title: tr('保存しました', 'Saved'), body: tr('続けて開きます。', 'Now continue to open it.'), ok: tr('続ける', 'Continue') });
+}
+
+/** いまがクリック・タップの中か（分からないブラウザは中でないとみなす） */
+function inGesture(): boolean {
+  return !!(navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive;
 }
 
 async function readSetDefLabels(folder: SongFolder): Promise<Map<string, string>> {
@@ -307,7 +330,7 @@ async function afterPromote(folder: SongFolder, id: string) {
     const oldId = s.meta.recentId;
     useEditor.setState({ meta: { ...s.meta, recentId: newId } });
     if (oldId && oldId !== newId) await deleteRecent(oldId);
-    await putRecent(autosaveEntry(get()));
+    await putRecent(await autosaveEntryWithArt(get()));
     await trimRecent();
   } else {
     // もう別の曲を開いた：「最近の曲」から開けるように控えを作る
@@ -473,6 +496,7 @@ export async function openFolder(folder: SongFolder, restore?: Map<string, { tex
       audioFiles: [...audioFiles(folder).map((f) => f.path), ...videos],
       movies: videos,
       defaults: { title: folder.name },
+      guessBpm: bpmGuesser(async (name) => findFile(folder, name)?.getFile()),
     });
     if (!asked) return;
     const info = await audioFromVideo(asked, folder, false);
@@ -528,7 +552,7 @@ function newMeta(fileName: string, folder: SongFolder | null): DocMeta {
  * 曲を集めたフォルダ（DTXFiles など）を選んだら、中を全部は読まずに、開く曲を選んでもらう
  */
 export async function openFolderPicker(fallbackInput?: HTMLInputElement | null) {
-  if (!(await confirmDiscard())) return;
+  if (!(await confirmDiscard({ gesture: true }))) return;
   if (supportsDirectWrite()) {
     try {
       let dir = await pickDir();
@@ -719,6 +743,7 @@ export async function openDroppedFiles(files: File[]) {
       bpm: tags?.bpm ? Math.round(tags.bpm * 100) / 100 : undefined,
       bgmFile: (namedAudio[0] ?? namedVideos[0])?.name,
     },
+    guessBpm: bpmGuesser(async (name) => namedAudio.find((f) => f.name === name)),
   });
   if (!asked) return;
   const folder = folderFromFiles(named, files[0].name.replace(/\.[^.]+$/, ''));
@@ -916,6 +941,27 @@ async function dropVideoInEditor(video: File, files: File[]) {
   else if (choice === 'new') await openDroppedFiles(files);
 }
 
+/**
+ * 新しい譜面のダイアログで、選んだ原曲から BPM の候補を出す（ダイアログを開いている間に別スレッドで。同じファイルは一度だけ）。
+ * 動画・大きすぎるファイルは推定しない（動画の音は作るときに取り出す）
+ */
+function bpmGuesser(open: (name: string) => Promise<Blob | null | undefined>): (name: string) => Promise<TempoCandidate[]> {
+  const memo = new Map<string, Promise<TempoCandidate[]>>();
+  return (name) => {
+    let p = memo.get(name);
+    if (!p) {
+      p = (async () => {
+        if (!name || isVideoName(name)) return [];
+        const blob = await open(name);
+        if (!blob || blob.size > 150 * 1024 * 1024) return [];
+        return tempoCandidates(await engine.decodeAudio(await blob.arrayBuffer()));
+      })().catch(() => []);
+      memo.set(name, p);
+    }
+    return p;
+  };
+}
+
 export async function newEmptySong() {
   if (!(await confirmDiscard())) return;
   const info = await newSongDialog({ title: tr('新しい譜面をつくる', 'Create a new chart'), audioFiles: [], defaults: {} });
@@ -1038,7 +1084,10 @@ async function saveIntoLocal(folder: SongFolder, fileName: string, bytes: Uint8A
   }
   const fxPrev = await fxBeforeSave(folder, fileName);
   for (const k of kit) await writeFile(folder, k.path, k.bytes);
-  for (const f of pendingFiles(folder)) await writeFile(folder, f.path, await f.getFile());
+  for (const f of pendingFiles(folder)) {
+    await writeFile(folder, f.path, await f.getFile());
+    keepSoundKey(folder, f);
+  }
   await writeFile(folder, fileName, bytes);
   const side = sidecarBytes(folder, fileName);
   if (side) await writeFile(folder, sidecarName(fileName), side);
@@ -1222,6 +1271,7 @@ async function relocate(from: SongFolder & { dir: FileSystemDirectoryHandle }, p
   const s = get();
   const labels = await readSetDefLabels(target);
   const known = new Map(s.meta.siblings.map((x) => [x.file.toLowerCase(), x.origin]));
+  carrySoundKeys(from, target);
   useEditor.setState({
     folder: target,
     meta: { ...s.meta, siblings: siblingsOf(target, labels).map((x) => ({ ...x, origin: known.get(x.file.toLowerCase()) })), recentId: recentIdFor(target, s.meta.fileName) },
@@ -1413,7 +1463,10 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       const fxPrev = await fxBeforeSave(folder, fileName);
       for (const k of kit) await writeFile(folder, k.path, k.bytes);
       // ステムや書き出した音で、まだフォルダに書けていなかったもの
-      for (const f of pendingFiles(folder)) await writeFile(folder, f.path, await f.getFile());
+      for (const f of pendingFiles(folder)) {
+        await writeFile(folder, f.path, await f.getFile());
+        keepSoundKey(folder, f);
+      }
       await writeFile(folder, fileName, bytes);
       const side = sidecarBytes(folder, fileName);
       if (side) await writeFile(folder, sidecarName(fileName), side);
@@ -1532,6 +1585,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       markSidecarSaved();
       const fxNow = useSidecar.getState().fx;
       const moved = folder?.local;
+      // 書き写した音は前の鍵のまま（原曲の解析・ドラムの採譜・スペクトルをやり直さない）
+      carrySoundKeys(folder, target);
       folder = target;
       const labels = await readSetDefLabels(folder);
       markSaved(doc, { folder, meta: { ...get().meta, fileName, siblings: siblingsOf(folder, labels), recentId: recentIdFor(folder, fileName) } });
@@ -1655,6 +1710,12 @@ function autosaveEntry(s: EditorState): RecentEntry {
   };
 }
 
+/** 控えに一覧の小さい画像も入れる（曲フォルダを開いている間に作る） */
+async function autosaveEntryWithArt(s: EditorState): Promise<RecentEntry> {
+  const e = autosaveEntry(s);
+  return { ...e, ...(await recentArt(s.doc, s.folder)) };
+}
+
 /** いまの譜面の控え（Drive の自動保存に送る）。保存済みなら null */
 export function autosaveSnapshot(): { fileName: string; text: string; sidecar?: string } | null {
   const s = get();
@@ -1668,7 +1729,7 @@ export async function autosaveNow(saved = false) {
   if (!saved && s.doc === lastAutosaved) return;
   lastAutosaved = s.doc;
   lastAutosaveAt = Date.now();
-  await putRecent(autosaveEntry(s));
+  await putRecent(await autosaveEntryWithArt(s));
   await trimRecent();
 }
 
@@ -1707,7 +1768,8 @@ export function startAutosave() {
 export { listRecent, listRecentSongs };
 
 export async function openRecent(e: RecentEntry) {
-  if (!(await confirmDiscard())) return;
+  // 曲フォルダの許可を聞くことがある（操作の中で）
+  if (!(await confirmDiscard({ gesture: !!e.dir }))) return;
   await openRecentEntry(e);
   await tellOtherDrafts();
 }

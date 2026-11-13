@@ -540,7 +540,7 @@ export function PhoneEditor({ folderInput }: { folderInput: React.RefObject<HTML
   // レーンの幅を変えるもの（原曲の列・強さの列・BGA の列）が変わったら決め直す
   useAssist((s) => s.audioCols);
   useVel((s) => s.lanes.length);
-  useBga((s) => `${s.show}|${s.wide}`);
+  useBga((s) => `${s.column}|${s.wide}`);
   useEditor((s) => hasBga(s.doc));
   useAudioColsByOrientation(portrait);
   useFitMeasureInLandscape(portrait);

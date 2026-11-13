@@ -7,6 +7,7 @@ import { rimWavs } from '../dtx/rim';
 import { buildTempoMap, type TempoMap } from '../dtx/timing';
 import { findFile, type SongFolder } from '../fs/folder';
 import { specialLayout } from './specialLayout';
+import { soundKey } from '../fs/soundKey';
 
 let lastTempo: { barLengths: object; fields: object; sig: string; map: TempoMap } | null = null;
 const tempoCache = new WeakMap<DtxDoc, TempoMap>();
@@ -187,7 +188,7 @@ export function wavSources(doc: DtxDoc, folder: SongFolder | null): WavSource[] 
     }
     out.push({
       no,
-      key: f ? `${folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : virtualKey(vs!),
+      key: f ? soundKey(folder, f) : virtualKey(vs!),
       load: f ? async () => (await f.getFile()).arrayBuffer() : undefined,
       fallback: vs ? () => vs.load() : undefined,
       volume: wavVolume(doc, no),

@@ -29,6 +29,8 @@ export interface RecentEntry {
    * 曲フォルダの作業ファイルより新しければ、開くときこちらを使う）。無い控え（前の版）は saved と同じに見る
    */
   sidecarSaved?: boolean;
+  /** 一覧の小さい画像（#PREIMAGE などを四角に切り抜いた JPEG の data URL。src/app/recentArt.ts） */
+  art?: string;
   updatedAt: number;
 }
 

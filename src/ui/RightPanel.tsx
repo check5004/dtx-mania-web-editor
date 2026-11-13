@@ -45,7 +45,102 @@ export function RightPanel() {
       <CheckCard />
       <StatsCard />
       <NoticeCard />
+      <HelpCard />
     </aside>
+  );
+}
+
+/** 操作のしかたの中身 */
+function HelpBody() {
+  return (
+    <>
+      {isJa() ? (
+      <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
+        <div>クリック … チップを置く</div>
+        <div>
+          <kbd>Shift</kbd>+クリック … HHオープン／左バスドラム／リム
+        </div>
+        <div>ダブルクリック … 消す（右ボタンでなぞるとまとめて消す）</div>
+        <div>右クリック … メニュー（チップならベロシティ・レーン・削除、何もない所ならグリッド）</div>
+        <div>空いた所をドラッグ … 範囲を選ぶ</div>
+        <div>チップをドラッグ／<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> … 動かす</div>
+        <div>
+          <kbd>Ctrl</kbd>+<kbd>C</kbd>／<kbd>V</kbd> … コピー／カーソル位置に貼り付け
+        </div>
+        <div>小節番号の列・波形をクリック … 再生を始める位置（▶）</div>
+        <div>左端の A・B の帯をドラッグ … ループの範囲</div>
+        <div>
+          <kbd>I</kbd> <kbd>O</kbd> … 今の位置を A・B に（両方決めるとループ）、<kbd>/</kbd> … ループのオン・オフ
+        </div>
+        <div>
+          <kbd>Ctrl</kbd>+ホイール … ズーム、<kbd>[</kbd> <kbd>]</kbd> … グリッド
+        </div>
+        <div>
+          <kbd>Tab</kbd> … 点線の続き（TAB補完）を入れる
+        </div>
+      </div>
+      ) : (
+        <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
+          <div>Click … place a chip</div>
+          <div>
+            <kbd>Shift</kbd>+click … HH open / left bass drum / rim
+          </div>
+          <div>Double-click … delete (drag with the right button to delete several)</div>
+          <div>Right-click … menu (on a chip: velocity, lane, delete; on an empty spot: grid)</div>
+          <div>Drag on an empty spot … box-select</div>
+          <div>
+            Drag chips / <kbd>↑</kbd>
+            <kbd>↓</kbd>
+            <kbd>←</kbd>
+            <kbd>→</kbd> … move
+          </div>
+          <div>
+            <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> … copy / paste at the cursor
+          </div>
+          <div>Click the measure-number column or the waveform … playback start (▶)</div>
+          <div>Drag the A·B strip at the left edge … loop range</div>
+          <div>
+            <kbd>I</kbd> <kbd>O</kbd> … set A / B here (loops once both are set), <kbd>/</kbd> … loop on/off
+          </div>
+          <div>
+            <kbd>Ctrl</kbd>+wheel … zoom, <kbd>[</kbd> <kbd>]</kbd> … grid
+          </div>
+          <div>
+            <kbd>Tab</kbd> … accept the dotted suggestion (Tab completion)
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const HELP_KEY = 'dtxe.helpCard';
+
+/** 操作のしかた（いつも同じ説明なので、右のパネルのいちばん下に置き、畳める。畳んだかはブラウザに覚える） */
+function HelpCard() {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(HELP_KEY) !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const toggle = () => {
+    setOpen(!open);
+    try {
+      localStorage.setItem(HELP_KEY, open ? 'closed' : 'open');
+    } catch {
+      // 覚えられなくても動く
+    }
+  };
+  return (
+    <div className="card help-card">
+      <button className="help-card-head section-title" onClick={toggle} aria-expanded={open}>
+        <span className="grow">{tr('操作のしかた', 'How to edit')}</span>
+        <span className="lbl">{open ? tr('畳む', 'Hide') : tr('開く', 'Show')}</span>
+      </button>
+      {open && <HelpBody />}
+    </div>
   );
 }
 
@@ -60,71 +155,8 @@ export function SelectionCard() {
     .map((k) => parseInt(k.slice(3), 36))
     .sort((a, b) => a - b);
 
-  if (chips.length === 0) {
-    return (
-      <div className="card">
-        <div className="section-title" style={{ marginBottom: 8 }}>
-          {tr('操作のしかた', 'How to edit')}
-        </div>
-        {isJa() ? (
-        <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
-          <div>クリック … チップを置く</div>
-          <div>
-            <kbd>Shift</kbd>+クリック … HHオープン／左バスドラム／リム
-          </div>
-          <div>ダブルクリック … 消す（右ボタンでなぞるとまとめて消す）</div>
-          <div>右クリック … メニュー（チップならベロシティ・レーン・削除、何もない所ならグリッド）</div>
-          <div>空いた所をドラッグ … 範囲を選ぶ</div>
-          <div>チップをドラッグ／<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> … 動かす</div>
-          <div>
-            <kbd>Ctrl</kbd>+<kbd>C</kbd>／<kbd>V</kbd> … コピー／カーソル位置に貼り付け
-          </div>
-          <div>小節番号の列・波形をクリック … 再生を始める位置（▶）</div>
-          <div>左端の A・B の帯をドラッグ … ループの範囲</div>
-          <div>
-            <kbd>I</kbd> <kbd>O</kbd> … 今の位置を A・B に（両方決めるとループ）、<kbd>/</kbd> … ループのオン・オフ
-          </div>
-          <div>
-            <kbd>Ctrl</kbd>+ホイール … ズーム、<kbd>[</kbd> <kbd>]</kbd> … グリッド
-          </div>
-          <div>
-            <kbd>Tab</kbd> … 点線の続き（TAB補完）を入れる
-          </div>
-        </div>
-        ) : (
-          <div className="lbl" style={{ lineHeight: 1.9, color: 'var(--text3)' }}>
-            <div>Click … place a chip</div>
-            <div>
-              <kbd>Shift</kbd>+click … HH open / left bass drum / rim
-            </div>
-            <div>Double-click … delete (drag with the right button to delete several)</div>
-            <div>Right-click … menu (on a chip: velocity, lane, delete; on an empty spot: grid)</div>
-            <div>Drag on an empty spot … box-select</div>
-            <div>
-              Drag chips / <kbd>↑</kbd>
-              <kbd>↓</kbd>
-              <kbd>←</kbd>
-              <kbd>→</kbd> … move
-            </div>
-            <div>
-              <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> … copy / paste at the cursor
-            </div>
-            <div>Click the measure-number column or the waveform … playback start (▶)</div>
-            <div>Drag the A·B strip at the left edge … loop range</div>
-            <div>
-              <kbd>I</kbd> <kbd>O</kbd> … set A / B here (loops once both are set), <kbd>/</kbd> … loop on/off
-            </div>
-            <div>
-              <kbd>Ctrl</kbd>+wheel … zoom, <kbd>[</kbd> <kbd>]</kbd> … grid
-            </div>
-            <div>
-              <kbd>Tab</kbd> … accept the dotted suggestion (Tab completion)
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+  // 何も選んでいなければ出さない（操作のしかたはパネルのいちばん下の HelpCard）
+  if (chips.length === 0) return null;
   const one = chips.length === 1 ? chips[0] : null;
   const kinds = new Set(drums.map((c) => drumChannel(c.ch)!.kind));
   const kind = kinds.size === 1 ? [...kinds][0] : null;

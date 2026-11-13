@@ -460,7 +460,8 @@ async function chooseAndOpen() {
 
 /** Drive の曲を開く：この端末にあれば変わったファイルだけ取り、無ければ本体に音ごと取ってくる */
 export async function openDriveSong(song: DriveSong) {
-  if (!(await confirmDiscard())) return;
+  // PC は曲フォルダの許可を聞くことがある（操作の中で）
+  if (!(await confirmDiscard({ gesture: true }))) return;
   let folder: SongFolder | null = null;
   let link: DriveLink | null = null;
   const mine = (await listLocalSongs()).find((l) => l.drive === song.id);

@@ -23,6 +23,7 @@ import {
   type GenCandidate,
 } from '../store/measureGen';
 import type { GhostAnchor } from './CompleteBadge';
+import { revealChartRange } from './ChartCanvas';
 import { Icon } from './icons';
 
 /** Alt+] ・Alt+[ の向き（Mac の Option では文字が変わるので、キーの位置でも見る） */
@@ -97,6 +98,11 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
   });
   void sized;
   useGenKeys();
+  // 開いたとき・範囲が変わったとき（入れて次へ・Alt+G）、範囲が譜面の外なら見える所へ送る（再生中は動かさない）
+  useLayoutEffect(() => {
+    if (!gs.open || useEditor.getState().playing) return;
+    revealChartRange(gs.from, gs.to - gs.from + 1);
+  }, [gs.open, gs.from, gs.to]);
 
   useEffect(() => {
     if (!gs.open) setNote(null);

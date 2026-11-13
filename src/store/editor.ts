@@ -43,6 +43,7 @@ import { opDeleteMeasures, opInsertMeasures, shiftMeasure, type DeleteResult } f
 import { keepSpecials } from './specialKeep';
 import { specialLayout } from './specialLayout';
 import { isDrumlessName } from '../separate/names';
+import { soundKey } from '../fs/soundKey';
 
 enablePatches();
 
@@ -1265,7 +1266,7 @@ export async function fileBuffer(path: string): Promise<AudioBuffer | null> {
   const f = findFile(s.folder, path, s.doc.fields['PATH_WAV'] ?? '');
   const vs = f ? null : virtualSound(path);
   if (!f && !vs) return null;
-  const key = f ? `${s.folder?.name}|${f.path}|${f.size}|${f.ver ?? 0}` : virtualKey(vs!);
+  const key = f ? soundKey(s.folder, f) : virtualKey(vs!);
   let p = previewCache.get(key);
   if (!p) {
     p = (async () => {
