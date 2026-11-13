@@ -67,7 +67,7 @@ function HomeDesktop() {
           <LogoMark />
           DTX Web Editor
         </span>
-        <span className="lbl hide-narrow">{tr('DTXManiaNX 向けのドラム譜面エディタ', 'Drum chart editor for DTXManiaNX')}</span>
+        <span className="lbl hide-narrow">{tr('DTXMania 向けのドラム譜面エディタ', 'Drum chart editor for DTXMania')}</span>
         <span className="grow" />
         <LangSwitch small />
         {hasDoc && (
@@ -91,8 +91,8 @@ function HomeDesktop() {
             <span>
               {local
                 ? tr(
-                    'このブラウザは曲フォルダへ直接保存できないため、曲は音ごとこのブラウザの中に保存します。NX へ渡すときは「ファイル › 曲フォルダを ZIP でダウンロード」を使ってください。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
-                    "This browser can't save into the song folder, so songs are kept inside this browser with their audio. To move one to NX, use File › Download song folder as ZIP. In Chrome or Edge, saving overwrites the files in the song folder.",
+                    'このブラウザは曲フォルダへ直接保存できないため、曲は音ごとこのブラウザの中に保存します。DTXMania へ渡すときは「ファイル › 曲フォルダを ZIP でダウンロード」を使ってください。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
+                    "This browser can't save into the song folder, so songs are kept inside this browser with their audio. To move one to DTXMania, use File › Download song folder as ZIP. In Chrome or Edge, saving overwrites the files in the song folder.",
                   )
                 : tr(
                     'このブラウザは曲フォルダへの直接保存に対応していないため、保存はダウンロードになります。Chrome か Edge なら曲フォルダに直接上書き保存できます。',
@@ -266,7 +266,7 @@ function HomeDesktop() {
               </div>
               <div>
                 <b>保存</b>
-                <kbd>Ctrl</kbd>+<kbd>S</kbd>で曲フォルダにShift_JISで保存。NXでそのまま読めます。
+                <kbd>Ctrl</kbd>+<kbd>S</kbd>で曲フォルダにShift_JISで保存。DTXMania でそのまま読めます。
               </div>
             </div>
           ) : (
@@ -286,7 +286,7 @@ function HomeDesktop() {
               </div>
               <div>
                 <b>Save</b>
-                <kbd>Ctrl</kbd>+<kbd>S</kbd> saves to the song folder in Shift_JIS, ready for NX.
+                <kbd>Ctrl</kbd>+<kbd>S</kbd> saves to the song folder in Shift_JIS, ready for DTXMania.
               </div>
             </div>
           )}

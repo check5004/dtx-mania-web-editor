@@ -253,7 +253,7 @@ function onKey(e: KeyboardEvent, folderInput: HTMLInputElement | null) {
     setPreset((Number(e.code.slice(5)) - 1) as 0 | 1 | 2);
     return;
   }
-  // P：NX風プレビュー（Shift+P で全画面）
+  // P：DTXMania風プレビュー（Shift+P で全画面）
   if (!e.altKey && e.code === 'KeyP') {
     e.preventDefault();
     togglePreview(e.shiftKey ? 'full' : 'side');
@@ -363,7 +363,7 @@ export function Editor() {
   }, []);
   const hasLeft = !velMode && !fxOpen;
   const cols = effectiveColumns(layout, width, hasLeft);
-  const rightLabel = velMode ? tr('ベロシティの道具', 'Velocity tools') : fxOpen ? tr('エフェクトの編集', 'Effect editing') : previewMode === 'side' ? tr('NX風プレビュー', 'NX-style preview') : tr('原曲・耳コピアシスト・確かめる', 'Original, transcription assist, checks');
+  const rightLabel = velMode ? tr('ベロシティの道具', 'Velocity tools') : fxOpen ? tr('エフェクトの編集', 'Effect editing') : previewMode === 'side' ? tr('DTXMania風プレビュー', 'DTXMania-style preview') : tr('原曲・耳コピアシスト・確かめる', 'Original, transcription assist, checks');
   useEffect(() => {
     const h = (e: KeyboardEvent) => onKey(e, folderInput.current);
     window.addEventListener('keydown', h);

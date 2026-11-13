@@ -242,11 +242,11 @@ function KitTab() {
       <p className="lbl" style={{ margin: 0 }}>
         {isJa() ? (
           <>
-            <kbd>Shift</kbd>+クリックで、HH は HHオープン、LP は左バスドラム、SD はリム（クロススティック）を置きます（＊の行の音）。リムは NX ではスネアのチップで、音だけが違います。
+            <kbd>Shift</kbd>+クリックで、HH は HHオープン、LP は左バスドラム、SD はリム（クロススティック）を置きます（＊の行の音）。リムは DTXMania ではスネアのチップで、音だけが違います。
           </>
         ) : (
           <>
-            <kbd>Shift</kbd>+click places HH open on HH, the left bass drum on LP and a rim (cross-stick) on SD (the sounds in the * rows). In NX a rim is a snare chip with a different sound.
+            <kbd>Shift</kbd>+click places HH open on HH, the left bass drum on LP and a rim (cross-stick) on SD (the sounds in the * rows). In DTXMania a rim is a snare chip with a different sound.
           </>
         )}
       </p>

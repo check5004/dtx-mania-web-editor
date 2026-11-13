@@ -528,8 +528,8 @@ export const LISTEN_PRESETS: ListenPresetDef[] = [
   withTr({ id: 'game' } as ListenPresetDef, {
     label: ['ゲームと同じ', 'Like the game'],
     hint: [
-      'ドラム以外のステムと譜面の音を鳴らします。NXで遊ぶときと同じ聞こえ方で、譜面だけでドラムが成り立っているか確かめます。',
-      'Plays the non-drum stems and the chart sounds, just like playing in NX, so you can check that the chart alone carries the drums.',
+      'ドラム以外のステムと譜面の音を鳴らします。DTXMania で遊ぶときと同じ聞こえ方で、譜面だけでドラムが成り立っているか確かめます。',
+      'Plays the non-drum stems and the chart sounds, just like playing in DTXMania, so you can check that the chart alone carries the drums.',
     ],
     hintNoStems: [
       'ステムが無いので原曲にドラムが入ったままです（「全部」と同じ）。ドラムのステムを読み込むと、ドラム抜きで聴けます。',

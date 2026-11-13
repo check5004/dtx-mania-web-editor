@@ -148,7 +148,7 @@ function SaveSheetBody() {
         <span className="grow">{tr('文字コード', 'Text encoding')}</span>
         <div className="seg t-seg" role="radiogroup">
           <button className={enc === 'shift_jis' ? 'on' : ''} onClick={() => setEnc('shift_jis')} aria-pressed={enc === 'shift_jis'}>
-            {tr('Shift_JIS（NX）', 'Shift_JIS (NX)')}
+            {tr('Shift_JIS（DTXMania）', 'Shift_JIS (DTXMania)')}
           </button>
           <button className={enc === 'utf-8-bom' ? 'on' : ''} onClick={() => setEnc('utf-8-bom')} aria-pressed={enc === 'utf-8-bom'}>
             UTF-8
@@ -166,8 +166,8 @@ function SaveSheetBody() {
       <p className="note">
         {local
           ? tr(
-              `「保存」は曲フォルダごと${localPlace()}の中に書きます。PC や NX へ渡すときは、ここから ZIP で書き出します（書き出した内容は${localPlace()}にも保存します）。`,
-              `"Save" writes the whole song folder inside ${localPlace()}. To hand it to a PC or NX, export a ZIP here (the exported content is also saved in ${localPlace()}).`,
+              `「保存」は曲フォルダごと${localPlace()}の中に書きます。PC や DTXMania へ渡すときは、ここから ZIP で書き出します（書き出した内容は${localPlace()}にも保存します）。`,
+              `"Save" writes the whole song folder inside ${localPlace()}. To hand it to a PC or DTXMania, export a ZIP here (the exported content is also saved in ${localPlace()}).`,
             )
           : iosName(
               tr(

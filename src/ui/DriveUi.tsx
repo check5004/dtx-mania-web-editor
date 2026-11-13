@@ -91,8 +91,8 @@ export function DriveSettings() {
         </div>
         <p className="lbl">
           {tr(
-            'マイドライブに「DTX Web Editor」フォルダを作り、曲フォルダと同じ並び（譜面・原曲・ステム・作業ファイル）で保存します。Drive の画面からフォルダごと落とせば、そのまま NX で使えます。このアプリが作ったファイルしか見えない許可（drive.file）なので、ほかのファイルは読みません。',
-            'Creates a "DTX Web Editor" folder in My Drive and saves each song like its song folder (charts, original audio, stems, work files). Download the folder from Drive and it works in NX as is. The permission (drive.file) only covers files this app created, so nothing else is read.',
+            'マイドライブに「DTX Web Editor」フォルダを作り、曲フォルダと同じ並び（譜面・原曲・ステム・作業ファイル）で保存します。Drive の画面からフォルダごと落とせば、そのまま DTXMania で使えます。このアプリが作ったファイルしか見えない許可（drive.file）なので、ほかのファイルは読みません。',
+            'Creates a "DTX Web Editor" folder in My Drive and saves each song like its song folder (charts, original audio, stems, work files). Download the folder from Drive and it works in DTXMania as is. The permission (drive.file) only covers files this app created, so nothing else is read.',
           )}
         </p>
         <div className="row" style={{ gap: 8 }}>
@@ -131,8 +131,8 @@ export function DriveSettings() {
         </p>
         <p className="lbl">
           {tr(
-            '送るのは曲のフォルダの中身だけです。ほかの曲も入ったフォルダ（NX の DTXFiles など）は送りません。',
-            "Only the contents of a song's folder are sent. A folder that holds other songs too (such as DTXFiles in NX) is never sent.",
+            '送るのは曲のフォルダの中身だけです。ほかの曲も入ったフォルダ（DTXMania の DTXFiles など）は送りません。',
+            "Only the contents of a song's folder are sent. A folder that holds other songs too (such as DTXFiles in DTXMania) is never sent.",
           )}
         </p>
       </section>

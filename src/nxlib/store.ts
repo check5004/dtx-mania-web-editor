@@ -407,7 +407,7 @@ export async function rescanNx(o: { full?: boolean } = {}): Promise<void> {
     if (!r.stopped) void pruneThumbs(new Set(songs.map((s) => s.id)));
     void refreshDrafts();
     if (!r.stopped && songs.length === 0 && roots.length) {
-      toast(tr('曲が見つかりませんでした。DTXMania のフォルダ（DTXManiaNX.exe のある所）か DTXFiles を選んでください', 'No songs were found. Choose the DTXMania folder (where DTXManiaNX.exe is) or DTXFiles'), 'warn', 8000);
+      toast(tr('曲が見つかりませんでした。DTXMania のフォルダ（.exe のある所）か DTXFiles を選んでください', 'No songs were found. Choose the DTXMania folder (where its .exe is) or DTXFiles'), 'warn', 8000);
     }
   } catch (e) {
     set({ scan: null });

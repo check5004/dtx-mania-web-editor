@@ -21,7 +21,7 @@ export function tabletPanels(): PanelDef[] {
     { id: 'src', label: tr('原曲', 'Original'), title: tr('原曲と参照映像', 'Original and reference video') },
     { id: 'asst', label: tr('耳コピ', 'Assist'), title: tr('耳コピアシスト', 'Transcription assist') },
     { id: 'chk', label: tr('確かめる', 'Check'), title: tr('確かめる', 'Check') },
-    { id: 'prev', label: tr('プレビュー', 'Preview'), title: tr('NX風プレビュー', 'NX-style preview') },
+    { id: 'prev', label: tr('プレビュー', 'Preview'), title: tr('DTXMania風プレビュー', 'DTXMania-style preview') },
   ];
 }
 

@@ -1,6 +1,7 @@
 # このリポジトリで作業するとき
 
 - 画面に出す文は `tr('日本語', 'English')` で両方書き、`node scripts/i18n-check.mjs` を 0 件にする。
+- ゲームは「DTXMania」と呼ぶ。画面の文・README・説明書・README の図に「NX」「DTXManiaNX」と書かない（楯さんの決め。`npm test` の `src/gameName.test.ts` が見張る）。コードの名前（nxlib など）とコメントはそのままでよい。
 - 確かめは `npx tsc -b` と `npm test`。公開は `npm run deploy`（テストとビルドを通してから gh-pages に置く）。
 
 ## Safari・iPad（詳しくは docs/safari.md）

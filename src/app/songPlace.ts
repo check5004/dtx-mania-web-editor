@@ -50,7 +50,7 @@ export async function pickSongPlace(songName: string): Promise<SongPlace | null>
       options: [
         {
           label: tr('別の場所を選び直す（おすすめ）', 'Choose another place (recommended)'),
-          sub: tr('NX の DTXFiles などを選ぶと、その中にこの曲のフォルダを作ります', 'Choose DTXFiles in NX, for example, and a folder for this song is made inside it'),
+          sub: tr('DTXMania の DTXFiles などを選ぶと、その中にこの曲のフォルダを作ります', 'Choose DTXFiles in DTXMania, for example, and a folder for this song is made inside it'),
           value: 'again',
         },
         { label: tr('同じ曲なので、ここに保存する', "It's the same song, so save here"), sub: tr('同じ名前のファイルは上書きします', 'Files with the same name are overwritten'), value: 'here' },

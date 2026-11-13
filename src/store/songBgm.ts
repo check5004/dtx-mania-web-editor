@@ -302,8 +302,8 @@ export async function refreshSongBgms(): Promise<void> {
     told.add(folder);
     toast(
       tr(
-        '難易度によって原曲（BGM）のファイルが違うため、切り替えるたびに原曲を読み直しています。NX でも難易度で鳴る BGM が変わります。',
-        'The original (BGM) file differs between difficulties, so it is reloaded each time you switch. NX also plays a different BGM per difficulty.',
+        '難易度によって原曲（BGM）のファイルが違うため、切り替えるたびに原曲を読み直しています。DTXMania でも難易度で鳴る BGM が変わります。',
+        'The original (BGM) file differs between difficulties, so it is reloaded each time you switch. DTXMania also plays a different BGM per difficulty.',
       ),
       'warn',
       12000,

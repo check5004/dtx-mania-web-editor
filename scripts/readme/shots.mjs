@@ -156,7 +156,7 @@ const CHART_CLIP = { x: 284, y: 104, width: 820, height: 590 };
   }
 
   if (want('preview')) {
-    // NX 風の落ちてくるプレビュー（右のパネル）。サビを鳴らしている途中
+    // DTXMania風の落ちてくるプレビュー（右のパネル）。サビを鳴らしている途中
     await ev(page, async () => {
       const pv = await window.__m('store/preview.ts');
       pv.togglePreview('side');

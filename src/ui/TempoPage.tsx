@@ -451,7 +451,7 @@ function TempoSplitNotice() {
           )}
           <span className="lbl">
             {canAlign
-              ? tr('NX は難易度ごとのテンポで鳴らします。わざと変えてあるのでなければ、そろえてください', 'NX plays each difficulty at its own tempo. Unless it is on purpose, match them')
+              ? tr('DTXMania は難易度ごとのテンポで鳴らします。わざと変えてあるのでなければ、そろえてください', 'DTXMania plays each difficulty at its own tempo. Unless it is on purpose, match them')
               : tr('小節の長さ（拍子）が違う難易度は、その難易度を開いて直してください', 'Open a difficulty with different measure lengths and fix it there')}
           </span>
         </div>

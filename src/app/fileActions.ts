@@ -730,8 +730,8 @@ export async function openDroppedFiles(files: File[]) {
   if (renamed.length)
     toast(
       tr(
-        `NX（Shift_JIS）で読めない文字があったので、名前を変えて曲フォルダに置きました：${renamed.slice(0, 3).join('、')}`,
-        `Renamed in the song folder because NX (Shift_JIS) can't read some characters: ${renamed.slice(0, 3).join(', ')}`,
+        `DTXMania（Shift_JIS）で読めない文字があったので、名前を変えて曲フォルダに置きました：${renamed.slice(0, 3).join('、')}`,
+        `Renamed in the song folder because DTXMania (Shift_JIS) can't read some characters: ${renamed.slice(0, 3).join(', ')}`,
       ),
       'info',
       8000,
@@ -838,7 +838,7 @@ export async function importBgmFile(file: File) {
   const rep = siblings ? await siblings.done : null;
   if (rep?.files.length) glowReflected({ diffs: rep.files });
   const notes = [
-    renamed ? tr('NX（Shift_JIS）で読めない文字があったので、名前を変えて置きました', "Its name had characters NX (Shift_JIS) can't read, so it was saved under a new name") : '',
+    renamed ? tr('DTXMania（Shift_JIS）で読めない文字があったので、名前を変えて置きました', "Its name had characters DTXMania (Shift_JIS) can't read, so it was saved under a new name") : '',
     ok && swap.preview ? tr('選曲画面の試聴（#PREVIEW）もこの原曲にしました', 'The song select preview (#PREVIEW) uses it too') : '',
   ]
     .filter(Boolean)
@@ -1256,8 +1256,8 @@ async function offerLeftoverCleanup(from: SongFolder & { dir: FileSystemDirector
   const c = await chooseDialog<'remove' | 'keep'>({
     title: tr(`「${where}」に移しました`, `Moved to "${where}"`),
     body: tr(
-      `元の「${from.name}」の直下に、この曲のファイルが ${left.length} 個残っています（${fewText(left.map((f) => f.path), 4)}）。残すと、NX に同じ曲が2つ出ます。`,
-      `${left.length} of this song's files are still directly in "${from.name}" (${fewText(left.map((f) => f.path), 4)}). If you keep them, NX shows the song twice.`,
+      `元の「${from.name}」の直下に、この曲のファイルが ${left.length} 個残っています（${fewText(left.map((f) => f.path), 4)}）。残すと、DTXMania に同じ曲が2つ出ます。`,
+      `${left.length} of this song's files are still directly in "${from.name}" (${fewText(left.map((f) => f.path), 4)}). If you keep them, DTXMania shows the song twice.`,
     ),
     options: [
       { label: tr(`「${from.name}」から消す（おすすめ）`, `Remove them from "${from.name}" (recommended)`), sub: tr(`新しいフォルダに写した ${left.length} 個だけを消します。ほかの曲のファイルには触りません`, `Removes only the ${left.length} files copied to the new folder. Other songs' files are not touched`), value: 'remove' },
@@ -1293,13 +1293,13 @@ export async function moveToOwnSongFolder(): Promise<SongFolder | null> {
   const c = await chooseDialog<'inside' | 'pick'>({
     title: tr(`「${folder.name}」はほかの曲も入ったフォルダです`, `"${folder.name}" also holds other songs`),
     body: tr(
-      `曲のフォルダ（${fewText(others.map((d) => dirLabel(folder, d)))}）が入っているので、ここには直接保存しません（NX でほかの曲と混ざり、Google Drive にもほかの曲まで送ってしまうため）。この曲だけのフォルダを作り、この曲のファイルを写してから保存します。`,
-      `It has song folders in it (${fewText(others.map((d) => dirLabel(folder, d)))}), so nothing is saved straight into it (it would mix with other songs in NX and send other songs to Google Drive too). A folder just for this song is made, the song's files are copied there, and then it is saved.`,
+      `曲のフォルダ（${fewText(others.map((d) => dirLabel(folder, d)))}）が入っているので、ここには直接保存しません（DTXMania でほかの曲と混ざり、Google Drive にもほかの曲まで送ってしまうため）。この曲だけのフォルダを作り、この曲のファイルを写してから保存します。`,
+      `It has song folders in it (${fewText(others.map((d) => dirLabel(folder, d)))}), so nothing is saved straight into it (it would mix with other songs in DTXMania and send other songs to Google Drive too). A folder just for this song is made, the song's files are copied there, and then it is saved.`,
     ),
     options: [
       {
         label: tr(`「${folder.name}」の中に「${name}」フォルダを作る（おすすめ）`, `Make a "${name}" folder in "${folder.name}" (recommended)`),
-        sub: tr('NX の DTXFiles なら、そのまま NX で遊べます', 'If this is DTXFiles in NX, you can play it in NX right away'),
+        sub: tr('DTXMania の DTXFiles なら、そのまま遊べます', 'If this is DTXFiles in DTXMania, you can play it right away'),
         value: 'inside',
       },
       { label: tr('別の場所を選ぶ…', 'Choose another place…'), sub: tr(`選んだフォルダの中に「${name}」フォルダを作ります`, `A "${name}" folder is made in the folder you choose`), value: 'pick' },
@@ -1335,8 +1335,8 @@ export async function changeSongFolder() {
   const ok = await confirmDialog({
     title: tr('保存先のフォルダを変えます', 'Change the save folder'),
     body: tr(
-      `移す先（NX の DTXFiles など）を選ぶと、その中に「${name}」フォルダを作り、この曲のファイル（譜面・原曲・ステムなど ${count} 個）を写して、次からはそこに保存します。いまのフォルダ「${folder.name}」のファイルは消さずに残します。Google Drive とのつなぎは新しいフォルダに移します。`,
-      `Choose where to move it (such as DTXFiles in NX). A "${name}" folder is made inside it, this song's ${count} ${pl(count, 'file')} (charts, original audio, stems…) are copied there, and later saves go there. The files in the current folder "${folder.name}" are kept. The Google Drive link moves to the new folder.`,
+      `移す先（DTXMania の DTXFiles など）を選ぶと、その中に「${name}」フォルダを作り、この曲のファイル（譜面・原曲・ステムなど ${count} 個）を写して、次からはそこに保存します。いまのフォルダ「${folder.name}」のファイルは消さずに残します。Google Drive とのつなぎは新しいフォルダに移します。`,
+      `Choose where to move it (such as DTXFiles in DTXMania). A "${name}" folder is made inside it, this song's ${count} ${pl(count, 'file')} (charts, original audio, stems…) are copied there, and later saves go there. The files in the current folder "${folder.name}" are kept. The Google Drive link moves to the new folder.`,
     ),
     ok: tr('移す先を選ぶ', 'Choose where to move'),
   });
@@ -1375,8 +1375,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
     const ok = await confirmDialog({
       title: tr('Shift_JISで表せない文字があります', "Some characters can't be written in Shift_JIS"),
       body: tr(
-        `${lost.join(' ')}\n\nNXは譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるのがおすすめです。このまま保存しますか？`,
-        `${lost.join(' ')}\n\nNX reads charts as Shift_JIS, so these characters become "?". It is best to replace them in Song info. Save anyway?`,
+        `${lost.join(' ')}\n\nDTXMania は譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるのがおすすめです。このまま保存しますか？`,
+        `${lost.join(' ')}\n\nDTXMania reads charts as Shift_JIS, so these characters become "?". It is best to replace them in Song info. Save anyway?`,
       ),
       ok: tr('このまま保存', 'Save anyway'),
     });
@@ -1429,8 +1429,8 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       // 本体に置いたまま保存することもできる（選んだら、その曲は次から聞かずに本体へ）
       const songName = songFolderName({ folder: folder?.name, title: doc.fields['TITLE'] });
       const makeNote = tr(
-        `保存する場所（NX の DTXFiles など）を選ぶと、その中に「${songName}」フォルダを作って、譜面・原曲・ステム・キットの音をまとめて書きます。次からはそのフォルダに上書きします`,
-        `Choose where to save it (such as DTXFiles in NX). A "${songName}" folder is made inside it and the chart, original audio, stems and kit sounds are written there together. Later saves overwrite that folder`,
+        `保存する場所（DTXMania の DTXFiles など）を選ぶと、その中に「${songName}」フォルダを作って、譜面・原曲・ステム・キットの音をまとめて書きます。次からはそのフォルダに上書きします`,
+        `Choose where to save it (such as DTXFiles in DTXMania). A "${songName}" folder is made inside it and the chart, original audio, stems and kit sounds are written there together. Later saves overwrite that folder`,
       );
       let where: 'folder' | 'local' | 'lib' = 'folder';
       // DTXMania の曲（覚えている DTXManiaNX）に入れる所（src/nxlib/save.ts）
@@ -1463,14 +1463,14 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
         if (await checkLocal()) {
           const c = await chooseDialog<'folder' | 'local'>({
             title: tr('どこに保存しますか？', 'Where do you want to save?'),
-            body: tr('NX で遊ぶには、NX の曲フォルダ（DTXFiles の中）に保存します。', 'To play it in NX, save it as a song folder inside DTXFiles in NX.'),
+            body: tr('DTXMania で遊ぶには、ゲームの曲フォルダ（DTXFiles の中）に保存します。', 'To play it in DTXMania, save it as a song folder inside DTXFiles in the game.'),
             options: [
               { label: tr('曲のフォルダを作って保存（おすすめ）', 'Make a song folder and save (recommended)'), sub: makeNote, value: 'folder' },
               {
                 label: tr('このブラウザの中に保存', 'Save inside this browser'),
                 sub: tr(
-                  '音も一緒にブラウザの中に残し、リロードしても続きを開けます。NX の曲フォルダへは、あとで「ファイル › 曲フォルダに書き出す」で移せます',
-                  'Keeps the audio too, so you can continue after a reload. Move it to an NX song folder later with File › Export to a song folder',
+                  '音も一緒にブラウザの中に残し、リロードしても続きを開けます。DTXMania の曲フォルダへは、あとで「ファイル › 曲フォルダに書き出す」で移せます',
+                  'Keeps the audio too, so you can continue after a reload. Move it to a DTXMania song folder later with File › Export to a song folder',
                 ),
                 value: 'local',
               },
@@ -1541,7 +1541,7 @@ export async function save(opts: { as?: boolean; toFolder?: boolean } = {}) {
       if ('label' in place) {
         // DTXMania の曲に入れた（一覧には、保存を見張る所が入れる。src/nxlib/store.ts）
         toast(
-          `${tr('保存しました：', 'Saved: ')}${place.label} / ${folder.name}${kitNote(kit)}${creditNote(kit)}\n${tr('曲の一覧にも入りました。NX を開いたままなら、NX の設定の「Reload Songs」で出ます。', "It's in the song list too. If NX is open, use Reload Songs in NX's settings to see it.")}`,
+          `${tr('保存しました：', 'Saved: ')}${place.label} / ${folder.name}${kitNote(kit)}${creditNote(kit)}\n${tr('曲の一覧にも入りました。DTXMania を開いたままなら、DTXMania の設定の「Reload Songs」で出ます。', "It's in the song list too. If DTXMania is open, use Reload Songs in DTXMania's settings to see it.")}`,
           'ok',
           9000,
         );
@@ -1859,8 +1859,8 @@ export async function buildExport(
     const ok = await confirmDialog({
       title: tr('Shift_JISで表せない文字があります', "Some characters can't be written in Shift_JIS"),
       body: tr(
-        `${lost.join(' ')}\n\nNXは譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるか、UTF-8 で書き出してください。このまま書き出しますか？`,
-        `${lost.join(' ')}\n\nNX reads charts as Shift_JIS, so these characters become "?". Replace them in Song info or export as UTF-8. Export anyway?`,
+        `${lost.join(' ')}\n\nDTXMania は譜面をShift_JISで読むため、これらの文字は「?」になります。曲情報で別の文字に置き換えるか、UTF-8 で書き出してください。このまま書き出しますか？`,
+        `${lost.join(' ')}\n\nDTXMania reads charts as Shift_JIS, so these characters become "?". Replace them in Song info or export as UTF-8. Export anyway?`,
       ),
       ok: tr('このまま書き出す', 'Export anyway'),
     });

@@ -1,4 +1,4 @@
-// NX 風の落下プレビュー。上から落ちてくるチップが判定ラインに重なる時刻に鳴る（再生中は再生位置、止まっているときはカーソル位置）。
+// DTXMania風の落下プレビュー。上から落ちてくるチップが判定ラインに重なる時刻に鳴る（再生中は再生位置、止まっているときはカーソル位置）。
 import { tr } from '../i18n';
 import { useEffect, useRef } from 'react';
 import { engine } from '../audio/engine';
@@ -302,14 +302,14 @@ export function NxPreview({ full = false }: { full?: boolean }) {
   return (
     <div className={`nx-preview ${full ? 'full' : ''}`}>
       <div className="nx-head row">
-        {!inPane && <b>{tr('NX風プレビュー', 'NX-style preview')}</b>}
+        {!inPane && <b>{tr('DTXMania風プレビュー', 'DTXMania-style preview')}</b>}
         {touchUi && full && (
           <button className="ib tiny" onClick={togglePlay} aria-pressed={isPlaying} aria-label={isPlaying ? tr('停止', 'Stop') : tr('再生', 'Play')}>
             {isPlaying ? Icon.stop(18) : Icon.play(18)}
           </button>
         )}
         <span className="grow" />
-        <label className="row lbl" style={{ gap: 6 }} title={tr('落ちてくる速さ（NX のハイスピード）', 'Scroll speed (NX hi-speed)')}>
+        <label className="row lbl" style={{ gap: 6 }} title={tr('落ちてくる速さ（DTXMania のハイスピード）', 'Scroll speed (DTXMania hi-speed)')}>
           {tr('速さ', 'Speed')}
           <input type="range" min={0.5} max={4} step={0.25} value={speed} onChange={(e) => usePreview.setState({ speed: Number(e.target.value) })} style={{ width: 90 }} />
           <span className="mono">×{speed.toFixed(2)}</span>
@@ -328,18 +328,18 @@ export function NxPreview({ full = false }: { full?: boolean }) {
         )}
       </div>
       <div ref={wrap} className="nx-canvas" onDoubleClick={togglePlay}>
-        <canvas ref={cv} aria-label={tr('NX風プレビュー', 'NX-style preview')} />
+        <canvas ref={cv} aria-label={tr('DTXMania風プレビュー', 'DTXMania-style preview')} />
       </div>
       <div className="nx-foot lbl">
         {Icon.play(11)}{' '}
         {touchUi
           ? tr(
-              '再生ボタンで再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。',
-              'The play button plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of NX; do the final check in NX.',
+              '再生ボタンで再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は DTXMania に寄せた目安で、最終確認は DTXMania で行ってください。',
+              'The play button plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of DTXMania; do the final check in DTXMania.',
             )
           : tr(
-              'Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は NX に寄せた目安で、最終確認は NX で行ってください。',
-              'Space plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of NX; do the final check in NX.',
+              'Space で再生・停止（止めると ▶ の位置に戻ります）。止めているときは ▶ の位置を出します。見た目は DTXMania に寄せた目安で、最終確認は DTXMania で行ってください。',
+              'Space plays and stops (stopping returns to ▶). While stopped it shows the ▶ position. The look is an approximation of DTXMania; do the final check in DTXMania.',
             )}
       </div>
     </div>

@@ -103,12 +103,12 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
       <p className="lbl" style={{ margin: '6px 0 10px', lineHeight: 1.65 }}>
         {isJa() ? (
           <>
-            原曲からドラムを取り出し、<b>ドラム</b>と<b>ドラム抜き</b>のステムを作ります。NX で遊ぶときはドラムを譜面の音で鳴らすので、BGM はドラム抜きにすると叩いている感じが出ます。
+            原曲からドラムを取り出し、<b>ドラム</b>と<b>ドラム抜き</b>のステムを作ります。DTXMania で遊ぶときはドラムを譜面の音で鳴らすので、BGM はドラム抜きにすると叩いている感じが出ます。
             分けたあとは下の「ドラム抜きを BGM に反映」か、右の「書き出し」の <b>BGM用（ドラム抜き）</b> でエディタ（譜面）の BGM にできます。ドラムのステムは原曲の打点（採譜）にも使います。
           </>
         ) : (
           <>
-            Pulls the drums out of the original and makes a <b>drums</b> stem and a <b>no-drums</b> stem. In NX the drums are played by the chart&apos;s own sounds, so a no-drums BGM makes it feel like you are the one playing.
+            Pulls the drums out of the original and makes a <b>drums</b> stem and a <b>no-drums</b> stem. In DTXMania the drums are played by the chart&apos;s own sounds, so a no-drums BGM makes it feel like you are the one playing.
             Afterwards, use &quot;Set no-drums as BGM&quot; below or <b>For BGM (no drums)</b> under &quot;Export&quot; on the right to make it the BGM in the editor (chart). The drums stem is also used for detecting hits in the original.
           </>
         )}
@@ -355,8 +355,8 @@ export function SeparatePanel({ onClose }: { onClose?: () => void }) {
             ) : (
               <>
                 {tr(
-                  'NX で遊ぶ用に、ドラム抜きをエディタ（譜面）の BGM にできます（原曲と同じ音量のまま。細かく決めるなら右の「書き出し」）。',
-                  'For playing in NX, you can make the no-drums mix the BGM in the editor (chart) (same volume as the original; use "Export" on the right for more control).',
+                  'DTXMania で遊ぶ用に、ドラム抜きをエディタ（譜面）の BGM にできます（原曲と同じ音量のまま。細かく決めるなら右の「書き出し」）。',
+                  'For playing in DTXMania, you can make the no-drums mix the BGM in the editor (chart) (same volume as the original; use "Export" on the right for more control).',
                 )}
                 <span className="row" style={{ gap: 8, marginTop: 6 }}>
                   <button className="btn small primary" disabled={!!busy} onClick={() => void toBgm()}>

@@ -3558,7 +3558,7 @@ function endTip(x: number, y: number, dragging: boolean): Tip {
       ]
     : [
         head,
-        tr('NX もここで演奏を終えます（最後の小節線）。DTX にも書き出します', 'NX also ends the song here (the last bar line). This is saved to the DTX too'),
+        tr('DTXMania もここで演奏を終えます（最後の小節線）。DTX にも書き出します', 'DTXMania also ends the song here (the last bar line). This is saved to the DTX too'),
         tr(`ドラッグ: 動かす（小節の頭に吸着） / ダブルクリック: ${back}に合わせる`, `Drag: move (snaps to measure starts) / Double-click: set it ${back}`),
         tr('右クリック: メニュー（最後のチップのすぐ後・▶ の所に）', 'Right-click: menu (right after the last chip, or at ▶)'),
       ];

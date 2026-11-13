@@ -232,7 +232,7 @@ ${chips.map((c) => c.css).join('\n')}
     ['耳コピのアシスト', LANE.HH],
     ['TAB補完', LANE.SD],
     ['AI難易度生成', C.amber],
-    ['NX でそのまま遊べる', LANE.BD],
+    ['DTXMania で遊べる', LANE.BD],
   ];
   let px = 48;
   const pillEls = pills
@@ -257,12 +257,12 @@ ${chips.map((c) => c.css).join('\n')}
 </g>
 ${text(48, 122, 'DTX Web Editor', { size: 50, weight: 700, ls: '0.5' })}
 ${text(50, 172, '原曲を聴きながら、ブラウザでドラム譜面を作る。', { size: 22, fill: '#CFE3F5' })}
-${text(50, 213, ['DTXManiaNX 向けの、無料のドラム譜面エディタ。', 'インストールなしで、PC・iPad・iPhone から。'], { size: 15.5, fill: C.sub, lh: 1.6 })}
+${text(50, 213, ['DTXMania 向けの、無料のドラム譜面エディタ。', 'インストールなしで、PC・iPad・iPhone から。'], { size: 15.5, fill: C.sub, lh: 1.6 })}
 ${pillEls}
 <g transform="translate(50 330)">${LANES10.map((k, i) => `<rect x="${i * 26}" y="0" width="22" height="7" rx="3.5" fill="${LANE[k]}"/>`).join('')}</g>
 ${text(50 + 10 * 26 + 10, 337, '10 レーン・4 シンバル対応', { size: 13, fill: C.sub })}
 `;
-  files['hero.svg'] = doc({ w: W, h: H, title: 'DTX Web Editor', desc: '原曲を聴きながら、ブラウザでドラム譜面を作る DTXManiaNX 向けのエディタ。スネアのヘッドへ、レーンを降りてくるチップのアニメーション。', css, defs, body });
+  files['hero.svg'] = doc({ w: W, h: H, title: 'DTX Web Editor', desc: '原曲を聴きながら、ブラウザでドラム譜面を作る DTXMania 向けのエディタ。スネアのヘッドへ、レーンを降りてくるチップのアニメーション。', css, defs, body });
 }
 
 // =====================================================================================
@@ -428,7 +428,7 @@ ${kCtrl.svg}${text(226, 47.5, '+', { size: 13, anchor: 'middle', fill: C.sub })}
   const cards = [
     { ill: ill1, title: 'ブラウザで開く', desc: ['インストールも登録もいりません。', 'PC は Chrome か Edge がおすすめ。'] },
     { ill: ill2, title: '曲を入れる', desc: ['原曲の MP3・WAV・動画をドロップ。', 'DTX の曲フォルダも開けます。'] },
-    { ill: ill3, title: '書いて保存', desc: ['Ctrl+S で曲フォルダへ。', 'DTXManiaNX でそのまま遊べます。'] },
+    { ill: ill3, title: '書いて保存', desc: ['Ctrl+S で曲フォルダへ。', 'DTXMania でそのまま遊べます。'] },
   ];
   const body = cards
     .map(
@@ -444,7 +444,7 @@ ${text(18, 200, c.desc, { size: 13, fill: C.sub, lh: 1.62 })}
     )
     .join('\n');
   const defs = `${cardDefs()}<linearGradient id="s2w" x1="0" x2="1"><stop offset="0" stop-color="#4CC2FF"/><stop offset="1" stop-color="#9C84E0"/></linearGradient>`;
-  files['steps.svg'] = doc({ w: W, h: H, title: 'はじめかた', desc: '1. ブラウザで開く 2. 曲（原曲の音声か DTX の曲フォルダ）を入れる 3. 書いて保存すると DTXManiaNX でそのまま遊べる。', css: css.join('\n'), defs, body });
+  files['steps.svg'] = doc({ w: W, h: H, title: 'はじめかた', desc: '1. ブラウザで開く 2. 曲（原曲の音声か DTX の曲フォルダ）を入れる 3. 書いて保存すると DTXMania でそのまま遊べる。', css: css.join('\n'), defs, body });
 }
 
 // =====================================================================================
@@ -690,7 +690,7 @@ ${text(RX, 344, ['原曲で同じに聞こえる所（2 番のサビなど）も
 }
 
 // =====================================================================================
-// 6. 10 レーン: NX と同じ 10 レーンの落ちてくる譜面と、上から見たドラムセット（叩いた所が光る）
+// 6. 10 レーン: DTXMania と同じ 10 レーンの落ちてくる譜面と、上から見たドラムセット（叩いた所が光る）
 // =====================================================================================
 {
   const W = 960;
@@ -779,7 +779,7 @@ ${flashes}
 <g>${chips}</g>
 <rect x="${LX}" y="${top - 8}" width="${10 * LW}" height="56" fill="url(#lt-fade)"/>
 ${labels}
-${text(LX, judge + 62, 'NX と同じ 10 レーン（左シンバル・HH・右シンバル・ライドの 4 シンバル）', { size: 12, fill: C.sub })}
+${text(LX, judge + 62, 'DTXMania と同じ 10 レーン（左右のシンバル・HH・ライドの 4 シンバル）', { size: 12, fill: C.sub })}
 <line x1="430" x2="430" y1="36" y2="${H - 36}" stroke="#1E2A3B"/>
 <rect x="${bdBox.x}" y="${bdBox.y}" width="${bdBox.w}" height="${bdBox.h}" rx="14" fill="${LANE.BD}" fill-opacity="0.12" stroke="${LANE.BD}" stroke-opacity="0.75" stroke-width="2"/>
 ${text(bdBox.x + bdBox.w / 2, bdBox.y + 74, 'BD', { size: 13, anchor: 'middle', weight: 700, fill: LANE.BD, cls: 'mono' })}${text(bdBox.x + bdBox.w / 2, bdBox.y + 92, 'バスドラム', { size: 11, anchor: 'middle', fill: C.sub })}
@@ -793,7 +793,7 @@ ${Object.entries(kit)
 ${kitLabels}
 `;
   const defs = `${cardDefs()}${laneDefs}<linearGradient id="lt-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0B1018"/><stop offset="1" stop-color="#0B1018" stop-opacity="0"/></linearGradient>`;
-  files['lanes.svg'] = doc({ w: W, h: H, title: '10 レーン・4 シンバル', desc: 'DTXManiaNX と同じ 10 レーン（LC HH LP SD HT BD LT FT CY RD）。落ちてくるチップと、上から見たドラムセットの叩いた所が光る。', css: css.join('\n'), defs, body });
+  files['lanes.svg'] = doc({ w: W, h: H, title: '10 レーン・4 シンバル', desc: 'DTXMania と同じ 10 レーン（LC HH LP SD HT BD LT FT CY RD）。落ちてくるチップと、上から見たドラムセットの叩いた所が光る。', css: css.join('\n'), defs, body });
 }
 
 // =====================================================================================
@@ -1025,7 +1025,7 @@ ${text(RX, 312, ['AI が「どこをどう削るか」を決め、', 'チップ�
 }
 
 // =====================================================================================
-// 9. NX へ保存: Ctrl+S で曲フォルダにファイルが並び、DTXManiaNX の曲になる
+// 9. DTXMania へ保存: Ctrl+S で曲フォルダにファイルが並び、DTXMania の曲になる
 // =====================================================================================
 {
   const W = 960;
@@ -1108,7 +1108,7 @@ ${text(RX, 312, ['AI が「どこをどう削るか」を決め、', 'チップ�
   const k1 = keycap(44, 148, 'Ctrl', { w: 70, h: 40, size: 15, cls: 'kps' });
   const k2 = keycap(140, 148, 'S', { w: 44, h: 40, size: 15, cls: 'kps' });
   const left = `${text(44, 70, '保存', { size: 20, weight: 700 })}
-${text(44, 98, ['曲フォルダに、NX が', 'そのまま読める形で'], { size: 13, fill: C.sub, lh: 1.6 })}
+${text(44, 98, ['曲フォルダに、DTXMania が', 'そのまま読める形で'], { size: 13, fill: C.sub, lh: 1.6 })}
 <rect class="kgs" x="38" y="142" width="152" height="54" rx="12" fill="${C.accent}" fill-opacity="0.28" filter="url(#sv-blur)"/>
 ${k1.svg}${text(127, 175, '+', { size: 16, anchor: 'middle', fill: C.sub })}${k2.svg}
 ${text(44, 236, ['Shift_JIS・CRLF', 'Chrome・Edge は曲フォルダへ', 'じかに、ほかは ZIP で'], { size: 12, fill: C.dim, lh: 1.65 })}`;
@@ -1123,7 +1123,7 @@ ${filesList
     return `<g class="f${i}"><rect x="${FX + 30}" y="${y}" width="284" height="22" rx="5" fill="#141E2C"/><circle cx="${FX + 42}" cy="${y + 11}" r="3" fill="${col}"/>${text(FX + 54, y + 15.5, f, { size: 12, cls: 'mono' })}${text(FX + 304, y + 15.5, d, { size: 11, anchor: 'end', fill: col === C.sub ? C.dim : col })}</g>`;
   })
   .join('')}`;
-  // 右: ゲームの曲（NX の画面をまねず、曲のカードとして描く）
+  // 右: ゲームの曲（DTXMania の画面をまねず、曲のカードとして描く）
   const GX = 612;
   const diffs = [
     ['BASIC', '5.17', '#4CC2FF'],
@@ -1136,7 +1136,7 @@ ${[[0, 60, 10, 24], [12, 50, 9, 34], [23, 64, 11, 20], [36, 46, 8, 38], [46, 58,
 <rect y="74" width="84" height="10" fill="#0A0518"/><path d="M0 76 H84" stroke="#FF5CA8" stroke-opacity="0.8"/>${text(42, 20, 'NEON', { size: 11, anchor: 'middle', weight: 700, fill: '#FFE3F6', ls: '1.5' })}${text(42, 31, 'SKYLINE', { size: 7.5, anchor: 'middle', weight: 700, fill: '#BFE8FF', ls: '1.2' })}</g>`;
   const game = `<g class="arw"><path d="M${FX + 344} 180 H${GX - 10}" stroke="${C.accent}" stroke-width="2.4"/><path d="M${GX - 16} 173 L${GX - 4} 180 L${GX - 16} 187 Z" fill="${C.accent}"/></g>
 <g class="card"><rect x="${GX}" y="48" width="320" height="270" rx="16" fill="#120C22" stroke="#3A2F55"/>
-${text(GX + 18, 76, 'DTXManiaNX', { size: 13, weight: 700, fill: '#D9C9FF', ls: '0.5' })}${text(GX + 302, 76, '曲を選ぶ', { size: 11, anchor: 'end', fill: C.dim })}
+${text(GX + 18, 76, 'DTXMania', { size: 13, weight: 700, fill: '#D9C9FF', ls: '0.5' })}${text(GX + 302, 76, '曲を選ぶ', { size: 11, anchor: 'end', fill: C.dim })}
 ${jacket}
 ${text(GX + 116, 116, 'Neon Skyline', { size: 18, weight: 700 })}${text(GX + 116, 138, 'DTX Web Editor demo', { size: 11.5, fill: C.sub })}${text(GX + 116, 160, '172 BPM', { size: 11.5, fill: C.dim, cls: 'mono' })}
 ${diffs
@@ -1158,8 +1158,8 @@ ${game}
   files['save-nx.svg'] = doc({
     w: W,
     h: H,
-    title: 'DTXManiaNX へ保存',
-    desc: 'Ctrl+S で曲フォルダに set.def・4 難易度の DTX・原曲・試聴・ジャケット・使った音が並び、DTXManiaNX でそのまま遊べる。',
+    title: 'DTXMania へ保存',
+    desc: 'Ctrl+S で曲フォルダに set.def・4 難易度の DTX・原曲・試聴・ジャケット・使った音が並び、DTXMania でそのまま遊べる。',
     css: css.join('\n'),
     defs,
     body,

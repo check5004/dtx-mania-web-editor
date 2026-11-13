@@ -1,9 +1,9 @@
 {
   "name": "dtx-mania-web-editor",
   "private": true,
-  "version": "0.50.5",
+  "version": "0.50.6",
   "type": "module",
-  "description": "DTXManiaNX向けのWebドラム譜面エディタ",
+  "description": "DTXMania向けのWebドラム譜面エディタ",
   "license": "MIT",
   "scripts": {
     "dev": "vite",

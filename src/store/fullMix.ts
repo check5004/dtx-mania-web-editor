@@ -123,8 +123,8 @@ export function fillPreview(): string | null {
   void toastSongEdit(
     r,
     tr(
-      `選曲画面の試聴（#PREVIEW）が空だったので、原曲「${f.path}」を入れました（NX は試聴が無いと何も鳴らしません）。曲情報で変えられます`,
-      `The song select preview (#PREVIEW) was empty, so it now uses the original "${f.path}" (NX plays nothing without one). You can change it in Song info`,
+      `選曲画面の試聴（#PREVIEW）が空だったので、原曲「${f.path}」を入れました（DTXMania は試聴が無いと何も鳴らしません）。曲情報で変えられます`,
+      `The song select preview (#PREVIEW) was empty, so it now uses the original "${f.path}" (DTXMania plays nothing without one). You can change it in Song info`,
     ),
     'info',
     9000,

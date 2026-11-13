@@ -182,8 +182,8 @@ function StemsWide() {
               <b>{tr('ここにファイルをまとめてドロップしてステムを追加', 'Drop files here to add stems')}</b>
               <span className="lbl" style={{ display: 'block', marginTop: 4 }}>
                 {tr(
-                  'ステム分離ソフトで作ったファイルを読み込みます（上の「原曲から分解」ならブラウザの中で作れます）。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/ にコピーし、作業ファイル（.dtxe.json）に記録します。NXはこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。',
-                  'Loads files made with stem separation software ("Split the original" above can make them inside the browser). The type and name are set automatically from words in the file name such as drums, Dr, (No Drums), bass, vocals or strings (change them with ✎ on each track), and differences in length and sample rate are checked. Files are copied to stems/ in the song folder and recorded in the work file (.dtxe.json). NX doesn\'t read this folder, so it won\'t get in the way when you play. Load the unsplit original from "Original" in the right panel of the chart screen (with stems only, the waveform is made from the drums or the first track).',
+                  'ステム分離ソフトで作ったファイルを読み込みます（上の「原曲から分解」ならブラウザの中で作れます）。ファイル名の drums・ドラム・Dr・(No Drums)・bass・vocals・弦楽器 などから種類と名前を自動で決め（名前と種類はトラックの ✎ で変えられます）、長さとサンプリングレートの違いを確かめます。ファイルは曲フォルダの stems/ にコピーし、作業ファイル（.dtxe.json）に記録します。DTXMania はこのフォルダを読まないので、遊ぶときの邪魔になりません。分ける前の原曲は、譜面画面の右のパネルの「原曲」から読み込みます（ステムだけでも、ドラムか最初のトラックから波形を作ります）。',
+                  'Loads files made with stem separation software ("Split the original" above can make them inside the browser). The type and name are set automatically from words in the file name such as drums, Dr, (No Drums), bass, vocals or strings (change them with ✎ on each track), and differences in length and sample rate are checked. Files are copied to stems/ in the song folder and recorded in the work file (.dtxe.json). DTXMania doesn\'t read this folder, so it won\'t get in the way when you play. Load the unsplit original from "Original" in the right panel of the chart screen (with stems only, the waveform is made from the drums or the first track).',
                 )}
               </span>
             </span>
@@ -901,7 +901,7 @@ const modes = (): { id: ExportMode; title: string; body: string; badge?: string;
     id: 'bgm',
     title: tr('BGM用（ドラム抜き）', 'For BGM (no drums)'),
     badge: tr('おすすめ', 'Recommended'),
-    body: tr('ドラム以外を1本にまとめます。NXでは譜面のドラム音が鳴るので、BGMはドラム抜きが基本です。', 'Mixes everything except the drums into one file. NX plays the chart\'s drum sounds, so BGM usually has no drums.'),
+    body: tr('ドラム以外を1本にまとめます。DTXMania では譜面のドラム音が鳴るので、BGMはドラム抜きが基本です。', 'Mixes everything except the drums into one file. DTXMania plays the chart\'s drum sounds, so BGM usually has no drums.'),
   },
   { id: 'all', title: tr('全部を1本に', 'Everything in one file'), body: tr('原曲と同じ音になります。試聴用（#PREVIEW）や確認に。', 'Sounds the same as the original. For the preview (#PREVIEW) or checking.') },
   { id: 'selected', title: tr('選んだステムを1本に', 'Selected stems in one file'), body: tr('下で選んだステムだけをまとめます。', 'Mixes only the stems you select below.') },
@@ -1215,7 +1215,7 @@ function ExportPanel() {
           </div>
           <p className="lbl note">
             {format === 'ogg'
-              ? tr('OGG Vorbis 品質6（約192 kbps）· 44.1 kHz。NXで読めて容量が小さい形式です。', 'OGG Vorbis quality 6 (about 192 kbps) · 44.1 kHz. NX can read it, and files are small.')
+              ? tr('OGG Vorbis 品質6（約192 kbps）· 44.1 kHz。DTXMania で読めて容量が小さい形式です。', 'OGG Vorbis quality 6 (about 192 kbps) · 44.1 kHz. DTXMania can read it, and files are small.')
               : tr('WAV 16bit · 44.1 kHz。音質は落ちませんが容量が大きくなります。', "WAV 16-bit · 44.1 kHz. No quality loss, but files are large.")}
           </p>
           <div className="kv">
@@ -1224,7 +1224,7 @@ function ExportPanel() {
           </div>
           {renamedOut && (
             <p className="lbl note">
-              {tr(`NX（Shift_JIS）で読めない文字があるので、${outName} の名前で書き出します。`, `It has characters NX (Shift_JIS) can't read, so it is written as ${outName}.`)}
+              {tr(`DTXMania（Shift_JIS）で読めない文字があるので、${outName} の名前で書き出します。`, `It has characters DTXMania (Shift_JIS) can't read, so it is written as ${outName}.`)}
             </p>
           )}
           {mode === 'each' && <p className="lbl note">{tr('{名前} はステムの名前になります（例: stems_ドラム.ogg）。', '{name} becomes the stem name (e.g. stems_Drums.ogg).')}</p>}

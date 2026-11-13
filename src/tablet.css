@@ -3386,7 +3386,7 @@ html.tablet .trk-fx .trk-fx-open .key {
   display: none;
 }
 
-/* NX風プレビューの見出しのボタン（▶・全画面・閉じる）を指で押せる大きさに */
+/* DTXMania風プレビューの見出しのボタン（▶・全画面・閉じる）を指で押せる大きさに */
 html.tablet .nx-head .ib {
   width: 44px;
   height: 44px;

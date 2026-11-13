@@ -81,7 +81,7 @@ export function Footer() {
           {unsaved ? tr(`未保存：${unsavedText(unsaved)}`, `Unsaved: ${unsavedText(unsaved)}`) : savedAt ? tr('保存済み', 'Saved') : tr('変更なし', 'No changes')} · {where}
         </span>
         <DriveFooterChip />
-        <span className="pill" title={tr('保存するときの文字コード（NXが読める形式）', 'Text encoding used when saving (a format NX can read)')}>
+        <span className="pill" title={tr('保存するときの文字コード（DTXMania が読める形式）', 'Text encoding used when saving (a format DTXMania can read)')}>
           Shift_JIS
         </span>
       </div>

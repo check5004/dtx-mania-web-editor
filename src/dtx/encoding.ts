@@ -11,7 +11,7 @@ export interface DecodedText {
 }
 
 const utf16Note = () =>
-  tr('このファイルはBOM付きUTF-16です。保存するとShift_JISで書き出します（NXはどちらも読めます）。', 'This file is UTF-16 with a BOM. Saving writes it as Shift_JIS (NX reads both).');
+  tr('このファイルはBOM付きUTF-16です。保存するとShift_JISで書き出します（DTXMania はどちらも読めます）。', 'This file is UTF-16 with a BOM. Saving writes it as Shift_JIS (DTXMania reads both).');
 
 export function decodeDtx(bytes: Uint8Array): DecodedText {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
@@ -38,8 +38,8 @@ export function decodeDtx(bytes: Uint8Array): DecodedText {
         text,
         encoding: 'utf-8',
         note: tr(
-          'このファイルはBOMなしのUTF-8です。NXはShift_JISとして読むため、日本語が文字化けします。保存するとShift_JISに直ります。',
-          'This file is UTF-8 without a BOM. NX reads it as Shift_JIS, so Japanese text would be garbled. Saving fixes it to Shift_JIS.',
+          'このファイルはBOMなしのUTF-8です。DTXMania はShift_JISとして読むため、日本語が文字化けします。保存するとShift_JISに直ります。',
+          'This file is UTF-8 without a BOM. DTXMania reads it as Shift_JIS, so Japanese text would be garbled. Saving fixes it to Shift_JIS.',
         ),
       };
     } catch {

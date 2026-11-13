@@ -219,10 +219,10 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
           ? []
           : [
               tablet
-                ? { label: tr('NX風プレビュー（パネル）', 'NX-style preview (panel)'), checked: useDevice.getState().panel === 'prev', key: 'P', run: () => togglePanelT('prev') }
-                : { label: tr('NX風プレビュー（右のパネル）', 'NX-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
+                ? { label: tr('DTXMania風プレビュー（パネル）', 'DTXMania-style preview (panel)'), checked: useDevice.getState().panel === 'prev', key: 'P', run: () => togglePanelT('prev') }
+                : { label: tr('DTXMania風プレビュー（右のパネル）', 'DTXMania-style preview (right panel)'), checked: usePreview.getState().mode === 'side', key: 'P', run: () => togglePreview('side') },
             ]),
-        { label: tr('NX風プレビュー（全画面）', 'NX-style preview (full screen)'), key: 'Shift+P', run: () => togglePreview('full') },
+        { label: tr('DTXMania風プレビュー（全画面）', 'DTXMania-style preview (full screen)'), key: 'Shift+P', run: () => togglePreview('full') },
         '-',
         // 画面の言語。名前はその言語自身で書く（どちらの言語の画面でも見つけられるように）
         ...(['en', 'ja'] as const).map((l) => ({ label: LANG_NAMES[l], checked: getLang() === l, run: () => setLang(l) })),
@@ -390,7 +390,7 @@ export function TopBar({ folderInput }: { folderInput: React.RefObject<HTMLInput
       <button className="ib" onClick={redo} disabled={!canRedo} title={redoLabel ? tr(`やり直す: ${redoLabel}（Ctrl+Y）`, `Redo: ${redoLabel} (Ctrl+Y)`) : tr('やり直す（Ctrl+Y）', 'Redo (Ctrl+Y)')}>
         {Icon.redo()}
       </button>
-      <button className={`ib tb-preview ${previewMode !== 'off' ? 'on' : ''}`} onClick={() => togglePreview('side')} title={tr('NX風プレビュー（P、Shift+P で全画面）', 'NX-style preview (P; Shift+P for full screen)')}>
+      <button className={`ib tb-preview ${previewMode !== 'off' ? 'on' : ''}`} onClick={() => togglePreview('side')} title={tr('DTXMania風プレビュー（P、Shift+P で全画面）', 'DTXMania-style preview (P; Shift+P for full screen)')}>
         {Icon.screen()}
       </button>
       <HistoryButton />
@@ -420,7 +420,7 @@ const f0 = (v: string | undefined) => v ?? '';
 /**
  * 上のバーが狭いときに畳む段：1 ロゴの文字、2 難易度名を短く、3 AI難易度生成をアイコンだけに、
  * 4 曲の画像を隠す、5 曲名を隠す（難易度の切り替えは残す）、6 曲の欄を隠す、
- * 7 NX風プレビューのボタンを隠す（表示メニューと P キーに残る）。
+ * 7 DTXMania風プレビューのボタンを隠す（表示メニューと P キーに残る）。
  * FIT_NEED[i] は段 i のときに曲名の欄に残したい幅（px。曲名がこれより短ければその長さ）で、切ったら次の段へ畳む
  */
 const FIT_NEED = [120, 120, 120, 64, 64, 0, 0];

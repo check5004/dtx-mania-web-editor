@@ -188,7 +188,7 @@ function SongSyncNotice({ splits }: { splits: FieldSplit[] }) {
           <button className="btn small" onClick={() => void alignSongFields()} title={tr('ほかの難易度の、この欄を、この難易度の値にします（Ctrl+Z で戻せます）', 'Set these fields in the other difficulties to the values here (Ctrl+Z undoes it)')}>
             {tr('この難易度にそろえる', 'Match this difficulty')}
           </button>
-          <span className="lbl">{tr('NX の選曲画面で難易度を替えると、曲名や画像・試聴が変わってしまいます', 'On the NX song select screen, switching difficulty changes the title, images or preview')}</span>
+          <span className="lbl">{tr('DTXMania の選曲画面で難易度を替えると、曲名や画像・試聴が変わってしまいます', 'On the DTXMania song select screen, switching difficulty changes the title, images or preview')}</span>
         </div>
       </div>
     </div>

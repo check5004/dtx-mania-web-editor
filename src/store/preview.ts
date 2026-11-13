@@ -1,4 +1,4 @@
-// NX 風の落下プレビューの表示状態。
+// DTXMania風の落下プレビューの表示状態。
 import { create } from 'zustand';
 
 const KEY = 'dtxe.preview.v1';

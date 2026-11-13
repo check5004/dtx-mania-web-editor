@@ -198,7 +198,7 @@ function TopBarT() {
         {Icon.redo(20)}
       </button>
       {!portrait && (
-        <button className={`t-ib ${panel === 'prev' ? 'on' : ''}`} onClick={() => togglePanelT('prev')} aria-label={tr('NX風プレビュー', 'NX-style preview')} title={tr('NX風プレビュー', 'NX-style preview')}>
+        <button className={`t-ib ${panel === 'prev' ? 'on' : ''}`} onClick={() => togglePanelT('prev')} aria-label={tr('DTXMania風プレビュー', 'DTXMania-style preview')} title={tr('DTXMania風プレビュー', 'DTXMania-style preview')}>
           {Icon.screen(20)}
         </button>
       )}

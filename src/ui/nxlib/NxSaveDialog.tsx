@@ -144,8 +144,8 @@ function NxSaveBody({ o, done }: { o: NxSaveAsk; done: (v: NxSaveChoice | null) 
       <h2>{o.toFolder ? tr(`「${o.title}」をどこに書き出しますか？`, `Where do you want to export "${o.title}"?`) : tr(`「${o.title}」をどこに保存しますか？`, `Where do you want to save "${o.title}"?`)}</h2>
       <p>
         {o.inBrowser
-          ? tr('この曲は、まだこのブラウザの中にだけあります。NX で遊ぶには、DTXMania の曲のフォルダに保存します。', 'This song is only inside this browser so far. To play it in NX, save it into a DTXMania song folder.')
-          : tr('NX で遊ぶには、DTXMania の曲のフォルダに保存します。', 'To play it in NX, save it into a DTXMania song folder.')}
+          ? tr('この曲は、まだこのブラウザの中にだけあります。DTXMania で遊ぶには、ゲームの曲のフォルダに保存します。', 'This song is only inside this browser so far. To play it in DTXMania, save it into a song folder in the game.')
+          : tr('DTXMania で遊ぶには、ゲームの曲のフォルダに保存します。', 'To play it in DTXMania, save it into a song folder in the game.')}
       </p>
       <div role="radiogroup" aria-label={tr('保存する場所', 'Where to save')}>
         {opt(
@@ -191,7 +191,7 @@ function NxSaveBody({ o, done }: { o: NxSaveAsk; done: (v: NxSaveChoice | null) 
               <div className="nx-sv-fl">
                 <span className="k">{tr('新しい BOX', 'New BOX')}</span>
                 <div className="nx-sv-field">
-                  <input value={newBox} onChange={(e) => setNewBox(e.target.value)} placeholder={tr('BOX の名前（NX の曲選びに出ます）', 'BOX name (shown in NX song select)')} aria-label={tr('新しい BOX の名前', 'New BOX name')} autoFocus />
+                  <input value={newBox} onChange={(e) => setNewBox(e.target.value)} placeholder={tr('BOX の名前（DTXMania の曲選びに出ます）', 'BOX name (shown in DTXMania song select)')} aria-label={tr('新しい BOX の名前', 'New BOX name')} autoFocus />
                   {same && <span className="lbl">{tr('もうある BOX に入れます', 'Uses the BOX already there')}</span>}
                 </div>
               </div>
@@ -222,7 +222,7 @@ function NxSaveBody({ o, done }: { o: NxSaveAsk; done: (v: NxSaveChoice | null) 
           </div>,
         )}
         {opt('pick', tr('別のフォルダを選ぶ…', 'Choose another folder…'), tr('今まで通りです。選んだフォルダの中に、この曲のフォルダを作ります。', 'As before. A folder for this song is made inside the folder you choose.'))}
-        {o.local && opt('local', tr('このブラウザの中に保存', 'Save inside this browser'), tr('NX の曲には入りません。あとで「ファイル › 曲フォルダに書き出す」で移せます。', "It isn't added to the NX songs. Move it later with File › Export to a song folder."))}
+        {o.local && opt('local', tr('このブラウザの中に保存', 'Save inside this browser'), tr('DTXMania の曲には入りません。あとで「ファイル › 曲フォルダに書き出す」で移せます。', "It isn't added to the DTXMania songs. Move it later with File › Export to a song folder."))}
       </div>
       {driveOn && (
         <label className="nx-sv-drv">

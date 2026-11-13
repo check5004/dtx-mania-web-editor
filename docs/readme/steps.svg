@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="272" viewBox="0 0 960 272" role="img" aria-labelledby="title desc">
 <title id="title">はじめかた</title>
-<desc id="desc">1. ブラウザで開く 2. 曲（原曲の音声か DTX の曲フォルダ）を入れる 3. 書いて保存すると DTXManiaNX でそのまま遊べる。</desc>
+<desc id="desc">1. ブラウザで開く 2. 曲（原曲の音声か DTX の曲フォルダ）を入れる 3. 書いて保存すると DTXMania でそのまま遊べる。</desc>
 <style>
 text{font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Yu Gothic','Meiryo','Noto Sans JP','Noto Sans CJK JP',system-ui,sans-serif}
 .mono{font-family:'JetBrains Mono','SF Mono','Cascadia Mono',Consolas,Menlo,monospace}
@@ -110,6 +110,6 @@ text{font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Yu 
 <g transform="translate(188 74)"><g class="fold fb"><path d="M0 6 a4 4 0 0 1 4 -4 h14 l5 5 h25 a4 4 0 0 1 4 4 v23 a4 4 0 0 1 -4 4 h-44 a4 4 0 0 1 -4 -4 z" fill="#FFB547" fill-opacity="0.9"/><circle cx="50" cy="31" r="9" fill="#5BD69A"/><path d="M45.5 31 l3 3 l6 -6.5" fill="none" stroke="#06121B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><text x="25" y="54" font-size="9.5" fill="#93A1B3" text-anchor="middle"><tspan x="25">曲フォルダ</tspan></text></g></g>
 <circle cx="30" cy="165" r="13" fill="#4CC2FF" fill-opacity="0.16" stroke="#4CC2FF" stroke-opacity="0.7"/><text x="30" y="170.46" font-size="14.95" fill="#4CC2FF" font-weight="700" text-anchor="middle"><tspan x="30">3</tspan></text>
 <text x="52" y="171" font-size="18" fill="#E8EEF6" font-weight="700"><tspan x="52">書いて保存</tspan></text>
-<text x="18" y="200" font-size="13" fill="#93A1B3"><tspan x="18">Ctrl+S で曲フォルダへ。</tspan><tspan x="18" dy="21.06">DTXManiaNX でそのまま遊べます。</tspan></text>
+<text x="18" y="200" font-size="13" fill="#93A1B3"><tspan x="18">Ctrl+S で曲フォルダへ。</tspan><tspan x="18" dy="21.06">DTXMania でそのまま遊べます。</tspan></text>
 </g>
 </svg>

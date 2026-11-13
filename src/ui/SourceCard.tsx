@@ -186,7 +186,7 @@ function BgmSplitNotice({ groups }: { groups: BgmGroup[] }) {
           <button className="btn small" onClick={() => void alignBgm()} title={tr('どの原曲にそろえるかを選び、すべての難易度の BGM を同じファイルにします（Ctrl+Z で戻せます）', 'Choose one original and make it the BGM of every difficulty (undo with Ctrl+Z)')}>
             {tr('そろえる…', 'Align…')}
           </button>
-          <span className="lbl">{tr('NX でも難易度で BGM が変わり、切り替えるたびに原曲を読み直します', 'NX plays a different BGM per difficulty too, and switching reloads the original')}</span>
+          <span className="lbl">{tr('DTXMania でも難易度で BGM が変わり、切り替えるたびに原曲を読み直します', 'DTXMania plays a different BGM per difficulty too, and switching reloads the original')}</span>
         </div>
       </div>
     </div>

@@ -120,7 +120,7 @@ export function NxDetail({ s }: { s: LibSong }) {
       <div className="nx-sec">
         <div className="nx-sec-t">
           <span>{tr('難易度', 'Difficulties')}</span>
-          <span className="nx-sec-sub">{tr('レベル · あなたの成績（NX）', 'Level · your record (NX)')}</span>
+          <span className="nx-sec-sub">{tr('レベル · あなたの成績（DTXMania）', 'Level · your record (DTXMania)')}</span>
         </div>
         {rows.map(({ k, c }) =>
           c ? (
@@ -160,7 +160,7 @@ export function NxDetail({ s }: { s: LibSong }) {
         <div className="nx-sec">
           <div className="nx-sec-t">
             <span>{tr('点検', 'Checks')}</span>
-            <span className="nx-sec-sub">{tr('NX で困る所', 'Things that trouble NX')}</span>
+            <span className="nx-sec-sub">{tr('DTXMania で困る所', 'Things that trouble DTXMania')}</span>
           </div>
           {[...s.checks]
             .sort((a, b) => (checkLevel(a.kind) === checkLevel(b.kind) ? 0 : checkLevel(a.kind) === 'warn' ? -1 : 1))
@@ -185,8 +185,8 @@ export function NxDetail({ s }: { s: LibSong }) {
             {s.doubled && (
               <span className="nx-hint">
                 {tr(
-                  '曲名のフォルダが二重です。NX と同じく、譜面のある内側のフォルダをこの曲として開き、保存もそこにします。',
-                  'The song-name folder is doubled. Like NX, the inner folder with the charts is opened as this song, and saving goes there too.',
+                  '曲名のフォルダが二重です。DTXMania と同じく、譜面のある内側のフォルダをこの曲として開き、保存もそこにします。',
+                  'The song-name folder is doubled. Like DTXMania, the inner folder with the charts is opened as this song, and saving goes there too.',
                 )}
               </span>
             )}
@@ -294,13 +294,13 @@ function CheckCard({ s, c, songs }: { s: LibSong; c: LibCheck; songs: readonly L
   switch (c.kind) {
     case 'nosetdef':
       title = tr('set.def がありません', 'No set.def');
-      text = tr(`NX では譜面ごとに別の曲として ${c.n ?? s.charts.length} つ並びます。難易度をまとめる set.def を作れます。`, `NX lists each chart as a separate song (${c.n ?? s.charts.length} entries). You can make a set.def that groups the difficulties.`);
+      text = tr(`DTXMania では譜面ごとに別の曲として ${c.n ?? s.charts.length} つ並びます。難易度をまとめる set.def を作れます。`, `DTXMania lists each chart as a separate song (${c.n ?? s.charts.length} entries). You can make a set.def that groups the difficulties.`);
       code = setDefFor(s.title, s.charts).trim();
       btn = { label: tr('set.def を作る', 'Make set.def'), run: () => void makeNxSetDef(s), amber: true };
       break;
     case 'setdef-missing':
       title = tr(`set.def に書いた譜面が ${c.n ?? 1} つ見つかりません`, `${c.n ?? 1} ${c.n === 1 ? 'chart' : 'charts'} listed in set.def ${c.n === 1 ? 'is' : 'are'} missing`);
-      text = tr('その難易度は NX に出ません。無い行を set.def から外せます。', "NX doesn't show that difficulty. You can remove the lines from set.def.");
+      text = tr('その難易度は DTXMania に出ません。無い行を set.def から外せます。', "DTXMania doesn't show that difficulty. You can remove the lines from set.def.");
       code = files;
       btn = { label: tr('set.def を直す', 'Fix set.def'), run: () => void fixNxSetDef(s) };
       break;
@@ -311,10 +311,10 @@ function CheckCard({ s, c, songs }: { s: LibSong; c: LibCheck; songs: readonly L
       btn = { label: tr('開いて直す', 'Open and fix'), run: () => void openNxSong(s) };
       break;
     case 'badname':
-      title = tr(`読めない名前のファイルが ${c.n ?? 1} 個あります`, `${c.n ?? 1} ${c.n === 1 ? 'file has a name' : 'files have names'} NX can't read`);
+      title = tr(`読めない名前のファイルが ${c.n ?? 1} 個あります`, `${c.n ?? 1} ${c.n === 1 ? 'file has a name' : 'files have names'} DTXMania can't read`);
       text = tr(
-        'Shift_JIS で書けない字があるので、NX の譜面から呼べません（文字化けで名前が変わったファイルかもしれません）。開いて名前を直せます。',
-        "The names have characters that Shift_JIS can't write, so NX charts can't refer to them (the names may have been garbled). Open the song to rename them.",
+        'Shift_JIS で書けない字があるので、DTXMania の譜面から呼べません（文字化けで名前が変わったファイルかもしれません）。開いて名前を直せます。',
+        "The names have characters that Shift_JIS can't write, so DTXMania charts can't refer to them (the names may have been garbled). Open the song to rename them.",
       );
       code = files;
       btn = { label: tr('開いて直す', 'Open and fix'), run: () => void openNxSong(s) };
@@ -324,7 +324,7 @@ function CheckCard({ s, c, songs }: { s: LibSong; c: LibCheck; songs: readonly L
       const k = key(s);
       const others = songs.filter((x) => x.id !== s.id && key(x) === k);
       title = tr(`同じ曲がもう ${c.n ?? others.length} つあります`, `${c.n ?? others.length} more of the same song`);
-      text = tr('NX の選曲画面に同じ曲が 2 回並びます。消すのはエクスプローラーで（このアプリは消しません）。', 'The same song shows twice in NX. Delete one in File Explorer (this app never deletes).');
+      text = tr('DTXMania の選曲画面に同じ曲が 2 回並びます。消すのはエクスプローラーで（このアプリは消しません）。', 'The same song shows twice in DTXMania. Delete one in File Explorer (this app never deletes).');
       code = others.map((x) => x.path.join('/')).join('\n');
       break;
     }
@@ -378,7 +378,7 @@ export function NxScanInfo() {
       ? { st: 'ok', t: tr('ゲームのフォルダ', 'Game folder'), d: tr('Config.ini か .exe があります', 'Has Config.ini or an .exe') }
       : { st: 'ok', t: tr('曲を集めたフォルダ', 'Folder of songs'), d: tr('中のフォルダを全部探します', 'Searches all folders inside') },
     ...(game ? [{ st: 'ok' as const, t: tr('Config.ini の DTXPath', 'DTXPath in Config.ini'), d: tr(`${list(place.dtxPath)} の ${place.dtxPath.length} か所`, `${place.dtxPath.length} ${place.dtxPath.length === 1 ? 'place' : 'places'}: ${list(place.dtxPath)}`) }] : []),
-    { st: scan ? 'run' : 'ok', t: tr(`${list(inside.length ? inside : ['.\\'])} を NX と同じ順に探す`, `Search ${list(inside.length ? inside : ['.\\'])} the way NX does`), d: tr('曲名のフォルダが二重でも読みます', 'Reads songs even when the song-name folder is doubled') },
+    { st: scan ? 'run' : 'ok', t: tr(`${list(inside.length ? inside : ['.\\'])} を DTXMania と同じ順に探す`, `Search ${list(inside.length ? inside : ['.\\'])} the way DTXMania does`), d: tr('曲名のフォルダが二重でも読みます', 'Reads songs even when the song-name folder is doubled') },
     ...place.extra.map((x) => ({ st: x.dir ? ('ok' as const) : ('wait' as const), t: x.path, d: x.dir ? tr('選んだフォルダも探します', 'The chosen folder is searched too') : tr('フォルダを選ぶと続けて読みます', 'Choose the folder to read it too') })),
     { st: scan ? 'run' : 'ok', t: tr('画像を小さくして控える', 'Keep small images'), d: tr('#PREIMAGE（無ければ #STAGEFILE）', '#PREIMAGE (or #STAGEFILE)') },
   ];

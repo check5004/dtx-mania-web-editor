@@ -81,8 +81,8 @@ export async function makeNxSetDef(s: LibSong): Promise<void> {
     title: tr('set.def を作ります', 'Create set.def'),
     body:
       tr(
-        `「${folderName(s)}」フォルダに、この中身の set.def を書きます。NX で、難易度が 1 つの曲にまとまります。ほかのファイルは変えません。`,
-        `A set.def with the content below is written in the "${folderName(s)}" folder. NX then shows the difficulties as one song. No other file is changed.`,
+        `「${folderName(s)}」フォルダに、この中身の set.def を書きます。DTXMania で、難易度が 1 つの曲にまとまります。ほかのファイルは変えません。`,
+        `A set.def with the content below is written in the "${folderName(s)}" folder. DTXMania then shows the difficulties as one song. No other file is changed.`,
       ) +
       (lost.length ? tr(`\n\nShift_JIS で書けない字（${lost.join(' ')}）は「?」になります。`, `\n\nCharacters that Shift_JIS can't write (${lost.join(' ')}) become "?".`) : '') +
       `\n\n${text.trim()}`,
@@ -96,7 +96,7 @@ export async function makeNxSetDef(s: LibSong): Promise<void> {
       toast(tr('set.def はもうあります。一覧を読み直します', 'set.def is already there. Reloading the list'), 'info');
     } else {
       await writeIn(dir, 'set.def', encodeDtx(text, 'shift_jis').bytes);
-      toast(tr(`set.def を作りました（${folderName(s)}）。NX を開いたままなら、NX の「Reload Songs」で出ます`, `Created set.def (${folderName(s)}). If NX is open, use "Reload Songs" in NX to see it`), 'ok', 7000);
+      toast(tr(`set.def を作りました（${folderName(s)}）。DTXMania を開いたままなら、DTXMania の「Reload Songs」で出ます`, `Created set.def (${folderName(s)}). If DTXMania is open, use "Reload Songs" in DTXMania to see it`), 'ok', 7000);
     }
     await refreshNxFolder(s.root, s.path);
   } catch (e) {

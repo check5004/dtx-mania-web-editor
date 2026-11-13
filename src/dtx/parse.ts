@@ -126,7 +126,7 @@ export function parseDtx(text: string): ParseResult {
       }
       const data = splitChipData(target.ch, p.param);
       if (!data) {
-        warnings.push({ line: lineNo, message: tr(`チップの並びを読めません（NXでも無視される行です）: ${line.trim()}`, `Can't read the chip data (NX ignores this line too): ${line.trim()}`) });
+        warnings.push({ line: lineNo, message: tr(`チップの並びを読めません（DTXMania でも無視される行です）: ${line.trim()}`, `Can't read the chip data (DTXMania ignores this line too): ${line.trim()}`) });
         header.push({ kind: 'raw', text: line });
         return;
       }

@@ -272,14 +272,14 @@ export function toastNxNames(r: NxNamesReport, dtxOnly = false) {
   const more = r.renamed.length > 3 ? tr(` ほか${r.renamed.length - 3}件`, ` and ${r.renamed.length - 3} more`) : '';
   const head = r.renamed.length
     ? tr(
-        `NX（Shift_JIS）で読めない文字があったので、ファイルの名前を変えました：${list}${more}。どの難易度の譜面も新しい名前にしています`,
-        `Renamed files whose names NX (Shift_JIS) can't read: ${list}${more}. Every difficulty now uses the new names`,
+        `DTXMania（Shift_JIS）で読めない文字があったので、ファイルの名前を変えました：${list}${more}。どの難易度の譜面も新しい名前にしています`,
+        `Renamed files whose names DTXMania (Shift_JIS) can't read: ${list}${more}. Every difficulty now uses the new names`,
       )
     : tr('「?」になっていたファイル名を、曲フォルダのファイルの名前に直しました', 'Fixed file names that had turned into "?" to match the files in the song folder');
   const fail = r.failed.length ? tr(`。${r.failed.join(sep)} は書き換えられなかったので、前の名前のファイルも残しています`, `. Couldn't update ${r.failed.join(sep)}, so the old files are kept too`) : '';
   const only =
     dtxOnly && r.renamed.length
-      ? tr('。DTX だけを渡すときは、名前を変えたファイルも NX の曲フォルダに入れてください', '. If you hand over only the DTX, put the renamed files in the NX song folder too')
+      ? tr('。DTX だけを渡すときは、名前を変えたファイルも DTXMania の曲フォルダに入れてください', '. If you hand over only the DTX, put the renamed files in the DTXMania song folder too')
       : '';
   toast(head + fail + only, r.failed.length ? 'warn' : 'ok', 10000);
 }

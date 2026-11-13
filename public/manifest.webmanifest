@@ -2,7 +2,7 @@
   "id": "/dtx-mania-web-editor/",
   "name": "DTX Web Editor",
   "short_name": "DTX Editor",
-  "description": "A drum chart editor for DTXManiaNX. Make charts in your browser while listening to the original song.",
+  "description": "A drum chart editor for DTXMania. Make charts in your browser while listening to the original song.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "./",

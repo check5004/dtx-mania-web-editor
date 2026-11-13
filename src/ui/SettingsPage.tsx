@@ -467,7 +467,7 @@ function KeySettings() {
 }
 
 const lanePresets = (): { id: string; name: string; order: number[] }[] => [
-  { id: 'nx', name: tr('NXの標準（LC HH LP SD HT BD LT FT CY RD）', 'NX default (LC HH LP SD HT BD LT FT CY RD)'), order: DEFAULT_LANE_ORDER },
+  { id: 'nx', name: tr('DTXMania の標準（LC HH LP SD HT BD LT FT CY RD）', 'DTXMania default (LC HH LP SD HT BD LT FT CY RD)'), order: DEFAULT_LANE_ORDER },
   { id: 'ride', name: tr('ライドを右シンバルの左に（… FT RD CY）', 'Ride left of the right cymbal (… FT RD CY)'), order: [0, 1, 2, 3, 4, 5, 6, 7, 9, 8] },
   { id: 'lp', name: tr('左ペダルをスネアの右に（LC HH SD LP …）', 'Left pedal right of the snare (LC HH SD LP …)'), order: [0, 1, 3, 2, 4, 5, 6, 7, 8, 9] },
   { id: 'mirror', name: tr('左右反転', 'Mirrored'), order: [...DEFAULT_LANE_ORDER].reverse() },
@@ -488,8 +488,8 @@ function LaneOrderSettings() {
       <h2>{tr('レーンの並び', 'Lane order')}</h2>
       <p className="lbl">
         {tr(
-          '譜面のレーンを左からどの順に並べるかです。NXのレーンの表示設定に合わせると、ゲームと同じ見た目で書けます。DTXの中身（チャンネル）は変わりません。',
-          "The left-to-right order of the chart's lanes. Match NX's lane display setting to chart with the same look as the game. The DTX contents (channels) don't change.",
+          '譜面のレーンを左からどの順に並べるかです。DTXMania のレーンの表示設定に合わせると、ゲームと同じ見た目で書けます。DTXの中身（チャンネル）は変わりません。',
+          "The left-to-right order of the chart's lanes. Match DTXMania's lane display setting to chart with the same look as the game. The DTX contents (channels) don't change.",
         )}
       </p>
       <div className="card">
@@ -544,7 +544,7 @@ function LaneOrderSettings() {
             );
           })}
         </div>
-        <p className="lbl" style={{ margin: '10px 0 0' }}>{tr('NXの設定画面の並びと違うときは、上で並べ替えてください。', "If it doesn't match the order in NX's settings, rearrange it above.")}</p>
+        <p className="lbl" style={{ margin: '10px 0 0' }}>{tr('DTXMania の設定画面の並びと違うときは、上で並べ替えてください。', "If it doesn't match the order in DTXMania's settings, rearrange it above.")}</p>
       </div>
     </div>
   );
@@ -565,8 +565,8 @@ function VelocitySettings() {
       <h2>{tr('ベロシティ', 'Velocity')}</h2>
       <p className="lbl" style={{ lineHeight: 1.7 }}>
         {tr(
-          'DTXには音ごとのベロシティが無いので、ベロシティは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav のベロシティ100は #WAV07、ベロシティ35は #WAV0F）。保存した譜面はそのまま NX で遊べます。',
-          "DTX has no per-note velocity, so velocity is saved as WAVs that share a sound but differ in #VOLUME (e.g. snare.wav at velocity 100 is #WAV07, and at velocity 35 is #WAV0F). Saved charts play as is in NX.",
+          'DTXには音ごとのベロシティが無いので、ベロシティは「同じ音で #VOLUME だけ違う WAV」として書き出します（例: snare.wav のベロシティ100は #WAV07、ベロシティ35は #WAV0F）。保存した譜面はそのまま DTXMania で遊べます。',
+          "DTX has no per-note velocity, so velocity is saved as WAVs that share a sound but differ in #VOLUME (e.g. snare.wav at velocity 100 is #WAV07, and at velocity 35 is #WAV0F). Saved charts play as is in DTXMania.",
         )}
       </p>
       <div className="card">

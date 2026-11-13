@@ -208,8 +208,8 @@ function NewSongBody({ spec }: { spec: Extract<Spec, { kind: 'newSong' }> }) {
             </label>
             <span className="lbl" style={{ gridColumn: 2, lineHeight: 1.5 }}>
               {nxMovie
-                ? tr('NX で譜面の後ろに流れます。原曲と同じ所（001 小節の頭）から始めます', 'NX plays it behind the chart, starting together with the original (top of measure 001)')
-                : tr('この形式が NX で流れるかは確かめていません（NX の曲データの動画は MP4・AVI）', 'Not checked whether NX plays this format (NX song data uses MP4 or AVI movies)')}
+                ? tr('DTXMania で譜面の後ろに流れます。原曲と同じ所（001 小節の頭）から始めます', 'DTXMania plays it behind the chart, starting together with the original (top of measure 001)')
+                : tr('この形式が DTXMania で流れるかは確かめていません（DTXMania の曲データの動画は MP4・AVI）', 'Not checked whether DTXMania plays this format (DTXMania song data uses MP4 or AVI movies)')}
             </span>
           </>
         )}

@@ -188,8 +188,8 @@ export function SongsPage() {
                 {tr('Config.ini の DTXPath にある ', 'DTXPath in Config.ini has ')}
                 <b className="mono">{outside.map((x) => x.path).join(tr('・', ', '))}</b>
                 {tr(
-                  ' は、選んだフォルダの外です。ブラウザはそこを自分では開けないので、そのフォルダも選んでください（NX と同じ曲がそろいます）。',
-                  ', outside the chosen folder. The browser can’t open it by itself, so please choose that folder too (to get the same songs as NX).',
+                  ' は、選んだフォルダの外です。ブラウザはそこを自分では開けないので、そのフォルダも選んでください（DTXMania と同じ曲がそろいます）。',
+                  ', outside the chosen folder. The browser can’t open it by itself, so please choose that folder too (to get the same songs as DTXMania).',
                 )}
               </span>
               <div className="nx-notice-acts">
@@ -282,7 +282,7 @@ export function NxPickButton({ after }: { after?: () => void }) {
       >
         {Icon.folder()} {tr('DTXMania のフォルダを選ぶ…', 'Choose the DTXMania folder…')}
       </button>
-      <span className="lbl">{tr('DTXManiaNX.exe のあるフォルダか、DTXFiles のどちらでも', 'Either the folder with DTXManiaNX.exe or DTXFiles')}</span>
+      <span className="lbl">{tr('DTXMania の .exe のあるフォルダか、DTXFiles のどちらでも', 'Either the folder with the DTXMania .exe or DTXFiles')}</span>
     </div>
   );
 }
@@ -338,7 +338,7 @@ function NxTop() {
           onClick={async () => {
             if (perm === 'granted' || (await ensureNxPerm())) void rescanNx({ full: true });
           }}
-          title={tr('全部の曲を読み直します（NX の「Reload Songs」と同じ）', 'Re-reads every song (like "Reload Songs" in NX)')}
+          title={tr('全部の曲を読み直します（DTXMania の「Reload Songs」と同じ）', 'Re-reads every song (like "Reload Songs" in DTXMania)')}
         >
           {Icon.refresh(14)}
           {tr('読み直す', 'Reload')}
@@ -389,7 +389,7 @@ function PlaceMenu({ close }: { close: () => void }) {
         }}
       >
         <b>{tr('別のフォルダを選ぶ…', 'Choose another folder…')}</b>
-        <span className="lbl">{tr('ゲームのフォルダ（DTXManiaNX.exe のある所）か DTXFiles', 'The game folder (with DTXManiaNX.exe) or DTXFiles')}</span>
+        <span className="lbl">{tr('ゲームのフォルダ（DTXMania の .exe のある所）か DTXFiles', 'The game folder (with the DTXMania .exe) or DTXFiles')}</span>
       </button>
       {place.extra.map((x, i) => (
         <button

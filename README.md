@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme/hero.svg" alt="DTX Web Editor — 原曲を聴きながら、ブラウザでドラム譜面を作る。DTXManiaNX 向けの、無料のドラム譜面エディタ">
+  <img src="docs/readme/hero.svg" alt="DTX Web Editor — 原曲を聴きながら、ブラウザでドラム譜面を作る。DTXMania 向けの、無料のドラム譜面エディタ">
 </p>
 
 <p align="center">
@@ -36,7 +36,7 @@ TAB補完が、書いた小節から続きを予想します。✨ を押せば 
 </tr>
 <tr>
 <td valign="top">
-<b>🥁 NX と同じ 10 レーン</b><br>
+<b>🥁 DTXMania と同じ 10 レーン</b><br>
 左右のシンバル・ハイハット・ライドの 4 シンバルと左ペダルまで。ドラムキットは 28 種類。
 </td>
 <td valign="top">
@@ -44,8 +44,8 @@ TAB補完が、書いた小節から続きを予想します。✨ を押せば 
 MASTER から EXTREME・ADVANCED・BASIC をまとめて作り、並べて聴き比べて直せます。
 </td>
 <td valign="top">
-<b>💾 NX でそのまま遊べる</b><br>
-DTX（Shift_JIS）と set.def・使った音を曲フォルダへ。DTXManiaNX にそのまま置けます。
+<b>💾 DTXMania でそのまま遊べる</b><br>
+DTX（Shift_JIS）と set.def・使った音を曲フォルダへ。DTXMania にそのまま置けます。
 </td>
 </tr>
 </table>
@@ -56,11 +56,11 @@ DTX（Shift_JIS）と set.def・使った音を曲フォルダへ。DTXManiaNX �
 
 1. **[ブラウザで開く](https://check5004.github.io/dtx-mania-web-editor/)**　初めて開いたときは英語の画面です。ホームの右上の「日本語」で切り替えます（メニューの「表示」や設定の「言語」からも）。
 2. **曲を入れる**　原曲の音声ファイル（WAV・OGG・MP3。MP4 などの動画なら音を取り出します）をホームにドロップすると、その曲を BGM にした新しい譜面ができます。今ある曲は「曲フォルダを開く」で、DTX と音をまとめて読み込みます。
-3. **書いて保存**　<kbd>Ctrl</kbd>+<kbd>S</kbd> で曲フォルダに保存します。DTXManiaNX の曲のフォルダ（DTXFiles など）に置けば、そのまま遊べます。
+3. **書いて保存**　<kbd>Ctrl</kbd>+<kbd>S</kbd> で曲フォルダに保存します。DTXMania の曲のフォルダ（DTXFiles など）に置けば、そのまま遊べます。
 
 <details>
 <summary><b>ホームの画面</b></summary>
-<p align="center"><img src="docs/readme/shots/home.png" alt="ホームの画面。原曲の音声ファイルから・曲フォルダを開く・空の譜面からの 3 つの始め方と、最近の曲、ブラウザに保存している曲、Google Drive"></p>
+<p align="center"><img src="docs/readme/shots/home.png" alt="ホームの画面。原曲の音声ファイルから・曲フォルダを開く・空の譜面からの 3 つの始め方と、DTXMania の曲をまとめて扱う入口、最近の曲"></p>
 </details>
 
 <details>
@@ -113,9 +113,9 @@ DTX（Shift_JIS）と set.def・使った音を曲フォルダへ。DTXManiaNX �
 
 ### 10 レーン・4 シンバル
 
-<p align="center"><img src="docs/readme/lanes.svg" alt="NX と同じ 10 レーンの譜面と、上から見たドラムセット。叩いた所が光る"></p>
+<p align="center"><img src="docs/readme/lanes.svg" alt="DTXMania と同じ 10 レーンの譜面と、上から見たドラムセット。叩いた所が光る"></p>
 
-NX と同じ 10 レーン（LC HH LP SD HT BD LT FT CY RD）。HH オープン、左バスドラム、スネアのリム（クロススティック）も書けます。レーンの並びは NX の表示に合わせて入れ替えられます。
+DTXMania と同じ 10 レーン（LC HH LP SD HT BD LT FT CY RD）。HH オープン、左バスドラム、スネアのリム（クロススティック）も書けます。レーンの並びは DTXMania の表示に合わせて入れ替えられます。
 
 ### 強さ・フラム・電子ドラム
 
@@ -151,17 +151,17 @@ NX と同じ 10 レーン（LC HH LP SD HT BD LT FT CY RD）。HH オープン�
 
 ### チップのエフェクト
 
-ハイカット・ローカット・ピッチのカーブを曲に引くと、かかる所のチップの音を作って差し替えます（B メロはこもらせて、サビで開く、など）。保存すると加工した音も曲フォルダに書き出すので、NX でも同じ音で鳴ります。
+ハイカット・ローカット・ピッチのカーブを曲に引くと、かかる所のチップの音を作って差し替えます（B メロはこもらせて、サビで開く、など）。保存すると加工した音も曲フォルダに書き出すので、DTXMania でも同じ音で鳴ります。
 
 <p align="center"><img src="docs/readme/shots/fx.png" alt="エフェクトの編集。スペクトルの上にハイカットのカーブを引き、チップに周波数が出ている"></p>
 
 ## 確かめる
 
-- **NX 風のプレビュー**　<kbd>P</kbd> で右のパネルに、<kbd>Shift</kbd>+<kbd>P</kbd> で全画面に。再生に合わせてチップが判定ラインへ落ちてきます。
+- **DTXMania風プレビュー**　<kbd>P</kbd> で右のパネルに、<kbd>Shift</kbd>+<kbd>P</kbd> で全画面に。再生に合わせてチップが判定ラインへ落ちてきます。
 - **無理な配置の警告**　手が 3 本いる同時打ち、足りない足、ハイハットの開閉の同時、速すぎる連打を知らせます。
 - **レベルの目安**　打数・密度・同時打ち・手の動きから、機械的にレベルの目安を出します（AI の判定も）。
 
-<p align="center"><img src="docs/readme/shots/preview.png" alt="NX 風のプレビュー。右のパネルでチップが判定ラインへ落ちてくる"></p>
+<p align="center"><img src="docs/readme/shots/preview.png" alt="DTXMania風プレビュー。右のパネルでチップが判定ラインへ落ちてくる"></p>
 
 ## AI で作る
 
@@ -180,16 +180,16 @@ AI は [OpenRouter](https://openrouter.ai/) を使います。キーは「設定
 <p align="center"><img src="docs/readme/shots/songinfo.png" alt="曲情報の画面。曲名・アーティスト・レベル・試聴・ジャケットなど"></p>
 </details>
 
-## NX へ保存
+## DTXMania へ保存
 
-<p align="center"><img src="docs/readme/save-nx.svg" alt="Ctrl+S で曲フォルダに set.def・4 難易度の DTX・原曲・試聴・ジャケット・使った音が並び、DTXManiaNX の曲になる"></p>
+<p align="center"><img src="docs/readme/save-nx.svg" alt="Ctrl+S で曲フォルダに set.def・4 難易度の DTX・原曲・試聴・ジャケット・使った音が並び、DTXMania の曲になる"></p>
 
-- DTX は Shift_JIS・CRLF で書きます（NX がそのまま読める形）。難易度の一覧（set.def）も作ります。
-- 使った音だけを曲フォルダに書き出します。NX で読めない文字のファイル名は読める名前に直し、選曲画面の試聴が空なら原曲を入れます。
+- DTX は Shift_JIS・CRLF で書きます（DTXMania がそのまま読める形）。難易度の一覧（set.def）も作ります。
+- 使った音だけを曲フォルダに書き出します。DTXMania で読めない文字のファイル名は読める名前に直し、選曲画面の試聴が空なら原曲を入れます。
 - Chrome・Edge は曲フォルダへじかに保存します。ほかのブラウザ・iPad・iPhone は ZIP やダウンロードで。
 - エディタが使わない行（#RANDOM・BGA・ギターやベースのチップなど）も、そのまま残します。DTXCreator で作った譜面も開けます。
 - 曲は音ごとブラウザの中にも自動で保存されるので、リロードしても「最近の曲」から続きを開けます。Google Drive にも保存して、ほかの端末で続きを開けます（いまは試験中で、使える人を限っています）。
-- PC の Chrome・Edge では、DTXMania のフォルダ（DTXManiaNX.exe のある所か DTXFiles）を覚えると、ゲームに入っている曲を、画像・難易度・レベルの一覧から開いて直せます。曲名のフォルダが二重になった曲も読み、set.def が無い・ファイルが足りないなど NX で困る所も点検します。新しい曲は BOX を選んでその中に保存できます。Google Drive には、保存した曲のフォルダだけを送ります（くわしくは[説明書](docs/manual.md#dtxmania-の曲pc)）。
+- PC の Chrome・Edge では、DTXMania のフォルダ（.exe のある所か DTXFiles）を覚えると、ゲームに入っている曲を、画像・難易度・レベルの一覧から開いて直せます。曲名のフォルダが二重になった曲も読み、set.def が無い・ファイルが足りないなど DTXMania で困る所も点検します。新しい曲は BOX を選んでその中に保存できます。Google Drive には、保存した曲のフォルダだけを送ります（くわしくは[説明書](docs/manual.md#dtxmania-の曲pc)）。
 
 ## iPad・iPhone でも
 
@@ -244,9 +244,9 @@ PC は Chrome か Edge がおすすめです。曲フォルダへのじかの保
 </details>
 
 <details>
-<summary><b>作った譜面が NX で読めない・音が鳴らない</b></summary>
+<summary><b>作った譜面が DTXMania で読めない・音が鳴らない</b></summary>
 
-保存した曲フォルダを、そのまま DTXManiaNX の曲のフォルダ（DTXFiles など）に置いてください。保存は Shift_JIS で、Shift_JIS で書けない文字（♡・絵文字など）のファイル名は保存のときに直します。それでも読めないときは、譜面と曲フォルダを添えて Issue で教えてください。
+保存した曲フォルダを、そのまま DTXMania の曲のフォルダ（DTXFiles など）に置いてください。保存は Shift_JIS で、Shift_JIS で書けない文字（♡・絵文字など）のファイル名は保存のときに直します。それでも読めないときは、譜面と曲フォルダを添えて Issue で教えてください。
 
 </details>
 
