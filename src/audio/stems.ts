@@ -95,6 +95,53 @@ export async function renderMix(tracks: RenderTrack[], opts: RenderOptions): Pro
   return out;
 }
 
+/** 頭の位置が違う音（at：その音の 0 秒が、まとめる時刻の何秒か） */
+export interface PlacedTrack extends RenderTrack {
+  at: number;
+}
+
+/**
+ * 頭の位置が違う音を足して、from〜to 秒を 1 本にする（試聴の切り出し・サビを探す音）。
+ * 音のサンプリング周波数が違っても合わせる。channels は 1（モノラル）か 2
+ */
+export async function renderPlaced(tracks: PlacedTrack[], from: number, to: number, opts: { sampleRate?: number; channels?: 1 | 2 } = {}): Promise<AudioBuffer> {
+  const sr = opts.sampleRate ?? 44100;
+  const len = Math.max(1, Math.ceil(Math.max(0.05, to - from) * sr));
+  const off = new OfflineAudioContext(opts.channels ?? 2, len, sr);
+  for (const t of tracks) {
+    // まとめる範囲にかからない音は足さない
+    if (t.at >= to || t.at + t.buf.duration <= from) continue;
+    const src = off.createBufferSource();
+    src.buffer = t.buf;
+    const g = off.createGain();
+    g.gain.value = Math.max(0, t.gain);
+    let node: AudioNode = src.connect(g);
+    if (t.pan !== 0 && (opts.channels ?? 2) === 2) {
+      const p = off.createStereoPanner();
+      p.pan.value = Math.max(-1, Math.min(1, t.pan));
+      node = node.connect(p);
+    }
+    node.connect(off.destination);
+    if (t.at >= from) src.start(t.at - from, 0);
+    else src.start(0, from - t.at);
+  }
+  return off.startRendering();
+}
+
+/** 頭と終わりのフェード（秒。終わりはなめらかに消える曲線） */
+export function applyFades(buf: AudioBuffer, fadeIn: number, fadeOut: number) {
+  const nIn = Math.min(buf.length, Math.floor(fadeIn * buf.sampleRate));
+  const nOut = Math.min(buf.length - nIn, Math.floor(fadeOut * buf.sampleRate));
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const ch = buf.getChannelData(c);
+    for (let i = 0; i < nIn; i++) ch[i] *= i / nIn;
+    for (let i = 0; i < nOut; i++) {
+      const k = i / nOut;
+      ch[ch.length - 1 - i] *= k * k;
+    }
+  }
+}
+
 export function applyFadeAndPeak(buf: AudioBuffer, fade: number, peakDb: number | null) {
   const chans = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i));
   if (peakDb !== null) {

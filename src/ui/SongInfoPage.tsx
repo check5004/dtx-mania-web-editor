@@ -12,6 +12,7 @@ import { setYoutube, useSidecar } from '../store/sidecar';
 import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion, type SuggestSource } from '../store/songinfo';
 import { alignSongFields, editSong, setSongField, songFieldLabel, toastSongEdit, useOtherDiffs, useSongFieldSplits, type FieldSplit } from '../store/songSync';
 import { ART_PRESETS, artPreset, loadArtImage, saveArt, writeArtCentered, type ArtPreset } from './artExport';
+import { PreviewTools } from './ChorusPreview';
 import { formatLevel } from './format';
 import { Icon } from './icons';
 import { CommitInput } from './LeftPanel';
@@ -252,6 +253,7 @@ function FieldRow({ f, value, suggestion, alt, split }: { f: FieldDef; value: st
           <CommitInput className={`field ${f.key === 'BPM' || f.key === 'DLEVEL' ? 'mono' : ''}`} value={value} onCommit={(v) => setSongField(f.key, v === '' ? undefined : v, tr(`${f.label}を変更`, `Change ${f.label}`))} />
         )}
         {f.key === 'DLEVEL' && value && <span className="lbl"> {tr('表示', 'Shown as')} {formatLevel(value)}</span>}
+        {f.key === 'PREVIEW' && <PreviewTools value={value} />}
         {suggestion && (differs(suggestion.value) || isTaken(suggestion.value)) && (
           <div className={`info-suggest ${isTaken(suggestion.value) ? 'taken' : ''}`}>
             <span

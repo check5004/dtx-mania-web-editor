@@ -2,7 +2,8 @@
 import { tr, setLang, type Lang } from '../i18n';
 import { alignFeatures, buildRefIndex, PROBE_SEC, ALIGN_FPS, probeFine, probeLocal, searchProbe, type AlignFeat, type RefIndex } from './align';
 import { analyzeAudio } from './analysis';
-import { computeFrameFeatures } from './features';
+import { findChorusAuto, type ChorusGrid } from './chorus';
+import { computeFrameFeatures, type FrameFeatures } from './features';
 import { renderSpectro, spectroDb, spectroZones, type SpecMode } from './spectro';
 import { wsola } from './stretch';
 
@@ -15,6 +16,8 @@ export type WorkerRequest =
   /** ドラム強調のスペクトルの帯ごとの明るさ（AI に渡す） */
   | { id: number; type: 'zones'; key: string; zones: { from: number; to: number }[] }
   | { id: number; type: 'features'; key: string }
+  /** サビを探す（曲情報の「サビから作る」）。grid は譜面の小節の頭と拍（曲の音の秒。無ければ音から推定） */
+  | { id: number; type: 'chorus'; key: string; grid: ChorusGrid | null }
   /** スロー再生用に伸ばす。音は伸ばす所（from〜to サンプル目）の前後を少し足したものを毎回渡す（ワーカーに音を残さない） */
   | { id: number; type: 'stretch'; channels: Float32Array[]; sr: number; rate: number; from: number; to: number }
   /** BPM の候補だけ（新しい譜面を作る前に原曲から推定する。音はワーカーに残さない） */
@@ -26,6 +29,9 @@ export type WorkerRequest =
 const store = new Map<string, { channels: Float32Array[]; sr: number }>();
 /** スペクトルの dB（見せ方を変えるときに測り直さない）。2曲ぶん */
 const specCache = new Map<string, ReturnType<typeof spectroDb>>();
+
+/** サビを探すための特徴（小節を変えて探し直すときに測り直さない）。2曲ぶん */
+const chorusFeat = new Map<string, { feat: FrameFeatures; duration: number }>();
 
 /** YouTube との自動合わせに使う原曲の特徴（1曲ぶん） */
 let alignRef: { key: string; idx: RefIndex } | null = null;
@@ -55,6 +61,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       // 古い曲は捨てる（2曲まで持つ）
       store.delete(req.key);
       specCache.delete(req.key);
+      chorusFeat.delete(req.key);
       store.set(req.key, { channels: req.channels, sr: req.sr });
       while (store.size > 7) store.delete(store.keys().next().value!);
       post({ id: req.id, ok: true });
@@ -93,6 +100,17 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       const r = computeFrameFeatures(src.channels, src.sr, (p) => post({ id: req.id, progress: p }));
       const duration = (src.channels[0]?.length ?? 0) / src.sr;
       post({ id: req.id, ok: true, result: { frames: r, duration } }, [r.chroma.buffer, r.bands.buffer, r.flux.buffer] as Transferable[]);
+      return;
+    }
+    if (req.type === 'chorus') {
+      let f = chorusFeat.get(req.key);
+      if (!f) {
+        f = { feat: computeFrameFeatures(src.channels, src.sr, (p) => post({ id: req.id, progress: p * 0.85 })), duration: (src.channels[0]?.length ?? 0) / src.sr };
+        chorusFeat.set(req.key, f);
+        while (chorusFeat.size > 2) chorusFeat.delete(chorusFeat.keys().next().value!);
+      }
+      post({ id: req.id, progress: 0.9 });
+      post({ id: req.id, ok: true, result: findChorusAuto(f.feat, f.duration, req.grid) });
       return;
     }
     if (req.type === 'alignRef') {

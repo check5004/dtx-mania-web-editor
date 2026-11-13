@@ -2,6 +2,7 @@
 import { tr, getLang, subscribeLang } from '../i18n';
 import type { AlignSearch, LocalSim } from './align';
 import type { AnalysisData, TempoCandidate } from './analysis';
+import type { ChorusFound, ChorusGrid } from './chorus';
 import type { FrameFeatures } from './features';
 import type { SpecMode, SpectroData, SpectroZones } from './spectro';
 
@@ -97,6 +98,11 @@ export function spectroZones(key: string, zones: readonly { from: number; to: nu
 /** 小節どうしの聞こえ方を比べるための特徴（TAB補完の「曲の構造」） */
 export function features(key: string, progress?: (p: number) => void): Promise<{ frames: FrameFeatures; duration: number }> {
   return call<{ frames: FrameFeatures; duration: number }>({ type: 'features', key }, [], progress);
+}
+
+/** サビを探す（曲情報の「サビから作る」）。grid は譜面の小節の頭と拍（曲の音の秒）。音に合っていなければ音から推定する */
+export function chorus(key: string, grid: ChorusGrid | null, progress?: (p: number) => void): Promise<ChorusFound> {
+  return call<ChorusFound>({ type: 'chorus', key, grid: grid ? { bars: [...grid.bars], beats: [...grid.beats] } : null }, [], progress);
 }
 
 /**

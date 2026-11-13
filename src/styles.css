@@ -5144,6 +5144,130 @@ button.wav-cut:hover {
   font-size: 12px;
 }
 
+/* 曲情報：試聴（#PREVIEW）を聴く・サビから作る（src/ui/ChorusPreview.tsx） */
+
+.pv-tools {
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.chorus-panel {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.chorus-head {
+  gap: 8px;
+}
+
+.chorus-note {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.chorus-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chorus-error {
+  gap: 8px;
+  color: var(--danger);
+}
+
+.chorus-src {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.chorus-warn {
+  color: var(--amber);
+  line-height: 1.6;
+}
+
+.chorus-strip {
+  position: relative;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line2);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.chorus-part {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 3px;
+  box-shadow: inset -1px 0 0 var(--bg);
+  color: var(--text2);
+  font-size: 10.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.chorus-part.chorus {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.chorus-sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid var(--amber);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.chorus-cands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chorus-cand {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.chorus-cands .chorus-cand.on {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--text);
+}
+
+.chorus-cand.best > span:first-child {
+  color: var(--accent);
+}
+
+.chorus-adjust,
+.chorus-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chorus-range {
+  white-space: normal;
+}
+
 /* 曲情報を調べる：手がかり・経過・結果 */
 
 .clue-box {
