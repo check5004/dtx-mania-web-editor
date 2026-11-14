@@ -436,8 +436,11 @@ export function GuidelinePage({ onBack }: { onBack?: () => void } = {}) {
                 <span className="grow" />
                 <span className="lbl">{o.c.label}</span>
               </div>
-              <div className="mono" style={{ fontSize: 12 }}>
-                {tr('付いている', 'Listed')} {o.c.level!.toFixed(2)} → {tr('似た譜面だと', 'similar charts say')} <span style={{ color: 'var(--amber)' }}>{tr(`${o.predicted.toFixed(1)}前後`, `about ${o.predicted.toFixed(1)}`)}</span>
+              <div style={{ fontSize: 12 }}>
+                {tr('付いている', 'Listed')} <span className="mono">{o.c.level!.toFixed(2)}</span> → {tr('似た譜面だと', 'similar charts')}{' '}
+                <span className="mono" style={{ color: 'var(--amber)', whiteSpace: 'nowrap' }}>
+                  {tr(`${o.predicted.toFixed(1)}前後`, `≈ ${o.predicted.toFixed(1)}`)}
+                </span>
               </div>
               <div className="row" style={{ gap: 6, marginTop: 6 }}>
                 <button className="btn small" onClick={() => void setExcluded(o.c.id, true)}>
@@ -471,6 +474,7 @@ function medianOf(xs: number[]): number {
 
 /** 頭の一行：どこから作った物差しか */
 function sourceText(r: Ruler, imported: number): string {
+  if (r.use.length === 0 && !r.nx && !imported) return tr('まだ物差しがありません', 'No ruler yet');
   const parts: string[] = [];
   if (r.nx) parts.push(tr('DTXMania の曲から', 'From your DTXMania songs'));
   else if (imported) parts.push(tr('足した曲から', 'From added songs'));
