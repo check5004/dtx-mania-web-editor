@@ -1,5 +1,6 @@
-// 「DTXMania の曲」の一覧からすること：一覧を開く・曲を開く・AI難易度生成／曲情報を開く・set.def を作る／直す・試聴。
-// 書くのは set.def を作る・直すときだけ（押して、中身を見せてから）。Google Drive には何も送らない。
+// 「DTXMania の曲」の一覧からすること：一覧を開く・曲を開く・AI難易度生成／曲情報／ステム分解を開く・set.def を作る／直す・試聴。
+// 書くのは set.def を作る・直すときだけ（押して、中身を見せてから）。ステム分解はエディタで開いてからする（分けた音は曲のフォルダの
+// stems/ と BGM のファイルに書く。いつものステム分解と同じ）。Google Drive には何も送らない。
 import { tr } from '../i18n';
 import { engine } from '../audio/engine';
 import { autosaveNow, openSongDir } from '../app/fileActions';
@@ -10,6 +11,9 @@ import type { Difficulty } from '../gen/simplify';
 import type { AuditionSound } from '../store/audition';
 import { openPage, toast, useEditor } from '../store/editor';
 import { applyInsertPlan, initGen, selectDiff } from '../store/gen';
+import { checkGpu, drumlessBgmName, openSeparation, registerDrumlessBgm, startSeparation } from '../store/separate';
+import { useSidecar } from '../store/sidecar';
+import { fileExists } from '../store/stems';
 import { insertPlan } from '../gen/insert';
 import { confirmDialog } from '../ui/dialogs';
 import { fileAt } from './check';
@@ -87,6 +91,41 @@ export async function openNxInsert(s: LibSong, want: number): Promise<void> {
 /** 曲情報を開く（試聴・画像を入れる） */
 export async function openNxSongInfo(s: LibSong): Promise<void> {
   if (await openNxSong(s)) openPage('songinfo');
+}
+
+/**
+ * BGM にドラムが入っている曲をステム分解して、BGM をドラム抜きにする（詳しい所の「ステム分解しましょうか？」）。
+ * いちばん上の譜面を開き、ステムとミックスの画面の分解のカードで、ドラムとドラム抜きに分けて、ドラム抜きを BGM にする
+ * （「ドラム抜きを BGM に反映」と同じ。同じ BGM のほかの難易度も。開いている譜面は保存すると曲のフォルダに書く）。
+ * もうステムのある曲は分け直さず、分解のカードを開くだけ（前のステムを置き換えないように）。押した操作の中で呼ぶ
+ */
+export async function openNxSeparate(s: LibSong): Promise<void> {
+  if (!(await openNxSong(s))) return;
+  openSeparation();
+  if (useSidecar.getState().stems.length) {
+    toast(
+      tr(
+        'この曲にはもうステムがあります。分け直すならこのカードの「分解する」で、今のステムから BGM を作るなら右の「書き出し」の「BGM用（ドラム抜き）」で',
+        'This song already has stems. To split again, press “Split” on this card; to make the BGM from the current stems, use “For BGM (no drums)” under “Export” on the right',
+      ),
+      'info',
+      9000,
+    );
+    return;
+  }
+  const name = drumlessBgmName();
+  if (fileExists(name)) {
+    const ok = await confirmDialog({
+      title: tr(`${name} を上書きしますか？`, `Overwrite ${name}?`),
+      body: tr('分けたドラム抜きの BGM をこの名前で書きます。曲フォルダに同じ名前のファイルがあります。', 'The no-drums BGM is written with this name, and a file with the same name is already in the song folder.'),
+      ok: tr('上書き', 'Overwrite'),
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  // GPU が使えなければ、CPU でも動くモデルで
+  await checkGpu();
+  if (await startSeparation({ outputs: 'two' })) await registerDrumlessBgm(name);
 }
 
 async function writeIn(dir: FileSystemDirectoryHandle, name: string, bytes: Uint8Array): Promise<void> {

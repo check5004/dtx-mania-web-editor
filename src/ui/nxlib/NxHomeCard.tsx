@@ -120,7 +120,7 @@ function NxHomeReady() {
   const [q, setQ] = useState('');
   const syncOn = usePcSync((s) => s.settings.on);
   const synced = useSyncedSet();
-  const counts = useMemo(() => filterCounts(songs, drafts, synced), [songs, drafts, synced]);
+  const counts = useMemo(() => filterCounts(songs, { drafts, synced }), [songs, drafts, synced]);
   // 同期で変わった曲があれば、最近変わった曲の代わりに出す
   const showSynced = useMemo(() => !!synced && songs.some((s) => synced.has(songKey(s))), [songs, synced]);
   const recent = useMemo(() => [...songs].sort((a, b) => b.updated - a.updated).slice(0, 6), [songs]);

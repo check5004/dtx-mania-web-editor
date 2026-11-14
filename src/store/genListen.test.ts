@@ -108,7 +108,7 @@ describe('並べて聴く：聴く譜面の切り替え', () => {
 describe('曲に既にある難易度', () => {
   let doc: DtxDoc;
   let ext: DtxDoc;
-  const chart = (slot: ExistingChart['slot'], d: DtxDoc, level: number): ExistingChart => ({ slot, label: slot, file: `${slot.toLowerCase()}.dtx`, doc: d, level, registered: true, origin: 'human', calib: 1 });
+  const chart = (slot: ExistingChart['slot'], d: DtxDoc, level: number): ExistingChart => ({ slot, label: slot, file: `${slot.toLowerCase()}.dtx`, doc: d, level, registered: true, origin: 'human', calc: level });
   const diff = (d: DiffState['diff'], enabled: boolean): DiffState => ({ ...useGen.getState().diffs[d], enabled, result: null, src: null, manual: null });
   beforeEach(() => {
     doc = master();
@@ -118,8 +118,8 @@ describe('曲に既にある難易度', () => {
       masterFile: 'mstr.dtx',
       masterLabel: 'MASTER',
       masterLevel: 7,
+      masterCalc: 7,
       sourceSlot: 'MASTER',
-      calib: 1,
       spans: [{ name: 'A', from: 0, to: 3 }],
       charts: { EXTREME: chart('EXTREME', ext, 6) },
       diffs: { EXTREME: diff('EXTREME', false), ADVANCED: diff('ADVANCED', true), BASIC: diff('BASIC', true) },

@@ -3,18 +3,22 @@
 // - 読むのは名前と小さいファイルだけ（src/nxlib/scan.ts）。一覧を出したあとに裏で譜面を全部読んで点検する（check.ts）
 // - 一覧・小さい画像・選んだフォルダはこのブラウザ（IndexedDB）に残す。次に開いたらすぐ出し、裏で変わった譜面だけ読み直す
 // - 書くのは「set.def を作る・直す」（nxlib/actions.ts）と、保存したとき（app/fileActions.ts）だけ
+// - 音は、選んだ曲（と「まだの曲を調べる」を押したときの曲）の BGM だけ聞いて、ドラムが入っているかを調べる（bgm.ts・bgmListen.ts）
 // - Google Drive には何も送らない（送るのは保存した曲だけ。app/driveActions.ts）
 import { create } from 'zustand';
 import { tr } from '../i18n';
 import { decodeDtx } from '../dtx/encoding';
 import { isDiskFolder, supportsDirectWrite } from '../fs/folder';
 import { listRecent } from '../fs/recent';
+import { useDrums } from '../store/drums';
 import { toast, useEditor } from '../store/editor';
+import type { BgmCheck } from './bgm';
+import { checkBgm } from './bgmListen';
 import { deepCheck, dirAt } from './check';
-import { clearNxLib, loadList, loadPlace, loadThumbs, pruneThumbs, saveList, savePlace, saveThumb, type NxExtra, type NxPlace } from './db';
+import { clearNxLib, loadKv, loadList, loadPlace, loadThumbs, pruneThumbs, saveKv, saveList, savePlace, saveThumb, type NxExtra, type NxPlace } from './db';
 import { dtxPathsOf, relDtxPath } from './parse';
 import { boxKeyOf, chartsSig, markDuplicates, scanLibrary, songIdOf, type LibBox, type LibSong, type ScanRoot } from './scan';
-import { rootSpecs, type NxFilter, type NxSort } from './view';
+import { bgmOf, canSeparate, rootSpecs, topChart, type NxFilter, type NxSort } from './view';
 
 export type NxPerm = 'granted' | 'prompt' | 'denied';
 
@@ -49,6 +53,12 @@ export interface NxState {
   drafts: Record<string, string[]>;
   /** DTXPath にある外のフォルダの知らせを「あとで」にした */
   outsideLater: boolean;
+  /** 曲の id → BGM にドラムが入っているかを調べた結果（このブラウザに残す。src/nxlib/bgm.ts） */
+  bgm: Record<string, BgmCheck>;
+  /** いま BGM を聞いている曲の id */
+  bgmBusy: string | null;
+  /** 「まだの曲を調べる」の進み具合（押したときだけ） */
+  bgmScan: { done: number; total: number } | null;
   // 画面の状態
   q: string;
   sort: NxSort;
@@ -72,6 +82,9 @@ export const useNxLib = create<NxState>(() => ({
   thumbs: {},
   drafts: {},
   outsideLater: false,
+  bgm: {},
+  bgmBusy: null,
+  bgmScan: null,
   q: '',
   sort: 'updated',
   box: null,
@@ -129,7 +142,7 @@ export function initNxLib(): Promise<void> {
       set({ ready: true, supported: true });
       return;
     }
-    const [list, thumbs, perm] = await Promise.all([loadList(), loadThumbs(), isGranted(place.root)]);
+    const [list, thumbs, perm, bgm] = await Promise.all([loadList(), loadThumbs(), isGranted(place.root), loadKv<Record<string, BgmCheck>>(BGM_KV)]);
     const urls: Record<string, string> = {};
     for (const [id, t] of thumbs) {
       urls[id] = URL.createObjectURL(t.blob);
@@ -145,6 +158,7 @@ export function initNxLib(): Promise<void> {
       at: list?.at ?? 0,
       folders: list?.folders ?? 0,
       thumbs: urls,
+      bgm: bgm && typeof bgm === 'object' ? bgm : {},
     });
     void refreshDrafts();
   })();
@@ -158,6 +172,8 @@ function watchSaves() {
   if (watching) return;
   watching = true;
   useEditor.subscribe((s, prev) => {
+    // 一覧の画面を離れたら、BGM をまとめて調べるのはやめる（選んだ曲を聞いている途中なら、その 1 曲は聞き終える）
+    if (s.screen !== prev.screen && s.screen !== 'songs') stopBgmScan();
     if (!s.savedAt || s.savedAt === prev.savedAt || !get().place || !isDiskFolder(s.folder)) return;
     void noteSavedNxFolder(s.folder.dir).catch(() => {});
   });
@@ -226,9 +242,10 @@ export async function pickNxPlace(): Promise<boolean> {
   const place: NxPlace = { root: dir, kind: look.kind, name: dir.name, dtxPath: look.dtxPath, extra, at: Date.now() };
   if (!same) {
     revokeThumbs();
+    resetBgm();
     await clearNxLib(false);
     rootDirs.clear();
-    set({ songs: [], boxes: [], at: 0, folders: 0, changed: 0, thumbs: {}, drafts: {}, sel: null, box: null, filter: null, checking: null });
+    set({ songs: [], boxes: [], at: 0, folders: 0, changed: 0, thumbs: {}, drafts: {}, bgm: {}, sel: null, box: null, filter: null, checking: null });
   }
   await savePlace(place);
   set({ place, perm: 'granted', outsideLater: false });
@@ -265,9 +282,10 @@ export function laterNxExtra() {
 export async function forgetNxPlace(): Promise<void> {
   stopNxScan();
   revokeThumbs();
+  resetBgm();
   rootDirs.clear();
   await clearNxLib(false);
-  set({ place: null, perm: 'prompt', songs: [], boxes: [], at: 0, folders: 0, changed: 0, thumbs: {}, drafts: {}, sel: null, box: null, filter: null, checking: null, scan: null });
+  set({ place: null, perm: 'prompt', songs: [], boxes: [], at: 0, folders: 0, changed: 0, thumbs: {}, drafts: {}, bgm: {}, sel: null, box: null, filter: null, checking: null, scan: null });
 }
 
 // ---- 探す場所のフォルダ -----------------------------------------------------------------
@@ -404,7 +422,11 @@ export async function rescanNx(o: { full?: boolean } = {}): Promise<void> {
     const at = Date.now();
     set({ songs, boxes, at, folders: r.folders, changed, scan: null, sel: get().sel && songs.some((s) => s.id === get().sel) ? get().sel : null });
     await saveList({ at, songs, boxes, folders: r.folders });
-    if (!r.stopped) void pruneThumbs(new Set(songs.map((s) => s.id)));
+    if (!r.stopped) {
+      const ids = new Set(songs.map((s) => s.id));
+      void pruneThumbs(ids);
+      pruneBgm(ids);
+    }
     void refreshDrafts();
     if (!r.stopped && songs.length === 0 && roots.length) {
       toast(tr('曲が見つかりませんでした。DTXMania のフォルダ（.exe のある所）か DTXFiles を選んでください', 'No songs were found. Choose the DTXMania folder (where its .exe is) or DTXFiles'), 'warn', 8000);
@@ -650,6 +672,121 @@ export async function refreshDrafts(): Promise<void> {
     }
   }
   set({ drafts });
+}
+
+// ---- BGM にドラムが入っているか（ステム分解の案内） ----------------------------------------
+// 決まりは bgm.ts、音を聞くのは bgmListen.ts。聞くのは、選んだ曲と「まだの曲を調べる」を押したときの曲だけ。
+// 結果はこのブラウザ（IndexedDB の nxlib の bgm）に残し、同じ譜面・同じ BGM のファイルなら聞き直さない
+
+const BGM_KV = 'bgm';
+/** 聞く曲の id（選んだ曲を先に。まとめて調べる曲は後ろに並べる） */
+let bgmQueue: string[] = [];
+/** まとめて調べている曲の id（進み具合を数える） */
+const bgmScanIds = new Set<string>();
+let bgmRunning = false;
+let bgmSaveTimer = 0;
+
+function saveBgmSoon() {
+  window.clearTimeout(bgmSaveTimer);
+  bgmSaveTimer = window.setTimeout(() => void saveKv(BGM_KV, get().bgm), 800);
+}
+
+/** 別のフォルダを選んだ・忘れた：聞くのをやめる（結果は呼ぶ側が消す） */
+function resetBgm() {
+  bgmQueue = [];
+  bgmScanIds.clear();
+  window.clearTimeout(bgmSaveTimer);
+  set({ bgmScan: null });
+}
+
+/** BGM を聞いて調べられるか（読み書きの許可があり、ドラムの採譜モデルを使う設定。エディタの右のパネルで変えられる） */
+export function canListenBgm(): boolean {
+  return get().perm === 'granted' && useDrums.getState().enabled;
+}
+
+/**
+ * 選んだ曲の BGM を調べる（前の結果が同じ譜面・同じ BGM のファイルのものなら聞き直さない）。曲を選んだときに呼ぶ。
+ * 前に選んでまだ聞いていない曲はやめる（↑↓ で通り過ぎた曲まで聞かない。まとめて調べている曲は残す）
+ */
+export function wantBgmCheck(id: string) {
+  const s = get().songs.find((x) => x.id === id);
+  if (!s || !canSeparate(s) || !canListenBgm()) return;
+  bgmQueue = [id, ...bgmQueue.filter((x) => x !== id && bgmScanIds.has(x))];
+  void runBgm();
+}
+
+/** もう一覧に無い曲の BGM の結果を消す（読み直したとき） */
+function pruneBgm(keep: ReadonlySet<string>) {
+  const cur = get().bgm;
+  const gone = Object.keys(cur).filter((id) => !keep.has(id));
+  if (!gone.length) return;
+  const next = { ...cur };
+  for (const id of gone) delete next[id];
+  set({ bgm: next });
+  saveBgmSoon();
+}
+
+/** まだ調べていない曲の BGM をまとめて調べる（押したときだけ。一覧の画面を離れたらやめる）。調べる曲の数を返す */
+export function startBgmScan(): number {
+  const st = get();
+  if (!canListenBgm()) return 0;
+  const todo = st.songs.filter((s) => canSeparate(s) && !bgmOf(s, st.bgm) && !bgmScanIds.has(s.id)).map((s) => s.id);
+  if (!todo.length) return 0;
+  for (const id of todo) bgmScanIds.add(id);
+  const queued = new Set(bgmQueue);
+  bgmQueue = [...bgmQueue, ...todo.filter((id) => !queued.has(id))];
+  const sc = st.bgmScan;
+  set({ bgmScan: { done: sc?.done ?? 0, total: (sc?.total ?? 0) + todo.length } });
+  void runBgm();
+  return todo.length;
+}
+
+/** まとめて調べるのをやめる（調べた所までは残す。いま聞いている 1 曲は聞き終える） */
+export function stopBgmScan() {
+  if (!bgmScanIds.size && !get().bgmScan) return;
+  bgmQueue = bgmQueue.filter((id) => !bgmScanIds.has(id));
+  bgmScanIds.clear();
+  set({ bgmScan: null });
+}
+
+async function runBgm() {
+  if (bgmRunning) return;
+  bgmRunning = true;
+  const place = get().place;
+  try {
+    while (bgmQueue.length && get().place === place) {
+      const id = bgmQueue.shift()!;
+      const st = get();
+      const s = st.songs.find((x) => x.id === id);
+      const top = s && topChart(s);
+      if (s && top && canSeparate(s) && canListenBgm()) {
+        set({ bgmBusy: id });
+        try {
+          const dir = await songDirOf(s);
+          if (dir) {
+            const r = await checkBgm(dir, top, st.bgm[id]);
+            // 前と同じ結果なら一覧を描き直さない
+            if (get().place === place && JSON.stringify(get().bgm[id]) !== JSON.stringify(r)) {
+              set((x) => ({ bgm: { ...x.bgm, [id]: r } }));
+              saveBgmSoon();
+            }
+          }
+        } catch {
+          // 読めない曲は飛ばす（次に選んだときにもう一度）
+        }
+      }
+      if (bgmScanIds.delete(id)) {
+        const sc = get().bgmScan;
+        if (sc) set({ bgmScan: bgmScanIds.size ? { ...sc, done: sc.done + 1 } : null });
+      }
+    }
+  } finally {
+    bgmRunning = false;
+    set({ bgmBusy: null });
+    if (!bgmScanIds.size && get().bgmScan) set({ bgmScan: null });
+    // 聞いている間に別のフォルダを選んで、新しい曲を頼まれていたら続ける
+    if (bgmQueue.length && get().place !== place) void runBgm();
+  }
 }
 
 // ---- 画面の状態 -----------------------------------------------------------------------
