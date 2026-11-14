@@ -3,12 +3,12 @@ import { tr, pl, isJa } from '../i18n';
 import { useEffect } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { setView, useEditor } from '../store/editor';
 import { tempoOf } from '../store/derived';
 import { applyCandidate, closePhrase, makeCandidates, setPhraseRange, stepCandidate, usePhrase } from '../store/phrase';
 import { Icon } from './icons';
-import { openSettings } from '../store/editor';
+import { KeyGateLink } from './aiGuide/KeyGate';
 
 /** フレーズ候補のキー（Esc で閉じる・Tab と , . で候補・Enter で反映）。パネルを出している間だけ使う */
 export function usePhraseKeys() {
@@ -78,7 +78,7 @@ export function PhrasePanel() {
         placeholder={
           hasKey
             ? tr('ひとこと（例: 着地はクラッシュ、タムは高い順に）', 'A note (e.g. "land on a crash, toms high to low")')
-            : tr('ひとことはキーを設定すると使えます', 'Set a key to add a note')
+            : tr('ひとことは OpenRouter のキーを入れると使えます', 'Notes need an OpenRouter key')
         }
         value={p.instruction}
         disabled={!hasKey}
@@ -99,15 +99,11 @@ export function PhrasePanel() {
           </>
         ) : (
           <>
-            <span title={noKeyTitle()}>
-              {tr(
-                'キーが無いので「似た小節からコピー」と「直前小節の複製」だけ出します。',
-                'No key, so only "copy from a similar measure" and "repeat the previous measure" are offered.',
-              )}
-            </span>{' '}
-            <button className="link-btn" onClick={() => openSettings('ai')}>
-              {tr('キーを設定', 'Set a key')}
-            </button>
+            {tr(
+              'キーが無いので「似た小節からコピー」と「直前小節の複製」だけ出します。',
+              'No key, so only "copy from a similar measure" and "repeat the previous measure" are offered.',
+            )}{' '}
+            <KeyGateLink feature="phrase" />
           </>
         )}
       </div>

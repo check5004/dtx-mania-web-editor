@@ -70,7 +70,8 @@ export function DialogHost() {
   useEffect(() => {
     if (!spec) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      // 上に AI を使う準備の小窓や「キーが要ります」の吹き出しが出ているときは、そちらを閉じる
+      if (e.key === 'Escape' && !document.querySelector('.aig-back, .kg')) {
         e.stopPropagation();
         close(spec.kind === 'confirm' ? false : null);
       }

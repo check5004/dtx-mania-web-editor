@@ -4,10 +4,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { toMeasure } from '../dtx/base36';
 import { DRUM_LANES } from '../dtx/model';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { useAssist } from '../store/assist';
 import { drumsAudible, useDrums } from '../store/drums';
-import { openSettings, useEditor } from '../store/editor';
+import { useEditor } from '../store/editor';
 import {
   applyMeasureGen,
   closeMeasureGen,
@@ -25,6 +25,7 @@ import {
 import type { GhostAnchor } from './CompleteBadge';
 import { revealChartRange } from './ChartCanvas';
 import { Icon } from './icons';
+import { AiButton } from './aiGuide/KeyGate';
 
 /** Alt+] ・Alt+[ の向き（Mac の Option では文字が変わるので、キーの位置でも見る） */
 function bracketDir(e: KeyboardEvent): 1 | -1 | 0 {
@@ -145,12 +146,13 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
   const rejected = v ? v.plan.skipped.filter((x) => x.why === 'rejected').length : 0;
   const offLanes = new Set(gs.offLanes);
   const fitPct = cand && cand.fit !== null && cand.source !== 'draft' ? Math.round(cand.fit * 100) : null;
+  // キーが無いときは AiButton が「キーが要ります」の説明に替える
   const aiTitle = hasKey
     ? tr(
         `AI にもう一度作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「小節の生成」のモデルを使います`,
         `Ask the AI for another one (${model}, about ${formatUsd(cost)} per run). Uses the "Measure generation" model in Settings › AI`,
       )
-    : noKeyTitle();
+    : undefined;
 
   return (
     <div ref={boxRef} className="tab-ghost gen-badge" style={style} onPointerDown={stop}>
@@ -179,15 +181,9 @@ export function GenBadge({ anchor, sized }: { anchor: (from: number, len: number
             </span>
           )}
         </span>
-        {hasKey ? (
-          <button className="tg-ai" onClick={() => regenMeasureAi(note ?? '')} disabled={gs.ai === 'loading'} title={aiTitle}>
-            {Icon.sparkle(12)} {gs.ai === 'done' || gs.ai === 'error' ? tr('AIでもう一度', 'AI again') : tr('AIで作る', 'Make with AI')}
-          </button>
-        ) : (
-          <button className="tg-ai" onClick={() => openSettings('ai')} title={noKeyTitle()}>
-            {Icon.sparkle(12)} {tr('キーを設定するとAIの案も', 'Set a key for AI ideas too')}
-          </button>
-        )}
+        <AiButton feature="measure" className="tg-ai" onClick={() => regenMeasureAi(note ?? '')} disabled={gs.ai === 'loading'} title={aiTitle} keySize={10}>
+          {Icon.sparkle(12)} {gs.ai === 'done' || gs.ai === 'error' ? tr('AIでもう一度', 'AI again') : tr('AIで作る', 'Make with AI')}
+        </AiButton>
         {hasKey && note === null && (
           <button
             className="gen-note-btn"

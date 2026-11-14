@@ -22,6 +22,8 @@ import { PcSyncHost } from './ui/sync/host';
 import { SongsPage } from './ui/nxlib/SongsPage';
 import { UpdateNotice } from './ui/pwa/UpdateNotice';
 import { VideoExtractHost } from './ui/VideoExtract';
+import { AiGuideHost } from './ui/aiGuide/AiGuide';
+import { KeyGateHost } from './ui/aiGuide/KeyGate';
 
 /**
  * 知らせ 1 つ。スマホでは譜面を隠さないように 2 行までに縮め（文を押すと全文・もう一度で縮める）、
@@ -95,6 +97,9 @@ export function App() {
       <PcSyncHost />
       <DialogHost />
       <VideoExtractHost />
+      {/* AI のキーが無いときの説明の吹き出しと、AI を使う準備（OpenRouter のはじめかた）の小窓 */}
+      <KeyGateHost />
+      <AiGuideHost />
       <Toasts />
       <LocalCopyChip />
       <DriveProgressChip />

@@ -20,7 +20,7 @@ import { openMeasureGen } from '../store/measureGen';
 import { AMOUNT, setCompleteSettings, useComplete, type CompleteAmount } from '../store/complete';
 import { drumStatusText, setDrumsEnabled, useDrums } from '../store/drums';
 import { ADTOF } from '../transcribe/model';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { formatUsd } from '../ai/tasks';
 import { chipBpmLabel, chipName, formatLevel, meterLabel, parseMeter } from './format';
 import { adoptLevel, gotoIssue, issuesOf, levelOf, setShowIssues, useCheck } from '../store/check';
@@ -29,6 +29,7 @@ import { promptDialog } from './dialogs';
 import { usePlayBeat } from './hooks';
 import { visibleBeats } from './ChartCanvas';
 import { Icon } from './icons';
+import { AiButton, KeyGateLink } from './aiGuide/KeyGate';
 import { useDevice } from '../store/device';
 import { ReferenceCard } from './ReferenceCard';
 import { SourceCard } from './SourceCard';
@@ -850,18 +851,19 @@ function AiLevelRow({ mech }: { mech: number | null }) {
             {r.confidence === 'high' ? tr('自信度 高', 'High confidence') : r.confidence === 'medium' ? tr('自信度 中', 'Medium confidence') : tr('自信度 低', 'Low confidence')}
           </span>
         )}
-        <button
+        <AiButton
+          feature="level"
           className="btn small"
-          disabled={!hasKey || st.loading || !mech}
+          disabled={st.loading || !mech}
           onClick={() => void judgeCurrent()}
-          title={hasKey ? tr(`ガイドラインと似た譜面を物差しに判定します（1回 約 ${formatUsd(cost)}）`, `Rates the level against the guidelines and similar charts (about ${formatUsd(cost)} per run)`) : noKeyTitle()}
+          title={tr(`ガイドラインと似た譜面を物差しに判定します（1回 約 ${formatUsd(cost)}）`, `Rates the level against the guidelines and similar charts (about ${formatUsd(cost)} per run)`)}
         >
           {st.loading ? tr('判定中…', 'Rating…') : r ? tr('判定し直す', 'Rate again') : tr('AIで判定', 'Rate with AI')}
-        </button>
+        </AiButton>
       </div>
       {!hasKey && (
         <div className="lbl" style={{ marginTop: 4 }}>
-          {tr(`${noKeyTitle()}。いまは機械的な推定だけ出しています。`, `${noKeyTitle()}. Only the computed estimate is shown for now.`)}
+          {tr('キーが無いので、いまは機械的な推定だけ出しています。', 'No key, so only the computed estimate is shown for now.')} <KeyGateLink feature="level" />
         </div>
       )}
       {st.error && <div className="ai-err">{st.error}</div>}

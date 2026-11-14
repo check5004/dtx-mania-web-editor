@@ -38,6 +38,8 @@ export interface AiState {
   keyInfo: KeyInfo | null;
   keyStatus: 'none' | 'checking' | 'ok' | 'error';
   keyError: string | null;
+  /** つながらなかったときの HTTP の番号（401 はキー違い・402 は残高不足。0 はネットにつながらない） */
+  keyErrorCode: number;
   /** 1回の目安がこれを超えたら確認する（ドル） */
   confirmOver: number;
   /** このアプリで使う月の上限（ドル） */
@@ -115,6 +117,7 @@ function initial(): AiState {
     keyInfo: null,
     keyStatus: key ? 'checking' : 'none',
     keyError: null,
+    keyErrorCode: 0,
     confirmOver: saved.confirmOver ?? 0.3,
     monthlyCap: saved.monthlyCap ?? 5,
     spend: freshSpend(readJson<Spend>(ls, K_SPEND)),
@@ -134,7 +137,6 @@ function persistSettings() {
 export const hasAiKey = (s: AiState = get()) => s.key.trim().length > 0;
 export const useHasAiKey = () => useAi((s) => s.key.trim().length > 0);
 
-/** キーを持たないときに AI のボタンへ出す説明 */
 /** AI のキーが無いときの説明（表示のたびに今の言語で） */
 export function noKeyTitle(): string {
   return tr('キーを設定すると使えます（設定 › AI）', 'Available once you set an API key (Settings › AI)');
@@ -142,7 +144,7 @@ export function noKeyTitle(): string {
 
 export function setKey(key: string) {
   const k = key.trim();
-  set({ key: k, keyInfo: null, keyStatus: k ? 'checking' : 'none', keyError: null });
+  set({ key: k, keyInfo: null, keyStatus: k ? 'checking' : 'none', keyError: null, keyErrorCode: 0 });
   try {
     if (get().remember) {
       if (k) ls?.setItem(K_KEY, k);
@@ -173,7 +175,7 @@ export async function checkKey(): Promise<boolean> {
   if (!k) return false;
   keyAbort?.abort();
   const ac = (keyAbort = new AbortController());
-  set({ keyStatus: 'checking', keyError: null });
+  set({ keyStatus: 'checking', keyError: null, keyErrorCode: 0 });
   try {
     const info = await fetchKeyInfo(k, ac.signal);
     if (ac.signal.aborted) return false;
@@ -181,7 +183,7 @@ export async function checkKey(): Promise<boolean> {
     return true;
   } catch (e) {
     if (ac.signal.aborted) return false;
-    set({ keyStatus: 'error', keyError: (e as Error).message });
+    set({ keyStatus: 'error', keyError: (e as Error).message, keyErrorCode: e instanceof AiError ? e.status : 0 });
     return false;
   }
 }

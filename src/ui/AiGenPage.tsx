@@ -14,9 +14,10 @@ import { measureList, STEP_GAP } from '../gen/stairs';
 import { MAX_DROP, SLOTS, type Slot } from '../gen/targets';
 import { originOf } from '../dtx/origin';
 import { setLoopPoint, toggleLoop } from '../store/assist';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { openKeyGate } from '../store/aiGuide';
 import { tempoOf } from '../store/derived';
-import { goToStart, openPage, openSettings, playFrom, setCursorBeat, togglePause, togglePlay, useEditor } from '../store/editor';
+import { goToStart, openPage, playFrom, setCursorBeat, togglePause, togglePlay, useEditor } from '../store/editor';
 import {
   belowSource,
   calcLevel,
@@ -65,6 +66,7 @@ import { useDevice } from '../store/device';
 import { genViewport, GenCompare } from './GenCompare';
 import { setGenDetail, useTabletUi } from './tablet/shared';
 import { Icon } from './icons';
+import { KeyGateLink, KeyMark, lockedTitle } from './aiGuide/KeyGate';
 import { MasterMixer, TrackMixStrip } from './MixPanel';
 import { OriginBadge, originTitle } from './OriginBadge';
 import { FollowToggle, LoopControls, PlayControls, SpeedControl } from './Transport';
@@ -345,9 +347,17 @@ export function AiGenPage() {
         )}
         {!phone && <MasterMixer />}
         {!phone && (
-          <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? tr(`1難易度 約 ${formatUsd(costPer)}＋判定`, `About ${formatUsd(costPer)} per difficulty + level check`) : noKeyTitle()}>
-            {hasKey ? `● OpenRouter · ${model}` : tr('キー未設定 · ルールだけで簡略化', 'No API key · rule-based simplification only')}
-          </span>
+          hasKey ? (
+            <span className="pill ok" title={tr(`1難易度 約 ${formatUsd(costPer)}＋判定`, `About ${formatUsd(costPer)} per difficulty + level check`)}>
+              ● OpenRouter · {model}
+            </span>
+          ) : (
+            // キーが無いとき：押すと「キーが要ります」の説明
+            <button className="pill nk-pill" onClick={(e) => openKeyGate('difficulty', e.currentTarget)} title={lockedTitle()}>
+              <KeyMark />
+              {tr('キー無し · ルールだけで作る', 'No key · rules only')}
+            </button>
+          )
         )}
         {/* 1つの難易度の作り直し・易しく・難しくは、その難易度のカードの中（右上はエディタに反映だけ） */}
         <button
@@ -465,13 +475,14 @@ export function AiGenPage() {
               .map((d) => d.label)
               .join(tr('、', ', ')) || tr('なし', 'none')}
           </div>
-          <div className="lbl" style={{ marginTop: 12 }}>
+          <div className="lbl row" style={{ marginTop: 12, gap: 8 }}>
             {tr('AIへの追加の指示（任意）', 'Extra instructions for the AI (optional)')}
+            {!hasKey && <KeyGateLink feature="difficulty" />}
           </div>
           <textarea
             className="field"
             rows={3}
-            placeholder={hasKey ? tr('例: サビは元の譜面に近く、Aメロはもっと簡単に', 'e.g. Keep the chorus close to the original and make the verse easier') : noKeyTitle()}
+            placeholder={hasKey ? tr('例: サビは元の譜面に近く、Aメロはもっと簡単に', 'e.g. Keep the chorus close to the original and make the verse easier') : tr('OpenRouter のキーを入れると使えます', 'Available with an OpenRouter key')}
             disabled={!hasKey}
             value={g.instruction}
             onChange={(e) => useGen.setState({ instruction: e.target.value })}
@@ -660,11 +671,8 @@ export function AiGenPage() {
           </p>
           {!hasKey && (
             <p className="lbl">
-              {noKeyTitle()}
-              {tr('。いまは標準の方針で、機械的な推定が目標に入るまで段を調整しています。', '. For now, the standard plan is used, and the step is adjusted until the computed estimate reaches the target.')}{' '}
-              <button className="link-btn" onClick={() => openSettings('ai')}>
-                {tr('キーを設定', 'Set API key')}
-              </button>
+              {tr('キーが無いので、標準の方針で、機械的な推定が目標に入るまで段を調整しています。', 'No key, so the standard plan is used, and the step is adjusted until the computed estimate reaches the target.')}{' '}
+              <KeyGateLink feature="difficulty" />
             </p>
           )}
           {tablet && <p className="lbl t-gen-pop-hint">{tr('見出しをタップで聴く譜面を切り替え、もう一度タップでこの詳細。', 'Tap a heading to switch the chart you hear; tap it again for these details.')}</p>}

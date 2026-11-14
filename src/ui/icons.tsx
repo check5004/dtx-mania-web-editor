@@ -534,4 +534,17 @@ export const Icon = {
       />
     </Svg>
   ),
+  /** 鍵（AI のキーが要るボタンの印） */
+  key: (s?: number) => (
+    <Svg size={s}>
+      <circle cx="5.3" cy="10.7" r="2.8" />
+      <path d="m7.3 8.7 6-6M11.3 4.7l1.7 1.7M9.8 6.2l1.2 1.2" />
+    </Svg>
+  ),
+  /** 外のサイトを新しいタブで開く */
+  external: (s?: number) => (
+    <Svg size={s}>
+      <path d="M9.5 2.5h4v4M13.5 2.5 7.8 8.2M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" />
+    </Svg>
+  ),
 };
