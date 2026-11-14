@@ -219,6 +219,8 @@ export class FakeDrive {
         const rm = url.searchParams.get('removeParents');
         if (add || rm) f.parents = [...f.parents.filter((p) => !(rm ?? '').split(',').includes(p)), ...(add && !f.parents.includes(add) ? [add] : [])];
         const mt = meta.modifiedTime;
+        // appProperties は Drive と同じく、キーごとに足す（null のキーは消す）
+        if (meta.appProperties) meta.appProperties = Object.fromEntries(Object.entries({ ...f.appProperties, ...meta.appProperties }).filter(([, v]) => v !== null));
         Object.assign(f, meta);
         f.modifiedTime = mt ?? this.now();
         this.touch(f.id);

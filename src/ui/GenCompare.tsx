@@ -18,7 +18,7 @@ import { useAssist } from '../store/assist';
 import { tempoOf } from '../store/derived';
 import { useSidecar } from '../store/sidecar';
 import { playFrom, setCursorBeat, setView, useEditor } from '../store/editor';
-import { columnKind, compareColumns, isPassing, selectDiff, setGenView, setListen, shownLevel, stairCount, stairIssues, toggleChip, useGen, type DiffState, type GenState } from '../store/gen';
+import { calcLevel, columnKind, compareColumns, isPassing, selectDiff, setGenView, setListen, stairCount, stairIssues, toggleChip, useGen, type DiffState, type GenState } from '../store/gen';
 import { useDevice } from '../store/device';
 import { setGenDetail } from './tablet/shared';
 import { songEndM } from './hooks';
@@ -479,7 +479,7 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
   const playable = kind !== 'made' || !!ds?.result;
   const narrow = w < 210;
   const tiny = w < 160;
-  // 作った難易度の見出しはレベルの出どころ（計算・AI判定）と ✓ も入るので、名前が切れないように早めに畳む
+  // 作った難易度の見出しはレベルの出どころ（計算）と ✓ も入るので、名前が切れないように早めに畳む
   const roomy = w >= 260;
   const full = kind === 'source' ? masterLabel : kind === 'existing' ? (chart?.label ?? col) : col;
   // 作る譜面の見出しは AI の印・レベル・✓ も入るので、狭い列では短い名前（聴く譜面の切り替えと同じ ADV など）
@@ -559,8 +559,10 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
           </span>
         ) : made?.result ? (
           <>
-            {roomy && <span className="lbl">{made.judge && !made.judgeStale ? tr('AI判定', 'AI') : tr('計算', 'Calc')}</span>}
-            <span className="mono gen-colhead-lv">{shownLevel(made).toFixed(2)}</span>
+            {roomy && <span className="lbl">{tr('計算', 'Calc')}</span>}
+            <span className="mono gen-colhead-lv" title={tr('エディタの「確かめる」の推定レベルと同じ計算（反映するとこの値を Lv に書きます）', "Same calculation as the estimated level in the editor's Checks (written as the Lv when you add it)")}>
+              {calcLevel(made).toFixed(2)}
+            </span>
             {isPassing(made) && stairN === 0 ? (
               <span className="gen-ok" title={tr('検証OK（目標の幅の中・どの小節も上の難易度より濃くない）', 'Checks passed (inside the target range, and no measure is denser than the harder chart)')}>
                 ✓

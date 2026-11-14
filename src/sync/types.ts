@@ -148,6 +148,8 @@ export interface SongReport {
   kept?: number;
   /** ほかの PC で消した曲を、この PC でも消した */
   removed?: boolean;
+  /** Drive に同じ曲が 2 つあったので、この PC が使っていない方（driveId）をゴミ箱に移した */
+  dup?: boolean;
   /** ほかの PC の名前（取った物を送った PC） */
   from?: string;
   error?: string;

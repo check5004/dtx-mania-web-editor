@@ -29,7 +29,7 @@ import {
   type JunkDir,
   type SyncProgress,
 } from '../drive/sync';
-import { folderFromHandle, normPath, type SongFolder } from '../fs/folder';
+import { folderFromHandle, isDiskFolder, normPath, type SongFolder } from '../fs/folder';
 import { dirLabel, otherSongsIn } from '../fs/songDir';
 import { checkLocal, createLocalSong, deleteLocalSong, finishLocalSong, freeLocalName, listLocalSongs, openLocalSong, updateLocalSong } from '../fs/local';
 import { songDir } from '../fs/opfs';
@@ -38,7 +38,7 @@ import { dismissToast, isDirty, toast, useEditor } from '../store/editor';
 import { bumpLocal, initLocalSongs, refreshLocalSongs } from '../store/localSongs';
 import { chooseDialog, confirmDialog } from '../ui/dialogs';
 import { askDriveFirst } from '../ui/DriveFirstDialog';
-import { useNxLib } from '../nxlib/store';
+import { noteSavedNxFolder, useNxLib } from '../nxlib/store';
 import { kindOf } from '../sync/kind';
 import { addSyncSong, onPcSyncReport, pcSyncPlace, syncSaved, syncTake, usePcSync } from '../sync/store';
 import type { RunReport } from '../sync/types';
@@ -234,6 +234,9 @@ async function push(kind: PushKind): Promise<void> {
     if (folder.local && !wasLinked) {
       await updateLocalSong(folder.local, { drive: folder.drive });
       bumpLocal();
+    } else if (!wasLinked && isDiskFolder(folder)) {
+      // DTXMania の曲なら、一覧の印（Drive とつないだ）も直す。古い印のままだと、あとで同期を始めたときに Drive に同じ曲をもう 1 つ作っていた
+      void noteSavedNxFolder(folder.dir).catch(() => {});
     }
     const status: DriveStatus = r.conflicts.length ? 'conflict' : r.newer.length ? 'newer' : 'ok';
     if (ed().folder === folder) set({ linked: true, status, at: Date.now(), conflicts: r.conflicts, newer: r.newer, doing: null, skip: false });

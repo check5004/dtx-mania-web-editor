@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import type { DrumClass } from '../bench/classes';
 import { transcribe, type TranscribeStage } from '../transcribe/client';
 import { ADTOF, type DrumActivations } from '../transcribe/model';
-import { drumHits, type DrumHit } from '../transcribe/peaks';
+import { AUDIBLE_PER_MIN, drumHits, type DrumHit } from '../transcribe/peaks';
 
 export interface DrumState {
   /** 採譜モデルを使う（設定。ブラウザに覚える） */
@@ -122,11 +122,6 @@ export function readyDrums(): DrumActivations | null {
   return d.enabled && d.status === 'ready' && d.data && d.key !== null && d.key === source?.key ? d.data : null;
 }
 
-/**
- * 原曲にドラムが聞こえるとみなす、採譜したバスドラム・スネアの1分あたりの数。
- * 2026-11-03 の手元の曲で、ドラム入りの原曲は 300 前後、ドラム抜きの BGM（bgm_d.ogg）は 2 だった
- */
-const AUDIBLE_PER_MIN = 20;
 let audibleMemo: { data: DrumActivations; v: boolean } | null = null;
 
 /** 原曲にドラムが聞こえるか（ドラム抜きの BGM なら false）。採譜がまだなら null */

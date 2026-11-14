@@ -1,23 +1,30 @@
 // 「DTXMania の曲」の一覧の見せ方（しぼりこみ・並べ替え・BOX の数・空いた難易度の枠・set.def を作る／直す）。
 // 画面からも試験からも使う、ファイルを触らない関数だけ。
+import { checkFits, type BgmCheck } from './bgm';
 import { relDtxPath } from './parse';
 import { checkLevel, SLOT_KEYS, type LibBox, type LibChart, type LibSong, type SlotKey } from './scan';
 
 export type NxSort = 'updated' | 'title' | 'artist' | 'bpm' | 'level' | 'checks';
-export type NxFilter = 'missing' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
+export type NxFilter = 'missing' | 'bgmdrums' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
 /** synced（同期で変わった曲）は PC どうしの同期をしているときだけ出す */
-export const NX_FILTERS: readonly NxFilter[] = ['missing', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
+export const NX_FILTERS: readonly NxFilter[] = ['missing', 'bgmdrums', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
 
-/** BOX のしぼりこみ：null はすべて、'' は BOX の外、ほかは BOX の鍵 */
-export interface NxQuery {
-  q: string;
-  sort: NxSort;
-  box: string | null;
-  filter: NxFilter | null;
+/** しぼりこみと数に使う、一覧のほかの情報 */
+export interface NxFilterCtx {
   /** 曲の id → 保存していない続きのある譜面 */
   drafts: Readonly<Record<string, readonly string[]>>;
   /** 同期で変わった曲（場所の鍵:曲のフォルダの並び。src/sync/store.ts の syncedSongs） */
   synced?: ReadonlySet<string>;
+  /** 曲の id → BGM にドラムが入っているかを調べた結果（src/nxlib/bgm.ts） */
+  bgm?: Readonly<Record<string, BgmCheck>>;
+}
+
+/** BOX のしぼりこみ：null はすべて、'' は BOX の外、ほかは BOX の鍵 */
+export interface NxQuery extends NxFilterCtx {
+  q: string;
+  sort: NxSort;
+  box: string | null;
+  filter: NxFilter | null;
 }
 
 export const SLOT_LABEL: Record<SlotKey, string> = { BSC: 'BASIC', ADV: 'ADVANCED', EXT: 'EXTREME', MAS: 'MASTER' };
@@ -50,6 +57,26 @@ export function addableSlots(s: LibSong): SlotKey[] {
   if (!top?.slot || !canOpen(top) || s.drums === false) return [];
   const i = SLOT_KEYS.indexOf(top.slot);
   return SLOT_KEYS.slice(0, i).filter((k) => !chartIn(s, k));
+}
+
+/**
+ * BGM を調べて、ステム分解をすすめられる曲か：いちばん上が .dtx のドラムの譜面（エディタで開いて分解する。
+ * 点検でドラムが無いと分かった曲・.gda などは調べない）
+ */
+export function canSeparate(s: LibSong): boolean {
+  const top = topChart(s);
+  return !!top && canOpen(top) && s.drums !== false;
+}
+
+/** その曲の BGM を調べた結果（いまのいちばん上の譜面を調べたものだけ。まだ・譜面が変わったなら undefined） */
+export function bgmOf(s: LibSong, bgm: NxFilterCtx['bgm']): BgmCheck | undefined {
+  const c = bgm?.[s.id];
+  return checkFits(c, topChart(s)) ? c : undefined;
+}
+
+/** BGM にドラムが入っていて、ステム分解（ドラム抜きの BGM）をすすめる曲か */
+export function suggestsSeparation(s: LibSong, bgm: NxFilterCtx['bgm']): boolean {
+  return canSeparate(s) && bgmOf(s, bgm)?.state === 'drums';
 }
 
 /** 枠の名前（AI難易度生成の難易度の名前） */
@@ -85,10 +112,12 @@ export function warnCount(s: LibSong): number {
   return s.checks.filter((c) => checkLevel(c.kind) === 'warn').length;
 }
 
-export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts'], synced?: NxQuery['synced']): boolean {
+export function hasFilter(s: LibSong, f: NxFilter, ctx: NxFilterCtx): boolean {
   switch (f) {
     case 'missing':
       return addableSlots(s).length > 0;
+    case 'bgmdrums':
+      return suggestsSeparation(s, ctx.bgm);
     case 'edited':
       return s.edited;
     case 'ai':
@@ -97,9 +126,9 @@ export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts'], sy
       // 成績だけ合わせている曲（PC どうしの同期）は入れない
       return s.drive?.state === 'linked' && !s.drive.play;
     case 'synced':
-      return !!synced?.has(`${s.root}:${s.path.join('/')}`);
+      return !!ctx.synced?.has(`${s.root}:${s.path.join('/')}`);
     case 'draft':
-      return (drafts[s.id]?.length ?? 0) > 0;
+      return (ctx.drafts[s.id]?.length ?? 0) > 0;
     case 'checks':
       return s.checks.length > 0;
   }
@@ -156,7 +185,7 @@ export function compareSongs(sort: NxSort): (a: LibSong, b: LibSong) => number {
 }
 
 export function viewSongs(songs: readonly LibSong[], o: NxQuery): LibSong[] {
-  return songs.filter((s) => inBox(s, o.box) && (!o.filter || hasFilter(s, o.filter, o.drafts, o.synced)) && matchQuery(s, o.q)).sort(compareSongs(o.sort));
+  return songs.filter((s) => inBox(s, o.box) && (!o.filter || hasFilter(s, o.filter, o)) && matchQuery(s, o.q)).sort(compareSongs(o.sort));
 }
 
 /** BOX ごとの曲の数（中の BOX の曲も数える）。'' は BOX の外 */
@@ -169,10 +198,22 @@ export function boxCounts(songs: readonly LibSong[]): Map<string, number> {
   return m;
 }
 
-export function filterCounts(songs: readonly LibSong[], drafts: NxQuery['drafts'], synced?: NxQuery['synced']): Record<NxFilter, number> {
+export function filterCounts(songs: readonly LibSong[], ctx: NxFilterCtx): Record<NxFilter, number> {
   const out = Object.fromEntries(NX_FILTERS.map((f) => [f, 0])) as Record<NxFilter, number>;
-  for (const s of songs) for (const f of NX_FILTERS) if (hasFilter(s, f, drafts, synced)) out[f]++;
+  for (const s of songs) for (const f of NX_FILTERS) if (hasFilter(s, f, ctx)) out[f]++;
   return out;
+}
+
+/** BGM を調べられる曲の数と、そのうち調べた曲の数（「BGM にドラム入り」のしぼりこみの知らせ） */
+export function bgmCheckedCount(songs: readonly LibSong[], bgm: NxFilterCtx['bgm']): { can: number; checked: number } {
+  let can = 0;
+  let checked = 0;
+  for (const s of songs) {
+    if (!canSeparate(s)) continue;
+    can++;
+    if (bgmOf(s, bgm)) checked++;
+  }
+  return { can, checked };
 }
 
 /** 譜面の数（一覧の上に出す） */

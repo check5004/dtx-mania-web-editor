@@ -105,12 +105,21 @@ interface Job {
   mode: 'all' | 'play';
   title: string;
   artist: string;
+  /** drive は、この PC の曲のフォルダのつなぎの記録（.dtxe-drive.json）にある曲 */
+  linked?: boolean;
+}
+
+/** Drive に同じ曲が 2 つあって、この PC は keep の方と合わせている（d は使っていない） */
+interface DupSong {
+  d: DriveSongRef;
+  keep: Job;
 }
 
 const low = (s: string) => s.normalize('NFC').toLowerCase();
 export const libKey = (lib: readonly string[]) => low(lib.join('/'));
-const folderKey = (root: string, path: readonly string[]) => `${root}:${normPath(path.join('/'))}`;
-const nameKey = (title: string, artist: string) => `${title.normalize('NFKC').trim().toLowerCase()}\u0000${artist.normalize('NFKC').trim().toLowerCase()}`;
+const folderKey = (root: string, path: readonly string[]) => `${root}:${normPath(path.join('/')).normalize('NFC')}`;
+const titleKey = (s: string) => s.normalize('NFKC').trim().toLowerCase();
+const nameKey = (title: string, artist: string) => `${titleKey(title)}\u0000${titleKey(artist)}`;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 /** MD5 の控え（下見と本番で 2 回計算しない） */
@@ -187,6 +196,10 @@ export class SyncRun {
   private newToken: string | undefined;
   private mine: Record<string, string> = {};
   private clockOff = false;
+  /** Drive にある曲のフォルダの id（今回の一覧） */
+  private alive = new Set<string>();
+  /** Drive に同じ曲が 2 つ：合わせ終えたら、使っていない方を片付ける */
+  private dups: DupSong[] = [];
   private done = 0;
   private total = 0;
   private bytes = 0;
@@ -230,13 +243,15 @@ export class SyncRun {
       const drive = this.rootId ? await this.listDriveSongs() : [];
       const jobs = await this.makeJobs(drive);
       this.total = jobs.length;
+      const failed = new Set<Job>();
       for (const job of jobs) {
-        let rep: SongReport;
+        let rep: SongReport | null;
         try {
           rep = await this.syncSong(job);
         } catch (e) {
           // ログインが切れた・Drive がいっぱい：ここでやめる
           if (e instanceof DriveError && (e.reason === 'auth' || /storageQuotaExceeded|quotaExceeded/i.test(e.reason))) throw e;
+          failed.add(job);
           rep = emptyReport(job.title, job.lib.join('/'), job.drive?.id ?? '', job.local ? (job.drive ? 'here' : 'new') : 'none');
           rep.error = (e as Error).message || String(e);
           if (job.local) {
@@ -248,8 +263,9 @@ export class SyncRun {
           if (known && !this.dry) known.recheck = true;
         }
         this.done++;
-        if (this.dry || hasNews(rep) || rep.error) this.report.songs.push(rep);
+        if (rep && (this.dry || hasNews(rep) || rep.error)) this.report.songs.push(rep);
       }
+      for (const x of this.dups) await this.dropDup(x, failed);
       ok = true;
     } finally {
       if (!this.dry) {
@@ -525,80 +541,167 @@ export class SyncRun {
     return this.set.scoresOnly && this.set.scores ? 'play' : null;
   }
 
+  /** Drive の曲の、DTXFiles からの並び（「DTX Web Editor」の直下の曲は、取り込む BOX の中） */
+  private libOfDrive(d: DriveSongRef): string[] {
+    return d.lib ?? (this.set.importBox ? [...this.set.importBox.split('/').filter(Boolean), d.name] : [d.name]);
+  }
+
   private async makeJobs(drive: DriveSongRef[]): Promise<Job[]> {
     const ans = this.st.answers;
+    const index = this.st.songs;
     const locals = this.localSongs();
     const byId = new Map(drive.map((d) => [d.id, d]));
-    const byLib = new Map<string, DriveSongRef>();
-    for (const d of drive) if (d.lib) byLib.set(libKey(d.lib), d);
+    this.alive = new Set(byId.keys());
+    // 並び（小文字）→ Drive の曲。「DTX Web Editor」の直下の曲（iPad・前の版の「Drive にも保存」）も、取り込む BOX での並びで探す
+    // （DTXFiles の同じ所にある曲と同じ曲。別の曲として Drive にもう 1 つ作らない）
+    const byLib = new Map<string, DriveSongRef[]>();
+    for (const d of drive) {
+      const k = libKey(this.libOfDrive(d));
+      byLib.set(k, [...(byLib.get(k) ?? []), d]);
+    }
+    /** この PC の曲のフォルダ at と、前に合わせていた曲か */
+    const wasAt = (d: DriveSongRef, at: string) => !!index[d.id] && folderKey(index[d.id].root, index[d.id].path) === at;
+    /** 同じ所に Drive の曲が 2 つ以上あるとき、いい方から：この PC がそのフォルダと合わせていた曲 → DTXFiles の中の曲 → 新しく送った曲 */
+    const better = (at: string | null) => (a: DriveSongRef, b: DriveSongRef) => {
+      const r = (d: DriveSongRef) => [at && wasAt(d, at) ? 0 : 1, d.lib ? 0 : 1, -(d.info.u ?? d.time)];
+      const ra = r(a);
+      const rb = r(b);
+      for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] - rb[i];
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    };
     const used = new Set<string>();
     const jobs: Job[] = [];
+    /** この PC の曲のフォルダ → それを合わせる仕事（null は合わせないがほかの曲を入れない）。1 つのフォルダに Drive の曲を 2 つ合わせない */
+    const claimed = new Map<string, Job | null>();
+    /** Drive の曲と組になった、この PC の曲のフォルダ */
+    const paired = new Set<string>();
+    const add = (job: Job, at: string) => {
+      jobs.push(job);
+      claimed.set(at, job);
+      if (job.drive) {
+        used.add(job.drive.id);
+        paired.add(at);
+      }
+    };
+    const join = (job: Job, d: DriveSongRef, at: string) => {
+      job.drive = d;
+      used.add(d.id);
+      paired.add(at);
+    };
     const only = this.o.only ? folderKey(this.o.only.root, this.o.only.path) : null;
-    // 前に合わせた曲（.dtxe-drive.json の id。成績だけの曲か）
-    const linked = new Map<string, { id: string; play: boolean }>();
-    for (const s of locals) {
-      if (s.drive !== 'linked' || (only && s.key !== only)) continue;
-      const dir = await this.songDir(s.root, s.path);
-      const f = dir && (await fileIn(dir, LINK_FILE));
-      const link = f ? parseLink(await (await f.getFile()).text()) : null;
-      if (link) linked.set(s.key, { id: link.folderId, play: !!link.play });
-    }
     if (only && !locals.some((s) => s.key === only)) {
       // まだ一覧に無い（新しく保存した）曲
       const o = this.o.only!;
       const lib = this.lib.libPath(o.root, o.path);
       if (lib) locals.push({ key: only, root: o.root, path: [...o.path], lib, title: o.title ?? o.path[o.path.length - 1] ?? '', artist: '', bpm: '', edited: true, drive: null, charts: 1, updated: this.now() });
     }
+    // 前に合わせた曲（.dtxe-drive.json の id。成績だけの曲か）。一覧の印は古いことがある（一覧を読んだあとで Drive につないだ）ので、
+    // 合わせる曲と、Drive の同じ並びに曲がある曲は、ファイルを読む
+    const linked = new Map<string, { id: string; play: boolean }>();
+    for (const s of locals) {
+      if ((only && s.key !== only) || s.drive === 'skip') continue;
+      if (s.drive !== 'linked' && !this.scopeOf(s) && !(s.lib && byLib.has(libKey(s.lib)))) continue;
+      const dir = await this.songDir(s.root, s.path);
+      const link = dir ? await linkAt(dir) : null;
+      if (link) linked.set(s.key, { id: link.folderId, play: !!link.play });
+    }
     for (const s of locals) {
       if (only && s.key !== only) continue;
       const ln = linked.get(s.key);
-      let mode = only === s.key && s.drive !== 'skip' && s.lib ? 'all' : this.scopeOf(s, ln?.play);
+      let mode = only === s.key && s.drive !== 'skip' && s.lib ? 'all' : this.scopeOf(ln ? { ...s, drive: 'linked' } : s, ln?.play);
       if (ln) {
         let d = byId.get(ln.id);
         if (!d) {
           // Drive で消された（ほかの PC で消した・同期から外した）か、印の無い古いフォルダ
           const f = await getFile(ln.id);
-          if (!f || f.trashed) {
+          // 同じ曲が Drive に 2 つあって、使っていない方として片付けた（ほかの PC で）：残した方とつなぎ直す
+          const to = f?.trashed ? byId.get(f.appProperties?.dup ?? '') : undefined;
+          if (to && !used.has(to.id)) {
+            if (!this.dry) delete index[ln.id];
+            d = to;
+          } else if (!f || f.trashed) {
             if (!this.dry) await this.dropLinked(s, f?.appProperties?.gone === '1');
             continue;
-          }
-          d = { id: f.id, name: f.name, parent: f.parents?.[0] ?? '', lib: null, info: {}, time: Date.parse(f.modifiedTime ?? '') || 0, play: f.appProperties?.play === '1' };
+          } else d = { id: f.id, name: f.name, parent: f.parents?.[0] ?? '', lib: null, info: {}, time: Date.parse(f.modifiedTime ?? '') || 0, play: f.appProperties?.play === '1' };
         }
-        used.add(d.id);
         // 成績だけ合わせていた曲を、ほかの PC が曲ごと合わせはじめた：この PC も曲ごと
         if (ln.play && !d.play && mode !== null) mode = 'all';
-        if (mode && s.lib) jobs.push({ local: s, drive: d, lib: s.lib, mode, title: s.title, artist: s.artist });
+        if (mode && s.lib) add({ local: s, drive: d, lib: s.lib, mode, title: s.title, artist: s.artist, linked: d.id === ln.id }, s.key);
+        else {
+          // 合わせない（成績だけの曲で、成績も合わせない設定）が、このフォルダは Drive のこの曲のもの
+          used.add(d.id);
+          claimed.set(s.key, null);
+          paired.add(s.key);
+        }
         continue;
       }
       if (!s.lib) continue;
-      const d = byLib.get(libKey(s.lib));
-      if (d && !used.has(d.id)) {
-        // 同じ並び：同じ曲（同期する曲でなくても、ほかの PC が作った曲なら合わせる）
-        const m = mode ?? (d.play ? null : 'all');
-        if (!m) continue;
-        used.add(d.id);
-        jobs.push({ local: s, drive: d, lib: s.lib, mode: m, title: s.title, artist: s.artist });
-        continue;
-      }
-      if (mode) jobs.push({ local: s, lib: s.lib, mode, title: s.title, artist: s.artist });
+      // 同じ並び：同じ曲（同期する曲でなくても、ほかの PC が作った曲なら合わせる）
+      const d = (byLib.get(libKey(s.lib)) ?? []).filter((x) => !used.has(x.id) && (mode !== null || !x.play)).sort(better(s.key))[0];
+      if (d) add({ local: s, drive: d, lib: s.lib, mode: mode ?? 'all', title: s.title, artist: s.artist }, s.key);
+      else if (mode) add({ local: s, lib: s.lib, mode, title: s.title, artist: s.artist }, s.key);
     }
     if (only) return jobs;
     // Drive にだけある曲
-    const free = new Map<string, LocalSong[]>();
-    const jobOf = new Map(jobs.filter((j) => j.local && !j.drive).map((j) => [j.local!.key, j]));
+    const named = new Map<string, LocalSong[]>();
     for (const s of locals) {
-      if (!s.title.trim() || jobs.some((j) => j.local === s && j.drive)) continue;
+      if (!s.title.trim()) continue;
       const k = nameKey(s.title, s.artist);
-      free.set(k, [...(free.get(k) ?? []), s]);
+      named.set(k, [...(named.get(k) ?? []), s]);
     }
-    const index = this.st.songs;
-    for (const d of drive) {
-      if (used.has(d.id) || d.play) continue;
-      const lib = d.lib ?? (this.set.importBox ? [...this.set.importBox.split('/').filter(Boolean), d.name] : [d.name]);
+    // この PC で合わせていた曲を先に。同じ所の曲は、いい方から
+    const rest = drive.filter((d) => !used.has(d.id) && !d.play).sort((a, b) => Number(!index[a.id]) - Number(!index[b.id]) || better(null)(a, b));
+    // 1) この PC で合わせていた曲で、一覧には出ていないが、フォルダはあってこの曲とつながっている：そのまま合わせる（一覧も読み直す）
+    for (const d of rest) {
+      const known = index[d.id];
+      if (!known) continue;
+      const at = folderKey(known.root, known.path);
+      if (claimed.has(at)) continue;
+      const dir = await this.songDir(known.root, known.path);
+      const link = dir ? await linkAt(dir) : null;
+      const lib = this.lib.libPath(known.root, known.path);
+      if (link?.folderId !== d.id || !lib) continue;
+      const title = known.title || d.info.t || d.name;
+      const s: LocalSong = { key: at, root: known.root, path: [...known.path], lib, title, artist: d.info.a ?? '', bpm: d.info.b ?? '', edited: false, drive: 'linked', charts: 0, updated: 0 };
+      const mode = this.scopeOf(s, !!link.play);
+      if (mode) add({ local: s, drive: d, lib, mode, title, artist: s.artist, linked: true }, at);
+      else {
+        used.add(d.id);
+        claimed.set(at, null);
+        paired.add(at);
+      }
+      if (!this.dry) this.lib.touched?.(known.root, known.path);
+    }
+    // 2) 残りの曲
+    for (const d of rest) {
+      if (used.has(d.id)) continue;
+      const lib = this.libOfDrive(d);
       const title = d.info.t || d.name;
       const artist = d.info.a ?? '';
-      // この PC で合わせていた曲のフォルダが無い（消した・動かした）：聞く
-      if (index[d.id]) {
+      const known = index[d.id];
+      if (known) {
+        const at = folderKey(known.root, known.path);
+        const holder = claimed.get(at);
+        if (holder && !holder.drive) {
+          // 前に合わせていたフォルダ（つなぎの記録が無くなった）：つなぎ直す
+          join(holder, d, at);
+          continue;
+        }
+        if (holder?.drive && holder.linked) {
+          // そのフォルダは、つなぎの記録で Drive の別の曲と合わせている。曲名が同じなら同じ曲（違えば、前の曲を消して別の曲を置いた）
+          if (titleKey(known.title || title) === titleKey(holder.title) || titleKey(title) === titleKey(holder.title)) {
+            // 同じ曲が Drive に 2 つある（前の版の初めての同期で、この PC が同じフォルダに 2 つ合わせた）。
+            // 消した・動かしたのではないので聞かない。合わせ終えたら、使っていないこちらを片付ける
+            if (!this.dry) this.dups.push({ d, keep: holder });
+            continue;
+          }
+          // 別の曲を置いた（前の曲は消した・動かした）：下で聞く
+        } else if (holder !== undefined || (await this.songDir(known.root, known.path))) {
+          // フォルダがある（一覧に出ていない・合わせはじめたばかり）：消した・動かしたのではないので聞かない。一覧は読み直す
+          if (holder === undefined && !this.dry) this.lib.touched?.(known.root, known.path);
+          continue;
+        }
+        // この PC で合わせていた曲のフォルダが無い（消した・動かした）：聞く
         const a = ans[`g:${d.id}`];
         if (a === 'leave') continue;
         if (a === 'trash') {
@@ -612,19 +715,27 @@ export class SyncRun {
           continue;
         }
         if (a !== 'get') {
-          this.report.asks.push({ id: `g:${d.id}`, kind: 'gone', title, driveId: d.id, lib: index[d.id].lib });
+          this.report.asks.push({ id: `g:${d.id}`, kind: 'gone', title, driveId: d.id, lib: known.lib });
           continue;
         }
       }
+      // 置く所のフォルダを、もうほかの曲が使っている
+      const place = this.lib.placeOf(lib);
+      const at = place ? folderKey(place.root, place.path) : `drive:${d.id}`;
+      const holder = claimed.get(at);
+      if (holder !== undefined) {
+        // この PC の同じ所の曲（新しく送るはずだった）：同じ曲。Drive の別の曲と合わせているなら、同じ曲が Drive に 2 つあるので、この PC は今のまま
+        if (holder && !holder.drive) join(holder, d, at);
+        continue;
+      }
       // 並びは違うが、曲名とアーティストが同じ曲：同じ曲か聞く
-      const same = (free.get(nameKey(title, artist)) ?? []).find((s) => s.lib && libKey(s.lib) !== libKey(lib));
+      const same = (named.get(nameKey(title, artist)) ?? []).find((s) => s.lib && !paired.has(s.key) && libKey(s.lib) !== libKey(lib));
       const sa = ans[`s:${d.id}`];
       if (same && sa !== 'separate') {
+        const lj = claimed.get(same.key);
         if (sa === 'join') {
-          used.add(d.id);
-          const lj = jobOf.get(same.key);
-          if (lj) lj.drive = d;
-          else jobs.push({ local: same, drive: d, lib: same.lib!, mode: 'all', title: same.title, artist: same.artist });
+          if (lj) join(lj, d, same.key);
+          else add({ local: same, drive: d, lib: same.lib!, mode: 'all', title: same.title, artist: same.artist }, same.key);
           continue;
         }
         this.report.asks.push({
@@ -638,15 +749,40 @@ export class SyncRun {
           local: { time: same.updated, charts: same.charts },
           remote: { time: d.info.u ?? d.time, dev: d.dev },
         });
-        // 答えるまで、この PC の曲も新しく送らない
-        const lj = jobOf.get(same.key);
-        if (lj) jobs.splice(jobs.indexOf(lj), 1);
+        // 答えるまで、この PC の曲も新しく送らない（ほかの曲もそのフォルダに入れない）
+        const i = lj ? jobs.indexOf(lj) : -1;
+        if (i >= 0) jobs.splice(i, 1);
+        claimed.set(same.key, null);
         continue;
       }
-      used.add(d.id);
-      jobs.push({ drive: d, lib, mode: 'all', title, artist });
+      add({ drive: d, lib, mode: 'all', title, artist }, at);
     }
     return jobs;
+  }
+
+  /**
+   * Drive に同じ曲が 2 つあり（前の版の初めての同期で作った）、この PC はもう一方と合わせている：使っていない方をゴミ箱へ（30 日は戻せる）。
+   * 残した方を合わせ終えたときだけ。ほかの PC がこちらとつないでいたら、印（dup）を見て残した方につなぎ直す
+   */
+  private async dropDup(x: DupSong, failed: ReadonlySet<Job>) {
+    const keep = x.keep.drive;
+    if (!keep || failed.has(x.keep) || !this.st.songs[keep.id]) return;
+    try {
+      await updateMeta(x.d.id, { appProperties: { dup: keep.id } });
+      await trashFile(x.d.id);
+    } catch (e) {
+      if (e instanceof DriveError && e.reason === 'auth') throw e;
+      return; // 次の同期で
+    }
+    delete this.st.songs[x.d.id];
+    for (const k of Object.keys(this.st.answers)) if (k.startsWith(`f:${x.d.id}:`) || k === `s:${x.d.id}` || k === `g:${x.d.id}`) delete this.st.answers[k];
+    const rep = emptyReport(x.keep.title, x.keep.lib.join('/'), x.d.id, 'here');
+    rep.dup = true;
+    if (x.keep.local) {
+      rep.root = x.keep.local.root;
+      rep.path = [...x.keep.local.path];
+    }
+    this.report.songs.push(rep);
   }
 
   /**
@@ -712,7 +848,7 @@ export class SyncRun {
 
   // ---- 1 曲を合わせる ----------------------------------------------------------------
 
-  private async syncSong(job: Job): Promise<SongReport> {
+  private async syncSong(job: Job): Promise<SongReport | null> {
     const rep = emptyReport(job.title, job.lib.join('/'), job.drive?.id ?? '', job.local ? (job.drive ? 'here' : 'new') : 'none');
     if (job.mode === 'play') rep.play = true;
     this.tell({ phase: 'check', song: job.title });
@@ -725,6 +861,8 @@ export class SyncRun {
     if (job.local && !dir) throw new Error(tr('曲のフォルダを開けません', "Can't open the song folder"));
     const loc = dir ? await readLocal(dir, place.path[place.path.length - 1] ?? '') : { folder: null as SongFolder | null, stats: new Map<string, LocalStat>(), blobs: new Map<string, File>() };
     const { link: oldLink } = loc.folder ? await readLinkOf(loc.folder) : { link: null };
+    // Drive にだけある曲を置く所のフォルダが、Drive の別の曲と合わせている（同じ曲が Drive に 2 つ）：そのフォルダは書きかえない
+    if (!job.local && job.drive && oldLink && oldLink.folderId !== job.drive.id && this.alive.has(oldLink.folderId)) return null;
     const before = oldLink ? linkSig(oldLink) : '';
     const first = !oldLink || !job.drive || oldLink.folderId !== job.drive.id;
     const asked = new Set(!first ? (oldLink?.ask ?? []) : []);
@@ -1203,6 +1341,16 @@ async function statNow(dir: FileSystemDirectoryHandle, path: string): Promise<{ 
     for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
     const f = await (await d.getFileHandle(parts[parts.length - 1])).getFile();
     return { size: f.size, mtime: f.lastModified };
+  } catch {
+    return null;
+  }
+}
+
+/** 曲のフォルダのつなぎの記録（無い・読めないなら null） */
+async function linkAt(dir: FileSystemDirectoryHandle): Promise<DriveLink | null> {
+  try {
+    const f = await fileIn(dir, LINK_FILE);
+    return f ? parseLink(await (await f.getFile()).text()) : null;
   } catch {
     return null;
   }

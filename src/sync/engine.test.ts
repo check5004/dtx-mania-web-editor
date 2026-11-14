@@ -528,6 +528,162 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     expect(r2.songs.map((s) => [s.lib, s.got])).toEqual([['オリジナル/Second', ['second.dtx']]]);
   });
 
+  describe('同じ曲を Drive に 2 つ作らない・「この PC に無い」はフォルダが無いときだけ', () => {
+    const NANI = 'nani ga warui';
+    const enc = (t: string) => new TextEncoder().encode(t);
+    /** Drive の曲のフォルダ（ゴミ箱の物は除く） */
+    const driveSongs = () => [...drive.files.values()].filter((f) => f.appProperties?.dtxe === 'song' && !drive.inTrash(f));
+    const linkOf = (p: Pc, song: string) => parseLink(p.root.read(`${song}/.dtxe-drive.json`) ?? '')?.folderId;
+
+    /** 前の版の「Drive にも保存」で、Drive の「DTX Web Editor」の直下に置いた曲 */
+    function oldDriveSong() {
+      const top = drive.add({ name: 'DTX Web Editor', parents: ['root'], appProperties: { dtxe: 'root' } });
+      const song = drive.add({ name: NANI, parents: [top.id], appProperties: { dtxe: 'song' }, description: JSON.stringify({ t: 'なにが悪い', a: 'Demo' }) });
+      drive.add({ name: 'nani.dtx', parents: [song.id], content: enc('#TITLE なにが悪い') });
+      drive.add({ name: 'bgm.ogg', parents: [song.id], content: enc('OGG') });
+      return song;
+    }
+
+    for (const how of ['つないでいない', 'つないであるが一覧の印が古い'] as const) {
+      it(`前の版で Drive の直下に保存した曲は、DTXFiles の同じ所の曲と同じ曲として合わせる（${how}）`, async () => {
+        const make = pc('作るPC', { scope: 'all' });
+        make.root.put(`${NANI}/nani.dtx`, '#TITLE なにが悪い');
+        make.root.put(`${NANI}/bgm.ogg`, 'OGG');
+        const old = oldDriveSong();
+        let stale = false;
+        if (how !== 'つないでいない') {
+          make.root.put(`${NANI}/.dtxe-drive.json`, JSON.stringify({ v: 1, folderId: old.id, name: NANI, files: {}, syncedAt: 1 }));
+          stale = true;
+        }
+        const lib = await libOf(make);
+        const r1 = await runSync({ settings: make.settings, lib: stale ? { ...lib, songs: lib.songs.map((s) => ({ ...s, drive: null })) } : lib, state: make.state, why: 'first', now });
+        // 曲を送り直さない（中身は同じ）。Drive の曲は DTXFiles へ動かし、1 つのまま
+        expect(r1.songs.flatMap((s) => s.sent)).toEqual([]);
+        expect(r1.asks).toEqual([]);
+        expect(driveSongs().map((f) => [f.id, drive.pathOf(f)])).toEqual([[old.id, `${LIB}/${NANI}`]]);
+        expect(drive.tree(`${LIB}/${NANI}`)).toEqual(['bgm.ogg', 'nani.dtx']);
+        expect(linkOf(make, NANI)).toBe(old.id);
+        // 前の版は、ここで「この PC で合わせていた「nani ga warui」のフォルダがありません」と毎回聞いていた
+        for (let i = 0; i < 2; i++) {
+          const r = await sync(make, { why: 'timer' });
+          expect(r.asks).toEqual([]);
+          expect(r.songs).toEqual([]);
+        }
+      });
+    }
+
+    it('前の版が Drive に 2 つ作ってしまった曲：使っていない方を Drive のゴミ箱に移し、「この PC に無い」とは聞かない', async () => {
+      const make = pc('作るPC');
+      makeSong(make);
+      const r1 = await sync(make);
+      const keep = r1.songs[0].driveId;
+      // 前の版の初めての同期で作った、もう 1 つの同じ曲（この PC の記録にも残っている。前に「この PC だけ消したままにする」と答えていても）
+      const box = drive.byPath(`${LIB}/オリジナル`)!;
+      const dup = drive.add({ name: 'Neon Skyline', parents: [box.id], appProperties: { dtxe: 'song', dev: '作るPC' }, description: JSON.stringify({ t: 'Neon Skyline', a: 'Demo', u: now() }) });
+      drive.add({ name: 'mstr.dtx', parents: [dup.id], content: enc(make.root.read(`${SONG}/mstr.dtx`)!) });
+      make.state.songs[dup.id] = { ...make.state.songs[keep], dirs: { '': dup.id } };
+      make.state.answers[`g:${dup.id}`] = 'leave';
+      const r2 = await sync(make, { why: 'timer' });
+      expect(r2.asks).toEqual([]);
+      expect(r2.songs.map((s) => [s.lib, s.dup, s.driveId])).toEqual([[SONG, true, dup.id]]);
+      expect(drive.inTrash(dup)).toBe(true);
+      // 片付けた方には、残した方の印（ほかの PC がつなぎ直す）
+      expect(dup.appProperties).toMatchObject({ dtxe: 'song', dup: keep });
+      expect(make.state.songs[dup.id]).toBeUndefined();
+      expect(make.state.answers[`g:${dup.id}`]).toBeUndefined();
+      expect(linkOf(make, SONG)).toBe(keep);
+      expect(driveSongs().map((f) => f.id)).toEqual([keep]);
+      const r3 = await sync(make, { why: 'timer' });
+      expect(r3.asks).toEqual([]);
+      expect(r3.songs).toEqual([]);
+    });
+
+    it('片付けた方とつないでいたほかの PC は、残した方につなぎ直す（同期から外さない）', async () => {
+      const make = pc('作るPC');
+      const play = pc('遊ぶPC');
+      makeSong(play);
+      const r0 = await sync(play);
+      const other = drive.files.get(r0.songs[0].driveId)!;
+      // 作るPC が、遊ぶPC の方に気づかずにもう 1 つ作ってしまった（前の版の形）
+      other.appProperties = { ...other.appProperties, dtxe: 'hidden' };
+      makeSong(make);
+      const r1 = await sync(make);
+      const keep = r1.songs[0].driveId;
+      other.appProperties = { ...other.appProperties, dtxe: 'song' };
+      make.state.songs[other.id] = { ...make.state.songs[keep], dirs: { '': other.id } };
+      const r2 = await sync(make, { why: 'timer' });
+      expect(r2.songs.map((s) => s.dup)).toEqual([true]);
+      expect(drive.inTrash(other)).toBe(true);
+      const r3 = await sync(play, { why: 'timer' });
+      expect(r3.asks).toEqual([]);
+      expect(r3.songs.filter((s) => s.error)).toEqual([]);
+      expect(linkOf(play, SONG)).toBe(keep);
+      // 遊ぶPC の曲は残り、同期も続く
+      make.root.put(`${SONG}/mstr.dtx`, 'MSTR-NEW');
+      await sync(make);
+      await sync(play);
+      expect(play.root.read(`${SONG}/mstr.dtx`)).toBe('MSTR-NEW');
+    });
+
+    it('前の曲を消して同じ所に別の曲を置いたときは、今までどおり「この PC に無い」と聞く（ゴミ箱には移さない）', async () => {
+      const make = pc('作るPC');
+      makeSong(make);
+      const was = (await sync(make)).songs[0].driveId;
+      // 遊ぶPC で作って同期した別の曲
+      const play = pc('遊ぶPC');
+      play.root.put('Rock/Other Song/other.dtx', '#TITLE Other Song');
+      play.root.put('Rock/Other Song/other.dtxe.json', '{"v":1}');
+      const other = (await sync(play)).songs[0].driveId;
+      // 作るPC で Neon Skyline を消して、同じ所に Other Song を写した（つなぎの記録ごと）
+      await (await make.root.getDirectoryHandle('オリジナル')).removeEntry('Neon Skyline', { recursive: true });
+      for (const p of play.root.list().filter((x) => x.startsWith('Rock/Other Song/'))) make.root.put(`${SONG}/${p.slice('Rock/Other Song/'.length)}`, play.root.read(p)!);
+      for (let i = 0; i < 2; i++) {
+        const lib = await libOf(make);
+        const r = await runSync({ settings: make.settings, lib: { ...lib, songs: lib.songs.map((s) => ({ ...s, title: 'Other Song' })) }, state: make.state, why: 'timer', now });
+        expect(r.asks.map((a) => [a.kind, a.id])).toEqual([['gone', `g:${was}`]]);
+        expect(r.songs.filter((s) => s.dup || s.error)).toEqual([]);
+        expect(drive.inTrash(drive.files.get(was)!)).toBe(false);
+        expect(linkOf(make, SONG)).toBe(other);
+      }
+    });
+
+    it('一覧に出ていない曲でも、フォルダがあれば「この PC に無い」と聞かずに合わせる（一覧が古いとき）', async () => {
+      const make = pc('作るPC');
+      makeSong(make);
+      await sync(make);
+      make.root.put(`${SONG}/adv.dtx`, 'ADV-NEW');
+      make.touched = [];
+      const lib = await libOf(make);
+      const r = await runSync({ settings: make.settings, lib: { ...lib, songs: [] }, state: make.state, why: 'timer', now });
+      expect(r.asks).toEqual([]);
+      expect(r.songs.map((s) => [s.lib, s.sent])).toEqual([[SONG, ['adv.dtx']]]);
+      // 一覧を読み直す
+      expect(make.touched).toContain(SONG);
+    });
+
+    it('Drive の同じ所に同じ曲が 2 つあっても、初めての PC は新しい方とだけ合わせる（行ったり来たりしない・聞かない）', async () => {
+      const make = pc('作るPC');
+      makeSong(make);
+      const r1 = await sync(make);
+      const keep = r1.songs[0].driveId;
+      const box = drive.byPath(`${LIB}/オリジナル`)!;
+      const old = drive.add({ name: 'Neon Skyline', parents: [box.id], appProperties: { dtxe: 'song', dev: '作るPC' }, description: JSON.stringify({ t: 'Neon Skyline', a: 'Demo', u: 1 }) });
+      drive.add({ name: 'mstr.dtx', parents: [old.id], content: enc('OLD') });
+      const play = pc('遊ぶPC');
+      const r2 = await sync(play);
+      expect(r2.asks).toEqual([]);
+      expect(linkOf(play, SONG)).toBe(keep);
+      expect(play.root.read(`${SONG}/mstr.dtx`)).toContain('#BPM 150');
+      for (let i = 0; i < 2; i++) {
+        const r = await sync(play, { why: 'timer' });
+        expect(r.asks).toEqual([]);
+        expect(linkOf(play, SONG)).toBe(keep);
+      }
+      // 作るPC も聞かない
+      expect((await sync(make, { why: 'timer' })).asks).toEqual([]);
+    });
+  });
+
   it('答えていない「確かめてほしい」は、次の同期でも聞き続ける（勝手に決めない・Drive に同じファイルを作らない）', async () => {
     const make = pc('作るPC');
     makeSong(make);
