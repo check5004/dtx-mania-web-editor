@@ -121,6 +121,19 @@ describe('目標の幅', () => {
     expect(b.BASIC!.max).toBeLessThanOrEqual(4.7);
   });
 
+  it('譜面を下へ移して空けた難易度（あいだに作る）は、上の譜面へ引き上げず、上下の譜面のあいだにする', () => {
+    // 楯さんの例：ADVANCED 5.10 を BASIC に移して、EXTREME 7.50 とのあいだに ADVANCED を作る
+    const known = { MASTER: 8.4, EXTREME: 7.5, BASIC: 5.1 };
+    const pulledUp = targetBands({ known, make: ['ADVANCED'] });
+    expect(pulledUp.ADVANCED!.center).toBeGreaterThanOrEqual(7.0 - 1e-9);
+    const b = targetBands({ known, make: ['ADVANCED'], inserted: ['ADVANCED'] });
+    expect(b.ADVANCED!.pulled).toBeUndefined();
+    expect(b.ADVANCED!.center).toBeGreaterThan(5.4);
+    expect(b.ADVANCED!.center).toBeLessThan(7.2);
+    expect(b.ADVANCED!.min).toBeGreaterThanOrEqual(5.4 - 1e-9);
+    expect(b.ADVANCED!.max).toBeLessThanOrEqual(7.2 + 1e-9);
+  });
+
   it('EXTREME を開いて作る（MASTER が無い曲）：EXTREME のレベルから下を決める', () => {
     const b = targetBands({ known: { EXTREME: 6 }, make: ['ADVANCED', 'BASIC'], floor: null });
     // EXTREME から ADVANCED は 0.5、BASIC は 0.9 まで

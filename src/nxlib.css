@@ -1136,6 +1136,100 @@ button.nx-dc.add:hover {
   line-height: 1.55;
 }
 
+/* あいだに作る（遊びたいレベルを入れる） */
+.nx-ins {
+  border: 1px solid #3a3160;
+  background: #16132a;
+  border-radius: 9px;
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 11.5px;
+  color: #d9cfff;
+  line-height: 1.55;
+}
+
+.nx-ins-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.nx-ins-lv {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b6a6ee;
+}
+
+.nx-ins-lv input {
+  width: 66px;
+  height: 28px;
+  border: 1px solid #4a3d78;
+  border-radius: 6px;
+  background: #0f0c1e;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.nx-ins-lv input:focus {
+  outline: none;
+  border-color: #8f7be0;
+}
+
+.nx-ins-say {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.nx-ins-say.ng {
+  color: var(--amber);
+}
+
+.nx-ins-chips {
+  display: flex;
+  gap: 5px;
+}
+
+.nx-ins-chips .nx-dc {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: 50px;
+}
+
+.nx-ins-chips .nx-dc .n {
+  height: 12px;
+  font-size: 9px;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.nx-ins-chips .nx-dc.made {
+  border-style: dashed;
+  border-color: #8f7be0;
+  background: rgb(143 123 224 / 0.16);
+}
+
+.nx-ins-chips .nx-dc.made .n {
+  color: #d2c2ff;
+}
+
+.nx-ins-note {
+  font-size: 10.5px;
+  color: #a99ccf;
+}
+
 .nx-ck {
   display: flex;
   gap: 9px;

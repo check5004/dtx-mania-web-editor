@@ -500,13 +500,25 @@ function ColHead({ col, w }: { col: Slot; w: number }) {
   // 何の列か：元の譜面・曲に既にある譜面（作者か AI か）・この画面で作る譜面（AI）
   let what: React.ReactNode = null;
   if (kind === 'source' && !narrow) what = <span className="lbl">{tr('元の譜面', 'Original')}</span>;
-  else if (kind === 'existing' && chart) what = <OriginBadge origin={chart.origin} tab={tiny} />;
+  else if (kind === 'existing' && chart)
+    what = (
+      <>
+        <OriginBadge origin={chart.origin} tab={tiny} />
+        {chart.movedFrom && !narrow && (
+          <span className="gen-moved" title={tr(`${chart.fromLabel ?? chart.movedFrom} から移した譜面`, `Moved here from ${chart.fromLabel ?? chart.movedFrom}`)}>
+            ← {SHORT[chart.movedFrom]}
+          </span>
+        )}
+      </>
+    );
   else if (kind === 'made') what = <OriginBadge origin="ai" tab={tiny} />;
   const whatTitle =
     kind === 'source'
       ? tr('（元の譜面）', ' (the original chart)')
       : kind === 'existing'
-        ? tr('（曲に既にある譜面）', ' (already in the song)')
+        ? chart?.movedFrom
+          ? tr(`（${chart.fromLabel ?? chart.movedFrom} から移した譜面）`, ` (moved from ${chart.fromLabel ?? chart.movedFrom})`)
+          : tr('（曲に既にある譜面）', ' (already in the song)')
         : chart
           ? tr('（この画面で作り直す譜面）', ' (being remade here)')
           : tr('（この画面で作る譜面）', ' (being made here)');

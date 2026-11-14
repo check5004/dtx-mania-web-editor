@@ -25,10 +25,15 @@ import {
   generateAll,
   genShow,
   initGen,
+  insertedSlots,
   isPassing,
   knownLevels,
   leaveGen,
   listenChoices,
+  moveDown,
+  moveSourceDown,
+  offeredMove,
+  pendingMoveTo,
   reflectState,
   selectDiff,
   setEnabled,
@@ -40,8 +45,11 @@ import {
   shownLevel,
   slotLabel,
   sourceFor,
+  sourceShift,
   stairIssues,
   stepListen,
+  undoableMove,
+  undoMove,
   unreflected,
   useGen,
   writeOut,
@@ -489,7 +497,9 @@ export function AiGenPage() {
             ) : (
               <span className="ellipsis gen-foot-policy">
                 {selChart
-                  ? tr(`${selChart.label} は曲に既にある譜面です（残します）。`, `${selChart.label} is already in the song (kept). `)
+                  ? selChart.movedFrom
+                    ? tr(`${selChart.label} は ${selChart.fromLabel ?? selChart.movedFrom} から移した譜面です。`, `${selChart.label} is the chart moved from ${selChart.fromLabel ?? selChart.movedFrom}. `)
+                    : tr(`${selChart.label} は曲に既にある譜面です（残します）。`, `${selChart.label} is already in the song (kept). `)
                   : anyResult
                   ? tr(`${ds.diff} はまだ作っていません。`, `${ds.diff} hasn't been generated yet. `)
                   : tr('左の「チェックした難易度を作る」で作ると、ここに並びます。', 'Use "Generate checked difficulties" on the left and the results line up here. ')}
@@ -724,7 +734,65 @@ function SourceCard() {
       <div className="row lbl gen-diff-line">
         <span className="ellipsis">{file}</span>
       </div>
+      <SourceMoveLink />
     </div>
+  );
+}
+
+/**
+ * 開いている譜面を下へ移して、あいだに作る（上の譜面を開き直す）。例: ADVANCED を開いていて BASIC が空いているとき、
+ * ADVANCED を BASIC に移し、EXTREME を開き直して、あいだの ADVANCED を EXTREME から作る
+ */
+function SourceMoveLink() {
+  const g = useGen();
+  const plan = sourceShift(g);
+  if (!plan) return null;
+  const from = g.sourceSlot;
+  const above = g.charts[plan.above]!;
+  return (
+    <button
+      className="link-btn gen-move-link"
+      onClick={(e) => {
+        e.stopPropagation();
+        void moveSourceDown();
+      }}
+      disabled={g.busy}
+      title={tr(
+        `この譜面を ${plan.to} に移し（ファイルと DTXMania の成績はそのまま）、${above.label}（Lv ${above.level.toFixed(2)}）を開き直して、あいだの ${from} を作ります。エディタに反映するまで、曲フォルダは変わりません`,
+        `Moves this chart to ${plan.to} (the file and your DTXMania records stay as they are), reopens ${above.label} (Lv ${above.level.toFixed(2)}) and makes a new ${from} in between. The song folder doesn't change until you add it to the editor`,
+      )}
+    >
+      {Icon.arrowDown(12)}
+      {tr(`${plan.to} へ移して、あいだに作る`, `Move to ${plan.to} and make one in between`)}
+    </button>
+  );
+}
+
+/** 曲にある譜面を下へ移すリンク（すぐ下の難易度が空いているとき） */
+function MoveLink({ chart }: { chart: ExistingChart }) {
+  const g = useGen();
+  const to = offeredMove(g, chart.slot);
+  if (!to) return null;
+  const up = SLOTS.slice(0, SLOTS.indexOf(chart.slot))
+    .reverse()
+    .find((x) => x === g.sourceSlot || g.charts[x]);
+  const upName = up ? slotLabel(g, up) : null;
+  return (
+    <button
+      className="link-btn gen-move-link"
+      onClick={(e) => {
+        e.stopPropagation();
+        moveDown(chart.slot as Difficulty);
+      }}
+      disabled={g.busy}
+      title={tr(
+        `この譜面を ${to} に移し（ファイルと DTXMania の成績はそのまま）、空いた ${chart.slot} に${upName ? ` ${upName} とのあいだの` : ''}譜面を作ります。エディタに反映するまで、曲フォルダは変わりません`,
+        `Moves this chart to ${to} (the file and your DTXMania records stay as they are) and makes a new ${chart.slot}${upName ? ` between it and ${upName}` : ''}. The song folder doesn't change until you add it to the editor`,
+      )}
+    >
+      {Icon.arrowDown(12)}
+      {tr(`${to} へ移して、あいだに作る`, `Move to ${to} and make one in between`)}
+    </button>
   );
 }
 
@@ -742,6 +810,7 @@ function ExistingCard({ chart, on, canRemake }: { chart: ExistingChart; on: bool
         <span className="gen-slot-pad" />
         <b className="ellipsis">{chart.label}</b>
         <OriginBadge origin={chart.origin} />
+        {chart.movedFrom && <MovedChip chart={chart} />}
         <span className="grow" />
         <b className="mono" title={chart.registered ? tr('登録レベル（#DLEVEL）', 'Listed level (#DLEVEL)') : tr('登録レベルが無いので計算のめやす', 'No listed level, so this is a computed estimate')}>
           {chart.registered ? '' : '≈'}
@@ -751,8 +820,8 @@ function ExistingCard({ chart, on, canRemake }: { chart: ExistingChart; on: bool
       <div className="row lbl gen-diff-line">
         <span className="ellipsis">{chart.file}</span>
         <span className="grow" />
-        <span>{tr('残す', 'Kept')}</span>
-        {canRemake && (
+        {chart.movedFrom ? <MovedState chart={chart} /> : <span>{tr('残す', 'Kept')}</span>}
+        {canRemake && !chart.movedFrom && (
           <button
             className="link-btn"
             onClick={(e) => {
@@ -765,7 +834,51 @@ function ExistingCard({ chart, on, canRemake }: { chart: ExistingChart; on: bool
           </button>
         )}
       </div>
+      <MoveLink chart={chart} />
     </div>
+  );
+}
+
+const SHORT_NAME: Record<Slot, string> = { MASTER: 'MAS', EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
+
+/** 下へ移した譜面の印（元の難易度） */
+function MovedChip({ chart }: { chart: ExistingChart }) {
+  if (!chart.movedFrom) return null;
+  return (
+    <span className="gen-moved" title={tr(`${chart.fromLabel ?? chart.movedFrom} から移した譜面`, `Moved here from ${chart.fromLabel ?? chart.movedFrom}`)}>
+      ← {SHORT_NAME[chart.movedFrom]}
+    </span>
+  );
+}
+
+/** 下へ移した譜面の様子：まだ反映していなければ「移す」と「戻す」、反映したら「移しました」 */
+function MovedState({ chart }: { chart: ExistingChart }) {
+  const g = useGen();
+  const pending = pendingMoveTo(g, chart.slot);
+  const undo = undoableMove(g);
+  if (!pending)
+    return (
+      <span className="gen-reflect ok" title={tr('set.def で移しました（ファイルと DTXMania の成績はそのまま）', 'Moved in set.def (the file and your DTXMania records stay as they are)')}>
+        {tr('✓ 移しました', '✓ Moved')}
+      </span>
+    );
+  return (
+    <>
+      <span title={tr('エディタに反映すると、set.def でこの難易度に移します（ファイルと DTXMania の成績はそのまま）', 'When you add to the editor, set.def moves it to this difficulty (the file and your DTXMania records stay as they are)')}>{tr('移す', 'Moving')}</span>
+      {undo?.to === chart.slot && (
+        <button
+          className="link-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            void undoMove();
+          }}
+          disabled={g.busy}
+          title={tr(`${chart.fromLabel ?? chart.movedFrom} に戻す`, `Move it back to ${chart.fromLabel ?? chart.movedFrom}`)}
+        >
+          {tr('戻す', 'Undo')}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -874,6 +987,8 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
   const t = ds.target;
   // 作ったあとで作る元が変わった（上の既存の譜面を作り直す・残すに変えた）
   const srcChanged = !!ds.result && !!ds.src && !!src && ds.src.doc !== src.doc;
+  // 曲にある譜面を下へ移して空けた難易度（上下の譜面のあいだに作る）
+  const between = !chart && insertedSlots(g).includes(ds.diff) ? betweenOf(g, ds.diff) : null;
   return (
     <div className={`card gen-diff ${on ? 'on' : ''} ${ds.enabled ? '' : 'off'}`} onClick={() => selectDiff(ds.diff)} role="button" tabIndex={0}>
       <div className="row" style={{ gap: 8 }}>
@@ -928,6 +1043,16 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
               {tr(`${slotLabel(g, t.pulledFrom)} に合わせて +${t.pulled!.toFixed(2)} 引き上げ（削りすぎない）`, `Raised +${t.pulled!.toFixed(2)} to stay near ${slotLabel(g, t.pulledFrom)}`)}
             </div>
           )}
+          {between && (
+            <div className="lbl gen-diff-line gen-diff-note gen-between">
+              {between.lower && between.upper
+                ? tr(
+                    `${between.lower.name}（${between.lower.level.toFixed(2)}）と ${between.upper.name}（${between.upper.level.toFixed(2)}）のあいだに作る`,
+                    `Made in between ${between.lower.name} (${between.lower.level.toFixed(2)}) and ${between.upper.name} (${between.upper.level.toFixed(2)})`,
+                  )
+                : tr('上下の譜面のあいだに作る', 'Made in between the charts above and below')}
+            </div>
+          )}
           {src && src.slot !== g.sourceSlot && (
             <div className="lbl gen-diff-line gen-diff-note">
               {tr(`元: ${slotLabel(g, src.slot)}（既存・Lv ${src.level.toFixed(2)}）`, `From: ${slotLabel(g, src.slot)} (existing, Lv ${src.level.toFixed(2)})`)}
@@ -975,6 +1100,20 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
       {on && ds.enabled && <DiffActions ds={ds} busy={busy || g.busy} />}
     </div>
   );
+}
+
+/** あいだに作る難易度の上下の譜面（名前とレベル） */
+function betweenOf(g: GenState, d: Difficulty): { lower: { name: string; level: number } | null; upper: { name: string; level: number } | null } {
+  const known = knownLevels(g);
+  const i = SLOTS.indexOf(d);
+  const up = SLOTS.slice(0, i)
+    .filter((x) => known[x] !== undefined)
+    .pop();
+  const down = SLOTS.slice(i + 1).find((x) => known[x] !== undefined);
+  return {
+    upper: up ? { name: slotLabel(g, up), level: known[up]! } : null,
+    lower: down ? { name: slotLabel(g, down), level: known[down]! } : null,
+  };
 }
 
 /**
@@ -1089,6 +1228,10 @@ function ExistingInfo({ chart }: { chart: ExistingChart }) {
   const canRemake = below.includes(chart.slot as Difficulty);
   // この譜面から作る難易度（次の残す譜面まで）
   const from = below.filter((d) => g.diffs[d].enabled && sourceFor(g, d)?.slot === chart.slot);
+  const to = offeredMove(g, chart.slot);
+  const pending = pendingMoveTo(g, chart.slot);
+  const undo = undoableMove(g);
+  const was = chart.fromLabel ?? chart.movedFrom;
   return (
     <div className="card gen-judge">
       <div className="row" style={{ gap: 6 }}>
@@ -1101,18 +1244,39 @@ function ExistingInfo({ chart }: { chart: ExistingChart }) {
         {chart.file} · {chart.registered ? tr('登録レベル（#DLEVEL）', 'listed level (#DLEVEL)') : tr('登録レベルが無いので計算のめやす', 'no listed level, so a computed estimate')}
       </div>
       <div>
-        {tr(`${originTitle(chart.origin)}です。曲フォルダの譜面はそのまま残します。`, `${originTitle(chart.origin)}. The chart in the song folder stays as it is.`)}
+        {!chart.movedFrom
+          ? tr(`${originTitle(chart.origin)}です。曲フォルダの譜面はそのまま残します。`, `${originTitle(chart.origin)}. The chart in the song folder stays as it is.`)
+          : pending
+            ? tr(
+                `${was} から移す譜面です。エディタに反映すると、set.def でこの譜面を ${chart.slot} に移します。ファイル（${chart.file}）も中身も変えないので、DTXMania の成績も付いたままです。空いた ${chart.movedFrom} には、新しい譜面を別の名前で作ります。`,
+                `This chart moves here from ${was}. When you add to the editor, set.def lists it as ${chart.slot}. Its file (${chart.file}) and content don't change, so your DTXMania records stay with it. The new ${chart.movedFrom} is written under a different name.`,
+              )
+            : tr(`${was} から移した譜面です（set.def で ${chart.slot} に移しました。ファイルと DTXMania の成績はそのまま）。`, `Moved here from ${was} (set.def lists it as ${chart.slot}; the file and your DTXMania records stay as they are).`)}
         {from.length > 0 &&
           tr(
             ` ${from.join('・')} はこの譜面から作ります（上の難易度からはみ出さないように）。`,
             ` ${from.join(' and ')} ${from.length === 1 ? 'is' : 'are'} made from this chart (so they never go beyond it).`,
           )}
       </div>
-      {canRemake && (
-        <button className="btn small" style={{ marginTop: 8 }} onClick={() => remake(chart.slot as Difficulty)}>
-          {tr('この難易度も作り直す', 'Remake this difficulty too')}
-        </button>
-      )}
+      {(canRemake && !chart.movedFrom) || to || undo?.to === chart.slot ? (
+        <div className="row wrap gen-info-acts">
+          {canRemake && !chart.movedFrom && (
+            <button className="btn small" onClick={() => remake(chart.slot as Difficulty)}>
+              {tr('この難易度も作り直す', 'Remake this difficulty too')}
+            </button>
+          )}
+          {to && (
+            <button className="btn small" onClick={() => moveDown(chart.slot as Difficulty)} disabled={g.busy}>
+              {Icon.arrowDown(12)} {tr(`${to} へ移して、あいだに作る`, `Move to ${to} and make one in between`)}
+            </button>
+          )}
+          {undo?.to === chart.slot && (
+            <button className="btn small" onClick={() => void undoMove()} disabled={g.busy}>
+              {tr(`${was} に戻す`, `Move back to ${was}`)}
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

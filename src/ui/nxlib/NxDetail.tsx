@@ -3,15 +3,17 @@
 import { tr, isJa } from '../../i18n';
 import { useEffect, useState } from 'react';
 import { useDriveAuth } from '../../drive/auth';
+import { defaultInsertLevel, insertPlan, type InsertFail, type InsertPlan } from '../../gen/insert';
 import { targetBands, type Slot } from '../../gen/targets';
 import type { Difficulty } from '../../gen/simplify';
-import { fixNxSetDef, makeNxSetDef, nxImageUrl, nxPreviewLoader, openNxGen, openNxSong, openNxSongInfo, setDriveSkip } from '../../nxlib/actions';
+import { fixNxSetDef, makeNxSetDef, nxImageUrl, nxPreviewLoader, openNxGen, openNxInsert, openNxSong, openNxSongInfo, setDriveSkip } from '../../nxlib/actions';
 import { checkLevel, SLOT_KEYS, type LibChart, type LibCheck, type LibSong, type SlotKey } from '../../nxlib/scan';
 import { useNxLib } from '../../nxlib/store';
-import { addableSlots, bytesText, bpmText, canOpen, chartIn, levelText, setDefFor, SLOT_LABEL, sourceFor, topChart } from '../../nxlib/view';
+import { addableSlots, bytesText, bpmText, canOpen, chartIn, KEY_OF_SLOT, levelText, setDefFor, SLOT_LABEL, SLOT_OF_KEY, slotLevels, sourceFor, topChart } from '../../nxlib/view';
+import { insertLevel } from '../../store/gen';
 import { AuditionButton, AuditionProgress } from '../Audition';
 import { Icon } from '../icons';
-import { SLOT_COLOR, Thumb } from './parts';
+import { SLOT_CLASS, SLOT_COLOR, Thumb } from './parts';
 import { usePcSync } from '../../sync/store';
 import { SyncSongSection } from '../sync/parts';
 
@@ -159,6 +161,8 @@ export function NxDetail({ s }: { s: LibSong }) {
         )}
       </div>
 
+      <InsertBox key={s.id} s={s} />
+
       {s.checks.length > 0 && (
         <div className="nx-sec">
           <div className="nx-sec-t">
@@ -286,6 +290,160 @@ function ChartRow({ s, c, color, draft }: { s: LibSong; c: LibChart; color: stri
       >
         {tr('開く', 'Open')}
       </button>
+    </div>
+  );
+}
+
+/** レベルの数字（6.5・5.10 のように、打った細かさで） */
+function wantText(v: number): string {
+  return Math.abs(Math.round(v * 10) - v * 10) < 1e-6 ? v.toFixed(1) : v.toFixed(2);
+}
+
+/** 作れないわけ */
+function failText(f: InsertFail, want: number): string {
+  const at = f.slot ? tr(`${f.slot}（${levelText(f.level ?? null)}）`, `${f.slot} (${levelText(f.level ?? null)})`) : '';
+  switch (f.why) {
+    case 'top':
+      return tr(
+        `Lv ${wantText(want)} は作れません。上の譜面を間引いて作るので、いちばん上の ${at}より 0.3 以上低くしてください。`,
+        `Lv ${wantText(want)} can't be made. Charts are made by thinning the chart above, so go at least 0.3 below the top one, ${at}.`,
+      );
+    case 'bottom':
+      return tr(`${at}より易しい譜面を入れる難易度がありません。`, `There's no difficulty below ${at} to put an easier chart in.`);
+    case 'near':
+      return tr(`${at}とほとんど同じレベルです。0.3 以上離してください。`, `That's almost the same level as ${at}. Keep it at least 0.3 away.`);
+    case 'full':
+      return tr('下の難易度が埋まっていて、譜面を移す先がありません。', 'The difficulties below are full, so there is nowhere to move a chart to.');
+    case 'unknown':
+      return tr(`${f.slot} の譜面にレベルが書いてないので、どこに作るか決められません。`, `The ${f.slot} chart has no level, so where to make it can't be decided.`);
+    case 'empty':
+      return '';
+  }
+}
+
+/**
+ * あいだに作る（gen/insert）：遊びたいレベルを入れると、曲の難易度のどこに作るかを出して、AI難易度生成を開く。
+ * あいだに空いた難易度が無ければ、曲にある譜面を下の難易度へ移して空ける（楯さんの依頼 2026-11-14。
+ * ADVANCED 5.10・EXTREME 7.50・MASTER 8.40 で 6.5 が欲しい → 5.10 を BASIC に移して、空いた ADVANCED に作る）。
+ * 出すのは、譜面が 2 つ以上あって、いちばん上より下に空いた難易度がある曲だけ（1 つだけなら上の「AI で作る」と同じ）
+ */
+function InsertBox({ s }: { s: LibSong }) {
+  const levels = slotLevels(s);
+  const [text, setText] = useState(() => {
+    const v = levels ? defaultInsertLevel(levels, insertLevel()) : null;
+    return v === null ? '' : wantText(v);
+  });
+  if (!levels || Object.keys(levels).length < 2) return null;
+  const typed = text.trim().replace(',', '.');
+  const n = Number(typed);
+  const want = typed !== '' && Number.isFinite(n) && n >= 1 && n <= 9.99 ? Math.round(n * 100) / 100 : null;
+  const plan = want !== null ? insertPlan(levels, want) : null;
+  const ok: InsertPlan | null = plan?.ok ? plan : null;
+  const lv = (k: Slot) => levelText(levels[k] ?? null);
+
+  let say = '';
+  if (want === null) say = typed === '' ? tr('遊びたいレベルを入れると、どの難易度に作るかを出します。', 'Enter the level you want to play, and it shows which difficulty it goes in.') : tr('1.00〜9.99 のレベルを入れてください。', 'Enter a level from 1.00 to 9.99.');
+  else if (!ok) say = failText(plan as InsertFail, want);
+  else if (ok.moves.length) {
+    const moved = [...ok.moves].reverse();
+    say = tr(
+      `${moved.map((m) => `${m.from}（${lv(m.from)}）を ${m.to} に`).join('、')}移して、空いた ${ok.make} に Lv ${wantText(want)} の譜面を ${ok.source}（${lv(ok.source)}）から作ります。`,
+      `Moves ${moved.map((m) => `${m.from} (${lv(m.from)}) to ${m.to}`).join(', ')}, then makes a Lv ${wantText(want)} chart in the freed ${ok.make} from ${ok.source} (${lv(ok.source)}).`,
+    );
+  } else
+    say = tr(
+      `空いている ${ok.make} に、Lv ${wantText(want)} の譜面を ${ok.source}（${lv(ok.source)}）から作ります。`,
+      `Makes a Lv ${wantText(want)} chart in the empty ${ok.make} from ${ok.source} (${lv(ok.source)}).`,
+    );
+
+  // 作ったあとの並び（移した譜面は元の難易度を添える）
+  const after = new Map<Slot, { lv: string; from?: Slot; made?: boolean }>();
+  if (ok && want !== null) {
+    for (const k of SLOT_KEYS) if (levels[SLOT_OF_KEY[k]] !== undefined) after.set(SLOT_OF_KEY[k], { lv: lv(SLOT_OF_KEY[k]) });
+    for (const m of ok.moves) after.set(m.to, { lv: lv(m.from), from: m.from });
+    after.set(ok.make, { lv: wantText(want), made: true });
+  }
+  const go = () => {
+    if (ok && want !== null) void openNxInsert(s, want);
+  };
+
+  return (
+    <div className="nx-sec">
+      <div className="nx-sec-t">
+        <span>{tr('あいだに作る', 'Make one in between')}</span>
+        <span className="nx-sec-sub">{tr('遊びたいレベルの譜面を足す', 'Add a chart at the level you want')}</span>
+      </div>
+      <div className="nx-ins">
+        <div className="nx-ins-row">
+          <label className="nx-ins-lv">
+            <span>Lv</span>
+            <input
+              className="mono"
+              type="number"
+              inputMode="decimal"
+              step={0.1}
+              min={1}
+              max={9.99}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                // 一覧のキー（↑↓ で曲を選ぶ・Enter で開く）にしない
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter') e.stopPropagation();
+                if (e.key === 'Enter') go();
+              }}
+              aria-label={tr('作る譜面のレベル', 'Level of the chart to make')}
+            />
+          </label>
+          <span className={`nx-ins-say ${want !== null && !ok ? 'ng' : ''}`}>{say}</span>
+        </div>
+        {ok && (
+          <div className="nx-ins-chips" aria-label={tr('作ったあとの難易度', 'Difficulties after making it')}>
+            {SLOT_KEYS.map((k) => {
+              const a = after.get(SLOT_OF_KEY[k]);
+              if (!a)
+                return (
+                  <span key={k} className="nx-dc none">
+                    <span className="t">{k}</span>
+                    <span className="v">—</span>
+                    <span className="n" />
+                  </span>
+                );
+              return (
+                <span key={k} className={`nx-dc ${SLOT_CLASS[k]} ${a.made ? 'made' : ''} ${a.from ? 'moved' : ''}`}>
+                  <span className="t">{k}</span>
+                  <span className="v">{a.lv}</span>
+                  <span className="n">
+                    {a.made ? (
+                      <>
+                        {Icon.sparkle(8)}
+                        {tr('作る', 'new')}
+                      </>
+                    ) : a.from ? (
+                      `← ${KEY_OF_SLOT[a.from]}`
+                    ) : (
+                      ''
+                    )}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {ok && ok.moves.length > 0 && (
+          <span className="nx-ins-note">
+            {tr(
+              '移すのは set.def の難易度の段だけで、譜面のファイルと DTXMania の成績はそのまま付いていきます。曲のフォルダが変わるのは、AI難易度生成で作って「エディタに反映」したときです。',
+              "Only the difficulty rows in set.def move; the chart files and your DTXMania records go with them unchanged. The song folder changes only when you make it in the AI generator and press “Add to editor”.",
+            )}
+          </span>
+        )}
+        <div>
+          <button className="btn small nx-ai" disabled={!ok} onClick={go}>
+            {Icon.sparkle(11)}
+            {ok ? tr(`AI難易度生成で ${ok.make} を作る`, `Make ${ok.make} with the AI generator`) : tr('AI難易度生成で作る', 'Make it with the AI generator')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

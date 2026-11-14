@@ -25,7 +25,8 @@ import { lastMeasure } from '../gen/features';
 import { projectCharts } from '../gen/project';
 import { DEFAULT_KEEP, DIFFICULTIES, easeSteps, generateToTarget, levelOfDoc, MAX_RUNG, simplify, type Difficulty, type Generated, type MustKeep, type SectionPlan } from '../gen/simplify';
 import { alignPlan, chartProfile, clampRange, keptIds, matchIds, profileLine, stairCheck, stepRange, type StairCheck } from '../gen/stairs';
-import { aimOf, isAbove, SLOTS, slotOf, slotRank, targetBands, type Slot, type TargetBand } from '../gen/targets';
+import { aimOf, isAbove, KNOWN_GAP, SLOTS, slotOf, slotRank, targetBands, type Slot, type TargetBand } from '../gen/targets';
+import type { InsertPlan } from '../gen/insert';
 import { chooseDialog, confirmDialog } from '../ui/dialogs';
 import { sortByDifficulty } from '../gen/diffTabs';
 import { hasAiKey, runAi } from './ai';
@@ -60,6 +61,23 @@ export interface ExistingChart {
   /** 作者の譜面か、このアプリで作った譜面か */
   origin: ChartOrigin;
   calib: number;
+  /** 下の難易度へ移した譜面なら、元の難易度と set.def の名前（あいだに作る。gen/insert） */
+  movedFrom?: Difficulty;
+  fromLabel?: string;
+}
+
+/**
+ * 曲にある譜面を 1 つ下の難易度へ移したこと（空いた難易度に、上下の譜面のあいだの譜面を作るため）。
+ * エディタに反映するまでは、この画面の中だけ。反映すると set.def の段と名前だけを変える（ファイル・中身・DTXMania の成績はそのまま）
+ */
+export interface ChartMove {
+  from: Difficulty;
+  to: Difficulty;
+  file: string;
+  /** 移す前の 2 つの難易度と譜面（戻すときにそのまま戻す） */
+  before: { from: DiffState; to: DiffState; chart: ExistingChart };
+  /** エディタに反映した（set.def に書いた）。もう戻さない */
+  written: boolean;
 }
 
 export interface DiffState {
@@ -120,9 +138,11 @@ export interface GenState {
   /** 登録レベル ÷ 機械的な推定（開いている譜面で合わせる倍率） */
   calib: number;
   spans: SectionSpan[];
-  /** 曲に既にあるほかの難易度 */
+  /** 曲に既にあるほかの難易度（下へ移した譜面は移した先に） */
   charts: Partial<Record<Slot, ExistingChart>>;
   chartsLoading: boolean;
+  /** 下へ移した譜面（移した順） */
+  moves: ChartMove[];
   diffs: Record<Difficulty, DiffState>;
   /** 右の判定・方針と、易しく・難しくの対象 */
   selected: Difficulty;
@@ -190,6 +210,7 @@ export const useGen = create<GenState>(() => ({
   spans: [],
   charts: {},
   chartsLoading: false,
+  moves: [],
   diffs: freshDiffs('MASTER'),
   selected: 'ADVANCED',
   listen: 'MASTER',
@@ -356,7 +377,7 @@ export function recomputeTargets() {
   const make = belowSource(s).filter((d) => known[d] === undefined);
   const manual: Partial<Record<Difficulty, number>> = {};
   for (const d of make) if (s.diffs[d].manual !== null) manual[d] = s.diffs[d].manual!;
-  const bands = targetBands({ known, make, floor: known.BASIC === undefined ? floorOf(s) : null, manual });
+  const bands = targetBands({ known, make, floor: known.BASIC === undefined ? floorOf(s) : null, manual, inserted: insertedSlots(s) });
   set((st) => {
     const diffs = { ...st.diffs };
     for (const d of DIFFICULTIES) if (bands[d]) diffs[d] = { ...diffs[d], target: bands[d]! };
@@ -364,13 +385,17 @@ export function recomputeTargets() {
   });
 }
 
-/** 画面を開いたとき：いまの譜面を元の譜面にする（同じ譜面なら前の結果を残す）。曲に既にある難易度を読む */
+/**
+ * 画面を開いたとき：いまの譜面を元の譜面にする（同じ譜面なら前の結果を残す）。曲に既にある難易度を読む。
+ * 返すのは曲にある難易度を読み終えるまで（あいだに作る案を当てるのは、読み終えてから）
+ */
 let loadToken = 0;
-export function initGen() {
+let loading: Promise<void> = Promise.resolve();
+export function initGen(): Promise<void> {
   void loadGuideline();
   const s = useEditor.getState();
   const g = get();
-  if (g.master === s.doc) return;
+  if (g.master === s.doc) return loading;
   const doc = s.doc;
   const mech = levelOfDoc(doc);
   const masterLevel = levelOfField(doc.fields['DLEVEL']) ?? levelOf(doc)?.level ?? mech;
@@ -393,6 +418,7 @@ export function initGen() {
     spans,
     charts: {},
     chartsLoading: !!s.folder,
+    moves: [],
     diffs: freshDiffs(sourceSlot),
     selected: below.includes('ADVANCED') ? 'ADVANCED' : (below[0] ?? 'BASIC'),
     listen: sourceSlot,
@@ -400,7 +426,9 @@ export function initGen() {
     view: { ...get().view, scrollBeat: Math.max(-0.5, s.cursorBeat - 2) },
   });
   recomputeTargets();
-  if (s.folder) void loadCharts(s.folder, ++loadToken);
+  // 別の譜面を読み終える前に開き直しても、古い読み込みは捨てる（loadToken）
+  loading = s.folder ? loadCharts(s.folder, ++loadToken).catch(() => undefined) : Promise.resolve();
+  return loading;
 }
 
 /** 曲フォルダの set.def（無ければ DTX のファイル名）から、ほかの難易度を読む */
@@ -474,11 +502,207 @@ async function loadCharts(folder: SongFolder, token: number) {
 /** 既存の譜面を作り直すか（作る難易度のチェック） */
 export function setEnabled(d: Difficulty, on: boolean) {
   if (!belowSource().includes(d)) return;
+  // 下へ移した譜面は作り直さない（移すのをやめるなら「戻す」）
+  if (pendingMoveTo(get(), d)) return;
   patchDiff(d, { enabled: on });
   // 既存の譜面を残すか作り直すかで、ほかの難易度の目標と作る元が変わる
   if (get().charts[d]) recomputeTargets();
   const s = get();
   if (!columnDoc(s, s.listen)) set({ listen: s.sourceSlot });
+}
+
+// ---- あいだに作る（曲にある譜面を下の難易度へ移す） -----------------------------------------
+// 楯さんの依頼（2026-11-14）: ADVANCED 5.10・EXTREME 7.50・MASTER 8.40 で BASIC が空いている曲に、6.5 くらいの譜面が欲しい。
+// 5.10 を BASIC に移して、空いた ADVANCED に上下のあいだの譜面を作る。
+// - 移すのは set.def の段（L1〜L4）と難易度名だけ。ファイルも中身も変えないので、DTXMania の成績（<譜面>.score.ini）も付いたまま
+// - 新しく作る譜面は別の名前にする（古い名前を使うと、DTXMania が前の譜面の成績を新しい譜面に付けてしまう）
+// - 作る元は上の譜面。下に移した譜面にある音は残す（段階の決まりは今までと同じ）
+// - エディタに反映するまでは、この画面の中だけ（戻せる）
+
+const INSERT_LEVEL_KEY = 'dtxe.insertLevel.v1';
+
+/** 前にあいだに作ったときのレベル（あなたが遊ぶレベル。次の曲でもはじめに出す） */
+export function insertLevel(): number | null {
+  try {
+    const v = Number(localStorage.getItem(INSERT_LEVEL_KEY));
+    return Number.isFinite(v) && v >= 1 && v <= 9.9 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberInsertLevel(v: number) {
+  if (!Number.isFinite(v) || v < 1 || v > 9.9) return;
+  try {
+    localStorage.setItem(INSERT_LEVEL_KEY, String(Math.round(v * 10) / 10));
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
+/** 譜面を下へ移して空けた難易度（まだ何も入っていない所。目標は上下の譜面のあいだ） */
+export function insertedSlots(s: Pick<GenState, 'moves' | 'charts'>): Difficulty[] {
+  return [...new Set(s.moves.map((m) => m.from))].filter((d) => !s.charts[d]);
+}
+
+/** まだ反映していない、その難易度へ移した譜面（作り直さない・「戻す」の対象） */
+export function pendingMoveTo(s: Pick<GenState, 'moves'>, d: Slot): ChartMove | null {
+  return [...s.moves].reverse().find((m) => m.to === d && !m.written) ?? null;
+}
+
+/** 最後の移した譜面（まだ反映していなければ戻せる） */
+export function undoableMove(s: Pick<GenState, 'moves'>): ChartMove | null {
+  const m = s.moves[s.moves.length - 1];
+  return m && !m.written ? m : null;
+}
+
+/**
+ * その難易度の譜面を 1 つ下へ移せるなら、移す先。開いている譜面より下の、曲にある譜面で、すぐ下の難易度が空いているときだけ
+ * （開いている譜面は「上の譜面を開き直して移す」: sourceShift）
+ */
+export function moveTarget(s: Pick<GenState, 'sourceSlot' | 'charts' | 'diffs' | 'chartsLoading'>, slot: Slot): Difficulty | null {
+  if (slot === 'MASTER' || s.chartsLoading || !s.charts[slot] || slot === s.sourceSlot || !isAbove(s.sourceSlot, slot)) return null;
+  // 作り直して反映した難易度の古い譜面は移さない（set.def にはもう作った譜面が載っている）
+  if (s.diffs[slot].applied) return null;
+  const to = SLOTS[slotRank(slot) + 1] as Difficulty | undefined;
+  if (!to || s.charts[to] || s.diffs[to].applied) return null;
+  return to;
+}
+
+/**
+ * 画面で「下へ移す」を出す難易度：移せる譜面のうち、移す先がいま空けた難易度でないもの
+ * （ADVANCED を BASIC に移した直後に、EXTREME を空けた ADVANCED へ移す案まで出すと、何をあいだに作るのか分かりにくい。
+ * 2 つ続けて移すのは、DTXMania の曲の「あいだに作る」でレベルから決めたときだけ）
+ */
+export function offeredMove(s: Pick<GenState, 'sourceSlot' | 'charts' | 'diffs' | 'chartsLoading' | 'moves'>, slot: Slot): Difficulty | null {
+  const to = moveTarget(s, slot);
+  return to && !insertedSlots(s).includes(to) ? to : null;
+}
+
+/** 空けた難易度のはじめのめやす：前に入れたレベルが上下の譜面のあいだに入れば、それ。入らなければ自動（上下の譜面のあいだ） */
+function rememberedAimFor(s: GenState, d: Difficulty): number | null {
+  const r = insertLevel();
+  if (r === null) return null;
+  const known = knownLevels(s);
+  const up = SLOTS.slice(0, slotRank(d)).filter((x) => known[x] !== undefined).pop();
+  const down = SLOTS.slice(slotRank(d) + 1).find((x) => known[x] !== undefined);
+  if (up && r > known[up]! - KNOWN_GAP) return null;
+  if (down && r < known[down]! + KNOWN_GAP) return null;
+  return r;
+}
+
+/**
+ * 曲にある譜面を 1 つ下の難易度へ移し、空いた難易度を作る難易度にする（めやすは aim か、前に入れたレベル）。
+ * 下の難易度で作っていた結果は消える（「戻す」で戻る）
+ */
+export function moveDown(slot: Difficulty, o: { aim?: number | null } = {}): boolean {
+  const s = get();
+  const to = moveTarget(s, slot);
+  if (!to) return false;
+  const c = s.charts[slot]!;
+  const charts = { ...s.charts };
+  delete charts[slot];
+  charts[to] = { ...c, slot: to, label: to, movedFrom: c.movedFrom ?? slot, fromLabel: c.fromLabel ?? c.label };
+  const move: ChartMove = { from: slot, to, file: c.file, before: { from: s.diffs[slot], to: s.diffs[to], chart: c }, written: false };
+  set({
+    charts,
+    moves: [...s.moves, move],
+    diffs: { ...s.diffs, [to]: emptyDiff(to, false), [slot]: emptyDiff(slot, true) },
+    selected: slot,
+    listen: s.listen === slot ? to : s.listen,
+  });
+  const aim = o.aim ?? rememberedAimFor(get(), slot);
+  if (aim !== null && Number.isFinite(aim)) patchDiff(slot, { manual: Math.max(1, Math.min(9.9, aim)) });
+  recomputeTargets();
+  return true;
+}
+
+/** 最後に移した譜面を元の難易度に戻す（空けた難易度で作った結果は消える。消えるときは聞く） */
+export async function undoMove(): Promise<boolean> {
+  const m = undoableMove(get());
+  if (!m) return false;
+  if (get().diffs[m.from].result) {
+    const ok = await confirmDialog({
+      title: tr(`${m.before.chart.label} を ${m.from} に戻しますか？`, `Move ${m.before.chart.label} back to ${m.from}?`),
+      body: tr(`あいだに作った ${m.from} は消えます。`, `The ${m.from} you made in between is discarded.`),
+      ok: tr('戻す', 'Move back'),
+      danger: true,
+    });
+    if (!ok || undoableMove(get()) !== m) return false;
+  }
+  const s = get();
+  const charts = { ...s.charts };
+  delete charts[m.to];
+  charts[m.from] = m.before.chart;
+  set({
+    charts,
+    moves: s.moves.slice(0, -1),
+    diffs: { ...s.diffs, [m.from]: m.before.from, [m.to]: m.before.to },
+    listen: s.listen === m.to ? m.from : s.listen,
+  });
+  recomputeTargets();
+  const g = get();
+  if (!columnDoc(g, g.listen)) set({ listen: g.sourceSlot });
+  return true;
+}
+
+/**
+ * 開いている譜面を下へ移すとき：移す先（すぐ下の空いた難易度）と、開き直す上の譜面（いちばん近い上の、曲にある譜面）。
+ * 新しく作る譜面は上の譜面を間引いて作るので、上の譜面を開いて作る
+ */
+export function sourceShift(s: Pick<GenState, 'sourceSlot' | 'charts' | 'diffs' | 'chartsLoading' | 'moves'>): { to: Difficulty; above: Slot } | null {
+  if (s.sourceSlot === 'MASTER' || s.chartsLoading) return null;
+  const r = slotRank(s.sourceSlot);
+  const to = SLOTS[r + 1] as Difficulty | undefined;
+  if (!to || s.charts[to] || s.diffs[to].applied || insertedSlots(s).includes(to)) return null;
+  const above = SLOTS.slice(0, r)
+    .reverse()
+    .find((x) => s.charts[x]);
+  return above ? { to, above } : null;
+}
+
+/** 開いている譜面を下へ移す：上の譜面をエディタで開き直し、この画面を作り直してから移す（作ってまだ反映していない難易度があれば聞く） */
+export async function moveSourceDown(o: { aim?: number | null } = {}): Promise<boolean> {
+  const g = get();
+  const plan = sourceShift(g);
+  if (!plan) return false;
+  const from = g.sourceSlot as Difficulty;
+  const above = g.charts[plan.above]!;
+  const lost = unreflected(g);
+  if (lost.length) {
+    const ok = await confirmDialog({
+      title: tr(`${above.label} を開き直して作ります`, `Reopen ${above.label} to make it`),
+      body: tr(
+        `新しい ${from} は ${above.label} から作るので、${above.label} を開き直します。まだエディタに反映していない ${lost.join('・')} は消えます。`,
+        `The new ${from} is made from ${above.label}, so ${above.label} is reopened. ${lost.join(' and ')} (not added to the editor yet) ${lost.length === 1 ? 'is' : 'are'} discarded.`,
+      ),
+      ok: tr('開き直す', 'Reopen'),
+      danger: true,
+    });
+    if (!ok) return false;
+  }
+  const { switchDifficulty } = await import('../app/fileActions');
+  await switchDifficulty(above.file);
+  if (!sameFile(useEditor.getState().meta.fileName, above.file)) return false;
+  await initGen();
+  return moveDown(from, o);
+}
+
+/**
+ * あいだに作る案（gen/insert）をこの画面に当てる：曲にある譜面を下から順に移し、作る難易度のめやすを want にする。
+ * 作る元（案の source）の譜面を開いてから呼ぶ
+ */
+export async function applyInsertPlan(plan: InsertPlan, want: number): Promise<boolean> {
+  await initGen();
+  rememberInsertLevel(want);
+  for (const m of plan.moves) if (!moveDown(m.from, { aim: want })) return false;
+  if (!belowSource().includes(plan.make)) return false;
+  if (plan.moves.length === 0) {
+    if (get().charts[plan.make]) return false;
+    selectDiff(plan.make);
+    setTarget(plan.make, want);
+  }
+  return true;
 }
 
 function defaultPlan(spans: SectionSpan[]): DifficultyPlan {
@@ -847,6 +1071,8 @@ export function setTarget(diff: Difficulty, center: number | null) {
   const c = center === null || !Number.isFinite(center) ? null : Math.max(1, Math.min(9.9, center));
   patchDiff(diff, { manual: c });
   recomputeTargets();
+  // あいだに作る難易度のめやすは、次の曲でもはじめに出す（あなたが遊ぶレベル）
+  if (c !== null && insertedSlots(get()).includes(diff)) rememberInsertLevel(c);
 }
 
 // ---- 並べて聴く ---------------------------------------------------------------------------
@@ -1100,25 +1326,28 @@ export function buildSetDef(
   sourceFile: string,
   sourceLabel: string,
   made: { diff: Difficulty; file: string }[],
-  o: { sourceSlot?: Slot; kept?: { slot: Slot; label: string; file: string }[] } = {},
+  o: { sourceSlot?: Slot; kept?: { slot: Slot; label: string; file: string }[]; moved?: { file: string; to: Slot }[] } = {},
 ): string {
   const sourceSlot = o.sourceSlot ?? 'MASTER';
   const blocks = existing ? parseSetDef(existing) : [];
   const block = blocks.find((b) => b.levels.some((l) => sameFile(l.file, sourceFile))) ?? blocks[0] ?? null;
   const slots = new Map<number, { label: string; file: string }>();
   const madeFiles = new Set(made.map((m) => m.file.toLowerCase()));
+  const movedFiles = new Set((o.moved ?? []).map((m) => m.file.toLowerCase()));
   for (const m of made) slots.set(SLOT_INDEX[m.diff], { label: m.diff, file: m.file });
   slots.set(SLOT_INDEX[sourceSlot], { label: sourceSetDefLabel(sourceLabel, sourceSlot), file: sourceFile });
+  // 下へ移した譜面は、移した先の段にその難易度の名前で（ファイルはそのまま）
+  for (const m of o.moved ?? []) if (!slots.has(SLOT_INDEX[m.to])) slots.set(SLOT_INDEX[m.to], { label: m.to, file: m.file });
   const rest: { label: string; file: string; at?: number }[] = [];
   for (const l of block?.levels ?? []) {
-    if (sameFile(l.file, sourceFile) || madeFiles.has(l.file.toLowerCase())) continue;
+    if (sameFile(l.file, sourceFile) || madeFiles.has(l.file.toLowerCase()) || movedFiles.has(l.file.toLowerCase())) continue;
     // 作った難易度に置き換わるもの
     const sl = slotOf(l.label, l.file);
     if (sl && sl !== 'MASTER' && made.some((m) => m.diff === sl)) continue;
     rest.push({ label: l.label, file: l.file, at: l.index });
   }
   for (const k of o.kept ?? []) {
-    if (sameFile(k.file, sourceFile) || madeFiles.has(k.file.toLowerCase()) || rest.some((r) => sameFile(r.file, k.file))) continue;
+    if (sameFile(k.file, sourceFile) || madeFiles.has(k.file.toLowerCase()) || movedFiles.has(k.file.toLowerCase()) || rest.some((r) => sameFile(r.file, k.file))) continue;
     rest.push({ label: k.label, file: k.file, at: SLOT_INDEX[k.slot] });
   }
   for (const r of rest) {
@@ -1141,15 +1370,16 @@ export function buildSetDef(
   return lines.join('\r\n') + '\r\n';
 }
 
-/** set.def に今ある難易度のうち、作った譜面に置き換わるもの（同じ難易度で別のファイル） */
-export function replacedInSetDef(existing: string | null, sourceFile: string, made: { diff: Difficulty; file: string }[]): { label: string; file: string }[] {
+/** set.def に今ある難易度のうち、作った譜面に置き換わるもの（同じ難易度で別のファイル。下へ移す譜面は置き換わらない） */
+export function replacedInSetDef(existing: string | null, sourceFile: string, made: { diff: Difficulty; file: string }[], movedFiles: readonly string[] = []): { label: string; file: string }[] {
   if (!existing) return [];
   const blocks = parseSetDef(existing);
   const block = blocks.find((b) => b.levels.some((l) => sameFile(l.file, sourceFile))) ?? blocks[0];
   if (!block) return [];
   const madeFiles = new Set(made.map((m) => m.file.toLowerCase()));
+  const moved = new Set(movedFiles.map((f) => f.toLowerCase()));
   return block.levels
-    .filter((l) => !madeFiles.has(l.file.toLowerCase()) && !sameFile(l.file, sourceFile) && made.some((m) => m.diff === slotOf(l.label, l.file)))
+    .filter((l) => !madeFiles.has(l.file.toLowerCase()) && !moved.has(l.file.toLowerCase()) && !sameFile(l.file, sourceFile) && made.some((m) => m.diff === slotOf(l.label, l.file)))
     .map((l) => ({ label: l.label, file: l.file }));
 }
 
@@ -1175,6 +1405,9 @@ export async function writeOut(): Promise<boolean> {
   }
   // 残す既存の譜面（set.def に残す・上書きしない）
   const kept = SLOTS.filter((x) => keepsExisting(g, x)).map((x) => ({ slot: x, label: g.charts[x]!.label, file: g.charts[x]!.file }));
+  // 下へ移した譜面（set.def の段と名前だけ変える。ファイルと DTXMania の成績はそのまま）。newlyMoved はまだ set.def に書いていないもの
+  const moved = SLOTS.filter((x) => keepsExisting(g, x) && g.charts[x]!.movedFrom).map((x) => ({ to: x, file: g.charts[x]!.file, from: g.charts[x]!.movedFrom!, level: g.charts[x]!.level }));
+  const newlyMoved = moved.filter((x) => g.moves.some((m) => !m.written && sameFile(m.file, x.file)));
   // 反映したままの難易度のファイルも上書きしない
   const appliedFiles = belowSource(g)
     .filter((d) => !made.includes(d) && g.diffs[d].applied)
@@ -1197,10 +1430,19 @@ export async function writeOut(): Promise<boolean> {
   }
   // 上書きを聞くのは、この画面で反映したファイル（作り直した・手直しした難易度）以外
   const exists = files.filter((f) => f.overwrite && !sameFile(f.file, g.diffs[f.diff].applied?.file ?? ''));
-  const replaced = replacedInSetDef(existing, g.masterFile, files);
-  if (exists.length || replaced.length) {
+  const replaced = replacedInSetDef(existing, g.masterFile, files, moved.map((m) => m.file));
+  if (exists.length || replaced.length || newlyMoved.length) {
     const sep = tr('、', ', ');
     const body = [
+      ...newlyMoved.map((m) =>
+        tr(
+          `${m.file}（${m.from} Lv ${m.level.toFixed(2)}）を ${m.to} に移します。ファイルはそのままで、DTXMania の成績も付いたままです。`,
+          `${m.file} (${m.from}, Lv ${m.level.toFixed(2)}) moves to ${m.to}. The file stays as it is, and so do your DTXMania records for it.`,
+        ),
+      ),
+      ...files
+        .filter((f) => newlyMoved.some((m) => m.from === f.diff))
+        .map((f) => tr(`新しい ${f.diff} は ${f.file} に書きます。`, `The new ${f.diff} is written to ${f.file}.`)),
       exists.length
         ? tr(
             `${exists.map((f) => f.file).join(sep)} を上書きします（このアプリで作ってから手を入れていない譜面です）。`,
@@ -1218,10 +1460,14 @@ export async function writeOut(): Promise<boolean> {
       .filter(Boolean)
       .join('\n');
     const ok = await confirmDialog({
-      title: exists.length ? tr('同じ名前の譜面があります', 'Charts with the same names exist') : tr('set.def の難易度を置き換えます', 'Replace difficulties in set.def'),
+      title: exists.length
+        ? tr('同じ名前の譜面があります', 'Charts with the same names exist')
+        : newlyMoved.length && !replaced.length
+          ? tr('set.def の難易度を移します', 'Move difficulties in set.def')
+          : tr('set.def の難易度を置き換えます', 'Replace difficulties in set.def'),
       body,
-      ok: exists.length ? tr('上書き', 'Overwrite') : tr('置き換える', 'Replace'),
-      danger: true,
+      ok: exists.length ? tr('上書き', 'Overwrite') : newlyMoved.length && !replaced.length ? tr('移して反映', 'Move and add') : tr('置き換える', 'Replace'),
+      danger: !!(exists.length || replaced.length),
     });
     if (!ok) return false;
   }
@@ -1238,10 +1484,16 @@ export async function writeOut(): Promise<boolean> {
     const { bytes } = encodeDtx(serializeDtx(doc), 'shift_jis');
     if ((await putFile(folder, file, bytes)) === 'memory') memory = true;
   }
-  const text = buildSetDef(existing, g.master.fields['TITLE'] || g.masterFile, g.masterFile, g.masterLabel, files, { sourceSlot: g.sourceSlot, kept });
+  const text = buildSetDef(existing, g.master.fields['TITLE'] || g.masterFile, g.masterFile, g.masterLabel, files, {
+    sourceSlot: g.sourceSlot,
+    kept,
+    moved: moved.map((m) => ({ file: m.file, to: m.to })),
+  });
   if ((await putFile(folder, 'set.def', encodeDtx(text, 'shift_jis').bytes)) === 'memory') memory = true;
   // 反映した印（このあと作り直す・手直しすると「反映のあとに変えた」になる）
   for (const { diff, file } of files) patchDiff(diff, { applied: { file, doc: g.diffs[diff].result!.doc } });
+  // 移した譜面は set.def に書いたので、もう戻さない
+  if (newlyMoved.length) set((st) => ({ moves: st.moves.map((m) => (m.written ? m : { ...m, written: true })) }));
   // 難易度の切り替えタブを更新する（易しい順。作った譜面には AI の印）
   const labels = new Map<string, string>();
   for (const b of parseSetDef(text)) for (const l of b.levels) labels.set(l.file.toLowerCase(), l.label);
@@ -1264,9 +1516,11 @@ export async function writeOut(): Promise<boolean> {
   });
   const names = files.map((f) => f.diff).join(tr('・', ', '));
   const list = files.map((f) => f.file).join(tr('・', ', '));
+  const movedText = newlyMoved.map((m) => tr(`${m.from}（${m.file}）を ${m.to} に移し、`, `Moved ${m.from} (${m.file}) to ${m.to}. `)).join('');
   // 「開く」は、この画面で最後に見ていた難易度（反映したものの中に無ければ最初のもの）
   const open = files.find((f) => f.diff === get().selected) ?? files[0];
   toast(
+    movedText +
     tr(
       `${names} をエディタに反映しました。難易度の切り替えから開けます（${memory ? `${list} と set.def は、保存（Ctrl+S）で曲フォルダに書き出します` : `曲フォルダに ${list} と set.def を書きました`}）`,
       `Added ${names} to the editor. Open ${files.length === 1 ? 'it' : 'them'} from the difficulty switcher (${memory ? `${list} and set.def are written to the song folder when you save (Ctrl+S)` : `wrote ${list} and set.def to the song folder`})`,
@@ -1275,8 +1529,8 @@ export async function writeOut(): Promise<boolean> {
     14000,
     { label: tr(`${open.diff} を開く`, `Open ${open.diff}`), run: () => void openReflected(open.file) },
   );
-  // エディタに戻ったら、増えた難易度のタブを光らせる
-  glowReflected({ diffs: files.map((f) => f.file) });
+  // エディタに戻ったら、増えた難易度・移した難易度のタブを光らせる
+  glowReflected({ diffs: [...files.map((f) => f.file), ...newlyMoved.map((m) => m.file)] });
   return true;
 }
 

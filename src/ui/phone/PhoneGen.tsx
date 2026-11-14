@@ -6,7 +6,7 @@ import { tr } from '../../i18n';
 import type { Difficulty } from '../../gen/simplify';
 import { SLOTS } from '../../gen/targets';
 import { toast } from '../../store/editor';
-import { belowSource, columnDoc, isPassing, knownLevels, setEnabled, setListen, setTarget, shownLevel, slotLabel, stairIssues, useGen, type DiffState } from '../../store/gen';
+import { belowSource, columnDoc, isPassing, knownLevels, pendingMoveTo, setEnabled, setListen, setTarget, shownLevel, slotLabel, stairIssues, useGen, type DiffState } from '../../store/gen';
 import { Icon } from '../icons';
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -156,6 +156,8 @@ export function TargetStrip() {
   );
 }
 
+const SHORT_OF: Record<Difficulty, string> = { EXTREME: 'EXT', ADVANCED: 'ADV', BASIC: 'BSC' };
+
 function TargetChip({ d }: { d: Difficulty }) {
   const g = useGen();
   const ds = g.diffs[d];
@@ -175,6 +177,7 @@ function TargetChip({ d }: { d: Difficulty }) {
         <input
           type="checkbox"
           checked={ds.enabled}
+          disabled={!!pendingMoveTo(g, d)}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => setEnabled(d, e.target.checked)}
           aria-label={chart ? tr(`${d} を作り直す（外すと曲にある譜面を残す）`, `Remake ${d} (uncheck to keep the chart in the song)`) : tr(`${d} を作る`, `Make ${d}`)}
@@ -198,7 +201,15 @@ function TargetChip({ d }: { d: Difficulty }) {
       {ds.enabled ? (
         <AimStepper ds={ds} />
       ) : (
-        <span className="pg-chip-off lbl">{chart ? tr('曲にある譜面を残す', 'Keep the song’s chart') : tr('作らない', 'Not made')}</span>
+        <span className="pg-chip-off lbl">
+          {chart?.movedFrom
+            ? pendingMoveTo(g, d)
+              ? tr(`${SHORT_OF[chart.movedFrom]} から移す`, `Moves from ${SHORT_OF[chart.movedFrom]}`)
+              : tr(`${SHORT_OF[chart.movedFrom]} から移した`, `Moved from ${SHORT_OF[chart.movedFrom]}`)
+            : chart
+              ? tr('曲にある譜面を残す', 'Keep the song’s chart')
+              : tr('作らない', 'Not made')}
+        </span>
       )}
     </div>
   );

@@ -52,6 +52,24 @@ export function addableSlots(s: LibSong): SlotKey[] {
   return SLOT_KEYS.slice(0, i).filter((k) => !chartIn(s, k));
 }
 
+/** 枠の名前（AI難易度生成の難易度の名前） */
+export const SLOT_OF_KEY: Record<SlotKey, 'BASIC' | 'ADVANCED' | 'EXTREME' | 'MASTER'> = { BSC: 'BASIC', ADV: 'ADVANCED', EXT: 'EXTREME', MAS: 'MASTER' };
+export const KEY_OF_SLOT: Record<'BASIC' | 'ADVANCED' | 'EXTREME' | 'MASTER', SlotKey> = { BASIC: 'BSC', ADVANCED: 'ADV', EXTREME: 'EXT', MASTER: 'MAS' };
+
+/**
+ * あいだに作る（gen/insert）に渡す、枠ごとの譜面のレベル（無い枠は書かない。レベルの分からない譜面は null）。
+ * 作れる曲（いちばん上がドラムの .dtx で、下に空いた枠がある）でなければ null
+ */
+export function slotLevels(s: LibSong): Partial<Record<'BASIC' | 'ADVANCED' | 'EXTREME' | 'MASTER', number | null>> | null {
+  if (addableSlots(s).length === 0) return null;
+  const out: Partial<Record<'BASIC' | 'ADVANCED' | 'EXTREME' | 'MASTER', number | null>> = {};
+  for (const k of SLOT_KEYS) {
+    const c = chartIn(s, k);
+    if (c) out[SLOT_OF_KEY[k]] = c.head.level;
+  }
+  return out;
+}
+
 /** その枠を作る元の譜面（すぐ上にある譜面） */
 export function sourceFor(s: LibSong, k: SlotKey): LibChart | undefined {
   const i = SLOT_KEYS.indexOf(k);

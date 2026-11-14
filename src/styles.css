@@ -6042,6 +6042,42 @@ button.wav-cut:hover {
   border-radius: 8px;
 }
 
+/* あいだに作る：曲にある譜面を下へ移すリンク・移した譜面の印（元の難易度）・空けた難易度の印 */
+.link-btn.gen-move-link {
+  align-self: flex-start;
+  margin-left: 18px;
+  font-size: 11.5px;
+  white-space: normal;
+  text-align: left;
+}
+
+.link-btn.gen-move-link:disabled {
+  color: var(--dim);
+  background: transparent;
+}
+
+.gen-moved {
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid #1f4a66;
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.gen-between {
+  color: var(--accent);
+}
+
+.gen-info-acts {
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* 譜面の出どころの印（曲に既にある作者の譜面・このアプリの AI難易度生成で作った譜面） */
 .origin-badge {
   display: inline-flex;

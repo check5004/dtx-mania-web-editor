@@ -73,6 +73,11 @@ export interface TargetInput {
   floor?: number | null;
   /** 手で決めためやす */
   manual?: Partial<Record<Difficulty, number>>;
+  /**
+   * 曲にある譜面を下へ移して空けた難易度（あいだに作る）。上下の残す譜面のあいだが目標なので、上の譜面への引き上げ（MAX_DROP）はしない。
+   * 引き上げは上の譜面だけから作るときに削りすぎないためのもので、下に残す譜面があれば、どこまで下げてよいかはその譜面が決めている
+   */
+  inserted?: readonly Difficulty[];
 }
 
 const clampLv = (x: number) => Math.max(1, Math.min(9.99, x));
@@ -125,8 +130,8 @@ export function targetBands(input: TargetInput): Partial<Record<Difficulty, Targ
     if (c === undefined) continue;
     const above = SLOTS.slice(0, rank(d)).filter((s) => known[s] !== undefined).pop();
     const below = SLOTS.slice(rank(d) + 1).find((s) => known[s] !== undefined);
-    // 上の譜面から下げすぎない（難しい曲は下の難易度も難しく。手で決めためやすはそのまま）
-    if (above && manual === undefined) {
+    // 上の譜面から下げすぎない（難しい曲は下の難易度も難しく。手で決めためやす・あいだに作る難易度はそのまま）
+    if (above && manual === undefined && !input.inserted?.includes(d)) {
       const min = known[above]! - (MAX_DROP[d] - MAX_DROP[above]);
       pull[d] = { from: above, min };
       c = Math.max(c, min);

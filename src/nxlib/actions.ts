@@ -9,12 +9,13 @@ import { isSkipText, parseLink } from '../drive/sync';
 import type { Difficulty } from '../gen/simplify';
 import type { AuditionSound } from '../store/audition';
 import { openPage, toast, useEditor } from '../store/editor';
-import { initGen, selectDiff } from '../store/gen';
+import { applyInsertPlan, initGen, selectDiff } from '../store/gen';
+import { insertPlan } from '../gen/insert';
 import { confirmDialog } from '../ui/dialogs';
 import { fileAt } from './check';
 import { LINK_NAME, type LibChart, type LibSong, type SlotKey } from './scan';
 import { ensureNxPerm, refreshNxFolder, songDirOf } from './store';
-import { canOpen, fixSetDef, setDefFor, SLOT_LABEL, sourceFor, topChart } from './view';
+import { canOpen, chartIn, fixSetDef, KEY_OF_SLOT, setDefFor, SLOT_LABEL, slotLevels, sourceFor, topChart } from './view';
 
 /** 一覧を開く（エディタからは、いまの譜面を自動保存の控えに残してから） */
 export async function openNxPage(): Promise<void> {
@@ -59,6 +60,28 @@ export async function openNxGen(s: LibSong, k: SlotKey | null): Promise<void> {
   openPage('ai');
   initGen();
   if (k && k !== 'MAS') selectDiff(SLOT_LABEL[k] as Difficulty);
+}
+
+/**
+ * あいだに作る：決めたレベルの譜面を、曲の難易度のあいだに作る（gen/insert の案）。作る元の譜面（上の隣）を開き、
+ * AI難易度生成で、曲にある譜面を下へ移して（set.def はエディタに反映したときに書く）、空いた難易度のめやすを want にする
+ */
+export async function openNxInsert(s: LibSong, want: number): Promise<void> {
+  const levels = slotLevels(s);
+  const plan = levels && insertPlan(levels, want);
+  if (!plan || !plan.ok) return;
+  const src = chartIn(s, KEY_OF_SLOT[plan.source]);
+  if (!src || !canOpen(src) || !(await openNxSong(s, src))) return;
+  openPage('ai');
+  if (!(await applyInsertPlan(plan, want)))
+    toast(
+      tr(
+        '譜面をうまく移せませんでした。AI難易度生成の難易度のカードの「下へ移して、あいだに作る」で移してください',
+        "Couldn't move the charts. Use “Move to … and make one in between” on the difficulty cards of the AI generator",
+      ),
+      'warn',
+      8000,
+    );
 }
 
 /** 曲情報を開く（試聴・画像を入れる） */
