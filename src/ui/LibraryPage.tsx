@@ -9,7 +9,7 @@ import { INSTS, instInfo } from '../library/analyze';
 import type { Inst, LibraryKit } from '../library/db';
 import { playAudition, useStopAuditionOnClose } from '../store/audition';
 import { NO_FOLDER_PICK, useDevice } from '../store/device';
-import { backToChart, edit, openPage, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
+import { backToChart, edit, prepareSounds, previewWav, setLaneWav, toast, useEditor } from '../store/editor';
 import { kitFile, setKit, useKit } from '../store/kit';
 import {
   allItems,
@@ -263,9 +263,6 @@ export function LibraryPage() {
           <input value={st.q} onChange={(e) => useLibrary.setState({ q: e.target.value })} placeholder={tr('名前・曲名・タグで検索', 'Search by name, song or tag')} />
         </label>
         <span className="grow" />
-        <button className="btn small ghost lib-guide" onClick={() => openPage('guideline')} title={tr('手元の曲のレベル帯ごとの集計と基準文', 'Stats and guideline text by level band, from your local songs')}>
-          {tr('難易度ガイドライン', 'Difficulty guidelines')}
-        </button>
         <button className="btn small" onClick={() => void exportZip()} disabled={st.samples.length === 0} title={tr('ライブラリ全体を ZIP に書き出します', 'Export the whole library as a ZIP')}>
           {tr('ZIPでバックアップ', 'Back up as ZIP')}
         </button>

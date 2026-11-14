@@ -254,7 +254,7 @@ async function runGenAi(instruction = '', focus = false) {
       to: range.to,
       onsets: onsets && bgm ? onsets : null,
       offsetSec: bgm?.sec ?? 0,
-      level: levelOfField(doc.fields['DLEVEL']),
+      level: levelOfField(doc.fields['DLEVEL'], doc.fields['DLVDEC']),
       style: styleLines(learnStyle(doc, tempo, range.from, range.to, 8, human)),
       sectionOf: (m) => sectionAt(sections, m)?.name ?? null,
       refs: cur0.cands.filter((c) => c.source === 'copy' && c.src !== undefined).map((c) => ({ src: c.src!, score: c.score ?? null })),

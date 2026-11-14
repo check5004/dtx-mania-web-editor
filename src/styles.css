@@ -5830,6 +5830,530 @@ button.wav-cut:hover {
   }
 }
 
+/* 難易度ガイドライン（2026-11-14 作り直し：DTXMania の曲から作る物差し・遊ぶレベル・入れていない譜面） */
+
+.gp-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--line3);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+.gp-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+.gp-notice {
+  margin: 10px 18px 0;
+}
+
+.gp-band-row {
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.gp-band-row b,
+.gp-band-row .lbl,
+.gp-band-row .guide-st {
+  white-space: nowrap;
+}
+
+.gp-you-tag,
+.gp-th-you {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: #ffd3ea;
+  background: #3a1d2d;
+  border: 1px solid #6b3352;
+}
+
+.gp-th-you {
+  display: block;
+  width: max-content;
+  margin: 3px auto 0;
+}
+
+.guide-table th.on .gp-th-you {
+  color: #ffd3ea;
+}
+
+.gp-note-h {
+  font-weight: 600;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+
+.gp-kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  font-size: 12px;
+  color: var(--text3);
+  padding: 2px 0;
+}
+
+.gp-kv b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+button.gp-kv {
+  border: 0;
+  background: none;
+  text-align: left;
+  border-radius: 5px;
+}
+
+button.gp-kv:hover span {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.gp-card-head {
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gp-play-body {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.gp-play-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gp-play-set {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gp-step {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line3);
+  background: var(--panel);
+  color: var(--text2);
+}
+
+.gp-big {
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1;
+  min-width: 78px;
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+
+.gp-big.unset {
+  color: var(--text3);
+}
+
+.gp-est {
+  border-top: 1px solid var(--line2);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  font-size: 12.5px;
+  color: var(--text2);
+}
+
+.gp-est b {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.gp-addable {
+  margin-top: 4px;
+  align-self: stretch;
+  justify-content: center;
+  gap: 4px;
+}
+
+.gp-play-empty {
+  border: 1px dashed var(--line3);
+  border-radius: 10px;
+  padding: 18px;
+  line-height: 1.7;
+  align-self: stretch;
+}
+
+.gp-chart {
+  position: relative;
+  min-width: 0;
+}
+
+.gp-chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.gp-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.gp-tick {
+  fill: var(--mute);
+  font-size: 10.5px;
+  font-family: var(--mono);
+}
+
+.gp-tick.strong {
+  fill: var(--text3);
+}
+
+.gp-sline {
+  stroke: #66717f;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.gp-you {
+  stroke: #ff8fc7;
+  stroke-width: 1.5;
+}
+
+.gp-you-t {
+  fill: var(--text2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gp-curve {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+.gp-dot {
+  fill: var(--accent);
+  stroke: var(--card);
+  stroke-width: 2;
+}
+
+.gp-dot.on {
+  stroke: var(--text);
+}
+
+.gp-est-dot {
+  fill: var(--card);
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.gp-hit {
+  fill: transparent;
+  cursor: default;
+}
+
+.gp-tip {
+  position: absolute;
+  z-index: 5;
+  width: 210px;
+  pointer-events: none;
+  background: var(--raise);
+  border: 1px solid var(--line3);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.gp-tip > div {
+  width: 100%;
+}
+
+.gp-tip b {
+  font-size: 14px;
+}
+
+.gp-rank {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.gp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 4px;
+  padding-left: 40px;
+}
+
+.gp-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gp-lg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.gp-lg-line {
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+.gp-lg-est {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--text);
+}
+
+.gp-ptable {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+}
+
+.gp-ptable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.gp-ptable th {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text3);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line2);
+}
+
+.gp-ptable td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gp-ptable th:first-child {
+  width: 40%;
+}
+
+.gp-ptable .num {
+  text-align: right;
+}
+
+.gp-band-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.gp-band-foot > div {
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gp-rep {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.guide-table .gp-count-row td:not(.rowh) {
+  background: transparent;
+  color: var(--text3);
+}
+
+.gp-skip-lead {
+  margin: 4px 0 8px;
+  line-height: 1.6;
+}
+
+.gp-skip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gp-skip-g {
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--card);
+  overflow: hidden;
+}
+
+.gp-skip-g.on {
+  border-color: var(--line3);
+}
+
+.gp-skip-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--text2);
+  text-align: left;
+}
+
+.gp-skip-row:hover {
+  background: var(--raise);
+}
+
+.gp-skip-row .mono {
+  color: var(--text);
+}
+
+.gp-why {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--dim);
+}
+
+.gp-why.work {
+  background: #4cc2ff;
+}
+
+.gp-why.ai {
+  background: #c9b3ff;
+}
+
+.gp-skip-in {
+  padding: 2px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gp-skip-in > p {
+  margin: 0 0 4px;
+  line-height: 1.6;
+}
+
+.gp-skip-in > .btn {
+  align-self: flex-start;
+}
+
+.gp-skip-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-height: 26px;
+  border-top: 1px solid var(--line);
+  padding-top: 3px;
+}
+
+.gp-skip-item .btn.tiny {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+
+.gp-in {
+  font-size: 10.5px;
+  color: var(--ok);
+}
+
+.gp-boxes {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 4px;
+  background: var(--panel);
+  margin-bottom: 4px;
+}
+
+.gp-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.gp-box:hover {
+  background: var(--raise);
+}
+
+.gp-prog {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--raise);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.gp-prog i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+@media (max-width: 1100px) {
+  .gp-play-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gp-band-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* AI難易度生成 */
 
 .gen-body {

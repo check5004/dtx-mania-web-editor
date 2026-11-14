@@ -85,6 +85,25 @@
   position: relative;
 }
 
+/* 難易度ガイドラインを開く（遊ぶレベルを横に） */
+.nx-guide-btn .nx-guide-you {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #ffd3ea;
+  background: #3a1d2d;
+  border: 1px solid #6b3352;
+}
+
+/* 曲の一覧の中で開いた難易度ガイドライン（エディタの中と同じく、高さいっぱいに） */
+.nx-guide-wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
 .nx-pop {
   position: absolute;
   right: 0;

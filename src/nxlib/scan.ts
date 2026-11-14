@@ -28,6 +28,8 @@ export interface LibChart {
   score: ScoreRec | null;
   size: number;
   mtime: number;
+  /** このアプリの作業ファイル（「譜面の名前.dtxe.json」）が譜面の横にある。前の版の一覧には無い */
+  work?: boolean;
 }
 
 export type CheckKind = 'nosetdef' | 'setdef-missing' | 'missing' | 'badname' | 'dup' | 'nopreview' | 'noimage' | 'nodrums';
@@ -432,7 +434,9 @@ async function songsHere(t: Task, files: ReadonlyMap<string, FileSystemFileHandl
     for (const c of b.charts) {
       try {
         const r = await readChart(c.handle, o.reread ? undefined : prev?.charts.find((x) => x.file.toLowerCase() === c.file.toLowerCase()));
-        charts.push({ file: c.file, label: setDefH ? c.label : '', index: c.index, slot: null, head: r.head, score: await readScore(files, c.file), size: r.size, mtime: r.mtime });
+        // 作業ファイルは譜面の横（このアプリは曲のフォルダの直下に譜面を置くので、直下の譜面だけ見る）
+        const hasWork = !c.file.includes('/') && files.has(c.file.replace(/\.dtx$/i, '').toLowerCase() + '.dtxe.json');
+        charts.push({ file: c.file, label: setDefH ? c.label : '', index: c.index, slot: null, head: r.head, score: await readScore(files, c.file), size: r.size, mtime: r.mtime, work: hasWork });
       } catch {
         // 読めない譜面は飛ばす
       }

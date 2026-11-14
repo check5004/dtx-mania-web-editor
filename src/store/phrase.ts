@@ -86,7 +86,7 @@ export async function makeCandidates(kind: 'fill' | 'rhythm') {
       from: p.from,
       to: p.to,
       instruction: p.instruction,
-      targetLevel: levelOfField(s.doc.fields['DLEVEL']),
+      targetLevel: levelOfField(s.doc.fields['DLEVEL'], s.doc.fields['DLVDEC']),
       onsets: onsets && bgm ? onsets : null,
       offsetSec,
       human: humanMeasure(s.doc),

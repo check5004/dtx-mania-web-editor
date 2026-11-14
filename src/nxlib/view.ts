@@ -1,12 +1,13 @@
 // 「DTXMania の曲」の一覧の見せ方（しぼりこみ・並べ替え・BOX の数・空いた難易度の枠・set.def を作る／直す）。
 // 画面からも試験からも使う、ファイルを触らない関数だけ。
+import { insertPlan } from '../gen/insert';
 import { relDtxPath } from './parse';
 import { checkLevel, SLOT_KEYS, type LibBox, type LibChart, type LibSong, type SlotKey } from './scan';
 
 export type NxSort = 'updated' | 'title' | 'artist' | 'bpm' | 'level' | 'checks';
-export type NxFilter = 'missing' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
-/** synced（同期で変わった曲）は PC どうしの同期をしているときだけ出す */
-export const NX_FILTERS: readonly NxFilter[] = ['missing', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
+export type NxFilter = 'missing' | 'mylevel' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
+/** synced（同期で変わった曲）は PC どうしの同期をしているときだけ、mylevel（遊ぶレベルを足せる曲）は遊ぶレベルを決めたときだけ出す */
+export const NX_FILTERS: readonly NxFilter[] = ['missing', 'mylevel', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
 
 /** BOX のしぼりこみ：null はすべて、'' は BOX の外、ほかは BOX の鍵 */
 export interface NxQuery {
@@ -18,6 +19,8 @@ export interface NxQuery {
   drafts: Readonly<Record<string, readonly string[]>>;
   /** 同期で変わった曲（場所の鍵:曲のフォルダの並び。src/sync/store.ts の syncedSongs） */
   synced?: ReadonlySet<string>;
+  /** 遊ぶレベル（store/playLevel。決めていなければ null） */
+  play?: number | null;
 }
 
 export const SLOT_LABEL: Record<SlotKey, string> = { BSC: 'BASIC', ADV: 'ADVANCED', EXT: 'EXTREME', MAS: 'MASTER' };
@@ -85,10 +88,19 @@ export function warnCount(s: LibSong): number {
   return s.checks.filter((c) => checkLevel(c.kind) === 'warn').length;
 }
 
-export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts'], synced?: NxQuery['synced']): boolean {
+/** 遊ぶレベルの譜面を、あいだに作って足せる曲（gen/insert。同じくらいのレベルの譜面がもうある曲は入れない） */
+export function canAddLevel(s: LibSong, play: number | null | undefined): boolean {
+  if (play === null || play === undefined) return false;
+  const levels = slotLevels(s);
+  return !!levels && insertPlan(levels, play).ok;
+}
+
+export function hasFilter(s: LibSong, f: NxFilter, drafts: NxQuery['drafts'], synced?: NxQuery['synced'], play?: NxQuery['play']): boolean {
   switch (f) {
     case 'missing':
       return addableSlots(s).length > 0;
+    case 'mylevel':
+      return canAddLevel(s, play);
     case 'edited':
       return s.edited;
     case 'ai':
@@ -156,7 +168,7 @@ export function compareSongs(sort: NxSort): (a: LibSong, b: LibSong) => number {
 }
 
 export function viewSongs(songs: readonly LibSong[], o: NxQuery): LibSong[] {
-  return songs.filter((s) => inBox(s, o.box) && (!o.filter || hasFilter(s, o.filter, o.drafts, o.synced)) && matchQuery(s, o.q)).sort(compareSongs(o.sort));
+  return songs.filter((s) => inBox(s, o.box) && (!o.filter || hasFilter(s, o.filter, o.drafts, o.synced, o.play)) && matchQuery(s, o.q)).sort(compareSongs(o.sort));
 }
 
 /** BOX ごとの曲の数（中の BOX の曲も数える）。'' は BOX の外 */
@@ -169,9 +181,9 @@ export function boxCounts(songs: readonly LibSong[]): Map<string, number> {
   return m;
 }
 
-export function filterCounts(songs: readonly LibSong[], drafts: NxQuery['drafts'], synced?: NxQuery['synced']): Record<NxFilter, number> {
+export function filterCounts(songs: readonly LibSong[], drafts: NxQuery['drafts'], synced?: NxQuery['synced'], play?: NxQuery['play']): Record<NxFilter, number> {
   const out = Object.fromEntries(NX_FILTERS.map((f) => [f, 0])) as Record<NxFilter, number>;
-  for (const s of songs) for (const f of NX_FILTERS) if (hasFilter(s, f, drafts, synced)) out[f]++;
+  for (const s of songs) for (const f of NX_FILTERS) if (hasFilter(s, f, drafts, synced, play)) out[f]++;
   return out;
 }
 

@@ -5,6 +5,7 @@ import { openNxPage, openNxSong } from '../../nxlib/actions';
 import { SLOT_KEYS, type LibSong } from '../../nxlib/scan';
 import { ensureNxPerm, rescanNx, setNxView, useNxLib } from '../../nxlib/store';
 import { addableSlots, chartCount, chartIn, filterCounts, type NxFilter } from '../../nxlib/view';
+import { usePlayLevel } from '../../store/playLevel';
 import { Icon } from '../icons';
 import { FILTER_COLOR, NxPickButton, NxPromises, filterName, useSyncedSet } from './SongsPage';
 import { SLOT_CLASS } from './parts';
@@ -120,7 +121,8 @@ function NxHomeReady() {
   const [q, setQ] = useState('');
   const syncOn = usePcSync((s) => s.settings.on);
   const synced = useSyncedSet();
-  const counts = useMemo(() => filterCounts(songs, drafts, synced), [songs, drafts, synced]);
+  const play = usePlayLevel((s) => s.v);
+  const counts = useMemo(() => filterCounts(songs, drafts, synced, play), [songs, drafts, synced, play]);
   // 同期で変わった曲があれば、最近変わった曲の代わりに出す
   const showSynced = useMemo(() => !!synced && songs.some((s) => synced.has(songKey(s))), [songs, synced]);
   const recent = useMemo(() => [...songs].sort((a, b) => b.updated - a.updated).slice(0, 6), [songs]);
@@ -226,6 +228,11 @@ function NxHomeReady() {
         <span className="lbl">{scan ? tr('読み込んでいます…', 'Reading…') : tr('まだ曲がありません', 'No songs yet')}</span>
       )}
       <div className="nx-home-quick">
+        <button onClick={() => open({ guide: true })} title={tr('DTXMania の曲から作った、レベルの物差しと、あなたの遊ぶレベル', 'The level ruler built from your DTXMania songs, and your playing level')}>
+          {Icon.chart(12)}
+          {tr('難易度ガイドライン', 'Difficulty guidelines')}
+          {play !== null && <b className="mono">{tr(`あなた ${play.toFixed(1)}`, `You ${play.toFixed(1)}`)}</b>}
+        </button>
         {quick.map((f) => (
           <button key={f} onClick={() => open({ filter: f, ...(f === 'checks' ? { sort: 'checks' as const } : {}) })}>
             <i className="dot" style={{ background: FILTER_COLOR[f] }} />
