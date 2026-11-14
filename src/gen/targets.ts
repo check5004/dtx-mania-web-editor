@@ -14,6 +14,13 @@
 //   4. 上の譜面から下げすぎない（MAX_DROP。BASIC でも元の音の約半分は残す）。比だけだと上の曲ほど多く削るので、それを止める
 //   5. 幅はめやすの ±1。既存の譜面とは 0.3 以上離し、隣の作る難易度とは真ん中で分ける（幅が重ならない）
 // 比は作者の譜面の中央値だが、Lv7 前後より上の曲では 4. が効いて、作者の ADVANCED・BASIC（2.4〜5.6）より高くなる（楯さんの方針）。
+// 目盛り（2026-11-14 楯さん「作ったあとの難易度が、エディタで計算し直すとずれる」）:
+//   作る譜面のレベルは、エディタの推定（check/level）そのもので測り、そのまま #DLEVEL に書く（前は元の譜面の
+//   登録レベル ÷ 推定 の倍率をかけていて、エディタで開くと 0.1〜0.7 ずれた）。目標の幅も同じ物差しで、決まっている譜面
+//   （元の譜面・残す譜面）の計算から決める（1.〜4.）。登録レベル（ゲームに出る #DLEVEL）は作者のつけ方で計算と違うことが
+//   あるので（手元の 6 曲で ±0.8 くらい）、並びにだけ使う: 作る譜面は上の譜面より登録でも計算でも 0.3 以上易しく、
+//   下の譜面より登録でも計算でも 0.3 以上難しくする（ゲームの中でも、計算でも、並びが逆にならない）。
+//   登録で幅を決めると、登録が計算より高い元の譜面（登録 9.00・計算 7.6 など）からは、ほとんど写しただけの譜面になる
 import type { Difficulty } from './simplify';
 import { TARGET_RATIO } from './simplify';
 
@@ -57,19 +64,34 @@ export interface TargetBand {
    * 引き上げたときは raised は 0（底上げより上にしたので）
    */
   pulled?: number;
-  /** 引き上げの元にした上の譜面（決まっている譜面のうち、いちばん近い上） */
+  /** 引き上げの元にした上の譜面（決まっている譜面のうち、いちばん近い上）と、そのレベル（計算） */
   pulledFrom?: Slot;
-  /** 幅の上を決めた隣の譜面（既存の譜面なら known） */
-  capAbove?: { slot: Slot; known: boolean };
-  capBelow?: { slot: Slot; known: boolean };
+  pulledLevel?: number;
+  /** 幅の上・下を決めた隣の譜面（決まっている譜面なら known） */
+  capAbove?: Cap;
+  capBelow?: Cap;
+}
+
+export interface Cap {
+  slot: Slot;
+  known: boolean;
+  /** 決まっている譜面なら、離したレベル（上の譜面は計算と登録の低い方、下の譜面は高い方） */
+  level?: number;
+  /** 離したのが登録レベル（計算より登録が低い上の譜面・計算より登録が高い下の譜面。ゲームの中で並びが逆にならないように） */
+  listed?: boolean;
 }
 
 export interface TargetInput {
-  /** レベルが決まっている譜面（元の譜面と、作り直さない既存の譜面）。登録の目盛り */
+  /** レベルが決まっている譜面（元の譜面と、作り直さない既存の譜面）の計算のレベル（エディタの推定。作る譜面と同じ物差し） */
   known: Partial<Record<Slot, number>>;
+  /**
+   * 決まっている譜面の登録レベル（ゲームに出る #DLEVEL）。並びにだけ使う：作る譜面は上の譜面より登録でも 0.3 以上易しく、
+   * 下の譜面より登録でも 0.3 以上難しくする。めやすの線・引き上げ（MAX_DROP）は計算から。無ければ計算だけで決める
+   */
+  listed?: Partial<Record<Slot, number>>;
   /** 作る難易度 */
   make: readonly Difficulty[];
-  /** BASIC を作る元の譜面を、いちばん易しい段まで間引いたときのレベル（登録の目盛り）。分からなければ null */
+  /** BASIC を作る元の譜面を、いちばん易しい段まで間引いたときのレベル（計算）。分からなければ null */
   floor?: number | null;
   /** 手で決めためやす */
   manual?: Partial<Record<Difficulty, number>>;
@@ -83,8 +105,8 @@ export interface TargetInput {
 const clampLv = (x: number) => Math.max(1, Math.min(9.99, x));
 const rank = (s: Slot) => SLOTS.indexOf(s);
 
-/** めやすを位置で結んだ線の上に置く（決まっている点 = 既存の譜面と下の端） */
-function centersOf(known: Partial<Record<Slot, number>>, make: readonly Difficulty[], floor: number | null): Partial<Record<Difficulty, number>> {
+/** めやすを位置で結んだ線の上に置く（決まっている点 = 既存の譜面と下の端）。low は上の譜面として離すレベル（計算と登録の低い方） */
+function centersOf(known: Partial<Record<Slot, number>>, make: readonly Difficulty[], floor: number | null, low: (s: Slot) => number): Partial<Record<Difficulty, number>> {
   const ks = SLOTS.filter((s) => known[s] !== undefined);
   const out: Partial<Record<Difficulty, number>> = {};
   if (ks.length === 0) return out;
@@ -98,7 +120,7 @@ function centersOf(known: Partial<Record<Slot, number>>, make: readonly Difficul
     if (floor !== null) bottom = Math.max(bottom, floor - FLOOR_MARGIN);
     // いちばん下の既存の譜面より、あいだの難易度の数ぶん下に
     const lowest = ks[ks.length - 1];
-    bottom = Math.min(bottom, known[lowest]! - KNOWN_GAP * (rank('BASIC') - rank(lowest)));
+    bottom = Math.min(bottom, low(lowest) - KNOWN_GAP * (rank('BASIC') - rank(lowest)));
     bottom = clampLv(bottom);
   }
   const pts = [...ks.map((s) => ({ pos: slotPos(s), lv: known[s]! })), ...(known.BASIC === undefined ? [{ pos: 0, lv: bottom }] : [])].sort((a, b) => a.pos - b.pos);
@@ -119,9 +141,13 @@ function centersOf(known: Partial<Record<Slot, number>>, make: readonly Difficul
 /** 作る難易度ごとの目標の幅 */
 export function targetBands(input: TargetInput): Partial<Record<Difficulty, TargetBand>> {
   const { known } = input;
+  const listed = input.listed ?? {};
+  // 上の譜面として離すレベル（計算と登録の低い方）・下の譜面として離すレベル（高い方）
+  const low = (s: Slot) => Math.min(known[s]!, listed[s] ?? known[s]!);
+  const high = (s: Slot) => Math.max(known[s]!, listed[s] ?? known[s]!);
   const make = SLOTS.filter((s): s is Difficulty => s !== 'MASTER' && input.make.includes(s as Difficulty) && known[s] === undefined);
-  const withFloor = centersOf(known, make, input.floor ?? null);
-  const noFloor = centersOf(known, make, null);
+  const withFloor = centersOf(known, make, input.floor ?? null, low);
+  const noFloor = centersOf(known, make, null, low);
   const center: Partial<Record<Difficulty, number>> = {};
   const pull: Partial<Record<Difficulty, { from: Slot; min: number }>> = {};
   for (const d of make) {
@@ -136,16 +162,16 @@ export function targetBands(input: TargetInput): Partial<Record<Difficulty, Targ
       pull[d] = { from: above, min };
       c = Math.max(c, min);
     }
-    // 既存の譜面より上・下にはしない
-    if (above) c = Math.min(c, known[above]! - KNOWN_GAP);
-    if (below) c = Math.max(c, known[below]! + KNOWN_GAP);
+    // 既存の譜面より上・下にはしない（計算でも登録でも）
+    if (above) c = Math.min(c, low(above) - KNOWN_GAP);
+    if (below) c = Math.max(c, high(below) + KNOWN_GAP);
     center[d] = clampLv(c);
   }
   // 作る難易度どうしも上から順に並べ、0.3 以上あける（引き上げで近づきすぎないように。手で決めためやすは動かさない）
   let prev: number | undefined;
   for (const s of SLOTS) {
     if (known[s] !== undefined) {
-      prev = known[s];
+      prev = low(s);
       continue;
     }
     const c = center[s as Difficulty];
@@ -161,17 +187,19 @@ export function targetBands(input: TargetInput): Partial<Record<Difficulty, Targ
     let min = Math.max(1, c - BAND_HALF);
     let capAbove: TargetBand['capAbove'];
     let capBelow: TargetBand['capBelow'];
-    // 上の隣：既存の譜面なら 0.3 下まで、作る難易度なら真ん中まで
+    // 上の隣：既存の譜面なら 0.3 下まで（計算と登録の低い方から）、作る難易度なら真ん中まで
     for (const s of SLOTS.slice(0, rank(d)).reverse()) {
-      const lim = known[s] !== undefined ? known[s]! - KNOWN_GAP : center[s as Difficulty] !== undefined ? (center[s as Difficulty]! + c) / 2 : null;
+      const isKnown = known[s] !== undefined;
+      const lim = isKnown ? low(s) - KNOWN_GAP : center[s as Difficulty] !== undefined ? (center[s as Difficulty]! + c) / 2 : null;
       if (lim === null) continue;
-      if (lim < max) (max = lim), (capAbove = { slot: s, known: known[s] !== undefined });
+      if (lim < max) (max = lim), (capAbove = isKnown ? { slot: s, known: true, level: low(s), listed: low(s) < known[s]! - 1e-9 } : { slot: s, known: false });
       break;
     }
     for (const s of SLOTS.slice(rank(d) + 1)) {
-      const lim = known[s] !== undefined ? known[s]! + KNOWN_GAP : center[s as Difficulty] !== undefined ? (center[s as Difficulty]! + c) / 2 : null;
+      const isKnown = known[s] !== undefined;
+      const lim = isKnown ? high(s) + KNOWN_GAP : center[s as Difficulty] !== undefined ? (center[s as Difficulty]! + c) / 2 : null;
       if (lim === null) continue;
-      if (lim > min) (min = lim), (capBelow = { slot: s, known: known[s] !== undefined });
+      if (lim > min) (min = lim), (capBelow = isKnown ? { slot: s, known: true, level: high(s), listed: high(s) > known[s]! + 1e-9 } : { slot: s, known: false });
       break;
     }
     min = Math.min(min, c);
@@ -181,7 +209,15 @@ export function targetBands(input: TargetInput): Partial<Record<Difficulty, Targ
     const p = pull[d];
     const pulled = p && p.min > floorC + 1e-9 && c > floorC + 1e-9 ? Math.max(0, c - (noFloor[d] ?? c)) : 0;
     const raised = input.manual?.[d] !== undefined || pulled > 0 ? 0 : Math.max(0, floorC - (noFloor[d] ?? c));
-    out[d] = { min: round2(min), max: round2(max), center: round2(c), raised: round2(raised), capAbove, capBelow, ...(pulled > 0 ? { pulled: round2(pulled), pulledFrom: p!.from } : {}) };
+    out[d] = {
+      min: round2(min),
+      max: round2(max),
+      center: round2(c),
+      raised: round2(raised),
+      capAbove,
+      capBelow,
+      ...(pulled > 0 ? { pulled: round2(pulled), pulledFrom: p!.from, pulledLevel: round2(known[p!.from]!) } : {}),
+    };
   }
   return out;
 }
