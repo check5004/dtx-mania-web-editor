@@ -117,7 +117,7 @@ describe('しぼりこみ・並べ替え', () => {
 
   it('しぼりこみの数', () => {
     expect(warnCount(songs[2])).toBe(1);
-    expect(filterCounts(songs, { drafts: { b: ['e.dtx'] } })).toEqual({ missing: 2, bgmdrums: 0, edited: 1, ai: 1, drive: 1, synced: 0, draft: 1, checks: 1 });
+    expect(filterCounts(songs, { drafts: { b: ['e.dtx'] } })).toEqual({ missing: 2, mylevel: 0, bgmdrums: 0, edited: 1, ai: 1, drive: 1, synced: 0, draft: 1, checks: 1 });
     expect(viewSongs(songs, { ...q, filter: 'ai' }).map((s) => s.id)).toEqual(['b']);
     // 同期で変わった曲（場所の鍵:曲のフォルダの並び）
     const synced = new Set([`${songs[0].root}:${songs[0].path.join('/')}`]);

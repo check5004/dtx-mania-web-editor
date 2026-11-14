@@ -892,7 +892,7 @@ function AiLevelRow({ mech }: { mech: number | null }) {
                 {' '}
                 ·{' '}
                 <button className="link-btn" onClick={() => openPage('guideline')}>
-                  {tr('手元の曲を集計すると精度が上がります', 'Analyzing your own songs makes it more accurate')}
+                  {tr('難易度ガイドラインで手元の曲から物差しを作ると、精度が上がります', 'Building a ruler from your songs in Difficulty guidelines makes it more accurate')}
                 </button>
               </>
             )}

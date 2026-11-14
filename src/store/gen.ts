@@ -6,6 +6,7 @@
 // - 作った譜面には、このアプリで作った印（#DTXE_ORIGIN）を付けて書き出す（dtx/origin）
 // AI は区間ごとの方針だけを決め、配置は gen/simplify のルールで行う。キーが無ければ標準の方針で作る。
 // 再生はエディタと共通（▶・ループ・速さ）で、この画面にいる間は「聴く」譜面（元の譜面・既存の譜面・作った難易度）の音を鳴らす。
+import { insertLevel, rememberInsertLevel } from './playLevel';
 import { tr } from '../i18n';
 import { create } from 'zustand';
 import { cleanPlan, planSchema, planPrompt, sectionSpans, type DifficultyPlan, type SectionSpan } from '../ai/judge';
@@ -33,7 +34,7 @@ import { hasAiKey, runAi } from './ai';
 import { judgeDoc, type JudgeResult } from './aiLevel';
 import { levelOf } from './check';
 import { addPlayDocTransform, addSoundDocs, goBack, prepareSounds, refreshPlayback, songEndMeasure, stop, toast, useEditor } from './editor';
-import { bandOf, guidelineText, levelOfField, loadGuideline, useGuideline } from './guideline';
+import { bandOf, guideContext, levelOfField, loadGuideline } from './guideline';
 import { useSidecar } from './sidecar';
 import { glowReflected } from './glow';
 
@@ -419,7 +420,7 @@ export function initGen(): Promise<void> {
   const doc = s.doc;
   // 計算のレベルはエディタの「確かめる」の推定レベルと同じ（作った譜面もこれで測り、そのまま #DLEVEL に書く）
   const mech = levelOf(doc)?.level ?? levelOfDoc(doc);
-  const masterLevel = levelOfField(doc.fields['DLEVEL']) ?? mech;
+  const masterLevel = levelOfField(doc.fields['DLEVEL'], doc.fields['DLVDEC']) ?? mech;
   const last = lastMeasure(doc);
   const spans = sectionSpans(useSidecar.getState().sections, last);
   const base = s.meta.fileName.replace(/\.dtx$/i, '').toLowerCase();
@@ -490,7 +491,7 @@ async function loadCharts(folder: SongFolder, token: number) {
     found.forEach((x, i) => {
       // 計算のレベルは、その譜面をエディタで開いたときの推定と同じ（読んだままの譜面で測る。写した譜面で測っても手元の 6 曲では同じ値）
       const mech = levelOfDoc(x.doc);
-      const reg = levelOfField(x.doc.fields['DLEVEL']);
+      const reg = levelOfField(x.doc.fields['DLEVEL'], x.doc.fields['DLVDEC']);
       charts[x.slot] = {
         slot: x.slot,
         label: x.label,
@@ -539,26 +540,8 @@ export function setEnabled(d: Difficulty, on: boolean) {
 // - 作る元は上の譜面。下に移した譜面にある音は残す（段階の決まりは今までと同じ）
 // - エディタに反映するまでは、この画面の中だけ（戻せる）
 
-const INSERT_LEVEL_KEY = 'dtxe.insertLevel.v1';
-
-/** 前にあいだに作ったときのレベル（あなたが遊ぶレベル。次の曲でもはじめに出す） */
-export function insertLevel(): number | null {
-  try {
-    const v = Number(localStorage.getItem(INSERT_LEVEL_KEY));
-    return Number.isFinite(v) && v >= 1 && v <= 9.9 ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-export function rememberInsertLevel(v: number) {
-  if (!Number.isFinite(v) || v < 1 || v > 9.9) return;
-  try {
-    localStorage.setItem(INSERT_LEVEL_KEY, String(Math.round(v * 10) / 10));
-  } catch {
-    // 覚えられなくても動く
-  }
-}
+// 遊ぶレベル（前にあいだに作ったときのレベル）は store/playLevel（難易度ガイドラインでも見せる）
+export { insertLevel, rememberInsertLevel } from './playLevel';
 
 /** 譜面を下へ移して空けた難易度（まだ何も入っていない所。目標は上下の譜面のあいだ） */
 export function insertedSlots(s: Pick<GenState, 'moves' | 'charts'>): Difficulty[] {
@@ -843,8 +826,8 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
     let plan = defaultPlan(g.spans);
     let planSource: DiffState['planSource'] = 'rule';
     if (useAi) {
-      const gl = useGuideline.getState();
-      const guide = guidelineText(gl.guide, [bandOf(ds.target.center)]);
+      // 目標レベルの帯の基準文と、手元の曲の集計（基準文が無くても数字は渡す）
+      const guide = guideContext([bandOf(ds.target.center)]);
       const r = await runAi<Partial<DifficultyPlan>>('difficulty', {
         ...planPrompt({
           doc: src.doc,

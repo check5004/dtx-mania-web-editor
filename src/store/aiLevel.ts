@@ -7,7 +7,7 @@ import type { DtxDoc } from '../dtx/model';
 import { buildTempoMap } from '../dtx/timing';
 import { chartFeatures, lastMeasure } from '../gen/features';
 import { runAi } from './ai';
-import { bandOf, guidelineText, loadGuideline, nearestCharts, useGuideline } from './guideline';
+import { bandOf, guideContext, loadGuideline, nearestCharts, rulerCharts } from './guideline';
 import { useEditor } from './editor';
 import { useSidecar } from './sidecar';
 import { levelOf } from './check';
@@ -21,13 +21,13 @@ export interface JudgeResult extends LevelJudgement {
 /** 譜面1つを AI に判定してもらう（mech はエディタの推定レベル。AI難易度生成も同じ値を渡す） */
 export async function judgeDoc(doc: DtxDoc, o: { title: string; sections: { m: number; name: string }[]; mech: number; quiet?: boolean }): Promise<JudgeResult | null> {
   await loadGuideline();
-  const g = useGuideline.getState();
   const tempo = buildTempoMap(doc);
   const feat = chartFeatures(doc, tempo);
-  const near = nearestCharts(feat, g.charts, 5, o.title);
-  // 基準文は推定レベルの前後の帯だけ渡す（短くする）
+  // 似た譜面は物差しに入れた譜面から（AI で作った譜面・エディタで直している譜面などは入れない）
+  const near = nearestCharts(feat, rulerCharts(), 5, o.title);
+  // 基準文と集計は推定レベルの前後の帯だけ渡す（短くする）
   const b = bandOf(o.mech);
-  const guide = guidelineText(g.guide, [b - 1, b, b + 1].filter((x) => x >= 1 && x <= 9));
+  const guide = guideContext([b - 1, b, b + 1].filter((x) => x >= 1 && x <= 9));
   const p = levelPrompt({ doc, title: o.title, sections: sectionSpans(o.sections, lastMeasure(doc)), guide, near, mech: o.mech, feat });
   const r = await runAi<Partial<LevelJudgement>>('level', { ...p, schema: levelSchema(), maxTokens: 2500, quiet: o.quiet });
   if (!r) return null;

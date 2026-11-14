@@ -1,13 +1,14 @@
 // 「DTXMania の曲」の一覧の見せ方（しぼりこみ・並べ替え・BOX の数・空いた難易度の枠・set.def を作る／直す）。
 // 画面からも試験からも使う、ファイルを触らない関数だけ。
+import { insertPlan } from '../gen/insert';
 import { checkFits, type BgmCheck } from './bgm';
 import { relDtxPath } from './parse';
 import { checkLevel, SLOT_KEYS, type LibBox, type LibChart, type LibSong, type SlotKey } from './scan';
 
 export type NxSort = 'updated' | 'title' | 'artist' | 'bpm' | 'level' | 'checks';
-export type NxFilter = 'missing' | 'bgmdrums' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
-/** synced（同期で変わった曲）は PC どうしの同期をしているときだけ出す */
-export const NX_FILTERS: readonly NxFilter[] = ['missing', 'bgmdrums', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
+export type NxFilter = 'missing' | 'mylevel' | 'bgmdrums' | 'edited' | 'ai' | 'drive' | 'synced' | 'draft' | 'checks';
+/** synced（同期で変わった曲）は PC どうしの同期をしているときだけ、mylevel（遊ぶレベルを足せる曲）は遊ぶレベルを決めたときだけ出す */
+export const NX_FILTERS: readonly NxFilter[] = ['missing', 'mylevel', 'bgmdrums', 'edited', 'ai', 'drive', 'synced', 'draft', 'checks'];
 
 /** しぼりこみと数に使う、一覧のほかの情報 */
 export interface NxFilterCtx {
@@ -17,6 +18,8 @@ export interface NxFilterCtx {
   synced?: ReadonlySet<string>;
   /** 曲の id → BGM にドラムが入っているかを調べた結果（src/nxlib/bgm.ts） */
   bgm?: Readonly<Record<string, BgmCheck>>;
+  /** 遊ぶレベル（store/playLevel。決めていなければ null） */
+  play?: number | null;
 }
 
 /** BOX のしぼりこみ：null はすべて、'' は BOX の外、ほかは BOX の鍵 */
@@ -112,10 +115,19 @@ export function warnCount(s: LibSong): number {
   return s.checks.filter((c) => checkLevel(c.kind) === 'warn').length;
 }
 
+/** 遊ぶレベルの譜面を、あいだに作って足せる曲（gen/insert。同じくらいのレベルの譜面がもうある曲は入れない） */
+export function canAddLevel(s: LibSong, play: number | null | undefined): boolean {
+  if (play === null || play === undefined) return false;
+  const levels = slotLevels(s);
+  return !!levels && insertPlan(levels, play).ok;
+}
+
 export function hasFilter(s: LibSong, f: NxFilter, ctx: NxFilterCtx): boolean {
   switch (f) {
     case 'missing':
       return addableSlots(s).length > 0;
+    case 'mylevel':
+      return canAddLevel(s, ctx.play);
     case 'bgmdrums':
       return suggestsSeparation(s, ctx.bgm);
     case 'edited':

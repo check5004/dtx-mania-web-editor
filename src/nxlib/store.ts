@@ -65,6 +65,8 @@ export interface NxState {
   box: string | null;
   filter: NxFilter | null;
   sel: string | null;
+  /** 曲の一覧の画面で、難易度ガイドラインを開いている */
+  guide: boolean;
 }
 
 export const useNxLib = create<NxState>(() => ({
@@ -90,6 +92,7 @@ export const useNxLib = create<NxState>(() => ({
   box: null,
   filter: null,
   sel: null,
+  guide: false,
 }));
 
 const get = useNxLib.getState;
@@ -791,6 +794,6 @@ async function runBgm() {
 
 // ---- 画面の状態 -----------------------------------------------------------------------
 
-export function setNxView(p: Partial<Pick<NxState, 'q' | 'sort' | 'box' | 'filter' | 'sel'>>) {
+export function setNxView(p: Partial<Pick<NxState, 'q' | 'sort' | 'box' | 'filter' | 'sel' | 'guide'>>) {
   set(p);
 }

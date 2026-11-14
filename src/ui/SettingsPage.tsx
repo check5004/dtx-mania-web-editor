@@ -81,7 +81,7 @@ function WideSettings({ tablet }: { tablet: boolean }) {
               </button>
               {/* AI の下に付ける（難易度生成のレベルの基準） */}
               {k === 'ai' && (
-                <button className="sub" onClick={() => openPage('guideline')} title={tr('手元の曲から作る、レベルの基準', 'Level guidelines built from your local songs')}>
+                <button className="sub" onClick={() => openPage('guideline')} title={tr('DTXMania の曲から作る、レベルの物差しと遊ぶレベル', 'A level ruler built from your DTXMania songs, and your playing level')}>
                   {tr('難易度ガイドライン', 'Difficulty guidelines')}
                 </button>
               )}

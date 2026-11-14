@@ -8,6 +8,9 @@ import { openNxGen, openNxSong, nxPreviewLoader } from '../../nxlib/actions';
 import type { LibSong } from '../../nxlib/scan';
 import { ensureNxPerm, forgetNxPlace, laterNxExtra, pickNxExtra, pickNxPlace, refreshDrafts, rescanNx, setNxView, startBgmScan, stopBgmScan, stopNxScan, useNxLib, type NxState } from '../../nxlib/store';
 import { bgmCheckedCount, boxCounts, bpmText, bytesText, chartCount, chartIn, filterCounts, NX_FILTERS, suggestsSeparation, viewSongs, type NxFilter, type NxSort } from '../../nxlib/view';
+import { insertLevel, usePlayLevel } from '../../store/playLevel';
+import { useGuideline } from '../../store/guideline';
+import { GuidelinePage } from '../GuidelinePage';
 import { toggleAudition, useStopAuditionOnClose } from '../../store/audition';
 import { useDrums } from '../../store/drums';
 import { goHome, useEditor } from '../../store/editor';
@@ -27,6 +30,10 @@ export function filterName(f: NxFilter): string {
   switch (f) {
     case 'missing':
       return tr('難易度が足りない', 'Missing difficulties');
+    case 'mylevel': {
+      const p = insertLevel();
+      return p !== null ? tr(`${p.toFixed(1)} を足せる`, `Can add a ${p.toFixed(1)}`) : tr('遊ぶレベルを足せる', 'Can add your level');
+    }
     case 'bgmdrums':
       return tr('BGM にドラム入り', 'Drums in the BGM');
     case 'edited':
@@ -44,11 +51,11 @@ export function filterName(f: NxFilter): string {
   }
 }
 
-export const FILTER_COLOR: Record<NxFilter, string> = { missing: '#b78cff', bgmdrums: '#7aa2ff', edited: '#4cc2ff', ai: '#c9b3ff', drive: '#5bd69a', synced: '#5fd4cf', draft: '#ffc768', checks: '#ff9a5c' };
+export const FILTER_COLOR: Record<NxFilter, string> = { missing: '#b78cff', mylevel: '#ff8fc7', bgmdrums: '#7aa2ff', edited: '#4cc2ff', ai: '#c9b3ff', drive: '#5bd69a', synced: '#5fd4cf', draft: '#ffc768', checks: '#ff9a5c' };
 
-/** 出すしぼりこみ（「同期で変わった曲」は PC どうしの同期をしているときだけ） */
-export function shownFilters(syncOn: boolean): NxFilter[] {
-  return NX_FILTERS.filter((f) => f !== 'synced' || syncOn);
+/** 出すしぼりこみ（「同期で変わった曲」は PC どうしの同期をしているときだけ、「遊ぶレベルを足せる」は遊ぶレベルを決めたときだけ） */
+export function shownFilters(syncOn: boolean, hasPlay: boolean): NxFilter[] {
+  return NX_FILTERS.filter((f) => (f !== 'synced' || syncOn) && (f !== 'mylevel' || hasPlay));
 }
 
 /** 同期で変わった曲（しぼりこみ・数） */
@@ -86,7 +93,8 @@ function useView() {
   const drafts = useNxLib((s) => s.drafts);
   const bgm = useNxLib((s) => s.bgm);
   const synced = useSyncedSet();
-  return useMemo(() => viewSongs(songs, { q, sort, box, filter, drafts, synced, bgm }), [songs, q, sort, box, filter, drafts, synced, bgm]);
+  const play = usePlayLevel((s) => s.v);
+  return useMemo(() => viewSongs(songs, { q, sort, box, filter, drafts, synced, bgm, play }), [songs, q, sort, box, filter, drafts, synced, bgm, play]);
 }
 
 function permText(st: Pick<NxState, 'perm'>, atStart: boolean): string {
@@ -106,6 +114,7 @@ export function SongsPage() {
   const sel = useNxLib((s) => s.sel);
   const filter = useNxLib((s) => s.filter);
   const outsideLater = useNxLib((s) => s.outsideLater);
+  const guide = useNxLib((s) => s.guide);
   const list = useView();
   const searchRef = useRef<HTMLInputElement>(null);
   useStopAuditionOnClose('nx:');
@@ -125,6 +134,8 @@ export function SongsPage() {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
       if (document.querySelector('.modal-back, .ps-drawer-back')) return;
+      // 難易度ガイドラインを開いている間は、その画面のキー
+      if (useNxLib.getState().guide) return;
       const t = e.target as HTMLElement | null;
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
       const st = useNxLib.getState();
@@ -169,6 +180,12 @@ export function SongsPage() {
   }, [list]);
 
   if (!ready) return <div className="nx-app nx-loading" />;
+  if (guide)
+    return (
+      <div className="nx-guide-wrap">
+        <GuidelinePage onBack={() => setNxView({ guide: false })} />
+      </div>
+    );
   if (!place) return <NxFirst />;
 
   const firstScan = !!scan?.first;
@@ -423,6 +440,7 @@ function NxTop() {
       )}
       <span className="grow" />
       <SyncChip />
+      {place && <GuideButton />}
       {place && (
         <button
           className="btn"
@@ -452,6 +470,24 @@ function NxTop() {
         </button>
       )}
     </header>
+  );
+}
+
+/** 難易度ガイドラインを開く（DTXMania の曲から裏で作った物差しと、遊ぶレベル） */
+export function GuideButton() {
+  const play = usePlayLevel((s) => s.v);
+  const analyzing = useGuideline((s) => !!s.analyzing);
+  return (
+    <button
+      className="btn nx-guide-btn"
+      onClick={() => setNxView({ guide: true })}
+      title={tr('DTXMania の曲から作った、レベルの物差しと、あなたの遊ぶレベル', 'The level ruler built from your DTXMania songs, and your playing level')}
+    >
+      {Icon.chart(14)}
+      {tr('難易度ガイドライン', 'Difficulty guidelines')}
+      {play !== null && <span className="nx-guide-you mono">{tr(`あなた ${play.toFixed(1)}`, `You ${play.toFixed(1)}`)}</span>}
+      {analyzing && <i className="gp-spin" aria-label={tr('譜面を読んでいます', 'Reading charts')} />}
+    </button>
   );
 }
 
@@ -534,7 +570,8 @@ function NxTool({ searchRef, shown }: { searchRef: React.RefObject<HTMLInputElem
   const prevFolders = useNxLib((s) => s.folders);
   const synced = useSyncedSet();
   const syncOn = usePcSync((s) => s.settings.on);
-  const counts = useMemo(() => (filter ? filterCounts(songs, { drafts, synced, bgm }) : null), [filter, songs, drafts, synced, bgm]);
+  const play = usePlayLevel((s) => s.v);
+  const counts = useMemo(() => (filter ? filterCounts(songs, { drafts, synced, bgm, play }) : null), [filter, songs, drafts, synced, bgm, play]);
   const syncN = useMemo(() => (syncOn ? syncedFolders(songs).n : 0), [syncOn, songs]);
   const n = songs.length;
   const charts = useMemo(() => chartCount(songs), [songs]);
@@ -616,8 +653,9 @@ function NxSide() {
   const scan = useNxLib((s) => s.scan);
   const syncOn = usePcSync((s) => s.settings.on);
   const synced = useSyncedSet();
+  const play = usePlayLevel((s) => s.v);
   const bc = useMemo(() => boxCounts(songs), [songs]);
-  const fc = useMemo(() => filterCounts(songs, { drafts, synced, bgm }), [songs, drafts, synced, bgm]);
+  const fc = useMemo(() => filterCounts(songs, { drafts, synced, bgm, play }), [songs, drafts, synced, bgm, play]);
   const outsideN = bc.get('') ?? 0;
   return (
     <nav className="nx-side scroll">
@@ -645,7 +683,7 @@ function NxSide() {
       <div className="nx-sh" style={{ marginTop: 6 }}>
         {tr('しぼりこみ', 'Filters')}
       </div>
-      {shownFilters(syncOn).map((f) => (
+      {shownFilters(syncOn, play !== null).map((f) => (
         <button
           key={f}
           className={`nx-si ${filter === f ? 'on' : ''}`}

@@ -17,6 +17,7 @@ import { SetupHost } from './ui/SetupProgress';
 import { Editor } from './ui/Editor';
 import { Home } from './ui/Home';
 import { initNxLib } from './nxlib/store';
+import { initGuideline } from './store/guideline';
 import { initPcSync } from './sync/store';
 import { PcSyncHost } from './ui/sync/host';
 import { SongsPage } from './ui/nxlib/SongsPage';
@@ -86,6 +87,8 @@ export function App() {
   useEffect(() => void initLocalSongs(), []);
   useEffect(() => initDrive(), []);
   useEffect(() => void initNxLib(), []);
+  // 難易度ガイドライン：DTXMania の曲の一覧を読み終えたら、裏で変わった譜面だけ物差しに足す
+  useEffect(() => initGuideline(), []);
   useEffect(() => initPcSync(), []);
   return (
     <>

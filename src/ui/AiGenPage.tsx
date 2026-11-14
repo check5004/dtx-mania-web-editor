@@ -60,7 +60,7 @@ import {
   type GenState,
   type StairIssues,
 } from '../store/gen';
-import { useGuideline } from '../store/guideline';
+import { useGuideline, useRuler } from '../store/guideline';
 import { useSidecar } from '../store/sidecar';
 import { useDevice } from '../store/device';
 import { genViewport, GenCompare } from './GenCompare';
@@ -263,7 +263,7 @@ export function AiGenPage() {
   const model = useAi((s) => modelLabel(s.tasks.difficulty.model, s.models));
   const costPer = useAi(() => taskCostEstimate('difficulty'));
   const guide = useGuideline((s) => s.guide);
-  const charts = useGuideline((s) => s.charts.length);
+  const ruler = useRuler();
   const sections = useSidecar((s) => s.sections);
   const tablet = useDevice((s) => s.tablet);
   const phone = useDevice((s) => s.phone);
@@ -309,16 +309,21 @@ export function AiGenPage() {
         <span className="gen-doc">{Icon.file(15)}</span>
         <span className="grow" style={{ textAlign: 'left' }}>
           <b>
-            {tr('難易度ガイドライン', 'Difficulty guidelines')} v{guide.version}
+            {tr('難易度ガイドライン', 'Difficulty guidelines')}
+            {guide.version > 0 && ` v${guide.version}`}
           </b>
           <span className="lbl" style={{ display: 'block' }}>
-            {charts ? tr(`手元 ${charts} 譜面から作成`, `Built from ${charts} local ${pl(charts, 'chart')}`) : tr('まだ集計していません', 'Not compiled yet')}
+            {ruler.use.length
+              ? ruler.nx
+                ? tr(`DTXMania の曲 ${ruler.use.length} 譜面の物差し`, `Ruler from ${ruler.use.length} DTXMania ${pl(ruler.use.length, 'chart')}`)
+                : tr(`足した曲 ${ruler.use.length} 譜面の物差し`, `Ruler from ${ruler.use.length} added ${pl(ruler.use.length, 'chart')}`)
+              : tr('物差しがまだありません（開くと作り方が出ます）', 'No ruler yet (open it to see how to build one)')}
           </span>
         </span>
         <span className="link-btn">{tr('開く', 'Open')}</span>
       </button>
       <p className="lbl" style={{ margin: '4px 0 12px' }}>
-        {tr('目標レベルの帯の基準文と集計をAIに渡します。', "The AI gets the guideline text and stats for the target level's band.")}
+        {tr('目標レベルの帯の集計（手元の曲で何がどれだけ出てくるか）と、基準文があればそれも AI に渡します。', "The AI gets the target band's stats (what appears how often in your songs), plus the guideline text if there is any.")}
       </p>
     </>
   );

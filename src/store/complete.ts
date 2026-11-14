@@ -630,7 +630,7 @@ export async function askAi() {
       from,
       to: from + len - 1,
       instruction: AI_NOTE,
-      targetLevel: levelOfField(doc.fields['DLEVEL']),
+      targetLevel: levelOfField(doc.fields['DLEVEL'], doc.fields['DLVDEC']),
       onsets: onsets && bgm ? onsets : null,
       offsetSec: bgm?.sec ?? 0,
       human: humanMeasure(doc),
