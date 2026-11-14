@@ -6,23 +6,30 @@ import { tr } from '../../i18n';
 import type { Difficulty } from '../../gen/simplify';
 import { SLOTS } from '../../gen/targets';
 import { toast } from '../../store/editor';
-import { belowSource, columnDoc, isPassing, knownLevels, pendingMoveTo, setEnabled, setListen, setTarget, shownLevel, slotLabel, stairIssues, useGen, type DiffState } from '../../store/gen';
+import { belowSource, calcLevel, columnDoc, isPassing, knownCalcs, knownLevels, pendingMoveTo, setEnabled, setListen, setTarget, slotLabel, stairIssues, stairLevel, useGen, type DiffState } from '../../store/gen';
 import { Icon } from '../icons';
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
 
-/** これ以上動かせないわけ（めやすは開いている譜面・残す既存の譜面から 0.3 離す。1.0〜9.9） */
+/**
+ * これ以上動かせないわけ（めやすは開いている譜面・残す既存の譜面から 0.3 離す。上の譜面は計算と登録の低い方、下の譜面は高い方から。1.0〜9.9）
+ */
 function capNote(d: Difficulty, up: boolean): string {
   const g = useGen.getState();
   const known = knownLevels(g);
+  const calcs = knownCalcs(g);
   const i = SLOTS.indexOf(d);
   const near = up ? SLOTS.slice(0, i).filter((s) => known[s] !== undefined).pop() : SLOTS.slice(i + 1).find((s) => known[s] !== undefined);
   if (near) {
-    const lv = known[near]!.toFixed(2);
+    const reg = known[near]!;
+    const calc = calcs[near] ?? reg;
+    const at = stairLevel(reg, calc, up);
+    // 登録と計算が違えば、どちらで止まったか
+    const lv = Math.abs(reg - calc) < 0.005 ? `Lv ${at.toFixed(2)}` : at === calc ? tr(`計算 ${at.toFixed(2)}`, `calculated ${at.toFixed(2)}`) : tr(`登録 Lv ${at.toFixed(2)}`, `listed Lv ${at.toFixed(2)}`);
     const name = slotLabel(g, near);
     return up
-      ? tr(`${d} のめやすは、上の ${name}（Lv ${lv}）より 0.3 低い所までです`, `The ${d} aim stays at least 0.3 below ${name} above it (Lv ${lv})`)
-      : tr(`${d} のめやすは、下の ${name}（Lv ${lv}）より 0.3 高い所までです`, `The ${d} aim stays at least 0.3 above ${name} below it (Lv ${lv})`);
+      ? tr(`${d} のめやすは、上の ${name}（${lv}）より 0.3 低い所までです`, `The ${d} aim stays at least 0.3 below ${name} above it (${lv})`)
+      : tr(`${d} のめやすは、下の ${name}（${lv}）より 0.3 高い所までです`, `The ${d} aim stays at least 0.3 above ${name} below it (${lv})`);
   }
   return up ? tr('めやすは 9.9 までです', 'The aim goes up to 9.9') : tr('めやすは 1.0 からです', 'The aim starts at 1.0');
 }
@@ -164,7 +171,7 @@ function TargetChip({ d }: { d: Difficulty }) {
   const chart = g.charts[d];
   const on = g.listen === d;
   const busy = ds.status === 'planning' || ds.status === 'building' || ds.status === 'judging';
-  const lv = ds.enabled && ds.result ? shownLevel(ds) : null;
+  const lv = ds.enabled && ds.result ? calcLevel(ds) : null;
   const st = lv !== null ? stairIssues(g, d) : null;
   const ok = lv !== null && isPassing(ds) && st !== null && st.denser.length + st.thinner.length === 0;
   const open = () => {

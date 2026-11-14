@@ -44,14 +44,17 @@ export function migrateLevel(old: number, avgNps: number, peakNps: number): numb
 }
 
 export function estimateLevel(doc: DtxDoc, tempo: TempoMap): LevelEstimate | null {
-  const ev: { sec: number; lane: number }[] = [];
+  const ev: { sec: number; lane: number; ch: number }[] = [];
   for (const c of doc.chips) {
     const d = drumChannel(c.ch);
     if (!d || d.kind !== 'normal') continue;
-    ev.push({ sec: tempo.beatToSec(tempo.beatOf(c.m, c.f)), lane: d.lane });
+    ev.push({ sec: tempo.beatToSec(tempo.beatOf(c.m, c.f)), lane: d.lane, ch: c.ch });
   }
   if (ev.length < 8) return null;
-  ev.sort((a, b) => a.sec - b.sec);
+  // 同じ時刻の音はチャンネルの順に並べる。手のレーンの切り替えの数が、譜面の中のチップの並び（読み込んだファイルの行の順・
+  // 手で足した順）で変わらないように。保存すると行はチャンネルの順になるので、AI難易度生成で作った譜面の値と、
+  // 書き出して開き直した譜面の値がそろう（並びで 0.01 変わっていた）
+  ev.sort((a, b) => a.sec - b.sec || a.ch - b.ch);
   const duration = Math.max(1, ev[ev.length - 1].sec - ev[0].sec);
   const avgNps = ev.length / duration;
   // 一番密な2秒

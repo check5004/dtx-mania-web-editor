@@ -78,4 +78,21 @@ describe('推定レベル', () => {
   it('#DLEVEL の書き方', () => {
     expect(levelToField(6.65)).toBe('665');
   });
+  it('同じ時刻の音の並び（読み込んだファイルの行の順・手で足した順）で推定が変わらない（保存して開き直しても同じ値）', () => {
+    // 4分ごとにハイハットとスネアの同時打ち、そのあいだにハイハットだけ。並びで手のレーンの切り替えの数が変わっていた
+    const chips = [];
+    let id = 1;
+    for (let m = 0; m < 8; m++)
+      for (let k = 0; k < 8; k++) {
+        chips.push(chip(id++, CH.HHC, m, k, 8));
+        if (k % 2 === 0) chips.push(chip(id++, k % 4 === 0 ? CH.BD : CH.SD, m, k, 8));
+        if (k === 0) chips.push(chip(id++, CH.CY, m, k, 8));
+      }
+    const a = doc(chips, 150);
+    const b = doc([...chips].reverse(), 150);
+    const ea = estimateLevel(a, buildTempoMap(a))!;
+    const eb = estimateLevel(b, buildTempoMap(b))!;
+    expect(eb.moves).toBe(ea.moves);
+    expect(eb.level).toBe(ea.level);
+  });
 });

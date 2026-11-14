@@ -18,8 +18,8 @@ export interface JudgeResult extends LevelJudgement {
   nearCount: number;
 }
 
-/** 譜面1つを AI に判定してもらう */
-export async function judgeDoc(doc: DtxDoc, o: { title: string; label?: string; sections: { m: number; name: string }[]; mech: number; quiet?: boolean }): Promise<JudgeResult | null> {
+/** 譜面1つを AI に判定してもらう（mech はエディタの推定レベル。AI難易度生成も同じ値を渡す） */
+export async function judgeDoc(doc: DtxDoc, o: { title: string; sections: { m: number; name: string }[]; mech: number; quiet?: boolean }): Promise<JudgeResult | null> {
   await loadGuideline();
   const g = useGuideline.getState();
   const tempo = buildTempoMap(doc);
@@ -28,7 +28,7 @@ export async function judgeDoc(doc: DtxDoc, o: { title: string; label?: string; 
   // 基準文は推定レベルの前後の帯だけ渡す（短くする）
   const b = bandOf(o.mech);
   const guide = guidelineText(g.guide, [b - 1, b, b + 1].filter((x) => x >= 1 && x <= 9));
-  const p = levelPrompt({ doc, title: o.title, label: o.label, sections: sectionSpans(o.sections, lastMeasure(doc)), guide, near, mech: o.mech, feat });
+  const p = levelPrompt({ doc, title: o.title, sections: sectionSpans(o.sections, lastMeasure(doc)), guide, near, mech: o.mech, feat });
   const r = await runAi<Partial<LevelJudgement>>('level', { ...p, schema: levelSchema(), maxTokens: 2500, quiet: o.quiet });
   if (!r) return null;
   return { ...cleanJudgement(r.data), cost: r.costUsed, model: r.model, nearCount: near.length };
@@ -48,8 +48,8 @@ export async function judgeCurrent() {
   const mech = levelOf(s.doc)?.level ?? 1;
   useAiLevel.setState({ loading: true, error: null });
   try {
-    const label = s.meta.siblings.find((x) => x.file.toLowerCase() === s.meta.fileName.toLowerCase())?.label;
-    const r = await judgeDoc(s.doc, { title: s.doc.fields['TITLE'] || s.meta.fileName, label, sections: useSidecar.getState().sections, mech });
+    // 難易度の名前は渡さない（AI難易度生成の判定と同じ頼み方。名前に引っ張られないように）
+    const r = await judgeDoc(s.doc, { title: s.doc.fields['TITLE'] || s.meta.fileName, sections: useSidecar.getState().sections, mech });
     if (r) useAiLevel.setState({ doc: s.doc, result: r, loading: false });
     else useAiLevel.setState({ loading: false });
   } catch (e) {

@@ -110,18 +110,22 @@ describe('難易度の段階', () => {
   it('難しい曲（MASTER Lv8.0）は、下の難易度も上に引っ張られて高く、作った譜面も削りすぎない', () => {
     const g = useGen.getState();
     expect(g.masterLevel).toBe(8);
-    // めやすは MASTER から EXTREME 1.3・ADVANCED 1.8・BASIC 2.2 まで（比だけなら 6.8・4.8・2.96）
-    expect(g.diffs.EXTREME.target.center).toBeCloseTo(6.8, 2);
-    expect(g.diffs.ADVANCED.target.center).toBeCloseTo(6.2, 2);
-    expect(g.diffs.BASIC.target.center).toBeCloseTo(5.8, 2);
-    expect(g.diffs.BASIC.target).toMatchObject({ pulledFrom: 'MASTER' });
-    // 作った譜面のレベルは幅の中（7.02・6.01・5.57 前後）。BASIC でも元の音の4割より多く残す（比だけのときは2割ほど）
+    // この MASTER は登録 8.0 より計算（エディタの推定）が高い。作る譜面は計算で測るので、目標（削りすぎない MAX_DROP も）は
+    // 計算から数え、上の譜面より易しくするのは低い方の登録から数える（ゲームの中でも MASTER より低い Lv に）
+    const calc = g.masterCalc;
+    expect(calc).toBeGreaterThan(8.5);
+    expect(g.diffs.EXTREME.target.center).toBeCloseTo(Math.min(8 - 0.3, calc - 1.3), 2);
+    expect(g.diffs.EXTREME.target.capAbove).toEqual({ slot: 'MASTER', known: true, level: 8, listed: true });
+    expect(g.diffs.ADVANCED.target.center).toBeCloseTo(calc - 1.8, 2);
+    expect(g.diffs.BASIC.target.center).toBeCloseTo(calc - 2.2, 2);
+    expect(g.diffs.BASIC.target).toMatchObject({ pulledFrom: 'MASTER', pulledLevel: Math.round(calc * 100) / 100 });
+    // 作った譜面のレベルは幅の中。BASIC でも元の音の約半分を残す（比だけのときは2割ほど）
     for (const d of DIFFS) {
       const t = g.diffs[d].target;
       expect(calcLevel(g.diffs[d]), d).toBeGreaterThanOrEqual(t.min - 1e-9);
       expect(calcLevel(g.diffs[d]), d).toBeLessThanOrEqual(t.max + 1e-9);
     }
-    expect(result('BASIC').notesAfter / result('BASIC').notesBefore).toBeGreaterThan(0.4);
+    expect(result('BASIC').notesAfter / result('BASIC').notesBefore).toBeGreaterThan(0.45);
   });
 
   it('上の難易度が薄くした区間は、下の難易度も同じだけ薄くする（AI が逆の方針を出しても）', () => {
@@ -213,8 +217,8 @@ describe('曲に既にある譜面を残して、あいだの難易度だけ作�
     const g = useGen.getState();
     useGen.setState({
       charts: {
-        EXTREME: { slot: 'EXTREME', label: 'EXTREME', file: 'ext.dtx', doc: ext, level: 6, registered: true, origin: 'human', calib: 1 },
-        BASIC: { slot: 'BASIC', label: 'BASIC', file: 'bsc.dtx', doc: bsc, level: 2.6, registered: true, origin: 'human', calib: 1 },
+        EXTREME: { slot: 'EXTREME', label: 'EXTREME', file: 'ext.dtx', doc: ext, level: 6, registered: true, origin: 'human', calc: 6 },
+        BASIC: { slot: 'BASIC', label: 'BASIC', file: 'bsc.dtx', doc: bsc, level: 2.6, registered: true, origin: 'human', calc: 2.6 },
       },
       diffs: { ...g.diffs, EXTREME: { ...g.diffs.EXTREME, enabled: false }, ADVANCED: { ...g.diffs.ADVANCED, enabled: true }, BASIC: { ...g.diffs.BASIC, enabled: false } },
     });
