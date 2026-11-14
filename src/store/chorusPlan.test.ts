@@ -16,13 +16,16 @@ vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout: () => undefined });
 vi.mock('../fs/recent', async (orig) => ({ ...(await orig<typeof import('../fs/recent')>()), getRecent: async () => undefined, draftFor: async () => undefined }));
 
 // 読み込んだステム（音はテストで決める）
-const st = vi.hoisted(() => ({ ready: [] as StemTrack[], bufs: new Map<string, AudioBuffer>() }));
+const st = vi.hoisted(() => ({ ready: [] as StemTrack[], bufs: new Map<string, AudioBuffer>(), heard: new Map<string, boolean>() }));
 vi.mock('./stems', async (orig) => ({
   ...(await orig<typeof import('./stems')>()),
   readyStems: () => st.ready,
   stemBuffer: (file: string) => st.bufs.get(file) ?? fakeBuf(200),
   stemsSettled: async () => undefined,
 }));
+
+// エディタの採譜で聞いた、音（engine.buffer の key）のドラム（無ければ採譜がまだ）
+vi.mock('./drums', async (orig) => ({ ...(await orig<typeof import('./drums')>()), drumsAudibleFor: (key: string | null | undefined) => (key ? (st.heard.get(key) ?? null) : null) }));
 
 // 読み込んだ音（WAV の番号 → 長さ。音で比べるテストでは中身のある音）
 const sounds = new Map<number, number>();
@@ -99,6 +102,7 @@ const plan = () => {
 beforeEach(() => {
   st.ready = [];
   st.bufs.clear();
+  st.heard.clear();
   decoded.clear();
 });
 
@@ -243,6 +247,32 @@ describe('名前では分からないドラム抜きを、ステムと音で比�
     openSong({ bgm: 'song.ogg', files });
     st.ready = [];
     expect(await fileHasDrums('preview_chorus.ogg')).toBeNull();
+  });
+});
+
+describe('ステムが無ければ、エディタの採譜（原曲にドラムが聞こえるか）で見分ける', () => {
+  it('採譜でドラムが聞こえない原曲は、ドラム入りの名前でも使わない（打ち込み終わった譜面ならドラムを足す・途中なら作らない）', async () => {
+    openSong({ bgm: 'song.ogg', drums: 10 });
+    st.heard.set('wav1', false);
+    expect(await plan()).toMatchObject({ kind: 'game', label: 'song.ogg' });
+    expect(await checkedFullOriginal()).toBeNull();
+    expect(await fileHasDrums('song.ogg')).toBe(false);
+
+    openSong({ bgm: 'song.ogg', drums: 3 });
+    st.heard.set('wav1', false);
+    expect(await plan()).toMatchObject({ kind: 'bgm' });
+  });
+
+  it('DTXMania の曲の bgm.ogg でも、採譜でドラムが聞こえれば完全な原曲（譜面のドラムは足さない）', async () => {
+    openSong({ bgm: 'bgm.ogg', drums: 10 });
+    st.heard.set('wav1', true);
+    const p = await plan();
+    expect(p).toMatchObject({ kind: 'full', label: 'bgm.ogg' });
+    expect(p?.maybeDrumless).toBeUndefined();
+    // 名前がドラム抜きの BGM は、採譜で聞こえても（分けた残りなど）名前のとおり
+    openSong({ bgm: 'song_drumless.ogg', drums: 3 });
+    st.heard.set('wav1', true);
+    expect(await plan()).toMatchObject({ kind: 'bgm' });
   });
 });
 

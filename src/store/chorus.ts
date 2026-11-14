@@ -1,11 +1,14 @@
 // サビから選曲画面の試聴（#PREVIEW）を作る。曲情報の「サビから作る」と、ほかの機能（原曲からワンボタンで作り始めるなど）から呼ぶ。
 // - 曲の音は、ドラムも入った完全な曲（ドラム抜きの BGM だけからは作らない。選曲画面でドラムが鳴らない試聴になるので）：
 //   1. 作業ファイルが覚えている完全な原曲（無ければほかの難易度の作業ファイルが覚えているもの・ドラム抜きの BGM と同じ名前の元の原曲）
-//   2. ドラム入りらしい原曲（BGM。長い SE があればゲームと同じに足す）
+//   2. ドラム入りらしい原曲（BGM。長い SE があればゲームと同じに足す）。名前では分からないドラム抜き（前の版で原曲の名前のまま
+//      書き出した音など）は、ドラムとほかの楽器のステムと音で比べて（src/audio/drumCheck.ts）、ステムが無ければエディタの採譜
+//      （ADTOF。src/store/drums.ts の drumsAudibleFor）で聞いて見分ける。1 の完全な原曲も同じに確かめる
 //   3. 原曲がドラム抜き（曲_drumless.ogg・DTXMania の曲の bgm.ogg など）か無いとき：ステムを全部足した音（ほかの難易度のステムも見る。
 //      メトロノーム・クリックは足さない）。ドラムのステムだけなら BGM と足す。長い SE がドラム（ドラムのステムを SE で鳴らす譜面）ならそれを足す
 //   4. 打ち込み終わった譜面なら、BGM に譜面のドラムの音をゲームと同じに足した音（サビを探すのは BGM で、切り出すのはドラムも足した音）
-//   5. どれも無く、BGM がドラム抜きと書いてある名前なら、サビを探して聴けるが、試聴は作らない（完全な原曲かステムを読み込むよう知らせる）
+//   5. どれも無く、BGM がドラム抜き（名前か、音で分かった）なら、サビを探して聴けるが、試聴は作らない（完全な原曲かステムを読み込むよう知らせる）。
+//      DTXMania の曲の bgm.ogg だけで、ドラム抜きか分からなければ使う（画面で知らせる）
 // - サビを探すのはワーカー（src/audio/chorus.ts）。小節は譜面の小節線（音に合っていなければ音から推定）
 // - DTXMania は試聴のファイルを頭から繰り返し鳴らすだけ（どこから鳴らすかを書けない）なので、サビの所を切り出したファイル
 //   （preview_chorus.ogg）を作って #PREVIEW に入れる。同じ試聴だったほかの難易度にも入れ、元に戻せる（src/store/stems.ts の registerExport）
@@ -26,6 +29,7 @@ import { getRecent, recentIdFor } from '../fs/recent';
 import { soundKey } from '../fs/soundKey';
 import { tr } from '../i18n';
 import { bgmSource, soundBus, soundEvents, tempoOf, wavPan, wavPath, wavVolume } from './derived';
+import { drumsAudibleFor, drumsSettledFor } from './drums';
 import { dismissToast, prepareSounds, toast, useEditor } from './editor';
 import { isDrumlessName, isGameBgmName } from '../separate/names';
 import { bgmFileOf, fullMixFile, fullOriginal, isFullMixPath, markPreviewFilled, namedOriginal, previewFillable } from './fullMix';
@@ -271,8 +275,25 @@ async function soundHasDrums(cacheKey: string, getBuf: () => Promise<AudioBuffer
 }
 
 /**
+ * 曲フォルダのファイル f が原曲（BGM）なら、エディタの採譜（ADTOF）で聞いたドラム（聞こえる true・聞こえない false）。
+ * ステムが無くても、ドラム抜きの BGM を見分けられる。採譜がまだ・別の音を採譜した・原曲でなければ null
+ */
+function heardIfBgm(doc: DtxDoc, folder: SongFolder | null, f: FolderFile): boolean | null {
+  const b = bgmSource(doc);
+  const bf = bgmFileOf(doc, folder);
+  return b && bf && normPath(bf.path) === normPath(f.path) ? drumsAudibleFor(engine.buffer(b.wav)?.key) : null;
+}
+
+/** 原曲（BGM）を採譜している途中なら、ドラムが聞こえるかが分かるまで待つ（ステムが無い曲で、普通の名前のドラム抜きを試聴にしない。ms で打ち切る） */
+async function bgmHeardSettled(ms: number) {
+  const s = useEditor.getState();
+  const b = bgmSource(s.doc);
+  await drumsSettledFor(b ? engine.buffer(b.wav)?.key : null, ms);
+}
+
+/**
  * 曲フォルダの音のファイル（パス）にドラムが入っているか。ドラムとほかの楽器のステム（開いている難易度か、ほかの難易度の作業ファイル）と
- * 音で比べる。比べられなければ null（今の試聴がドラム抜きかを知らせるのに使う）
+ * 音で比べる。比べられなければ、原曲（BGM）なら採譜で聞いた答え。分からなければ null（今の試聴がドラム抜きかを知らせるのに使う）
  */
 export async function fileHasDrums(path: string): Promise<boolean | null> {
   const s = useEditor.getState();
@@ -281,12 +302,12 @@ export async function fileHasDrums(path: string): Promise<boolean | null> {
   if (!folder || !f) return null;
   await stemsSettled();
   const set = stemSet(folder, await siblingSidecars(folder, s.meta.fileName));
-  return soundHasDrums(fileKey(folder, f), () => decodeOnce(folder, f), set, 0);
+  return (await soundHasDrums(fileKey(folder, f), () => decodeOnce(folder, f), set, 0)) ?? heardIfBgm(s.doc, folder, f);
 }
 
 /**
- * 完全な原曲（src/store/fullMix.ts の fullOriginal）を、ステムと音で比べて確かめたもの。ドラム抜きと分かれば null
- * （前の版でドラム抜きを原曲の名前のまま書き出し、完全な原曲として覚えた曲。保存の前に試聴を入れるときに使う）
+ * 完全な原曲（src/store/fullMix.ts の fullOriginal）を、ステムと音で比べて（比べられなければ、原曲（BGM）は採譜で聞いて）確かめたもの。
+ * ドラム抜きと分かれば null（前の版でドラム抜きを原曲の名前のまま書き出し、完全な原曲として覚えた曲。保存の前に試聴を入れるときに使う）
  */
 export async function checkedFullOriginal(): Promise<FolderFile | null> {
   const s = useEditor.getState();
@@ -294,8 +315,10 @@ export async function checkedFullOriginal(): Promise<FolderFile | null> {
   const f = fullOriginal(s.doc, folder);
   if (!f || !folder) return f;
   await stemsSettled();
+  await bgmHeardSettled(20000);
   const set = stemSet(folder, await siblingSidecars(folder, s.meta.fileName));
-  return (await soundHasDrums(fileKey(folder, f), () => decodeOnce(folder, f), set, 0)) === false ? null : f;
+  const v = (await soundHasDrums(fileKey(folder, f), () => decodeOnce(folder, f), set, 0)) ?? heardIfBgm(s.doc, folder, f);
+  return v === false ? null : f;
 }
 
 /** BGM の長さ（秒）のうち、音のあるドラムのチップがある小節の割合 */
@@ -347,6 +370,9 @@ export async function planAudio(doc: DtxDoc, folder: SongFolder | null, fileName
   const bgm = bgmSource(doc);
   const at0 = bgm?.sec ?? 0;
   const bf = bgmFileOf(doc, folder);
+  const bgmGot = bgm ? engine.buffer(bgm.wav) : null;
+  /** エディタの採譜（ADTOF）で聞いた原曲（BGM）のドラム：聞こえる true・聞こえない false（採譜がまだ・ステムを解析元にしていれば null） */
+  const heard = drumsAudibleFor(bgmGot?.key);
   /** 1 本のファイルの音（原曲（BGM）そのものなら、読み込んだ音を使う） */
   const single = (f: FolderFile, kind: SongAudioKind): AudioPlan => {
     const isBgm = !!bgm && !!bf && normPath(bf.path) === normPath(f.path);
@@ -368,12 +394,14 @@ export async function planAudio(doc: DtxDoc, folder: SongFolder | null, fileName
   const stems = stemSet(folder, sibs);
   /**
    * 完全な原曲として使ってよいか：ドラムとほかの楽器のステムがあれば、ドラムが入っているかを音で確かめる
-   * （前の版では、ドラム抜きを原曲の名前のまま書き出すと、それを原曲・完全な原曲として覚えていた）。ステムが無ければ名前のとおり
+   * （前の版では、ドラム抜きを原曲の名前のまま書き出すと、それを原曲・完全な原曲として覚えていた）。
+   * 比べられなければ、原曲（BGM）は採譜で聞いた答え。それも無ければ名前のとおり
    */
   const complete = async (f: FolderFile) => {
     const isBgm = !!bgm && !!bf && normPath(bf.path) === normPath(f.path);
-    const got = isBgm ? engine.buffer(bgm.wav) : null;
-    return (await soundHasDrums(fileKey(folder, f), async () => got?.buf ?? (await decodeOnce(folder, f)), stems, 0)) !== false;
+    const got = isBgm ? bgmGot : null;
+    const v = await soundHasDrums(fileKey(folder, f), async () => got?.buf ?? (await decodeOnce(folder, f)), stems, 0);
+    return v ?? !(isBgm && heard === false);
   };
   // 1. 作業ファイルが覚えている完全な原曲（ドラム入り。BGM をドラム抜きにした曲）
   const fm = fullMixFile(folder);
@@ -420,8 +448,9 @@ export async function planAudio(doc: DtxDoc, folder: SongFolder | null, fileName
       },
     };
   }
-  // 2. ドラム入りらしい原曲（BGM。名前がドラム抜きらしくなく、ステムと比べてもドラムが入っている）
-  if (bf && !drumlessish(bf.name) && (await complete(bf))) return chart ?? single(bf, 'full');
+  // 2. ドラム入りらしい原曲（BGM。名前がドラム抜きらしくなく、ステムと比べても・採譜で聞いてもドラムが入っている）。
+  //    DTXMania の曲の BGM の名前（bgm.ogg）でも、採譜でドラムが聞こえれば完全な原曲（譜面のドラムを足すと二重になる）
+  if (bf && (!drumlessish(bf.name) || (!isDrumlessName(bf.name) && heard === true)) && (await complete(bf))) return chart ?? single(bf, 'full');
 
   // ここからは、原曲がドラム抜き（らしい）か無い
   // 3. ステム：ドラムとほかの楽器がそろえば全部を足す。ドラムだけなら BGM と足す
@@ -465,8 +494,8 @@ export async function planAudio(doc: DtxDoc, folder: SongFolder | null, fileName
   if (stems && (stems.tracks.length >= 2 || !bf)) return stemsPlan(stems, false);
   if (!bf) return chart;
   // 7. DTXMania の曲の BGM の名前（bgm.ogg）だけ：ドラム抜きのことが多いが、わからないので使う（画面で知らせる）
-  if (!isDrumlessName(bf.name)) return { ...(chart ?? single(bf, 'full')), maybeDrumless: true };
-  // 8. ドラム抜きの原曲だけ：サビを探して聴けるが、試聴は作らない
+  if (!isDrumlessName(bf.name) && heard !== false) return { ...(chart ?? single(bf, 'full')), maybeDrumless: true };
+  // 8. ドラム抜きの原曲だけ（名前か、ステムと比べて・採譜で聞いて分かった）：サビを探して聴けるが、試聴は作らない
   return { ...(chart ?? single(bf, 'bgm')), kind: 'bgm' };
 }
 
@@ -747,6 +776,8 @@ export async function makeChorusPreview(range?: ChorusRange | null, opts: { quie
       if (!found) return fail(useChorus.getState().error ?? tr('曲の音がありません', "There's no song audio"));
       r = defaultRange(found);
     }
+    // 原曲を採譜している途中なら待つ（普通の名前のドラム抜きの BGM を、完全な原曲として切り出さない）
+    await bgmHeardSettled(60000);
     const a = await songAudio();
     if (!a) return fail(tr('曲の音がありません', "There's no song audio"));
     // ドラム抜きの音だけからは作らない（選曲画面でドラムが鳴らない）
@@ -791,6 +822,7 @@ export async function makeChorusPreview(range?: ChorusRange | null, opts: { quie
 export async function fillPreviewFromChorus(): Promise<string | null> {
   const s = useEditor.getState();
   if (!s.folder || !previewFillable()) return null;
+  await bgmHeardSettled(20000);
   const plan = await planAudio(s.doc, s.folder, s.meta.fileName).catch(() => null);
   if (!plan || plan.kind === 'bgm' || plan.maybeDrumless) return null;
   const wait = toast(tr('選曲画面の試聴（#PREVIEW）が空なので、曲のサビから作っています…', 'The song select preview (#PREVIEW) is empty, so one is being made from the chorus…'), 'info', 60000);

@@ -22,6 +22,7 @@ import {
 } from '../store/chorus';
 import { fileBuffer, useEditor } from '../store/editor';
 import { isDrumlessName } from '../separate/names';
+import { useDrums } from '../store/drums';
 import { useStems } from '../store/stems';
 import { AuditionProgress } from './Audition';
 import { Icon } from './icons';
@@ -40,6 +41,8 @@ export function PreviewTools({ value }: { value: string }) {
   // ステムがあれば音で比べる（前の版で、原曲の名前のまま書き出したドラム抜き・ドラム抜きから作った試聴）
   const [heard, setHeard] = useState<{ value: string; drums: boolean | null } | null>(null);
   const stemsVersion = useStems((s) => s.version);
+  // ステムが無くても、原曲（BGM）を試聴にしていれば、エディタの採譜で聞いた答えで見分ける（採譜が終わったら見直す）
+  const heardKey = useDrums((d) => (d.status === 'ready' ? d.key : null));
   const v = value.trim();
   useEffect(() => {
     if (!v || isDrumlessName(v)) return;
@@ -50,7 +53,7 @@ export function PreviewTools({ value }: { value: string }) {
     return () => {
       live = false;
     };
-  }, [v, stemsVersion]);
+  }, [v, stemsVersion, heardKey]);
   const drumless = !!v && (isDrumlessName(v) || (heard?.value === v && heard.drums === false));
   return (
     <>
@@ -126,10 +129,11 @@ function ChorusPanel({ onClose }: { onClose: () => void }) {
   const [sel, setSel] = useState<Sel | null>(null);
   const [made, setMade] = useState<string | null>(null);
   useStopAuditionOnClose('chorus:');
-  // テンポ・原曲が変わったら探し直す（同じなら前の答えのまま）
+  // テンポ・原曲が変わったら探し直す（同じなら前の答えのまま）。原曲の採譜が終わったら、試聴を切り出す音を決め直す
+  const heardKey = useDrums((d) => (d.status === 'ready' ? d.key : null));
   useEffect(() => {
     void findSongChorus();
-  }, [doc]);
+  }, [doc, heardKey]);
   // 見つかったら、サビの頭から約 15 秒（4 小節単位）
   useEffect(() => {
     if (!found || !found.bars.length) {
