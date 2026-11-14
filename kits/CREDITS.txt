@@ -1,0 +1,78 @@
+DTX Web Editor - 標準キットの音の出どころとライセンス / Credits and licenses of the built-in kit sounds
+==========================================================================================
+
+どの音も、作った譜面（DTX）に入れて配ってかまいません。
+GeneralUser GS 以外はすべて CC0 1.0（パブリックドメイン）で、クレジットも要りません。
+You may include any of these sounds in the charts you share.
+Everything except GeneralUser GS is CC0 1.0 (public domain) and needs no credit.
+
+音は scripts/make-kits.mjs（作り方は scripts/kits/defs.mjs）で、マイクを混ぜ・頭と終わりを整え・音量をそろえ、
+一部のキットでは残響・ゲート・歪みなどをかけて作っています。
+The sounds were made with scripts/make-kits.mjs (recipes in scripts/kits/defs.mjs): mics mixed down to mono,
+trimmed, level-matched, and for some kits processed with reverb, gate, saturation, etc.
+
+
+音源 / Sources
+--------------
+
+[gu] GeneralUser GS v1.471 - S. Christian Collins
+  License: GeneralUser GS License v2.0 (LICENSE-GeneralUser-GS.txt)
+  https://www.schristiancollins.com/generaluser.php
+  Kits: std, room, rock, metal, jazz, elec, dance, eighties
+  特殊ノーツの音（clap・tamb・cowbell・shaker）も。ほかのキットは std か elec の音を使います。
+  Also the special-note sounds (clap, tamb, cowbell, shaker); other kits use those of std or elec.
+
+[bigrusty] Big Rusty Drums - Karoryfer Samples
+  License: CC0 1.0 Universal
+  https://github.com/sfzinstruments/karoryfer.big-rusty-drums (f07ce00)
+  Kits: vintage, heavy, arena, gated, dry, fat (right cymbal), funk (ride)
+
+[unruly] Unruly Drums - Karoryfer Samples
+  License: CC0 1.0 Universal
+  https://github.com/sfzinstruments/karoryfer.unruly-drums (9bf75c2)
+  Kits: garage, fat, funk
+
+[virtuosity] Virtuosity Drums - Versilian Studios / Karoryfer Samples
+  (drummer: Austin McMahon, recorded at Virtuosity Musical Instruments, Boston)
+  License: CC0 1.0 Universal
+  https://github.com/sfzinstruments/virtuosity_drums (9f04cf9)
+  Kits: swing, live, retro, lofi, seventies (cymbals), brushes (cross-stick), funk (right cymbal)
+
+[swirly] Swirly Drums - Karoryfer Samples
+  License: CC0 1.0 Universal
+  https://github.com/sfzinstruments/karoryfer.swirly-drums (c40dafe)
+  Kits: brushes
+
+[frankensnare] Frankensnare - Karoryfer Samples
+  License: CC0 1.0 Universal
+  https://github.com/sfzinstruments/karoryfer.frankensnare (9151c2d)
+  Kits: funk (snare, cross-stick: 12x5 steel)
+
+[gogodze] Gogodze Phu Vol II - Karoryfer Samples
+  License: CC0 1.0 Universal
+  https://github.com/sfzinstruments/karoryfer.gogodze-phu-vol-ii (69a0274)
+  Kits: seventies
+
+[freepats] FreePats Synthesizer Percussion (2022-07-18) - Roberto (FreePats project)
+  License: CC0 1.0 Universal
+  https://freepats.zenvoid.org/Percussion/synthesizer-percussion.html
+  Kits: analog, house (clap)
+
+[sonicpi] Sonic Pi samples (Sonic Pi 3.2.2, Debian package sonic-pi-samples) - from freesound.org, each CC0
+  https://github.com/sonic-pi-net/sonic-pi/tree/dev/etc/samples
+  Kits: house
+    bd_haus.flac            Rodrigo The Mad  https://freesound.org/people/Rodrigo%20The%20Mad/sounds/137722/
+    sn_dolf.flac            Dolfeus          https://freesound.org/people/Dolfeus/sounds/57534/
+    drum_cymbal_closed.flac menegass         https://freesound.org/people/menegass/sounds/100053/
+    drum_cymbal_open.flac   menegass         https://freesound.org/people/menegass/sounds/100055/
+    drum_cymbal_pedal.flac  menegass         https://freesound.org/people/menegass/sounds/100054/
+    drum_cymbal_hard.flac   menegass         https://freesound.org/people/menegass/sounds/100056/
+    drum_splash_hard.flac   menegass         https://freesound.org/people/menegass/sounds/100060/
+
+[own] このエディタで合成した音 / Synthesized by this editor (scripts/kits/synth.mjs, src/audio/kit.ts)
+  License: CC0 1.0 Universal - DTX Web Editor の作者は、これらの音の権利を放棄します。
+           The authors of DTX Web Editor waive all rights to these sounds.
+  Kits: trap, chip, fm, synth, analog (ride), house (cross-stick, toms, ride)
+
+
+CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/

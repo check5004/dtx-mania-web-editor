@@ -1,0 +1,1 @@
+import{i as e,n as t,r as n,t as r}from"./main-AnxSgXJk.js";async function i(e){let n=await r(e);return n?n.mode===`manual`?n:(await t(n.src,n.opts),null):null}export{i as offerSetup,n as setupSourceOf,e as setupSourceOfFolder};
