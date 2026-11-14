@@ -506,19 +506,23 @@ export async function refreshNxFolder(rootKey: string, rel: readonly string[]): 
       if (thumbSig.get(real) !== sig) queueThumb(real, fh, sig);
     },
   });
+  // 読んでいる間に一覧が変わっていることがある（ほかの曲のフォルダも読み直した・同期で曲が増えた）：今の一覧に足す
+  // （読む前の一覧に足すと、あいだに読み直したほかの曲が前のままに戻る。同期で取った曲が一覧から消えてしまう）
+  if (get().place !== place) return;
+  const cur = get();
   // この曲のフォルダが入っている BOX（外から順に）
-  const boxKeys = new Set(st.boxes.map((b) => b.key));
+  const boxKeys = new Set(cur.boxes.map((b) => b.key));
   const box: string[] = [];
   for (let i = 1; i < path.length; i++) {
     const k = boxKeyOf(rootKey, path.slice(0, i));
     if (boxKeys.has(k)) box.push(k);
   }
-  const old = st.songs.find((s) => s.id.startsWith(prefix));
+  const old = cur.songs.find((s) => s.id.startsWith(prefix)) ?? st.songs.find((s) => s.id.startsWith(prefix));
   const fresh = r.songs.map((s) => ({ ...s, id: songIdOf(rootKey, path, s.block), path, box, doubled: old?.doubled ?? false }));
-  const songs = [...st.songs.filter((s) => !s.id.startsWith(prefix)), ...fresh].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const songs = [...cur.songs.filter((s) => !s.id.startsWith(prefix)), ...fresh].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   markDuplicates(songs);
   set({ songs });
-  await saveList({ at: st.at || Date.now(), songs, boxes: st.boxes, folders: st.folders });
+  await saveList({ at: cur.at || Date.now(), songs, boxes: cur.boxes, folders: cur.folders });
   void refreshDrafts();
   // 変わった曲だけ点検し直す
   const run = scanRun;

@@ -341,6 +341,20 @@ function Run({ l, songs, me }: { l: LogEntry; songs: readonly LibSong[]; me: str
       </Ev>,
     );
   }
+  // Drive に同じ曲が 2 つあった（前の版の初めての同期で作った）：この PC が使っていない方を片付けた
+  const dups = l.songs.filter((x) => x.dup);
+  if (dups.length) {
+    evs.push(
+      <Ev key="dup" ic="del" icon={Icon.trash(13)} title={tr(`Drive に 2 つあった曲を 1 つにしました · ${dups.length} 曲`, `Removed duplicate songs on Drive · ${dups.length} ${pl(dups.length, 'song')}`)}>
+        <span>
+          {tr(
+            `${dups.map(name).join('、')}：同じ曲が Drive に 2 つあったので、この PC で使っていない方を Drive のゴミ箱に移しました（30 日は戻せます）。この PC の曲はそのままです。`,
+            `${dups.map(name).join(', ')}: the same song was on Drive twice, so the copy this PC doesn't use was moved to the Drive trash (restorable for 30 days). The song on this PC is unchanged.`,
+          )}
+        </span>
+      </Ev>,
+    );
+  }
   for (const s of l.songs.filter((x) => x.kept)) {
     evs.push(
       <Ev key={`kept:${s.lib}`} ic="ask" icon={Icon.shield(13)} title={tr(`消さずに残しました · ${name(s)}`, `Kept instead of deleting · ${name(s)}`)}>

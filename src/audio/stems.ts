@@ -98,6 +98,8 @@ export async function renderMix(tracks: RenderTrack[], opts: RenderOptions): Pro
 /** 頭の位置が違う音（at：その音の 0 秒が、まとめる時刻の何秒か） */
 export interface PlacedTrack extends RenderTrack {
   at: number;
+  /** この時刻（まとめる時刻の秒）で止める（ハイハットを閉じたときなど、同じグループの次の音で前の音を止める）。無ければ最後まで */
+  until?: number;
 }
 
 /**
@@ -109,8 +111,8 @@ export async function renderPlaced(tracks: PlacedTrack[], from: number, to: numb
   const len = Math.max(1, Math.ceil(Math.max(0.05, to - from) * sr));
   const off = new OfflineAudioContext(opts.channels ?? 2, len, sr);
   for (const t of tracks) {
-    // まとめる範囲にかからない音は足さない
-    if (t.at >= to || t.at + t.buf.duration <= from) continue;
+    // まとめる範囲にかからない音・範囲の前に止めた音は足さない
+    if (t.at >= to || t.at + t.buf.duration <= from || (t.until !== undefined && t.until <= from)) continue;
     const src = off.createBufferSource();
     src.buffer = t.buf;
     const g = off.createGain();
@@ -124,6 +126,12 @@ export async function renderPlaced(tracks: PlacedTrack[], from: number, to: numb
     node.connect(off.destination);
     if (t.at >= from) src.start(t.at - from, 0);
     else src.start(0, from - t.at);
+    // 止める音は再生と同じように短く消す（src/audio/engine.ts の choke と同じ）
+    if (t.until !== undefined && t.until < to) {
+      const at = Math.max(0, t.until - from);
+      g.gain.setTargetAtTime(0, at, 0.012);
+      src.stop(at + 0.08);
+    }
   }
   return off.startRendering();
 }

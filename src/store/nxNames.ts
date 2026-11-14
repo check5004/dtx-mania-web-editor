@@ -15,7 +15,8 @@ import { otherSongsIn } from '../fs/songDir';
 import { readChart, patchChart, siblingWrites } from './siblings';
 import { rewriteFieldValues, toast, useEditor } from './editor';
 import { parseSidecar, serializeSidecar, sidecarData, sidecarName, updateSidecar, type SidecarData } from './sidecar';
-import { fillPreview } from './fullMix';
+import { fillPreview, previewFillable } from './fullMix';
+import { checkedFullOriginal, fillPreviewFromChorus } from './chorus';
 
 /** 譜面のうち、ファイル名を書く項目 */
 const FILE_KEY =
@@ -134,13 +135,16 @@ function newRef(folder: SongFolder, plan: Plan, value: string, base: string): st
 
 /**
  * NX で遊ぶ譜面を保存・書き出しする前の用意。試聴（#PREVIEW）が空なら原曲を入れ（src/store/fullMix.ts）、
+ * 完全な原曲のファイルが無ければ、ステムや譜面のドラムも足した曲の音のサビから作る（src/store/chorus.ts。DTX だけを書き出すときは作らない）。
  * Shift_JIS で書くなら（rename）譜面のファイル名を NX で読める名前にする
  */
 export async function prepareForNx(opts: NxFixOptions & { rename?: boolean } = {}): Promise<void> {
   // 名前を先に直す（試聴には直した名前を入れ、知らせにも直した名前を出す）
   if (opts.rename !== false) await fixNxFileNames(opts);
   // ほかの難易度に入れ終わってから書き出す
-  if (fillPreview()) await siblingWrites();
+  // 試聴が空のときだけ。完全な原曲は、ステムがあれば音でも確かめる（前の版で原曲の名前のまま書き出したドラム抜きを試聴にしない）
+  if (!previewFillable()) return;
+  if (fillPreview(await checkedFullOriginal()) || (!opts.dtxOnly && (await fillPreviewFromChorus()))) await siblingWrites();
 }
 
 let running: Promise<NxNamesReport | null> | null = null;
