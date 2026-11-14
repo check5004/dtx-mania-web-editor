@@ -344,9 +344,11 @@ export function easeSteps(sections: readonly { shift: number }[]): number {
 /**
  * 目標のレベル帯に入る段を探す。段を上げるほど音は減る（前の段の音の一部だけになる）ので、二分探索で幅の上の端を見つけ、
  * 幅の中に入るもののうち、まん中にいちばん近いものを採る（同じなら元に近いほう）。
- * 幅に入らなければ、いちばん近いもの（同じなら元に近いほう）
+ * 幅に入らなければ、いちばん近いもの（同じなら元に近いほう）。
+ * band は合格の幅（target はその中の狙い）。段の間が広くて狙いに入らないときは、合格の幅に入るものを先に採る
+ * （狙いの少し下でも合格の幅の外になるものより、狙いの少し上で幅の中のものを）
  */
-export function generateToTarget(base: Omit<SimplifyInput, 'rung' | 'ease'>, target: { min: number; max: number }): Generated {
+export function generateToTarget(base: Omit<SimplifyInput, 'rung' | 'ease'>, target: { min: number; max: number }, band?: { min: number; max: number }): Generated {
   const prep = prepare(base);
   // 段と調整を1本の並びにした番号（大きいほど易しい。どの番号も、それより小さい番号の譜面の音の一部だけ）
   const per = (prep.hasRoles ? MAX_EASE : 0) + 1;
@@ -365,7 +367,9 @@ export function generateToTarget(base: Omit<SimplifyInput, 'rung' | 'ease'>, tar
     }
     return x;
   };
-  const errOf = (lv: number) => (lv > target.max ? lv - target.max : lv < target.min ? target.min - lv : 0);
+  const gapOf = (lv: number, r: { min: number; max: number }) => (lv > r.max ? lv - r.max : lv < r.min ? r.min - lv : 0);
+  const errOf = (lv: number) => gapOf(lv, target);
+  const outOf = (lv: number) => (band ? gapOf(lv, band) : 0);
   // 幅の上の端より易しい最初の番号
   let lo = 0;
   let hi = CONFIGS - 1;
@@ -383,11 +387,12 @@ export function generateToTarget(base: Omit<SimplifyInput, 'rung' | 'ease'>, tar
   for (let i = hi + 1; i < CONFIGS && at(i - 1).level >= target.min - 1e-9; i++) cands.add(i);
   const mid = (target.min + target.max) / 2;
   let best = -1;
-  let bestKey = [Infinity, Infinity];
+  let bestKey = [Infinity, Infinity, Infinity];
   for (const i of [...cands].sort((a, b) => a - b)) {
     const lv = at(i).level;
-    const key = [errOf(lv), Math.abs(lv - mid)];
-    if (key[0] < bestKey[0] - 1e-9 || (Math.abs(key[0] - bestKey[0]) <= 1e-9 && key[1] < bestKey[1] - 1e-9)) (best = i), (bestKey = key);
+    const key = [outOf(lv), errOf(lv), Math.abs(lv - mid)];
+    const k = key.findIndex((x, j) => Math.abs(x - bestKey[j]) > 1e-9);
+    if (k >= 0 && key[k] < bestKey[k]) (best = i), (bestKey = key);
   }
   const c = configOf(best);
   const x = at(best);

@@ -64,6 +64,13 @@ export function pickPeaks(act: Float32Array, nCls: number, c: number, fps: numbe
   return out;
 }
 
+/**
+ * 原曲にドラムが聞こえるとみなす、採譜したバスドラム・スネアの1分あたりの数（store/drums の drumsAudible）。
+ * 2026-11-03 の手元の曲で、ドラム入りの原曲は 300 前後、ドラム抜きの BGM（bgm_d.ogg）は 2 だった。
+ * 「DTXMania の曲」の BGM を調べるとき（src/nxlib/bgm.ts）も同じ数で決める
+ */
+export const AUDIBLE_PER_MIN = 20;
+
 export interface DrumHit {
   /** 音の時刻（秒、音の頭が 0） */
   t: number;

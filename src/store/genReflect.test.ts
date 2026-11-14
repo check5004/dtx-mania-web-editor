@@ -54,7 +54,7 @@ describe('作った難易度をエディタに反映する', () => {
     doc = master();
     folder = folderFromFiles([new File(['#TITLE テスト\r\n'], 'mstr.dtx')], 'テスト');
     const g = useGen.getState();
-    const src = { slot: 'MASTER' as const, file: 'mstr.dtx', doc, calib: 1, level: 7 };
+    const src = { slot: 'MASTER' as const, file: 'mstr.dtx', doc, level: 7, calc: 7 };
     const plan = { summary: '', sections: SECTIONS };
     useGen.setState({
       master: doc,

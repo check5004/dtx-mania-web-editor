@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeDtx } from '../dtx/encoding';
 import { CH, emptyDoc, type DtxDoc } from '../dtx/model';
+import { parseDtx } from '../dtx/parse';
 import { serializeDtx } from '../dtx/serialize';
 import { setField } from '../edit/ops';
 import { folderFromFiles, findFile, parseSetDef, type SongFolder } from '../fs/folder';
@@ -22,7 +23,9 @@ vi.mock('../ui/dialogs', () => ({
 vi.stubGlobal('window', { setTimeout: () => 0 });
 
 const { useEditor } = await import('./editor');
-const { applyInsertPlan, generate, initGen, insertedSlots, moveDown, offeredMove, undoableMove, undoMove, useGen, writeOut } = await import('./gen');
+const { applyInsertPlan, calcLevel, generate, initGen, insertedSlots, knownCalcs, moveDown, offeredMove, undoableMove, undoMove, useGen, writeOut } = await import('./gen');
+const { levelOf } = await import('./check');
+const { levelOfField } = await import('./guideline');
 
 const chip = (id: number, ch: number, m: number, n = 0, d = 1) => ({ id, ch, m, f: { n, d }, v: 1 });
 
@@ -162,6 +165,19 @@ describe('あいだに作る：譜面を下の難易度へ移す', () => {
     expect(await textOf(folder, 'adv.dtx')).toBe(advBefore);
     expect(await textOf(folder, 'adv.dtx.score.ini')).toBe(SCORE);
     expect(findFile(folder, 'adv_ai.dtx')).toBeTruthy();
+    // 新しい ADVANCED の Lv は、開き直したエディタの推定と同じ（2026-11-14）。めやす 6.5 の幅の中で、上下の譜面のあいだ
+    // （8 小節の短い曲なので段の間が広く、めやすの ±0.3 には入らない）
+    const made = parseDtx(await textOf(folder, 'adv_ai.dtx')).doc;
+    const lv = levelOf(made)!.level;
+    const t = useGen.getState().diffs.ADVANCED.target;
+    expect(levelOfField(made.fields['DLEVEL'])).toBeCloseTo(lv, 6);
+    expect(lv).toBeCloseTo(calcLevel(useGen.getState().diffs.ADVANCED), 6);
+    expect(t.center).toBeCloseTo(6.5);
+    expect(lv).toBeGreaterThanOrEqual(t.min - 1e-9);
+    expect(lv).toBeLessThanOrEqual(t.max + 1e-9);
+    const calcs = knownCalcs(useGen.getState());
+    expect(lv).toBeLessThanOrEqual(Math.min(7.5, calcs.EXTREME!) - 0.3 + 1e-9);
+    expect(lv).toBeGreaterThanOrEqual(Math.max(5.1, calcs.BASIC!) + 0.3 - 1e-9);
     // 書いたら、もう戻さない
     const s = useGen.getState();
     expect(s.moves.every((m) => m.written)).toBe(true);

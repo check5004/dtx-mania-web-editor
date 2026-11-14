@@ -46,20 +46,24 @@ export function checkLabel(c: LibCheck): string {
 
 export interface Pill {
   /** sync・got・merged は PC どうしの同期（src/ui/sync/common.tsx） */
-  k: 'edit' | 'ai' | 'drive' | 'draft' | 'warn' | 'info' | 'sync' | 'got' | 'merged';
+  k: 'edit' | 'ai' | 'drive' | 'draft' | 'bgm' | 'warn' | 'info' | 'sync' | 'got' | 'merged';
   label: string;
   title?: string;
   icon?: 'cloud' | 'down';
 }
 
-/** 一覧の行の印。issues なら点検を 1 つずつ（「点検のある曲」でしぼりこんだとき） */
-export function songPills(s: LibSong, draft: boolean, issues: boolean): Pill[] {
+/**
+ * 一覧の行の印。issues なら点検を 1 つずつ（「点検のある曲」でしぼりこんだとき）。
+ * bgmDrums は BGM を聞いてドラムが入っていた曲（ステム分解をすすめる。src/nxlib/view.ts の suggestsSeparation）
+ */
+export function songPills(s: LibSong, draft: boolean, issues: boolean, bgmDrums = false): Pill[] {
   if (issues) return s.checks.map((c) => ({ k: checkLevel(c.kind) === 'warn' ? 'warn' : 'info', label: checkLabel(c) }));
   const out: Pill[] = [];
   if (s.edited) out.push({ k: 'edit', label: tr('エディタ', 'Editor'), title: tr('このアプリで直した（作業ファイルがある）', 'Edited in this app (has a work file)') });
   if (s.charts.some((c) => c.head.ai)) out.push({ k: 'ai', label: 'AI', title: tr('AI難易度生成で作った難易度がある', 'Has a difficulty made by the AI generator') });
   if (s.drive?.state === 'linked' && !s.drive.play) out.push({ k: 'drive', label: 'Drive', title: tr('Google Drive にも保存している', 'Also saved on Google Drive') });
   if (draft) out.push({ k: 'draft', label: tr('未保存', 'Unsaved'), title: tr('保存していない続きがある', 'Has unsaved changes') });
+  if (bgmDrums) out.push({ k: 'bgm', label: tr('BGM ドラム入り', 'BGM drums'), title: tr('BGM にドラムが入っている（ステム分解してドラム抜きにできる）', 'The BGM has drums in it (stem splitting can remove them)') });
   const w = warnCount(s);
   if (w) out.push({ k: 'warn', label: tr(`点検 ${w}`, `${w} ${w === 1 ? 'issue' : 'issues'}`) });
   else {

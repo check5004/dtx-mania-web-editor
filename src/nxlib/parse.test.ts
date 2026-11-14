@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boxTitleOf, chartRefGroups, decodeHead, dotBoxName, dtxPathsOf, hasDrumChips, headIncomplete, levelOf, parseScoreIni, readChartHead, relDtxPath } from './parse';
+import { bgmRefOf, boxTitleOf, chartRefGroups, decodeHead, dotBoxName, dtxPathsOf, hasDrumChips, headIncomplete, levelOf, parseScoreIni, readChartHead, relDtxPath } from './parse';
 
 describe('レベル（NX と同じ読み方）', () => {
   it('#DLEVEL が 100 以上なら 3 桁（825 → 8.25）', () => {
@@ -140,5 +140,24 @@ describe('譜面の全体（点検）', () => {
       { name: 'pre.ogg', keys: ['pre.ogg', 'sounds/pre.ogg'] },
       { name: 'stage.jpg', keys: ['stage.jpg', 'sounds/stage.jpg'] },
     ]);
+  });
+});
+
+describe('譜面の BGM（ステム分解の案内）', () => {
+  it('いちばん初めの BGM チップ（ch01）の音。同じ所なら先に書いたもの', () => {
+    // 小節 3 の頭より、小節 2 の後ろ半分より、小節 2 の頭（後の行に書いてあっても）。同じ頭なら先に書いた 02
+    const g = bgmRefOf(['#TITLE x', '#WAV01 intro.ogg', '#WAV02 bgm.ogg', '#WAV03 late.ogg', '#00301: 01', '#00201: 0003', '#00201: 0200', '#00201: 0300', '#00211: 01'].join('\n'));
+    expect(g).toEqual({ name: 'bgm.ogg', keys: ['bgm.ogg'] });
+  });
+
+  it('#PATH_WAV があれば、エディタと同じくその中から探す', () => {
+    expect(bgmRefOf(['#PATH_WAV Sounds\\', '#WAV0A Song\\BGM.ogg', '#00101: 0A'].join('\n'))).toEqual({ name: 'Song/BGM.ogg', keys: ['sounds/song/bgm.ogg', 'song/bgm.ogg'] });
+  });
+
+  it('BGM のチップが無い・#WAV が無い・曲のフォルダの外なら無し', () => {
+    expect(bgmRefOf('#WAV01 bgm.ogg\n#00111: 01')).toBeNull();
+    expect(bgmRefOf('#00101: 01')).toBeNull();
+    expect(bgmRefOf('#WAV01 ..\\bgm.ogg\n#00101: 01')).toBeNull();
+    expect(bgmRefOf('#WAV01 C:\\bgm.ogg\n#00101: 01')).toBeNull();
   });
 });

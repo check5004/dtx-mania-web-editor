@@ -1,4 +1,4 @@
-// 「DTXMania の曲」の右：選んだ曲（画像・試聴・難易度とレベルと成績・空いた難易度・点検・フォルダ・エディタ・Drive）。
+// 「DTXMania の曲」の右：選んだ曲（画像・試聴・難易度とレベルと成績・空いた難易度・BGM のステム分解・点検・フォルダ・エディタ・Drive）。
 // 初めての読み込みの間は、読み方と読むもの・書くものを出す（NxScanInfo）。
 import { tr, isJa } from '../../i18n';
 import { useEffect, useState } from 'react';
@@ -6,10 +6,12 @@ import { useDriveAuth } from '../../drive/auth';
 import { defaultInsertLevel, insertPlan, type InsertFail, type InsertPlan } from '../../gen/insert';
 import { targetBands, type Slot } from '../../gen/targets';
 import type { Difficulty } from '../../gen/simplify';
-import { fixNxSetDef, makeNxSetDef, nxImageUrl, nxPreviewLoader, openNxGen, openNxInsert, openNxSong, openNxSongInfo, setDriveSkip } from '../../nxlib/actions';
+import { fixNxSetDef, makeNxSetDef, nxImageUrl, nxPreviewLoader, openNxGen, openNxInsert, openNxSeparate, openNxSong, openNxSongInfo, setDriveSkip } from '../../nxlib/actions';
+import type { BgmCheck } from '../../nxlib/bgm';
 import { checkLevel, SLOT_KEYS, type LibChart, type LibCheck, type LibSong, type SlotKey } from '../../nxlib/scan';
-import { useNxLib } from '../../nxlib/store';
-import { addableSlots, bytesText, bpmText, canOpen, chartIn, KEY_OF_SLOT, levelText, setDefFor, SLOT_LABEL, SLOT_OF_KEY, slotLevels, sourceFor, topChart } from '../../nxlib/view';
+import { useNxLib, wantBgmCheck } from '../../nxlib/store';
+import { addableSlots, bgmOf, bytesText, bpmText, canOpen, canSeparate, chartIn, KEY_OF_SLOT, levelText, setDefFor, SLOT_LABEL, SLOT_OF_KEY, slotLevels, sourceFor, topChart } from '../../nxlib/view';
+import { useDrums } from '../../store/drums';
 import { insertLevel } from '../../store/gen';
 import { AuditionButton, AuditionProgress } from '../Audition';
 import { Icon } from '../icons';
@@ -41,6 +43,9 @@ export function NxDetail({ s }: { s: LibSong }) {
   const place = useNxLib((st) => st.place);
   const driveOn = useDriveAuth((a) => a.connected);
   const syncOn = usePcSync((st) => st.settings.on);
+  const bgmAll = useNxLib((st) => st.bgm);
+  const bgmBusy = useNxLib((st) => st.bgmBusy === s.id);
+  const listenOn = useDrums((d) => d.enabled);
   const [big, setBig] = useState<string | null>(null);
 
   // 大きい画像（許可があるときだけ。無ければ小さい画像）
@@ -62,6 +67,16 @@ export function NxDetail({ s }: { s: LibSong }) {
   const boxNames = new Map(boxes.map((b) => [b.key, b.title]));
   const add = addableSlots(s);
   const top = topChart(s);
+  const sepOk = canSeparate(s);
+  const bgm = bgmOf(s, bgmAll);
+
+  // BGM にドラムが入っているかを聞く（前に聞いた同じ譜面・同じ BGM のファイルなら聞き直さない）。
+  // ↑↓ で通り過ぎた曲は聞かないよう、少し止まってから
+  useEffect(() => {
+    if (perm !== 'granted' || !listenOn) return;
+    const t = window.setTimeout(() => wantBgmCheck(s.id), 350);
+    return () => window.clearTimeout(t);
+  }, [s.id, top?.file, top?.size, top?.mtime, perm, listenOn]);
   const extra = s.charts.filter((c) => !c.slot);
   const nonDtx = s.charts.filter((c) => !canOpen(c)).length;
   const meta = [boxText(s, boxNames) || tr('BOX の外', 'Outside any BOX'), s.bpm && `${bpmText(s.bpm)} BPM`].filter(Boolean).join(' · ');
@@ -163,6 +178,35 @@ export function NxDetail({ s }: { s: LibSong }) {
 
       <InsertBox key={s.id} s={s} />
 
+      {sepOk && bgm?.state === 'drums' && (
+        <div className="nx-sec">
+          <div className="nx-sec-t">
+            <span>{tr('ステム分解', 'Stem split')}</span>
+            <span className="nx-sec-sub">{tr('BGM をドラム抜きに', 'A BGM without drums')}</span>
+          </div>
+          <div className="nx-callout stem">
+            <span>
+              {tr(
+                `BGM（${bgm.name}）にドラムが入っています。DTXMania ではドラムを譜面の音で鳴らすので、ステム分解してドラム抜きの BGM にしませんか？`,
+                `The BGM (${bgm.name}) has drums in it. DTXMania plays the drums from the chart, so how about splitting the stems and using a BGM without drums?`,
+              )}
+            </span>
+            <span className="nx-callout-note">
+              {tr(
+                'エディタで開いて、ブラウザの中でドラムとドラム抜きに分け、ドラム抜きを BGM にします（同じ BGM のほかの難易度も）。元の BGM のファイルは残します。',
+                'Opens the song in the editor, splits it into drums and no drums inside your browser, and makes the no-drums mix the BGM (for the other difficulties with the same BGM too). The original BGM file is kept.',
+              )}
+            </span>
+            <div>
+              <button className="btn small nx-stem" disabled={!top || !canOpen(top)} onClick={() => void openNxSeparate(s)}>
+                {Icon.layers(11)}
+                {tr('ステム分解する', 'Split the stems')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {s.checks.length > 0 && (
         <div className="nx-sec">
           <div className="nx-sec-t">
@@ -201,6 +245,14 @@ export function NxDetail({ s }: { s: LibSong }) {
             )}
           </div>
         </div>
+        {sepOk && (
+          <div className="k">
+            <span>BGM</span>
+            <div className="v">
+              <BgmLine c={bgm} busy={bgmBusy} perm={perm === 'granted'} listenOn={listenOn} />
+            </div>
+          </div>
+        )}
         <div className="k">
           <span>{tr('エディタ', 'Editor')}</span>
           <div className="v">
@@ -251,6 +303,63 @@ export function NxDetail({ s }: { s: LibSong }) {
       </div>
     </div>
   );
+}
+
+/** 詳しい所の BGM の行：ドラム入りか（音を聞いて調べた結果）・調べている・調べられないわけ */
+function BgmLine({ c, busy, perm, listenOn }: { c: BgmCheck | undefined; busy: boolean; perm: boolean; listenOn: boolean }) {
+  if (!c) {
+    if (busy)
+      return (
+        <span className="nx-bgm-line">
+          <i className="nx-spin" />
+          {tr('ドラムが入っているか聞いています…', 'Listening for drums…')}
+        </span>
+      );
+    if (!listenOn) return <>{tr('調べていません（エディタの右のパネルの「ドラムの採譜モデルで打点を聞き取る」がオフ）', "Not checked (“Detect hits with the drum transcription model” is off in the editor's right panel)")}</>;
+    if (!perm) return <>{tr('まだ調べていません（読み書きを許可すると、ドラムが入っているかを聞きます）', 'Not checked yet (once access is allowed, it listens for drums)')}</>;
+    return <>{tr('まだ調べていません', 'Not checked yet')}</>;
+  }
+  const n = Math.round(c.perMin ?? 0);
+  const name = <span className="mono">{c.name || c.path}</span>;
+  switch (c.state) {
+    case 'drums':
+      return (
+        <span>
+          {name}
+          {tr(` · ドラム入り（バスドラム・スネア 1 分に ${n} 回）`, ` · has drums (${n} kick and snare hits a minute)`)}
+        </span>
+      );
+    case 'clean':
+      return (
+        <span>
+          {name}
+          {tr(` · ドラム抜き（バスドラム・スネア 1 分に ${n} 回）`, ` · no drums (${n} kick and snare hits a minute)`)}
+        </span>
+      );
+    case 'named':
+      return (
+        <span>
+          {name}
+          {tr(' · ドラム抜き（名前から）', ' · no drums (by its name)')}
+        </span>
+      );
+    case 'none':
+      return <>{tr('BGM のチップがありません', 'No BGM chip')}</>;
+    case 'missing':
+      return (
+        <span>
+          {name}
+          {tr(' が見つかりません', ' is missing')}
+        </span>
+      );
+    case 'error':
+      return (
+        <span>
+          {name}
+          {tr(' を聞けませんでした', " couldn't be read")}
+        </span>
+      );
+  }
 }
 
 function ChartRow({ s, c, color, draft }: { s: LibSong; c: LibChart; color: string; draft: boolean }) {
@@ -600,7 +709,12 @@ export function NxScanInfo() {
       <div className="nx-info">
         <div className="k">
           <span>{tr('読むもの', 'Reads')}</span>
-          <div className="v">{tr('名前と小さいファイルだけ（set.def・box.def・譜面・成績・画像）。音や動画は読みません。', 'Only names and small files (set.def, box.def, charts, records, images). No audio or video.')}</div>
+          <div className="v">
+            {tr(
+              '名前と小さいファイルだけ（set.def・box.def・譜面・成績・画像）。音や動画は読みません（あとで曲を選ぶと、その曲の BGM だけ、ドラムが入っているかを聞きます）。',
+              'Only names and small files (set.def, box.def, charts, records, images). No audio or video (later, choosing a song listens to that song’s BGM only, to hear whether it has drums).',
+            )}
+          </div>
         </div>
         <div className="k">
           <span>{tr('書くもの', 'Writes')}</span>

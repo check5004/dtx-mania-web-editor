@@ -113,8 +113,8 @@ describe('目標の幅', () => {
     const b = targetBands({ known: { MASTER: 7, ADVANCED: 5 }, make: ['EXTREME', 'BASIC'], floor: 2 });
     expect(b.EXTREME!.max).toBeCloseTo(6.7, 5);
     expect(b.EXTREME!.min).toBeCloseTo(5.3, 5);
-    expect(b.EXTREME!.capAbove).toEqual({ slot: 'MASTER', known: true });
-    expect(b.EXTREME!.capBelow).toEqual({ slot: 'ADVANCED', known: true });
+    expect(b.EXTREME!.capAbove).toEqual({ slot: 'MASTER', known: true, level: 7, listed: false });
+    expect(b.EXTREME!.capBelow).toEqual({ slot: 'ADVANCED', known: true, level: 5, listed: false });
     // BASIC は既存の ADVANCED から下げすぎない（ADVANCED → BASIC は 0.4 まで）。ADVANCED の 0.3 下より下
     expect(b.BASIC!.center).toBeCloseTo(4.6, 2);
     expect(b.BASIC!.pulledFrom).toBe('ADVANCED');
@@ -160,6 +160,41 @@ describe('目標の幅', () => {
   it('作る難易度のめやすは ±0.3 の範囲で狙う（幅の中で）', () => {
     expect(aimOf({ min: 2, max: 4, center: 3 })).toEqual({ min: 2.7, max: 3.3 });
     expect(aimOf({ min: 2.9, max: 4, center: 3 })).toEqual({ min: 2.9, max: 3.3 });
+  });
+});
+
+// 2026-11-14 楯さん「作ったあとの難易度が、エディタで計算し直すとずれる」：作る譜面はエディタの推定（計算）で測るので、
+// 目標も決まっている譜面の計算から決める。登録レベル（作者のつけ方で計算と違う）は、ゲームの中の並びにだけ使う
+describe('目標は計算から、登録は並びだけ', () => {
+  it('登録が計算より高い元の譜面（登録 9.00・計算 7.60）でも、目標は計算から（登録の無いときと同じ。写しに近い譜面にしない）', () => {
+    const calcOnly = targetBands({ known: { MASTER: 7.6 }, make: ALL, floor: null });
+    const b = targetBands({ known: { MASTER: 7.6 }, listed: { MASTER: 9 }, make: ALL, floor: null });
+    expect(b).toEqual(calcOnly);
+    expect(b.EXTREME!.max).toBeLessThanOrEqual(7.6 - 0.3 + 1e-9);
+    expect(b.EXTREME!.capAbove).toMatchObject({ slot: 'MASTER', level: 7.6, listed: false });
+  });
+
+  it('登録が計算より低い元の譜面（登録 6.40・計算 7.60）は、ゲームの中でも上の譜面より低い Lv になるよう、登録から 0.3 離す', () => {
+    const b = targetBands({ known: { MASTER: 7.6 }, listed: { MASTER: 6.4 }, make: ALL, floor: null });
+    expect(b.EXTREME!.center).toBeLessThanOrEqual(6.1 + 1e-9);
+    expect(b.EXTREME!.max).toBeCloseTo(6.1, 5);
+    expect(b.EXTREME!.capAbove).toEqual({ slot: 'MASTER', known: true, level: 6.4, listed: true });
+    // 作る難易度どうしも上から順に 0.3 以上あける
+    expect(b.ADVANCED!.center).toBeLessThanOrEqual(b.EXTREME!.center - 0.3 + 1e-9);
+    expect(b.BASIC!.center).toBeLessThanOrEqual(b.ADVANCED!.center - 0.3 + 1e-9);
+  });
+
+  it('引き上げ（削りすぎない）は上の譜面の計算から数える', () => {
+    const b = targetBands({ known: { MASTER: 8.6 }, listed: { MASTER: 9.5 }, make: ALL, floor: null });
+    expect(b.BASIC!.center).toBeCloseTo(8.6 - MAX_DROP.BASIC, 2);
+    expect(b.BASIC!).toMatchObject({ pulledFrom: 'MASTER', pulledLevel: 8.6 });
+  });
+
+  it('残す下の譜面の登録が計算より高ければ、作る譜面はその登録より 0.3 以上上に（ゲームの中で逆にならない）', () => {
+    const b = targetBands({ known: { MASTER: 8, BASIC: 3.5 }, listed: { MASTER: 8, BASIC: 4.4 }, make: ['EXTREME', 'ADVANCED'], floor: null, manual: { ADVANCED: 4.2 } });
+    expect(b.ADVANCED!.center).toBeCloseTo(4.7, 5);
+    expect(b.ADVANCED!.min).toBeCloseTo(4.7, 5);
+    expect(b.ADVANCED!.capBelow).toEqual({ slot: 'BASIC', known: true, level: 4.4, listed: true });
   });
 });
 
