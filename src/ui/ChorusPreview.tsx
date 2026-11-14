@@ -10,7 +10,9 @@ import {
   barRange,
   CHORUS_PREVIEW_FILE,
   defaultBarCount,
+  drumlessOnlyText,
   fallbackBar,
+  fileHasDrums,
   findSongChorus,
   makeChorusPreview,
   renderChorusClip,
@@ -19,6 +21,9 @@ import {
   type SongChorus,
 } from '../store/chorus';
 import { fileBuffer, useEditor } from '../store/editor';
+import { isDrumlessName } from '../separate/names';
+import { useDrums } from '../store/drums';
+import { useStems } from '../store/stems';
 import { AuditionProgress } from './Audition';
 import { Icon } from './icons';
 
@@ -32,8 +37,35 @@ export function PreviewTools({ value }: { value: string }) {
   const [open, setOpen] = useState(false);
   const k = `pv:${value}`;
   const on = useAudition((s) => s.key === k);
+  // ドラム抜きの音を試聴にしていたら知らせる（選曲画面でドラムが鳴らない）。名前（曲_drumless.ogg など）で分からなくても、
+  // ステムがあれば音で比べる（前の版で、原曲の名前のまま書き出したドラム抜き・ドラム抜きから作った試聴）
+  const [heard, setHeard] = useState<{ value: string; drums: boolean | null } | null>(null);
+  const stemsVersion = useStems((s) => s.version);
+  // ステムが無くても、原曲（BGM）を試聴にしていれば、エディタの採譜で聞いた答えで見分ける（採譜が終わったら見直す）
+  const heardKey = useDrums((d) => (d.status === 'ready' ? d.key : null));
+  const v = value.trim();
+  useEffect(() => {
+    if (!v || isDrumlessName(v)) return;
+    let live = true;
+    void fileHasDrums(v).then((drums) => {
+      if (live) setHeard({ value: v, drums });
+    });
+    return () => {
+      live = false;
+    };
+  }, [v, stemsVersion, heardKey]);
+  const drumless = !!v && (isDrumlessName(v) || (heard?.value === v && heard.drums === false));
   return (
     <>
+      {drumless && (
+        <div className="lbl chorus-warn">
+          {Icon.warn(11)}{' '}
+          {tr(
+            '今の試聴はドラム抜きの音なので、選曲画面でドラムが鳴りません。「サビから作る…」で、ドラムも入った曲の音から作り直せます。',
+            "The current preview has no drums, so the song select screen plays it without drums. Use \"Make from the chorus…\" to remake it from the song audio with drums.",
+          )}
+        </div>
+      )}
       <div className="row pv-tools">
         {value && (
           <button
@@ -80,6 +112,8 @@ const kindLabel = (k: SongChorus['audio']['kind']) =>
     full: tr('完全な原曲', 'full original'),
     chart: tr('BGM と長い SE をゲームと同じに足した音', 'BGM plus long SE sounds, as the game plays them'),
     stems: tr('ステムを全部足した音', 'all stems mixed'),
+    bgmStems: tr('ドラム抜きの BGM とドラムのステムを足した音', 'the BGM without drums plus the drum stems'),
+    game: tr('BGM に譜面のドラムの音をゲームと同じに足した音', "the BGM plus the chart's drum sounds, as the game plays them"),
     bgm: tr('ドラム抜きの原曲', 'original without drums'),
   })[k];
 
@@ -90,13 +124,16 @@ function ChorusPanel({ onClose }: { onClose: () => void }) {
   const st = useChorus();
   const doc = useEditor((s) => s.doc);
   const found = st.status === 'ready' ? st.found : null;
+  // ドラム抜きの音しか無い：探して聴けるが、試聴にはしない
+  const blocked = found?.audio.kind === 'bgm';
   const [sel, setSel] = useState<Sel | null>(null);
   const [made, setMade] = useState<string | null>(null);
   useStopAuditionOnClose('chorus:');
-  // テンポ・原曲が変わったら探し直す（同じなら前の答えのまま）
+  // テンポ・原曲が変わったら探し直す（同じなら前の答えのまま）。原曲の採譜が終わったら、試聴を切り出す音を決め直す
+  const heardKey = useDrums((d) => (d.status === 'ready' ? d.key : null));
   useEffect(() => {
     void findSongChorus();
-  }, [doc]);
+  }, [doc, heardKey]);
   // 見つかったら、サビの頭から約 15 秒（4 小節単位）
   useEffect(() => {
     if (!found || !found.bars.length) {
@@ -179,6 +216,20 @@ function ChorusPanel({ onClose }: { onClose: () => void }) {
             </span>
             {tr(`（${kindLabel(found.audio.kind)}）`, ` (${kindLabel(found.audio.kind)})`)}
           </div>
+          {blocked && (
+            <div className="lbl chorus-warn">
+              {Icon.warn(11)} {drumlessOnlyText()}
+            </div>
+          )}
+          {found.audio.maybeDrumless && (
+            <div className="lbl chorus-warn">
+              {Icon.info(11)}{' '}
+              {tr(
+                `${found.audio.label} は、DTXMania の曲ではドラム抜きの BGM によく付ける名前です。ドラムが入っていなければ、完全な原曲（ドラム入り）かステムを読み込んでから作ってください。`,
+                `${found.audio.label} is a name DTXMania songs often use for a BGM without drums. If it has no drums, load the full original (with drums) or the stems first.`,
+              )}
+            </div>
+          )}
           {found.grid === 'audio' && (
             <div className="lbl chorus-warn">
               {Icon.info(11)}{' '}
@@ -260,7 +311,7 @@ function ChorusPanel({ onClose }: { onClose: () => void }) {
               onClick={() =>
                 void toggleAudition(auditionKey, async () => {
                   try {
-                    return { buf: await renderChorusClip(range) };
+                    return { buf: await renderChorusClip(range, undefined, { listen: true }) };
                   } catch {
                     return null;
                   }
@@ -273,7 +324,7 @@ function ChorusPanel({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               className="btn small primary"
-              disabled={st.making}
+              disabled={st.making || blocked}
               onClick={() =>
                 void makeChorusPreview(range).then((r) => {
                   if (r) setMade(r.file);

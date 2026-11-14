@@ -137,6 +137,32 @@ export function drumsAudible(): boolean | null {
   return v;
 }
 
+/**
+ * 音 key（engine.buffer の key）にドラムが聞こえるか（原曲（BGM）がドラム抜きかを、ステムが無くても見分ける。src/store/chorus.ts）。
+ * 採譜したのが別の音（解析元に選んだステム）か、採譜がまだなら null
+ */
+export function drumsAudibleFor(key: string | null | undefined): boolean | null {
+  return key && source?.key === key ? drumsAudible() : null;
+}
+
+/** 音 key を採譜している途中なら、終わるまで待つ（採譜していなければすぐ。ms で打ち切る） */
+export function drumsSettledFor(key: string | null | undefined, ms: number): Promise<void> {
+  const busy = () => !!key && source?.key === key && get().key === key && get().status === 'loading';
+  if (!busy()) return Promise.resolve();
+  return new Promise((resolve) => {
+    let unsub = () => {};
+    const timer = setTimeout(() => done(), ms);
+    const done = () => {
+      clearTimeout(timer);
+      unsub();
+      resolve();
+    };
+    unsub = useDrums.subscribe(() => {
+      if (!busy()) done();
+    });
+  });
+}
+
 export type DrumHitsByClass = Record<DrumClass, DrumHit[]>;
 
 let hitsMemo: { data: DrumActivations; sens: number; out: DrumHitsByClass } | null = null;
