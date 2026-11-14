@@ -43,11 +43,13 @@ export function PcSyncBanner() {
             <span className="ps-spin">{Icon.refresh(18)}</span>
           </span>
           <span className="ps-bt">
-            <b>{tr(`同期しています · ${progressText(progress)}`, `Syncing · ${progressText(progress)}`)}</b>
+            <b>{progress?.phase === 'wait' ? progressText(progress) : tr(`同期しています · ${progressText(progress)}`, `Syncing · ${progressText(progress)}`)}</b>
             <span>
               {progress?.song
                 ? `${progress.song}${progress.file ? ` · ${progress.file}` : ''}`
-                : tr('Drive の変化とこの PC の曲を比べています', 'Comparing changes on Drive with the songs on this PC')}
+                : progress?.phase === 'wait'
+                  ? tr('同じ PC で開いているほかの窓・タブ（ホーム画面のアプリなど）が同期しています。終わったら続けます', 'Another window or tab on this PC (such as the home screen app) is syncing. This continues when it finishes')
+                  : tr('Drive の変化とこの PC の曲を比べています', 'Comparing changes on Drive with the songs on this PC')}
             </span>
           </span>
         </div>

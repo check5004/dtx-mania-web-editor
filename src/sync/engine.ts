@@ -47,8 +47,8 @@ export interface LibAccess {
   libPath(root: string, path: readonly string[]): string[] | null;
   /** Drive の並びの曲を、この PC のどこに置くか */
   placeOf(lib: readonly string[]): { root: string; path: string[] } | null;
-  /** エディタで開いている曲のフォルダか（作るファイルを書きかえない） */
-  isOpen?(dir: FileSystemDirectoryHandle): Promise<boolean>;
+  /** エディタで開いている曲のフォルダか（作るファイルを書きかえない）。at は一覧の場所（ほかの窓・タブのエディタで開いている曲も見る） */
+  isOpen?(dir: FileSystemDirectoryHandle, at: { root: string; path: readonly string[] }): Promise<boolean>;
   /** 曲のフォルダを書きかえた（一覧のその曲を読み直す） */
   touched?(root: string, path: readonly string[]): void;
 }
@@ -278,7 +278,10 @@ export class SyncRun {
     }
     if (this.dry) return;
     this.st.at = this.now();
-    if (!this.o.only) this.st.sig = sig;
+    if (!this.o.only) {
+      this.st.sig = sig;
+      this.st.full = this.st.at;
+    }
     await this.cleanBackups().catch(() => {});
   }
 
@@ -870,7 +873,7 @@ export class SyncRun {
     if (job.mode === 'play') link.play = true;
     else delete link.play;
     const recs = first ? {} : { ...link.files };
-    const open = !this.o.take && !!(dir && this.lib.isOpen && (await this.lib.isOpen(dir)));
+    const open = !this.o.take && !!(dir && this.lib.isOpen && (await this.lib.isOpen(dir, place)));
     // Drive
     let tree: DriveTree | null = null;
     const remote = new Map<string, RemoteStat>();

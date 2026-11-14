@@ -66,6 +66,8 @@ export interface SyncState {
   pcFile?: string;
   /** 前の同期 */
   at: number;
+  /** 前の全部の曲の同期（保存したときの 1 曲だけの同期は入れない）。ほかの窓・タブも、ここから 5 分は 5 分ごとの同期をしない */
+  full?: number;
   /** PC の時計と Drive の時計の差（ミリ秒。Drive − PC）と、測った時刻 */
   skew?: number;
   clockAt?: number;
@@ -175,7 +177,8 @@ export interface RunReport {
 
 /** 進み具合 */
 export interface SyncProgressInfo {
-  phase: 'list' | 'check' | 'up' | 'down';
+  /** wait：ほかの窓・タブの同期が終わるのを待っている */
+  phase: 'wait' | 'list' | 'check' | 'up' | 'down';
   song?: string;
   file?: string;
   /** 曲の数 */

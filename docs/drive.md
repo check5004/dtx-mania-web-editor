@@ -46,7 +46,12 @@ DTXMania の DTXFiles のように曲を集めたフォルダを曲フォルダ�
   - 消えた: 記録にあって片方で消えた → もう一方も消す（Drive はゴミ箱、PC は消す）。消えた側で直していたら戻す。一度にたくさん消えていたら消さずに戻す（`guardMass`）。成績は消さない。曲のフォルダごと消えたときは聞く。
   - 開いている曲（エディタで開いている）は、この PC の作るファイルを書きかえない（`wait`。エディタで「取り込む」→ `syncTake`）。DTXMania が開いていて書けないファイルは `later`（次の同期で）。
 - いつ: アプリを開いたとき・開いている間 5 分ごと・曲を保存したとき（その曲だけ、`syncSaved`）・「今すぐ同期」（`syncNow`。押した操作の中でログインとフォルダの許可を聞く）。開いたとき・5 分ごとはログインの小窓を出せないので、切れていたら帯で知らせる。
-- 記録: 設定は localStorage `dtxe.pcsync`、状態（`SyncState`：Drive の曲の索引・changes の印・聞いたことの答え）と同期の記録（30 日）は IndexedDB。
+- 記録: 設定は localStorage `dtxe.pcsync`、状態（`SyncState`：Drive の曲の索引・changes の印・聞いたことの答え）と同期の記録（30 日）は IndexedDB。記録の決まり（聞いていることは、いちばん新しい記録にだけ・1 曲だけの同期はほかの曲の分を残す・聞いているだけの同期は足さない・同じ失敗が続いたら 1 件）は `src/sync/runlog.ts`。
+- 同じブラウザで窓・タブを 2 つ開いたとき（ホーム画面のアプリとタブなど。v0.57.3〜。前は窓ごとに記録を開いたときに 1 回だけ読み、5 分ごとに別々に同期して上書きし合っていた）:
+  - 記録を書くことは 1 つずつ（`src/sync/lock.ts`。`navigator.locks` の鍵 `dtxe-pcsync`、無いブラウザは localStorage の札 `dtxe.pcsync.lock`）。順番を取ってから IndexedDB の記録と localStorage の設定を読み直し、書き終えてから離す。あとから頼んだ「今すぐ同期」・保存は「ほかの窓・タブの同期を待っています…」（`SyncProgressInfo.phase = 'wait'`）。
+  - 書いたら localStorage `dtxe.pcsync.ping` で知らせる。ほかの窓は記録を読み直し、次の 5 分ごとをそこからにし、その同期の結果を開いている曲に映し（「取り込む」）、書いた曲の一覧を読み直す。設定（`dtxe.pcsync`）と Drive のトークン・設定（`src/drive/auth.ts`）も storage で映す。
+  - 5 分ごとの同期は、どれかの窓が 5 分以内に全部の曲を同期していればしない（`SyncState.full`）。開いたときの同期は 1 分以内ならしない。
+  - エディタで開いている DTXMania の曲は、共有の鍵 `dtxe-open:<場所の鍵>:<並びの小文字>` を持つ。同期はそれも見て（`LibAccess.isOpen` の `at`）、ほかの窓で開いている曲の作るファイルを書きかえない（`wait`）。
 - 大きさ: 設定の画面で、合わせる曲の大きさを数え（`measureSongs`）、Drive の空き（`about.storageQuota`）と比べる。全部の曲が空きに入らなければ選べない。
 
 | 何 | どこ |
@@ -57,10 +62,12 @@ DTXMania の DTXFiles のように曲を集めたフォルダを曲フォルダ�
 | 1 曲のファイルをどうするか | `src/sync/plan.ts` |
 | 同期の本体（Drive の置き方・控え・PC の印・初めての比べ・実行） | `src/sync/engine.ts` |
 | いつ動かすか・状態・記録・設定 | `src/sync/store.ts` |
+| 窓・タブをまたいだ順番・開いている曲の印 | `src/sync/lock.ts` |
+| 同期の記録に足す決まり | `src/sync/runlog.ts` |
 | 画面（設定・容量の警告・初めての確認・記録・帯・一覧の印・曲の「同期」） | `src/ui/sync/`、`src/sync.css` |
 | エディタで開いている曲との行き来（「取り込む」） | `src/app/driveActions.ts` |
 
-試験: `src/sync/plan.test.ts`・`src/sync/scoreIni.test.ts`・`src/sync/engine.test.ts`（偽の Drive と、メモリの中のフォルダ `src/sync/memfs.testutil.ts` で 2 台・3 台の PC）。画面は、Playwright で 2 つのブラウザ（作る PC・遊ぶ PC。別々の OPFS に偽の DTXMania のフォルダ）と、Node の偽の Drive 1 つをつないで確かめた（初めての同期・成績の行き来・両方で直した譜面・容量の警告・ログイン切れ・開いている曲の「取り込む」）。
+試験: `src/sync/plan.test.ts`・`src/sync/scoreIni.test.ts`・`src/sync/engine.test.ts`（偽の Drive と、メモリの中のフォルダ `src/sync/memfs.testutil.ts` で 2 台・3 台の PC）・`src/sync/lock.test.ts`（窓をまたいだ順番）・`src/sync/runlog.test.ts`（記録の決まり）。窓 2 つは、Playwright の 1 つのブラウザ（同じ IndexedDB・localStorage・OPFS・navigator.locks）にページを 2 つ開いて、前の版と比べて確かめた（答えた確かめがまた出る・同時に同期すると Drive に同じ曲を 2 つ作る・ほかの窓で開いている曲を書きかえる、が直ったこと）。画面は、Playwright で 2 つのブラウザ（作る PC・遊ぶ PC。別々の OPFS に偽の DTXMania のフォルダ）と、Node の偽の Drive 1 つをつないで確かめた（初めての同期・成績の行き来・両方で直した譜面・容量の警告・ログイン切れ・開いている曲の「取り込む」）。
 
 ## コードの場所
 

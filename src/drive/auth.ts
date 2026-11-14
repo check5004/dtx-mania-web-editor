@@ -67,12 +67,18 @@ export interface DriveAuthState extends DrivePrefs {
 
 const DEFAULT_PREFS: DrivePrefs = { connected: false, email: '', name: '', redirect: false, onSave: true, autosave: true };
 
-function readPrefs(): DrivePrefs {
+/** localStorage の設定（まだ無い・読めないときは null） */
+function storedPrefs(): DrivePrefs | null {
   try {
-    return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<DrivePrefs>) };
+    const raw = localStorage.getItem(PREFS_KEY);
+    return raw === null ? null : { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<DrivePrefs>) };
   } catch {
-    return { ...DEFAULT_PREFS };
+    return null;
   }
+}
+
+function readPrefs(): DrivePrefs {
+  return storedPrefs() ?? { ...DEFAULT_PREFS };
 }
 
 function readToken(): { token: string | null; exp: number } {
@@ -90,9 +96,10 @@ export const useDriveAuth = create<DriveAuthState>(() => ({ ...readPrefs(), ...r
 const get = useDriveAuth.getState;
 
 export function setPrefs(p: Partial<DrivePrefs>) {
-  useDriveAuth.setState(p);
   const s = get();
-  const prefs: DrivePrefs = { connected: s.connected, email: s.email, name: s.name, redirect: s.redirect, onSave: s.onSave, autosave: s.autosave };
+  // ほかの窓・タブで変えた物を消さないよう、localStorage の今の値に足す
+  const prefs: DrivePrefs = { ...(storedPrefs() ?? { connected: s.connected, email: s.email, name: s.name, redirect: s.redirect, onSave: s.onSave, autosave: s.autosave }), ...p };
+  useDriveAuth.setState(prefs);
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
@@ -115,6 +122,20 @@ function setToken(token: string | null, expiresIn = 0) {
   } catch {
     // 覚えられなくても、この画面の間は使える
   }
+}
+
+// ほかの窓・タブ（ホーム画面のアプリとタブなど）でログインし直した・切れた・設定を変えた：この窓も同じにする
+// （1 つの窓でログインし直せば、ほかの窓もそのトークンで同期できる）
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === TOKEN_KEY) {
+      const t = readToken();
+      if (t.token !== get().token || t.exp !== get().exp) useDriveAuth.setState(t);
+    } else if (e.key === PREFS_KEY) {
+      const p = storedPrefs();
+      if (p) useDriveAuth.setState(p);
+    }
+  });
 }
 
 // API にトークンの取り方を渡す（操作の外では取り直さない。切れていたら DriveAuthError）

@@ -63,6 +63,7 @@ export function runTitle(why: RunReport['why']): string {
 
 /** 進み具合の言葉（上の帯・記録） */
 export function progressText(p: SyncProgressInfo | null): string {
+  if (p?.phase === 'wait') return tr('ほかの窓・タブの同期を待っています…', 'Waiting for the sync in another window or tab…');
   if (!p || p.phase === 'list') return tr('Drive と比べています…', 'Comparing with Drive…');
   if (p.phase === 'check') return p.total ? tr(`比べています ${p.done}/${p.total}`, `Comparing ${p.done}/${p.total}`) : tr('比べています…', 'Comparing…');
   return p.total ? tr(`同期中 ${p.done}/${p.total}`, `Syncing ${p.done}/${p.total}`) : tr('同期中…', 'Syncing…');
