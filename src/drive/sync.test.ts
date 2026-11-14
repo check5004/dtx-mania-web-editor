@@ -234,6 +234,28 @@ describe('Drive と曲フォルダを合わせる（偽の Drive で）', () => 
     expect(r.link!.folderId).not.toBe(folderId);
   });
 
+  it('PC どうしの同期が片付けた曲（同じ曲が Drive に 2 つ）：保存のときに残した方へつなぎ直し、違うファイルは聞く', async () => {
+    const f = song({ 'ext.dtx': 'v1', 'bgm.ogg': 'BGM' });
+    await pushSong(f, { create: true });
+    const old = (await readLink(f))!.folderId;
+    // 残した方（DTXFiles の中。譜面はほかの PC で直した）
+    const lib = drive.add({ name: 'DTXFiles', parents: [drive.files.get(old)!.parents[0]], appProperties: { dtxe: 'lib' } });
+    const keep = drive.add({ name: 'Mephisto', parents: [lib.id], appProperties: { dtxe: 'song' } });
+    drive.add({ name: 'ext.dtx', parents: [keep.id], content: enc('v2') });
+    drive.add({ name: 'bgm.ogg', parents: [keep.id], content: enc('BGM') });
+    drive.files.get(old)!.appProperties = { ...drive.files.get(old)!.appProperties, dup: keep.id };
+    drive.trash(old);
+    // 自動保存ではつながない
+    expect((await pushSong(f, { create: false })).skipped).toBe(true);
+    const asked: string[][] = [];
+    const r = await pushSong(f, { create: true, resolve: async (paths) => (asked.push(paths), null) });
+    expect(r.link!.folderId).toBe(keep.id);
+    expect((await readLink(f))!.folderId).toBe(keep.id);
+    expect(asked).toEqual([['ext.dtx']]);
+    expect(r.sent).toBe(0);
+    expect((await listDriveSongs()).map((s) => s.id)).toEqual([keep.id]);
+  });
+
   it('ログインが切れていたら DriveAuthError', async () => {
     const f = song({ 'ext.dtx': 'v1' });
     let lost = 0;
