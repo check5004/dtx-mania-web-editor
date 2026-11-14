@@ -152,14 +152,14 @@ describe('保存の前に、譜面に書くファイル名を NX で読める名
 describe('試聴（#PREVIEW）は原曲についてくる', () => {
   const songWith = (preview: string | null) =>
     openSong(
-      { 'mstr.dtx': chart(['#TITLE: テスト', '#BPM: 120', ...(preview ? [`#PREVIEW: ${preview}`] : []), '#WAV01: bgm.ogg']) },
-      [audio('bgm.ogg'), audio('new.ogg'), audio('bgm_drumless.ogg'), audio('pre.ogg'), audio('hh.wav')],
+      { 'mstr.dtx': chart(['#TITLE: テスト', '#BPM: 120', ...(preview ? [`#PREVIEW: ${preview}`] : []), '#WAV01: song.ogg']) },
+      [audio('song.ogg'), audio('new.ogg'), audio('song_drumless.ogg'), audio('mix.ogg'), audio('pre.ogg'), audio('hh.wav')],
     );
 
   it('ドラム入りの原曲に替えると、空・前の原曲を指していた試聴は新しい原曲に。選んだ試聴はそのまま', () => {
     songWith(null);
     expect(planBgmSwap('new.ogg')).toEqual({ preview: 'new.ogg', fullMix: undefined });
-    songWith('bgm.ogg');
+    songWith('song.ogg');
     expect(planBgmSwap('new.ogg').preview).toBe('new.ogg');
     songWith('pre.ogg');
     expect(planBgmSwap('new.ogg').preview).toBeNull();
@@ -167,9 +167,27 @@ describe('試聴（#PREVIEW）は原曲についてくる', () => {
 
   it('ドラム抜きにするときは、前の原曲を完全な原曲として覚え、試聴が空なら完全な原曲を入れる', () => {
     songWith(null);
-    expect(planBgmSwap('bgm_drumless.ogg')).toEqual({ preview: 'bgm.ogg', fullMix: 'bgm.ogg' });
-    songWith('bgm.ogg');
-    expect(planBgmSwap('bgm_drumless.ogg')).toEqual({ preview: null, fullMix: 'bgm.ogg' });
+    expect(planBgmSwap('song_drumless.ogg')).toEqual({ preview: 'song.ogg', fullMix: 'song.ogg' });
+    songWith('song.ogg');
+    expect(planBgmSwap('song_drumless.ogg')).toEqual({ preview: null, fullMix: 'song.ogg' });
+  });
+
+  it('ステムから書き出した BGM は、名前にドラム抜きと書いていなくても、作り方でドラム抜きとみなす（試聴にしない）', () => {
+    songWith(null);
+    // 前はファイル名だけで見ていたので、mix.ogg（ドラム抜き）を試聴に入れ、完全な原曲として覚えていた
+    expect(planBgmSwap('mix.ogg')).toEqual({ preview: 'mix.ogg', fullMix: undefined });
+    expect(planBgmSwap('mix.ogg', { drumless: true })).toEqual({ preview: 'song.ogg', fullMix: 'song.ogg' });
+    // ステムを全部まとめた音（ドラム入り）は完全な原曲
+    expect(planBgmSwap('song_drumless.ogg', { drumless: false })).toEqual({ preview: 'song_drumless.ogg', fullMix: undefined });
+  });
+
+  it('DTXMania の曲の BGM の名前（bgm.ogg・bgm_d.ogg）はドラム抜きのことが多いので、完全な原曲として覚えず、試聴にも入れない', () => {
+    for (const name of ['bgm.ogg', 'BGM_D.ogg', 'bgm-d.wav']) {
+      openSong({ 'mstr.dtx': chart(['#TITLE: テスト', '#BPM: 120', `#WAV01: ${name}`]) }, [audio(name), audio('bgm_drumless.ogg'), audio('hh.wav')]);
+      expect(planBgmSwap('bgm_drumless.ogg')).toEqual({ preview: null, fullMix: undefined });
+      expect(fullOriginal()).toBeNull();
+      expect(fillPreview()).toBeNull();
+    }
   });
 
   it('原曲と一緒に替えた試聴は、同じ原曲・同じ試聴だったほかの難易度にも入れ、Ctrl+Z で一緒に戻す', async () => {
@@ -187,12 +205,12 @@ describe('試聴（#PREVIEW）は原曲についてくる', () => {
   });
 
   it('保存の前に試聴が空なら原曲を入れる（空だったほかの難易度にも）。入れたのを空にしたら、もう入れない', async () => {
-    const t = chart(['#TITLE: テスト', '#BPM: 120', '#WAV01: bgm.ogg']);
-    const folder = openSong({ 'mstr.dtx': t, 'adv.dtx': t }, [audio('bgm.ogg'), audio('hh.wav')]);
-    expect(fillPreview()).toBe('bgm.ogg');
-    expect(useEditor.getState().doc.fields.PREVIEW).toBe('bgm.ogg');
+    const t = chart(['#TITLE: テスト', '#BPM: 120', '#WAV01: song.ogg']);
+    const folder = openSong({ 'mstr.dtx': t, 'adv.dtx': t }, [audio('song.ogg'), audio('hh.wav')]);
+    expect(fillPreview()).toBe('song.ogg');
+    expect(useEditor.getState().doc.fields.PREVIEW).toBe('song.ogg');
     await siblingWrites();
-    expect((await onDisk(folder, 'adv.dtx')).fields.PREVIEW).toBe('bgm.ogg');
+    expect((await onDisk(folder, 'adv.dtx')).fields.PREVIEW).toBe('song.ogg');
     undo();
     await siblingWrites();
     expect(fillPreview()).toBeNull();
