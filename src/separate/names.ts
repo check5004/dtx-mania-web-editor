@@ -23,6 +23,15 @@ export function isDrumlessName(fileName: string): boolean {
   return sourceNameInfo(fileName).drumless;
 }
 
+/**
+ * DTXMania の曲で BGM によく付ける名前（bgm.ogg・bgm_d.ogg）か。ドラムの譜面の BGM はふつうドラム抜き（ドラムは譜面の音で鳴らす）なので、
+ * 「ドラム抜き」と書いていなくても完全な原曲（ドラム入り）とはみなさない（完全な原曲として覚えない・試聴は譜面のドラムも足して作る）
+ */
+export function isGameBgmName(fileName: string): boolean {
+  const stem = (fileName.split(/[\\/]/).pop() ?? fileName).replace(/\.[^.]+$/, '').trim();
+  return /^bgm(?:[ _-]?d)?$/i.test(stem);
+}
+
 /** 画面とトラックに並べる順（ドラムが先、その他が最後） */
 const STEM_ORDER: SepStem[] = ['drums', 'bass', 'vocals', 'guitar', 'piano', 'other'];
 

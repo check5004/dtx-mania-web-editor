@@ -520,7 +520,12 @@ export async function pushSong(folder: SongFolder, o: PushOptions): Promise<Push
   if (o.quickOnly) return { link, ...NONE, skipped: true };
   if (link) {
     const f = await getFile(link.folderId);
-    if (!f || f.trashed) link = null; // Drive で消された
+    if (!f || f.trashed) {
+      // Drive で消された。同じ曲が Drive に 2 つあって、PC どうしの同期が使っていない方として片付けた（印 dup）なら、保存のときに残した方につなぎ直す
+      // （同じ名前の曲と合わせるときと同じ。前に合わせた記録は無いものとして、中身が違うファイルは聞く）
+      const to = o.create && f?.appProperties?.dup ? await getFile(f.appProperties.dup) : null;
+      link = to && !to.trashed && to.appProperties?.dtxe === 'song' ? { ...newLink(to.id, to.name), ...(link.noVideo ? { noVideo: true } : {}) } : null;
+    }
   }
   if (!link) {
     if (!o.create) return { link: null, ...NONE, skipped: true };
