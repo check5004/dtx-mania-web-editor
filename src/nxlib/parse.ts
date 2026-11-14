@@ -3,7 +3,10 @@
 // - レベルは #DLEVEL が 100 以上なら 3 桁（825 → 8.25）、2 桁なら #DLVDEC を小数の 2 桁目に（82 と 5 → 8.25）
 // - 成績は譜面の横の「譜面の名前.score.ini」（NX が書く）。読むだけで書き換えない
 // - Config.ini（UTF-16）の DTXPath は「;」で区切って複数。既定は「.\」（ゲームのフォルダ全体）
+import { toBase36x2 } from '../dtx/base36';
 import { decodeDtx } from '../dtx/encoding';
+import { CH } from '../dtx/model';
+import { parseDtx } from '../dtx/parse';
 import { normPath } from '../fs/folder';
 
 /** 譜面の頭 */
@@ -216,19 +219,49 @@ export function chartRefGroups(text: string): RefGroup[] {
     }
     if (REF_KEY.test(key) && /\.[A-Za-z0-9]{2,4}$/.test(v)) vals.push(v);
   }
-  const outside = (k: string) => /^[a-z]:/.test(k) || k === '..' || k.startsWith('../') || k.includes('/../');
   const seen = new Set<string>();
   const out: RefGroup[] = [];
   for (const v of vals) {
-    const key = normPath(v);
-    if (seen.has(key) || outside(key)) continue;
-    seen.add(key);
-    const keys = [key];
-    if (pathWav) {
-      const joined = normPath(`${pathWav.replace(/\\/g, '/').replace(/\/+$/, '')}/${v}`);
-      if (joined !== key && !outside(joined)) keys.push(joined);
-    }
-    out.push({ name: v.replace(/\\/g, '/'), keys });
+    const g = refGroupOf(v, pathWav);
+    if (!g || seen.has(g.keys[0])) continue;
+    seen.add(g.keys[0]);
+    out.push(g);
   }
   return out;
+}
+
+/** 曲のフォルダの外（「..\」・ドライブ）を指すパスか（正規化したパスで） */
+function outsidePath(k: string): boolean {
+  return /^[a-z]:/.test(k) || k === '..' || k.startsWith('../') || k.includes('/../');
+}
+
+/** 書いてあるファイル名 1 つを探す候補にする（#PATH_WAV があれば、その中とそのままの両方）。曲のフォルダの外なら null */
+function refGroupOf(v: string, pathWav: string): RefGroup | null {
+  const key = normPath(v);
+  if (outsidePath(key)) return null;
+  const keys = [key];
+  if (pathWav) {
+    const joined = normPath(`${pathWav.replace(/\\/g, '/').replace(/\/+$/, '')}/${v}`);
+    if (joined !== key && !outsidePath(joined)) keys.push(joined);
+  }
+  return { name: v.replace(/\\/g, '/'), keys };
+}
+
+/**
+ * 譜面の BGM：いちばん初めの BGM チップ（ch01。同じ所なら先に書いたもの）の音（エディタの原曲と同じ決め方）。
+ * 探す順もエディタ（findFile）と同じく #PATH_WAV の中が先。BGM のチップが無い・その音の #WAV が無い・
+ * 曲のフォルダの外を指していれば null
+ */
+export function bgmRefOf(text: string): RefGroup | null {
+  const { doc } = parseDtx(text);
+  let best: { m: number; f: number; v: number } | null = null;
+  for (const c of doc.chips) {
+    if (c.ch !== CH.BGM) continue;
+    const f = c.f.n / c.f.d;
+    if (!best || c.m < best.m || (c.m === best.m && f < best.f)) best = { m: c.m, f, v: c.v };
+  }
+  if (!best) return null;
+  const name = (doc.fields['WAV' + toBase36x2(best.v)] ?? '').trim();
+  const g = name ? refGroupOf(name, (doc.fields['PATH_WAV'] ?? '').trim()) : null;
+  return g && g.keys.length > 1 ? { ...g, keys: [...g.keys].reverse() } : g;
 }
