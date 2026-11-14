@@ -2,7 +2,7 @@
 // 「キーが要ります」の説明（src/ui/aiGuide/KeyGate.tsx）、AI を使う準備の案内、設定 › AI の一覧が同じものを使う。
 // AI に頼む処理を足したら、ここにも足す（src/ai/features.test.ts が TASKS と見比べる）。
 import { tr } from '../i18n';
-import type { AiTask } from './tasks';
+import { formatUsd, type AiTask } from './tasks';
 
 export type AiFeatureId = 'songinfo' | 'measure' | 'tabAsk' | 'phrase' | 'level' | 'difficulty' | 'guideline';
 
@@ -105,4 +105,15 @@ export function keyFreeFeatures(): string[] {
     tr('YouTube との自動合わせ', 'Auto-sync with YouTube'),
     tr('レベルの機械的な推定', 'Computed level estimate'),
   ];
+}
+
+/** 円の目安に使う 1 ドルの値（案内と「キーが要ります」の説明で同じ値） */
+export const JPY_PER_USD = 150;
+
+/** 1 回の目安（ドル）。日本語では円も添える */
+export function costText(usd: number | null): string {
+  if (usd === null || !Number.isFinite(usd)) return '—';
+  const yen = usd * JPY_PER_USD;
+  const y = yen < 10 ? yen.toFixed(1).replace(/\.0$/, '') : Math.round(yen).toString();
+  return tr(`約 ${formatUsd(usd)}（${y} 円ほど）`, `about ${formatUsd(usd)}`);
 }

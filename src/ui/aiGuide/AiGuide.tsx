@@ -3,14 +3,13 @@
 // 「貼る」の手順は本物のキーの欄で、ここでつないで確かめて終われる（ホームからでも開ける）。
 import { tr, isJa } from '../../i18n';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { aiFeatures, keyFreeFeatures } from '../../ai/features';
+import { aiFeatures, costText, JPY_PER_USD, keyFreeFeatures } from '../../ai/features';
 import { formatUsd } from '../../ai/tasks';
 import { checkKey, setKey, setRemember, taskCostEstimate, useAi } from '../../store/ai';
 import { closeAiGuide, GUIDE_STEPS, replayGuide, setGuideStep, stepGuide, useAiGuide, type GuideStep } from '../../store/aiGuide';
 import { useDevice } from '../../store/device';
 import { openSettings, useEditor } from '../../store/editor';
 import { Icon } from '../icons';
-import { costText, JPY_PER_USD } from './KeyGate';
 import { GuideStage } from './Stages';
 import './aiGuide.css';
 
@@ -492,17 +491,22 @@ function Ready() {
             </li>
           ))}
         </ul>
-        {inEditor && (
-          <button
-            className="link-btn"
-            onClick={() => {
-              closeAiGuide();
-              openSettings('ai');
-            }}
-          >
-            {tr('モデルや使いすぎの上限を見る（設定 › AI）', 'See models and spending limits (Settings › AI)')}
+        <div className="aig-row">
+          <button className="btn small primary" onClick={closeAiGuide}>
+            {tr('閉じて使い始める', 'Close and start')}
           </button>
-        )}
+          {inEditor && (
+            <button
+              className="link-btn"
+              onClick={() => {
+                closeAiGuide();
+                openSettings('ai');
+              }}
+            >
+              {tr('モデルや使いすぎの上限を見る（設定 › AI）', 'See models and spending limits (Settings › AI)')}
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );

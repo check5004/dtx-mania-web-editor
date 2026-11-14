@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatUsd, modelLabel } from '../ai/tasks';
 import { downloadBytes } from '../fs/folder';
 import { FEATURE_DEFS } from '../gen/features';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { openKeyGate } from '../store/aiGuide';
 import { NO_FOLDER_PICK } from '../store/device';
-import { goBack, openSettings, toast, useEditor } from '../store/editor';
+import { goBack, toast, useEditor } from '../store/editor';
 import {
   addRow,
   BANDS,
@@ -28,6 +29,7 @@ import {
 } from '../store/guideline';
 import { FolderInput } from './Editor';
 import { Icon } from './icons';
+import { AiButton, KeyGateLink, KeyMark, lockedTitle } from './aiGuide/KeyGate';
 
 export function GuidelinePage() {
   const st = useGuideline();
@@ -85,9 +87,14 @@ export function GuidelinePage() {
             : ''}
         </span>
         <span className="grow" />
-        <span className={`pill ${hasKey ? 'ok' : ''}`} title={hasKey ? undefined : noKeyTitle()}>
-          {hasKey ? tr('● OpenRouter · キー設定済み', '● OpenRouter · key set') : tr('キー未設定（集計と手書きは使えます）', 'No API key (stats and hand-written guidelines still work)')}
-        </span>
+        {hasKey ? (
+          <span className="pill ok">{tr('● OpenRouter · キー設定済み', '● OpenRouter · key set')}</span>
+        ) : (
+          <button className="pill nk-pill" onClick={(e) => openKeyGate('guideline', e.currentTarget)} title={lockedTitle()}>
+            <KeyMark />
+            {tr('キー無し（集計と手書きは使えます）', 'No key (stats and hand-written guidelines still work)')}
+          </button>
+        )}
         <button className="btn small" onClick={() => jsonInput.current?.click()}>
           {tr('読み込み', 'Import')}
         </button>
@@ -234,22 +241,19 @@ export function GuidelinePage() {
               <button className="btn small" onClick={() => addRow(band)}>
                 {Icon.plus(13)} {tr('行を追加', 'Add row')}
               </button>
-              <button
+              <AiButton
+                feature="guideline"
                 className="btn small on-amber"
-                disabled={!hasKey || running || bs.count === 0}
-                title={hasKey ? tr(`${model} · 1回 約 ${formatUsd(cost)}（全レベル帯）`, `${model} · ~${formatUsd(cost)} per run (all level bands)`) : noKeyTitle()}
+                disabled={running || bs.count === 0}
+                title={tr(`${model} · 1回 約 ${formatUsd(cost)}（全レベル帯）`, `${model} · ~${formatUsd(cost)} per run (all level bands)`)}
                 onClick={() => void draftWithAi([band])}
               >
                 {Icon.sparkle(13)} {running ? tr('下書き中…', 'Drafting…') : gb.rows.length ? tr('AIで下書きし直す', 'Redraft with AI') : tr('AIで下書き', 'Draft with AI')}
-              </button>
+              </AiButton>
             </div>
             {!hasKey && (
               <p className="lbl" style={{ margin: '6px 0 0' }}>
-                {noKeyTitle()}
-                {tr('。基準文は「行を追加」で手で書けます。', '. You can write guidelines by hand with "Add row".')}{' '}
-                <button className="link-btn" onClick={() => openSettings('ai')}>
-                  {tr('キーを設定', 'Set API key')}
-                </button>
+                {tr('キーが無いので、基準文は「行を追加」で手で書けます。', 'No key, so write guidelines by hand with "Add row".')} <KeyGateLink feature="guideline" />
               </p>
             )}
             {hasKey && st.charts.length > 0 && BANDS.some((b) => (st.guide.bands[b]?.rows.length ?? 0) === 0 && stats[b - 1].count > 0) && (

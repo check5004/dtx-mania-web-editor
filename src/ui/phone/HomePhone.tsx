@@ -10,6 +10,7 @@ import { useEditor } from '../../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../../store/localSongs';
 import { usePwa } from '../../store/pwa';
 import { DriveHomeCard, PrivacyLine } from '../DriveUi';
+import { AiHomeCard } from '../aiGuide/AiHomeCard';
 import { formatLevel } from '../format';
 import { Icon } from '../icons';
 import { LangSwitch } from '../LangSwitch';
@@ -248,6 +249,7 @@ export function HomePhone() {
             {starts}
             <DriveHomeCard tablet />
             <LocalStorageCard tablet />
+            <AiHomeCard tablet />
             {tipsCard}
           </>
         ) : (
@@ -259,6 +261,7 @@ export function HomePhone() {
             {recents}
             <DriveHomeCard tablet />
             <LocalStorageCard tablet />
+            <AiHomeCard tablet />
             {tipsCard}
           </>
         )}

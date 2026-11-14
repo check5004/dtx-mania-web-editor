@@ -9,6 +9,7 @@ import { useEditor } from '../../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../../store/localSongs';
 import { LocalStorageCard } from '../LocalStorage';
 import { DriveHomeCard, PrivacyLine } from '../DriveUi';
+import { AiHomeCard } from '../aiGuide/AiHomeCard';
 import { FolderInput } from '../Editor';
 import { formatLevel } from '../format';
 import { Icon } from '../icons';
@@ -292,6 +293,7 @@ export function HomeTablet() {
 
         <LocalStorageCard tablet />
         <DriveHomeCard tablet />
+        <AiHomeCard tablet />
 
         <section className="th-section">
           <div className="th-section-head">

@@ -137,9 +137,9 @@ function persistSettings() {
 export const hasAiKey = (s: AiState = get()) => s.key.trim().length > 0;
 export const useHasAiKey = () => useAi((s) => s.key.trim().length > 0);
 
-/** AI のキーが無いときの説明（表示のたびに今の言語で） */
+/** AI のキーが無いときの説明（表示のたびに今の言語で）。画面のボタンは ui/aiGuide/KeyGate.tsx の説明を出す */
 export function noKeyTitle(): string {
-  return tr('キーを設定すると使えます（設定 › AI）', 'Available once you set an API key (Settings › AI)');
+  return tr('OpenRouter のキーを入れると使えます', 'Available once you add an OpenRouter key');
 }
 
 export function setKey(key: string) {

@@ -5,6 +5,7 @@ import { isDiskFolder, isLocalFolder, supportsDirectWrite } from '../fs/folder';
 import { localPlace, useLocalSongs } from '../store/localSongs';
 import { cleanDriveJunk, connectDrive, openFromDrive, pushNow } from '../app/driveActions';
 import { openNxPage } from '../nxlib/actions';
+import { openAiGuide } from '../store/aiGuide';
 import { useDriveAuth } from '../drive/auth';
 import { GRID_DIVS, gridLabel } from '../edit/ops';
 import { findFile } from '../fs/folder';
@@ -259,6 +260,7 @@ export function useEditorMenus(folderInput: React.RefObject<HTMLInputElement | n
         '-',
         { label: tr('設定（電子ドラム・キー・遅延補正）…', 'Settings (e-drums, keys, latency)…'), run: () => openSettings() },
         { label: tr('AIの設定（OpenRouter）…', 'AI settings (OpenRouter)…'), run: () => openSettings('ai') },
+        { label: tr('AI を使う準備（OpenRouter のはじめかた）…', 'Set up AI (getting started with OpenRouter)…'), run: () => openAiGuide() },
         { label: tr('アプリとして使う（追加・オフライン・更新）…', 'Use as an app (install, offline, updates)…'), run: () => openSettings('app') },
       ],
     },

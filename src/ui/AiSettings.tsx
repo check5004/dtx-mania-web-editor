@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Effort, OrModel } from '../ai/openrouter';
 import { formatUsd, meetsNeeds, modelInfo, perMillion, sortModels, taskDef, TASKS, type AiTask, type ModelSort } from '../ai/tasks';
 import { checkKey, refreshModels, resetTasks, setKey, setLimits, setRemember, setTaskConfig, taskCostEstimate, useAi } from '../store/ai';
+import { aiFeatures } from '../ai/features';
+import { openAiGuide } from '../store/aiGuide';
+import { Icon } from './icons';
+import { KeyMark } from './aiGuide/KeyGate';
 
 const efforts = (): { v: Effort; label: string }[] => [
   { v: 'none', label: tr('なし', 'None') },
@@ -22,6 +26,7 @@ export function AiSettings() {
   return (
     <div className="ai-set">
       <div className="ai-set-main">
+        <SetupHero />
         <ConnectionCard />
         <TaskTable sel={sel} onSel={setSel} />
         <div className="ai-set-2col">
@@ -29,6 +34,7 @@ export function AiSettings() {
           <PrivacyCard />
         </div>
         <SpendCard />
+        <FeaturesCard />
       </div>
       <ModelPicker task={sel} />
     </div>
@@ -60,8 +66,11 @@ function ConnectionCard() {
         <h3>{tr('OpenRouterとの接続', 'OpenRouter connection')}</h3>
         {pill}
         <span className="grow" />
-        <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">
-          {tr('キーを発行する（OpenRouter）', 'Get an API key (OpenRouter)')}
+        <button className="link-btn" onClick={() => openAiGuide(key ? 'care' : 'about')}>
+          {tr('はじめかた・注意点', 'Getting started and tips')}
+        </button>
+        <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">
+          {tr('OpenRouter の Keys を開く', 'Open OpenRouter Keys')}
         </a>
       </div>
       <div className="ai-conn">
@@ -113,6 +122,65 @@ function ConnectionCard() {
           'Spending and limits come from the key info (/api/v1/key). The key is stored unencrypted in this browser and sent directly to OpenRouter only. On a shared PC, choose "Don\'t save".',
         )}
       </p>
+    </section>
+  );
+}
+
+/** キーが無いとき：いちばん上に、AI を使う準備（案内）への入口 */
+function SetupHero() {
+  const hasKey = useAi((s) => s.key.trim().length > 0);
+  if (hasKey) return null;
+  return (
+    <section className="card ai-hero">
+      <span className="ai-hero-i">{Icon.sparkle(20)}</span>
+      <div className="grow">
+        <h3>{tr('AI を使うには、OpenRouter のキーが要ります', 'AI features need an OpenRouter key')}</h3>
+        <p className="lbl">
+          {tr(
+            'OpenRouter のアカウントを作り、クレジットを $5 ほど入れて、キーを作って下に貼ります（約 5 分）。手順は画面のイメージつきで案内します。',
+            'Create an OpenRouter account, add about $5 of credits, make a key and paste it below (about 5 minutes). The guide walks you through it with pictures.',
+          )}
+        </p>
+      </div>
+      <button className="btn primary" onClick={() => openAiGuide('about')}>
+        {Icon.sparkle(14)}
+        {tr('AI を使う準備（約 5 分）', 'Set up AI (about 5 min)')}
+      </button>
+    </section>
+  );
+}
+
+/** AI を使う機能の一覧（どこから・キーで増えること・キーが無いとき） */
+function FeaturesCard() {
+  const hasKey = useAi((s) => s.key.trim().length > 0);
+  return (
+    <section className="card ai-card">
+      <div className="row" style={{ gap: 10 }}>
+        <h3>{tr('AI を使う機能', 'Features that use AI')}</h3>
+        <span className="lbl hide-narrow">
+          {hasKey ? tr('キーが無いときは、右の列の形で動きます', 'Without a key, they work as in the right column') : tr('キーが無いあいだは、ボタンに鍵の印が付きます', 'Without a key, their buttons show a key mark')}
+        </span>
+      </div>
+      <div className="ai-feat-table">
+        <div className="ai-feat-h lbl">
+          <span>{tr('機能・どこから', 'Feature and where')}</span>
+          <span>{tr('キーで増えること', 'What a key adds')}</span>
+          <span>{tr('キーが無いとき', 'Without a key')}</span>
+        </div>
+        {aiFeatures().map((f) => (
+          <div key={f.id} className="ai-feat-r">
+            <span>
+              <b>
+                {!hasKey && <KeyMark />}
+                {f.name}
+              </b>
+              <span className="lbl">{f.where}</span>
+            </span>
+            <span>{f.withKey}</span>
+            <span className="lbl">{f.withoutKey}</span>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

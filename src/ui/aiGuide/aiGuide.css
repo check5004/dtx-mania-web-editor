@@ -38,12 +38,159 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 「キー無し」の札（AI難易度生成・ガイドラインの上のバー）。押すと説明 */
+.pill.nk-pill {
+  border: 1px dashed var(--amber-line);
+  cursor: pointer;
+}
+
+.pill.nk-pill:hover {
+  color: var(--text2);
+}
+
+/* ---- ホームの「AI（OpenRouter）」の札 ---- */
+.ai-home-card .ai-home-i {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.ai-home-card .local-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.ai-home-card .ai-home-ok {
+  color: var(--ok);
+}
+
+.ai-home-card .ai-home-err {
+  color: var(--danger, #ff7b72);
+}
+
+/* スマホ：ボタンを幅いっぱいに縦に（「AI を使う準備」を上に） */
+@media (max-width: 560px) {
+  .ai-home-card .local-row > .grow {
+    display: none;
+  }
+
+  .ai-home-card .local-row {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .ai-home-card .local-row > button {
+    justify-content: center;
+  }
+}
+
+/* ---- 設定 › AI：キーが無いときの入口と、AI を使う機能の一覧 ---- */
+.card.ai-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-color: var(--amber-line);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 181, 71, 0.1), transparent 60%),
+    var(--card);
+}
+
+.ai-hero h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.ai-hero p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.ai-hero-i {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.ai-hero .btn {
+  flex: none;
+}
+
+.ai-feat-table {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.1fr) 1.3fr 1.2fr;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-feat-h,
+.ai-feat-r {
+  display: contents;
+}
+
+.ai-feat-h > span {
+  padding: 0 8px 6px 0;
+  border-bottom: 1px solid var(--line2);
+}
+
+.ai-feat-r > span {
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ai-feat-r > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ai-feat-r b {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-feat-r b .nk-key {
+  margin-left: 0;
+}
+
+@media (max-width: 760px) {
+  .card.ai-hero {
+    flex-wrap: wrap;
+  }
+
+  .ai-feat-table {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-feat-h {
+    display: none;
+  }
+
+  .ai-feat-r > span {
+    border-bottom: none;
+    padding: 0 0 2px;
+  }
+
+  .ai-feat-r > span:last-child {
+    padding-bottom: 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 /* ---- 「キーが要ります」の吹き出し ---- */
 
 .kg {
   position: fixed;
   z-index: 130;
-  width: 330px;
+  width: 352px;
   max-width: calc(100vw - 20px);
   background: #151a22;
   border: 1px solid #3a4554;
@@ -2666,4 +2813,8 @@
   .pa-feat .pa-lock {
     display: none;
   }
+}
+
+.aig-ready .aig-row {
+  margin: 10px 0 0;
 }

@@ -8,6 +8,7 @@ import { useEditor } from '../store/editor';
 import { localBadge, localPlace, useLocalSongs } from '../store/localSongs';
 import { LocalStorageCard } from './LocalStorage';
 import { DriveHomeCard, PrivacyLine } from './DriveUi';
+import { AiHomeCard } from './aiGuide/AiHomeCard';
 import { FolderInput } from './Editor';
 import { formatLevel } from './format';
 import { Icon } from './icons';
@@ -278,6 +279,7 @@ function HomeDesktop() {
 
         <LocalStorageCard />
         <DriveHomeCard />
+        <AiHomeCard />
 
         <section>
           <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>{tr('操作のきほん', 'Basics')}</h3>

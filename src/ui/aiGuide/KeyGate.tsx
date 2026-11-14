@@ -2,8 +2,7 @@
 // 吹き出しは押したボタンの近く（スマホは下からのシート）に出し、AI を使う準備（案内）へつなぐ。
 import { tr } from '../../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
-import { aiFeature, type AiFeatureId } from '../../ai/features';
-import { formatUsd } from '../../ai/tasks';
+import { aiFeature, costText, type AiFeatureId } from '../../ai/features';
 import { taskCostEstimate, useHasAiKey } from '../../store/ai';
 import { closeKeyGate, openAiGuide, openKeyGate, useKeyGate } from '../../store/aiGuide';
 import { useDevice } from '../../store/device';
@@ -43,7 +42,8 @@ export function AiButton({ feature, onClick, children, className = '', title, di
       </button>
     );
   return (
-    <button {...rest} className={`${className} needs-key`} aria-disabled="true" title={lockedTitle()} onClick={(e) => openKeyGate(feature, e.currentTarget)}>
+    // 押すと説明が開くので、aria-disabled にはしない（読み上げでは「キーが要ります」の説明つきのボタン）
+    <button {...rest} className={`${className} needs-key`} aria-haspopup="dialog" title={lockedTitle()} onClick={(e) => openKeyGate(feature, e.currentTarget)}>
       {children}
       <KeyMark size={keySize} />
     </button>
@@ -58,15 +58,6 @@ export function KeyGateLink({ feature, label }: { feature: AiFeatureId; label?: 
       {label ?? tr('AI を使うには', 'How to use AI')}
     </button>
   );
-}
-
-/** 1 回の目安（ドル）。日本語では円も添える（AI を使う準備の案内と同じ 1 ドル 150 円） */
-export const JPY_PER_USD = 150;
-export function costText(usd: number | null): string {
-  if (usd === null || !Number.isFinite(usd)) return '—';
-  const yen = usd * JPY_PER_USD;
-  const y = yen < 1 ? yen.toFixed(1) : yen < 10 ? yen.toFixed(1).replace(/\.0$/, '') : Math.round(yen).toString();
-  return tr(`約 ${formatUsd(usd)}（${y} 円ほど）`, `about ${formatUsd(usd)}`);
 }
 
 /** 「キーが要ります」の吹き出し（App に 1 つ置く） */
@@ -100,12 +91,17 @@ export function KeyGateHost() {
     setPos({ left, top, arrow: Math.max(16, Math.min(w - 16, cx - left)), above });
   }, [feature, rect, phone]);
 
-  // 外を押す・Esc・画面の大きさが変わったら閉じる
+  // 外を押す・Esc・画面の大きさが変わる・後ろが動く（押したボタンから離れる）と閉じる
   useEffect(() => {
     if (!feature) return;
     const down = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) closeKeyGate();
     };
+    const scroll = (e: Event) => {
+      if (!phone && ref.current && !ref.current.contains(e.target as Node)) closeKeyGate();
+    };
+    // スマホの下からのシートは、アドレスバーの出入り（resize）では閉じない
+    const resize = () => !phone && closeKeyGate();
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -115,14 +111,16 @@ export function KeyGateHost() {
     // 開いたときの押下（同じ押下）で閉じないよう、次の回から聞く
     const t = window.setTimeout(() => window.addEventListener('pointerdown', down, true), 0);
     window.addEventListener('keydown', key, true);
-    window.addEventListener('resize', closeKeyGate);
+    window.addEventListener('resize', resize);
+    window.addEventListener('scroll', scroll, true);
     return () => {
       window.clearTimeout(t);
       window.removeEventListener('pointerdown', down, true);
       window.removeEventListener('keydown', key, true);
-      window.removeEventListener('resize', closeKeyGate);
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('scroll', scroll, true);
     };
-  }, [feature]);
+  }, [feature, phone]);
 
   if (!feature) return null;
   const f = aiFeature(feature);

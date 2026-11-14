@@ -18,6 +18,7 @@ import type { Frac } from '../dtx/fraction';
 import { SD_RIM, type DtxDoc } from '../dtx/model';
 import type { TempoMap } from '../dtx/timing';
 import { hasAiKey, noKeyTitle, runAi } from './ai';
+import { openKeyGate } from './aiGuide';
 import { aiOnsets, useAssist } from './assist';
 import { drumsAudible, readyDrums, useDrums } from './drums';
 import { drumHits, type DrumHit } from '../transcribe/peaks';
@@ -604,7 +605,7 @@ export async function askAi() {
   const c = get();
   if (!c.enabled) return;
   if (!hasAiKey()) {
-    toast(noKeyTitle(), 'warn');
+    toast(noKeyTitle(), 'warn', 6000, { label: tr('AI を使うには', 'How to use AI'), run: () => openKeyGate('tabAsk') });
     return;
   }
   const doc = useEditor.getState().doc;

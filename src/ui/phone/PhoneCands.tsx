@@ -9,13 +9,13 @@ import { pl, tr } from '../../i18n';
 import { formatUsd, modelLabel } from '../../ai/tasks';
 import { toMeasure } from '../../dtx/base36';
 import { DRUM_LANES } from '../../dtx/model';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../../store/ai';
 import { useAssist } from '../../store/assist';
 import { acceptGhost, askAi, dismissGhost, ghostBadge, sourceLabel, stepGhost, useComplete } from '../../store/complete';
 import { tempoOf } from '../../store/derived';
 import { closePhoneTab, useDevice, type PhoneTab } from '../../store/device';
 import { drumsAudible, useDrums } from '../../store/drums';
-import { openSettings, useEditor } from '../../store/editor';
+import { useEditor } from '../../store/editor';
 import {
   applyMeasureGen,
   closeMeasureGen,
@@ -33,6 +33,7 @@ import { useVel } from '../../store/velocity';
 import { liftAboveCover, revealChartRange, revealGhost, setChartBottomCover, visibleBeats } from '../ChartCanvas';
 import { genSourceTip, tabLabel, useGenKeys } from '../GenBadge';
 import { Icon } from '../icons';
+import { AiButton, KeyGateLink } from '../aiGuide/KeyGate';
 import { usePhraseKeys } from '../PhrasePanel';
 
 /** 帯と譜面の下の端のすき間 */
@@ -189,19 +190,20 @@ function TabBar({ at }: { at: number }) {
   // 点線がまるごと画面の外なら、向きを示す（押すとそこへ送る）
   const arrow = b0 > vis.to ? '↑ ' : b1 < vis.from ? '↓ ' : '';
   const range = len === 1 ? toMeasure(at) : `${toMeasure(at)}${tr('〜', '–')}${toMeasure(at + len - 1)}`;
+  // キーが無いときは AiButton が「キーが要ります」の説明に替える
   const aiTitle = hasKey
     ? tr(
         `この先の続きをAIに3つ作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「フレーズ候補」のモデルを使います`,
         `Ask the AI for 3 ways to continue from here (${model}, about ${formatUsd(cost)} per run). Uses the "Phrase ideas" model in Settings › AI`,
       )
-    : noKeyTitle();
+    : undefined;
   // 前後の候補と「1小節だけ」が両方あるときは、AI のボタンを短く
   const tight = !!g && g.count > 1 && len > 1;
   const aiButton = (
-    <button className="p-btn sm p-cand-ai" onClick={() => void askAi()} disabled={c.aiLoading} title={aiTitle} aria-label={tr('AIに聞く', 'Ask AI')}>
+    <AiButton feature="tabAsk" className="p-btn sm p-cand-ai" onClick={() => void askAi()} disabled={c.aiLoading} title={aiTitle} aria-label={tr('AIに聞く', 'Ask AI')} keySize={12}>
       {Icon.sparkle(14)}
       <span>{c.aiLoading ? tr('考え中…', 'Thinking…') : tight ? 'AI' : tr('AIに聞く', 'Ask AI')}</span>
-    </button>
+    </AiButton>
   );
 
   let info: React.ReactNode;
@@ -334,7 +336,7 @@ function GenDock() {
         `AI にもう一度作ってもらいます（${model}・1回 約 ${formatUsd(cost)}）。設定 › AI の「小節の生成」のモデルを使います`,
         `Ask the AI for another one (${model}, about ${formatUsd(cost)} per run). Uses the "Measure generation" model in Settings › AI`,
       )
-    : noKeyTitle();
+    : undefined;
 
   return (
     <section ref={ref} className={`p-dock p-gen ${land ? 'land' : ''}`} aria-label={tr('小節の生成', 'Measure generation')} onPointerDown={stop}>
@@ -364,7 +366,7 @@ function GenDock() {
           ) : (
             <span>
               {tr('案が見つかりませんでした。', 'No ideas found. ')}
-              {!hasKey ? tr('キーを設定すると AI に作ってもらえます。', 'Set a key to have the AI make one.') : ''}
+              {!hasKey ? tr('OpenRouter のキーがあれば AI に作ってもらえます。', 'With an OpenRouter key, the AI can make one.') : ''}
             </span>
           )}
         </span>
@@ -387,17 +389,10 @@ function GenDock() {
           </button>
         ))}
         {gs.ai === 'loading' && <span className="p-gen-tab loading">{tr('AI 考え中…', 'AI thinking…')}</span>}
-        {hasKey ? (
-          <button className="p-btn sm p-cand-ai" onClick={() => regenMeasureAi(note ?? '')} disabled={gs.ai === 'loading'} title={aiTitle}>
-            {Icon.sparkle(14)}
-            <span>{gs.ai === 'done' || gs.ai === 'error' ? tr('AIでもう一度', 'AI again') : tr('AIで作る', 'Make with AI')}</span>
-          </button>
-        ) : (
-          <button className="p-btn sm p-cand-ai" onClick={() => openSettings('ai')} title={noKeyTitle()}>
-            {Icon.sparkle(14)}
-            <span>{tr('キーを設定するとAIの案も', 'Set a key for AI ideas too')}</span>
-          </button>
-        )}
+        <AiButton feature="measure" className="p-btn sm p-cand-ai" onClick={() => regenMeasureAi(note ?? '')} disabled={gs.ai === 'loading'} title={aiTitle} keySize={12}>
+          {Icon.sparkle(14)}
+          <span>{gs.ai === 'done' || gs.ai === 'error' ? tr('AIでもう一度', 'AI again') : tr('AIで作る', 'Make with AI')}</span>
+        </AiButton>
         {hasKey && note === null && (
           <button className="p-btn sm" onClick={() => setNote('')} title={tr('AI にひとこと添えて作り直します（例: ここはフィル、ライドで刻む）', 'Remake it with a short note to the AI (e.g. "fill here", "keep time on the ride")')}>
             {tr('ひとこと', 'Note')}
@@ -567,7 +562,7 @@ function PhraseDock() {
             <input
               className="field p-dock-input"
               enterKeyHint="done"
-              placeholder={hasKey ? tr('ひとこと（例: 着地はクラッシュ）', 'A note (e.g. "land on a crash")') : tr('ひとことはキーを設定すると使えます', 'Set a key to add a note')}
+              placeholder={hasKey ? tr('ひとこと（例: 着地はクラッシュ）', 'A note (e.g. "land on a crash")') : tr('ひとことは OpenRouter のキーで使えます', 'Notes need an OpenRouter key')}
               value={p.instruction}
               disabled={!hasKey}
               onChange={(e) => usePhrase.setState({ instruction: e.target.value })}
@@ -591,9 +586,7 @@ function PhraseDock() {
             ) : (
               <>
                 {tr('キーが無いので「似た小節からコピー」と「直前小節の複製」だけ出します。', 'No key, so only "copy from a similar measure" and "repeat the previous measure" are offered.')}{' '}
-                <button className="link-btn" onClick={() => openSettings('ai')}>
-                  {tr('キーを設定', 'Set a key')}
-                </button>
+                <KeyGateLink feature="phrase" />
               </>
             )}
           </div>

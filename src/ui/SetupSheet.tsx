@@ -80,8 +80,8 @@ export function infoTexts(ai: boolean): { desc: string; short: string; time: str
       }
     : {
         desc: tr(
-          'タグと iTunes で探して、曲名・アーティスト・ジャケットを入れます。設定で AI のキーを入れると、背景画像と公式 YouTube も',
-          'Searches the tags and iTunes for the title, artist and jacket. With an AI key in Settings, the background image and official YouTube too',
+          'タグと iTunes で探して、曲名・アーティスト・ジャケットを入れます。OpenRouter のキーがあれば、AI の Web 検索で背景画像と公式 YouTube も',
+          'Searches the tags and iTunes for the title, artist and jacket. With an OpenRouter key, AI web search also finds the background image and official YouTube',
         ),
         short: tr('タグと iTunes で（無料）', 'Tags and iTunes (free)'),
         time: tr('数秒 · 無料', 'A few seconds · free'),

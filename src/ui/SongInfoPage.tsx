@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { YtPick } from '../ai/songAgent';
 import { itunesSearch, youtubeOEmbed, youtubeThumbs, type ArtCandidate, type StoreHit } from '../ai/songInfo';
 import { formatUsd, modelLabel } from '../ai/tasks';
-import { noKeyTitle, taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
+import { taskCostEstimate, useAi, useHasAiKey } from '../store/ai';
 import { useDevice } from '../store/device';
-import { goBack, openSettings, setFieldValue, toast, useEditor } from '../store/editor';
+import { goBack, setFieldValue, toast, useEditor } from '../store/editor';
 import { setYoutube, useSidecar } from '../store/sidecar';
 import { ensureClues, lookupSong, stopLookup, useSongInfo, type InfoField, type LookupResult, type Suggestion, type SuggestSource } from '../store/songinfo';
 import { alignSongFields, setSongField, songFieldLabel, toastSongEdit, useOtherDiffs, useSongFieldSplits, type FieldSplit } from '../store/songSync';
@@ -15,6 +15,7 @@ import { applySongInfo, infoChanges } from '../app/songInfoApply';
 import { PreviewTools } from './ChorusPreview';
 import { formatLevel } from './format';
 import { Icon } from './icons';
+import { KeyGateLink } from './aiGuide/KeyGate';
 import { CommitInput } from './LeftPanel';
 import { youtubeId } from './youtube';
 
@@ -338,15 +339,11 @@ function LookupCard() {
         <span className="ai-spark">{Icon.sparkle(14)}</span>
         <h3>{tr('曲情報を調べる', 'Look up song info')}</h3>
         <span className="grow" />
-        {hasKey ? (
+        {hasKey && (
           <span className="lbl" title={tr('1回の目安（Web検索を数回含む）', 'Estimate per run (includes a few web searches)')}>
             {model} · {tr('約', '~')}
             {formatUsd(cost)}
           </span>
-        ) : (
-          <button className="link-btn" onClick={() => openSettings('ai')}>
-            {tr('キーを設定', 'Set API key')}
-          </button>
         )}
       </div>
       <div className="clue-box">
@@ -410,8 +407,11 @@ function LookupCard() {
       </div>
       {!hasKey && !running && (
         <p className="lbl" style={{ margin: '6px 0 0', lineHeight: 1.6 }}>
-          {noKeyTitle()}
-          {tr('。キーがあると、Web検索で公式の YouTube 動画・曲の紹介文も探します。', '. With a key, it also searches the web for the official YouTube video and a description of the song.')}
+          {tr(
+            'OpenRouter のキーがあると、Web検索で正式な表記・年・ジャンル・公式の YouTube 動画・曲の紹介文も探します。',
+            'With an OpenRouter key, it also searches the web for the official spelling, year, genre, official YouTube video and a description of the song.',
+          )}{' '}
+          <KeyGateLink feature="songinfo" />
         </p>
       )}
       {steps.length > 0 && <StepList />}
