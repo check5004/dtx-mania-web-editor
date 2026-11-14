@@ -690,6 +690,11 @@
   color: var(--amber);
 }
 
+.nx-pill.bgm {
+  background: #131f33;
+  color: #9dbbff;
+}
+
 .nx-pill.warn {
   background: #2c1b12;
   color: #ffb070;
@@ -1153,6 +1158,52 @@ button.nx-dc.add:hover {
   font-size: 11.5px;
   color: #d9cfff;
   line-height: 1.55;
+}
+
+/* ステム分解の案内（BGM にドラムが入っている曲）。分解のカードと同じ青 */
+.nx-callout.stem {
+  border-color: #23435a;
+  background: #101b24;
+  color: #c4e3f6;
+}
+
+.nx-callout-note {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.btn.nx-stem {
+  background: #13212c;
+  border-color: #2b5470;
+  color: var(--accent);
+  gap: 5px;
+}
+
+.btn.nx-stem:hover:not(:disabled) {
+  background: #172a38;
+  border-color: #3a6a8b;
+}
+
+/* 詳しい所の BGM の行（聞いている間） */
+.nx-bgm-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text2);
+}
+
+.nx-bgm-line .nx-spin {
+  color: var(--accent);
+  flex: none;
+}
+
+/* 「BGM にドラム入り」の知らせの、まとめて調べるボタンと進み具合 */
+.nx-bgm-prog {
+  align-items: center;
+}
+
+.nx-bgm-prog .nx-prog {
+  width: 180px;
 }
 
 /* あいだに作る（遊びたいレベルを入れる） */

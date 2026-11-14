@@ -27,6 +27,7 @@ import {
   initGen,
   insertedSlots,
   isPassing,
+  knownCalcs,
   knownLevels,
   leaveGen,
   listenChoices,
@@ -42,7 +43,6 @@ import {
   setListen,
   setTarget,
   shiftRung,
-  shownLevel,
   slotLabel,
   sourceFor,
   sourceShift,
@@ -712,11 +712,31 @@ function SlotCard({ slot }: { slot: Slot }) {
   return <DiffCard ds={g.diffs[d]} on={g.selected === d} />;
 }
 
+/**
+ * 登録レベルと計算（エディタの推定）が違う譜面に、計算の値を小さく出す。作る譜面は計算で測り、目標の幅も計算から決めるので、
+ * 目標の幅がなぜそこかが分かるように
+ */
+function CalcNote({ level, calc }: { level: number; calc: number }) {
+  if (Math.abs(calc - level) < 0.05) return null;
+  return (
+    <span
+      className="mono"
+      title={tr(
+        'エディタの「確かめる」の推定レベル。作る譜面はこの計算で測って #DLEVEL に書き、目標の幅もこの計算から決めます（登録レベルは、ゲームの中で並びが逆にならないようにだけ使います）',
+        "The estimated level in the editor's Checks. New charts are measured by this calculation and get it as #DLEVEL, and target ranges come from it too (the listed level is only used to keep the in-game order)",
+      )}
+    >
+      {tr(`計算 ${calc.toFixed(2)}`, `calc ${calc.toFixed(2)}`)}
+    </span>
+  );
+}
+
 /** いま開いている譜面（ここから下の難易度を作る） */
 function SourceCard() {
   const master = useGen((s) => s.master);
   const label = useGen((s) => s.masterLabel);
   const level = useGen((s) => s.masterLevel);
+  const calc = useGen((s) => s.masterCalc);
   const file = useGen((s) => s.masterFile);
   const slot = useGen((s) => s.sourceSlot);
   const origin = useMemo(() => (master ? originOf(master) : 'human'), [master]);
@@ -738,6 +758,8 @@ function SourceCard() {
       </div>
       <div className="row lbl gen-diff-line">
         <span className="ellipsis">{file}</span>
+        <span className="grow" />
+        <CalcNote level={level} calc={calc} />
       </div>
       <SourceMoveLink />
     </div>
@@ -825,6 +847,7 @@ function ExistingCard({ chart, on, canRemake }: { chart: ExistingChart; on: bool
       <div className="row lbl gen-diff-line">
         <span className="ellipsis">{chart.file}</span>
         <span className="grow" />
+        {chart.registered && <CalcNote level={chart.level} calc={chart.calc} />}
         {chart.movedFrom ? <MovedState chart={chart} /> : <span>{tr('残す', 'Kept')}</span>}
         {canRemake && !chart.movedFrom && (
           <button
@@ -915,12 +938,30 @@ function bandTitle(g: GenState, ds: DiffState): string {
   ];
   if (ds.manual !== null) parts.push(tr('めやすは手で決めた値です', 'The aim was set by hand'));
   const known = knownLevels(g);
+  const calcs = knownCalcs(g);
+  // 決まっている譜面のレベルの見せ方（登録と計算が違えば、どちらか）
+  const lvText = (slot: Slot, lv: number) => {
+    const reg = known[slot];
+    if (reg === undefined || Math.abs(reg - (calcs[slot] ?? reg)) < 0.005) return `Lv ${lv.toFixed(2)}`;
+    return Math.abs(lv - reg) < 0.005 ? tr(`登録 Lv ${lv.toFixed(2)}`, `listed Lv ${lv.toFixed(2)}`) : tr(`計算 ${lv.toFixed(2)}`, `calculated ${lv.toFixed(2)}`);
+  };
   const capText = (c: NonNullable<typeof t.capAbove>, up: boolean) => {
     const name = slotLabel(g, c.slot);
-    const lv = known[c.slot];
-    return c.known && lv !== undefined
-      ? tr(`${up ? '上' : '下'}は ${name}（Lv ${lv.toFixed(2)}）から 0.3 離しています`, `The ${up ? 'upper' : 'lower'} end stays 0.3 away from ${name} (Lv ${lv.toFixed(2)})`)
-      : tr(`${up ? '上' : '下'}は ${name} のめやすとの真ん中で分けています`, `The ${up ? 'upper' : 'lower'} end is halfway to ${name}'s aim`);
+    const lv = c.level ?? calcs[c.slot];
+    if (!c.known || lv === undefined) return tr(`${up ? '上' : '下'}は ${name} のめやすとの真ん中で分けています`, `The ${up ? 'upper' : 'lower'} end is halfway to ${name}'s aim`);
+    if (c.listed) {
+      const calc = calcs[c.slot]!;
+      return up
+        ? tr(
+            `上は ${name} の登録 Lv ${lv.toFixed(2)} から 0.3 離しています（計算 ${calc.toFixed(2)} より登録が低いので、ゲームの中でも ${name} より低い Lv になるように）`,
+            `The upper end stays 0.3 below ${name}'s listed Lv ${lv.toFixed(2)} (lower than its calculated ${calc.toFixed(2)}, so the new chart also shows a lower Lv in the game)`,
+          )
+        : tr(
+            `下は ${name} の登録 Lv ${lv.toFixed(2)} から 0.3 離しています（計算 ${calc.toFixed(2)} より登録が高いので、ゲームの中でも ${name} より高い Lv になるように）`,
+            `The lower end stays 0.3 above ${name}'s listed Lv ${lv.toFixed(2)} (higher than its calculated ${calc.toFixed(2)}, so the new chart also shows a higher Lv in the game)`,
+          );
+    }
+    return tr(`${up ? '上' : '下'}は ${name}（${lvText(c.slot, lv)}）から 0.3 離しています`, `The ${up ? 'upper' : 'lower'} end stays 0.3 away from ${name} (${lvText(c.slot, lv)})`);
   };
   if (t.capAbove) parts.push(capText(t.capAbove, true));
   if (t.capBelow) parts.push(capText(t.capBelow, false));
@@ -933,8 +974,8 @@ function bandTitle(g: GenState, ds: DiffState): string {
     );
   if ((t.pulled ?? 0) >= 0.05 && t.pulledFrom) {
     const name = slotLabel(g, t.pulledFrom);
-    const lv = known[t.pulledFrom];
-    const at = lv !== undefined ? tr(`（Lv ${lv.toFixed(2)}）`, ` (Lv ${lv.toFixed(2)})`) : '';
+    const lv = t.pulledLevel ?? calcs[t.pulledFrom];
+    const at = lv === undefined ? '' : tr(`（${lvText(t.pulledFrom, lv)}）`, ` (${lvText(t.pulledFrom, lv)})`);
     const d = (s: Slot) => MAX_DROP[s].toFixed(1);
     parts.push(
       tr(
@@ -957,7 +998,7 @@ function shiftText(n: number): string {
 function reviewWhy(ds: DiffState, stairN: number): string {
   const out: string[] = [];
   if (ds.issues) out.push(tr(`叩けない所 ${ds.issues}`, `${ds.issues} unplayable`));
-  if (ds.result && !inRange(shownLevel(ds), ds.target)) out.push(tr('目標の幅から外れ', 'outside the target range'));
+  if (ds.result && !inRange(calcLevel(ds), ds.target)) out.push(tr('目標の幅から外れ', 'outside the target range'));
   if (stairN) out.push(tr(`段階の逆転 ${stairN}小節`, `${stairN} ${pl(stairN, 'measure')} out of step`));
   return out.join(tr('・', ', '));
 }
@@ -988,7 +1029,7 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
   const stair = stairIssues(g, ds.diff);
   const stairN = stair.denser.length + stair.thinner.length;
   const pass = isPassing(ds) && stairN === 0;
-  const lv = ds.result ? shownLevel(ds) : null;
+  const lv = ds.result ? calcLevel(ds) : null;
   const t = ds.target;
   // 作ったあとで作る元が変わった（上の既存の譜面を作り直す・残すに変えた）
   const srcChanged = !!ds.result && !!ds.src && !!src && ds.src.doc !== src.doc;
@@ -1009,7 +1050,7 @@ function DiffCard({ ds, on }: { ds: DiffState; on: boolean }) {
         <span className="grow" />
         {lv !== null && (
           <>
-            <span className="lbl">{ds.judge && !ds.judgeStale ? tr('AI判定', 'AI') : tr('計算', 'Calc')}</span>
+            <span className="lbl">{tr('計算', 'Calc')}</span>
             <b className="mono">{lv.toFixed(2)}</b>
           </>
         )}
@@ -1247,6 +1288,7 @@ function ExistingInfo({ chart }: { chart: ExistingChart }) {
       </div>
       <div className="lbl">
         {chart.file} · {chart.registered ? tr('登録レベル（#DLEVEL）', 'listed level (#DLEVEL)') : tr('登録レベルが無いので計算のめやす', 'no listed level, so a computed estimate')}
+        {chart.registered && Math.abs(chart.calc - chart.level) >= 0.05 && tr(` · 計算 ${chart.calc.toFixed(2)}`, ` · calculated ${chart.calc.toFixed(2)}`)}
       </div>
       <div>
         {!chart.movedFrom
@@ -1291,77 +1333,78 @@ function inRange(lv: number, t: { min: number; max: number }) {
 }
 
 function JudgeCard({ ds }: { ds: DiffState }) {
-  const hasKey = useHasAiKey();
-  const openCalib = useGen((s) => s.calib);
-  const label = useGen((s) => (ds.src ? slotLabel(s, ds.src.slot) : s.masterLabel));
-  const calib = ds.src?.calib ?? openCalib;
   const calc = calcLevel(ds);
   const j = ds.judge;
   const r = ds.result;
   if (!r) return <div className="card gen-judge lbl">{tr('作るとここにレベルの判定が出ます。', 'The level check appears here after you generate.')}</div>;
-  if (!j)
-    return (
-      <div className="card gen-judge">
-        <div className="row">
-          <b>{hasKey ? tr('レベル（計算）', 'Level (calculated)') : tr('レベル（機械的な推定）', 'Level (computed estimate)')}</b>
-          <span className="grow" />
-          {ds.status === 'judging' && <span className="lbl">{tr('AIが判定中…', 'AI is judging…')}</span>}
-        </div>
-        <div className="row" style={{ alignItems: 'baseline', gap: 8 }}>
-          <span className="gen-lv mono">{calc.toFixed(2)}</span>
-          <span className="lbl mono">
-            {tr('目標', 'Target')} {ds.target.min.toFixed(2)}–{ds.target.max.toFixed(2)}
-          </span>
-        </div>
-        <div className="lbl">
-          {tr('試した段: ', 'Steps tried: ')}
-          {[...r.tries]
-            .sort((a, b) => a.rung - b.rung || (a.ease ?? 0) - (b.ease ?? 0))
-            .map((t) => `${t.rung}${t.ease ? `+${t.ease}/3` : ''}→${(t.level * calib).toFixed(2)}`)
-            .join(tr('、', ', '))}
-        </div>
-        {Math.abs(calib - 1) > 0.02 && (
-          <div className="lbl">
-            {tr(`作る元の譜面（${label}）の登録レベルに合わせて、機械的な推定を ×${calib.toFixed(2)} しています。`, `The computed estimate is scaled ×${calib.toFixed(2)} to match the listed level of the chart it is made from (${label}).`)}
-          </div>
-        )}
-      </div>
-    );
   return (
-    <div className="card gen-judge ai">
-      <div className="row" style={{ gap: 6 }}>
-        <span className="ai-spark">{Icon.sparkle(13)}</span>
-        <b>{tr('AIのレベル判定', "AI's level check")}</b>
+    <div className="card gen-judge">
+      <div className="row">
+        <b>{tr('レベル（計算）', 'Level (calculated)')}</b>
         <span className="grow" />
-        <span className={`ai-conf ${j.confidence}`}>
-          {j.confidence === 'high' ? tr('自信度 高', 'High confidence') : j.confidence === 'medium' ? tr('自信度 中', 'Medium confidence') : tr('自信度 低', 'Low confidence')}
-        </span>
+        {ds.status === 'judging' && <span className="lbl">{tr('AIが判定中…', 'AI is judging…')}</span>}
       </div>
       <div className="row" style={{ alignItems: 'baseline', gap: 8 }}>
-        <span className="gen-lv mono">{j.level.toFixed(2)}</span>
+        <span className="gen-lv mono">{calc.toFixed(2)}</span>
         <span className="lbl mono">
-          {tr('目標', 'Target')} {ds.target.min.toFixed(2)}–{ds.target.max.toFixed(2)} · {tr('計算', 'Calc')} {calc.toFixed(2)}
+          {tr('目標', 'Target')} {ds.target.min.toFixed(2)}–{ds.target.max.toFixed(2)}
         </span>
       </div>
-      <ul className="ai-reasons">
-        {j.reasons.map((x, i) => (
-          <li key={i}>{x}</li>
-        ))}
-        {j.hardest && (
-          <li>
-            {tr('難所: ', 'Hardest part: ')}
-            {j.hardest}
-          </li>
+      <div className="lbl">
+        {tr(
+          'エディタの「確かめる」の推定レベルと同じ計算です。エディタに反映すると、この値を譜面の Lv（#DLEVEL）に書きます。',
+          "The same calculation as the estimated level in the editor's Checks. Adding to the editor writes this value as the chart's Lv (#DLEVEL).",
         )}
-      </ul>
-      {ds.judgeStale && (
-        <div className="lbl" style={{ color: 'var(--amber)' }}>
-          {tr('判定のあとに手直ししました。エディタに反映するレベルは計算の値を使います。', 'You edited it after the check. The level added to the editor uses the calculated value.')}
+      </div>
+      <div className="lbl">
+        {tr('試した段: ', 'Steps tried: ')}
+        {[...r.tries]
+          .sort((a, b) => a.rung - b.rung || (a.ease ?? 0) - (b.ease ?? 0))
+          .map((t) => `${t.rung}${t.ease ? `+${t.ease}/3` : ''}→${t.level.toFixed(2)}`)
+          .join(tr('、', ', '))}
+      </div>
+      {j && (
+        <div className="gen-ai-judge">
+          <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
+            <span className="ai-spark">{Icon.sparkle(13)}</span>
+            <b>{tr('AIの判定', "AI's check")}</b>
+            <span className="mono">{j.level.toFixed(2)}</span>
+            <span className="lbl">{tr('（参考）', '(for reference)')}</span>
+            <span className="grow" />
+            <span className={`ai-conf ${j.confidence}`}>
+              {j.confidence === 'high' ? tr('自信度 高', 'High confidence') : j.confidence === 'medium' ? tr('自信度 中', 'Medium confidence') : tr('自信度 低', 'Low confidence')}
+            </span>
+          </div>
+          <ul className="ai-reasons">
+            {j.reasons.map((x, i) => (
+              <li key={i}>{x}</li>
+            ))}
+            {j.hardest && (
+              <li>
+                {tr('難所: ', 'Hardest part: ')}
+                {j.hardest}
+              </li>
+            )}
+            {j.gap && (
+              <li>
+                {tr('計算との違い: ', 'Vs. calculated: ')}
+                {j.gap}
+              </li>
+            )}
+          </ul>
+          <div className="lbl">
+            {ds.judgeStale
+              ? tr('判定のあとに手直ししました（AI の判定は手直しの前の譜面のものです）。', 'You edited it after the check (the AI checked the chart before your edits).')
+              : tr(
+                  'AI の判定は Lv に書きません。使うときは、反映した譜面をエディタで開き、「確かめる」の「AIのレベル判定」で判定して「Lv に反映」を押してください。',
+                  "The AI's check isn't written as the Lv. To use it, open the chart in the editor after adding it, rate it with \"AI level rating\" in Checks and press \"Set as Lv\".",
+                )}
+          </div>
+          <div className="lbl">
+            {tr('この難易度の費用', 'Cost for this difficulty')} {formatUsd(ds.cost)}
+          </div>
         </div>
       )}
-      <div className="lbl">
-        {tr('この難易度の費用', 'Cost for this difficulty')} {formatUsd(ds.cost)}
-      </div>
     </div>
   );
 }
@@ -1370,14 +1413,15 @@ function Verdict({ ds }: { ds: DiffState }) {
   const g = useGen();
   const r = ds.result;
   if (!r) return null;
-  const ok = inRange(shownLevel(ds), ds.target);
+  const ok = inRange(calcLevel(ds), ds.target);
   const stair = stairIssues(g, ds.diff);
   const stairN = stair.denser.length + stair.thinner.length;
   const msgs: string[] = [];
+  const ai = ds.judge && !ds.judgeStale ? ds.judge.level.toFixed(2) : null;
   msgs.push(
     tr(
-      `${ds.judge && !ds.judgeStale ? `AI判定 ${ds.judge.level.toFixed(2)}・` : ''}計算 ${calcLevel(ds).toFixed(2)}（目標の幅 ${ds.target.min.toFixed(2)}–${ds.target.max.toFixed(2)}、めやす ${ds.target.center.toFixed(2)}）`,
-      `${ds.judge && !ds.judgeStale ? `AI check ${ds.judge.level.toFixed(2)}, ` : ''}calculated ${calcLevel(ds).toFixed(2)} (target range ${ds.target.min.toFixed(2)}–${ds.target.max.toFixed(2)}, aim ${ds.target.center.toFixed(2)})`,
+      `計算 ${calcLevel(ds).toFixed(2)}（目標の幅 ${ds.target.min.toFixed(2)}–${ds.target.max.toFixed(2)}、めやす ${ds.target.center.toFixed(2)}）${ai ? `・AIの判定 ${ai}（参考）` : ''}`,
+      `calculated ${calcLevel(ds).toFixed(2)} (target range ${ds.target.min.toFixed(2)}–${ds.target.max.toFixed(2)}, aim ${ds.target.center.toFixed(2)})${ai ? `, AI check ${ai} (for reference)` : ''}`,
     ),
   );
   if (ds.issues)
@@ -1399,7 +1443,7 @@ function Verdict({ ds }: { ds: DiffState }) {
       <b>{pass ? tr('✓ 検証を通過', '✓ Passed the checks') : tr('! 確認してください', '! Please review')}</b>
       <div>{tr(`${msgs.join('。')}。`, `${msgs.join('. ')}.`)}</div>
       {!ok &&
-        (r.rung >= MAX_RUNG && shownLevel(ds) > ds.target.max ? (
+        (r.rung >= MAX_RUNG && calcLevel(ds) > ds.target.max ? (
           <div className="lbl">
             {tr(
               'いちばん簡単な段でも目標より高く出ました。人が作る BASIC でもこのくらいの曲はあります。このままでよければエディタに反映し、もっと下げたいときは中央の譜面のチップを押して削ってください。',

@@ -45,7 +45,11 @@ export interface SectionSpan {
   to: number;
 }
 
-export function levelPrompt(o: { doc: DtxDoc; title: string; label?: string; sections: SectionSpan[]; guide: string; near: { c: ChartEntry; d: number }[]; mech: number; feat?: ChartFeatures }): { system: string; user: string } {
+/**
+ * 難易度の名前（BASIC など）は渡さない。難しい曲は BASIC でもレベルが高いので、名前に引っ張られて低く判定しないように
+ * （エディタの「確かめる」でも AI難易度生成でも同じ頼み方にする）
+ */
+export function levelPrompt(o: { doc: DtxDoc; title: string; sections: SectionSpan[]; guide: string; near: { c: ChartEntry; d: number }[]; mech: number; feat?: ChartFeatures }): { system: string; user: string } {
   const tempo = buildTempoMap(o.doc);
   const feat = o.feat ?? chartFeatures(o.doc, tempo);
   // i18n-ignore-start
@@ -57,7 +61,7 @@ export function levelPrompt(o: { doc: DtxDoc; title: string; label?: string; sec
     aiLangRule(),
   ].join('\n');
   const lines: string[] = [];
-  lines.push(`曲: ${o.title}${o.label ? `（${o.label}）` : ''}`);
+  lines.push(`曲: ${o.title}`);
   lines.push(`全体: ${featureSummary(feat)}`);
   lines.push(`機械的な推定: ${o.mech.toFixed(2)}`);
   lines.push('');
@@ -234,8 +238,10 @@ export function planPrompt(o: {
   target: { min: number; max: number; center?: number };
   /** 作る元の譜面の難易度（ふつうは MASTER。既存の EXTREME から ADVANCED を作るなど） */
   sourceLabel?: string;
-  /** 作る元の譜面のレベル */
+  /** 作る元の譜面のレベル（計算。目標の幅と同じ物差し） */
   masterLevel: number;
+  /** 作る元の譜面の登録レベル（#DLEVEL。計算と違えば添える） */
+  listedLevel?: number;
   /** 曲にあるほかの難易度（「EXTREME（既存・作者の譜面）Lv6.20」など） */
   others?: string[];
   /**
@@ -259,6 +265,7 @@ export function planPrompt(o: {
     `省く順番（上から順に、目標のレベルに届くまで省きます）: ${order.map((k, i) => `${i + 1}. ${STEP_INFO[k].label}`).join(' / ')}`,
     'いつも残すもの: 1拍目のバスドラム、2・4拍のスネア（バックビート）、小節の頭と食いのクラッシュとそれに合わせたバスドラム、フィルの着地。楽器や奏法を別のものに置き換えることはしません（ライドはライド、オープンHHはオープン、左右のシンバルもそのまま）。',
     '目標のレベルは決まっていて、ルールエンジンが目標に届く段で止めます。難しい曲は、下の難易度も難しくてよい方針です（低い難易度に合わせて削りすぎると、曲として崩れるため）。説明の文も、難易度の名前ではなく目標のレベルに合わせてください。',
+    'レベルはどれも、このアプリの計算（ノーツの密度・同時打ち・速い連打から出す推定）でそろえています。作った譜面にもこの値を書きます。作者の登録レベルが違う譜面は、それも添えます。',
     'あなたが決めるのは、全体の方針の説明（summary）と、セクションごとの説明（comment: どんな所か）と役割（shift）です。',
     '役割（shift）は、作者の指示でセクションごとに違う扱いを求められたときだけ使います（例:「サビは元の譜面に近く」ならサビを -1、「Aメロはもっと簡単に」なら Aメロを +1）。+1 = 先に易しくする、-1 = 最後まで元の譜面に近く残す。指示が無ければ、すべて 0 にしてください（曲全体で同じ扱いにするため。セクションごとにばらばらにすると、一貫しない譜面になります）。',
     '役割を使うときも、省く順番の境目の1段をどこから先に当てるかにだけ使い、どのセクションも曲全体と1段しか違いません。同じ形のセクション（1番と2番のサビなど）は同じ値にしてください。',
@@ -268,7 +275,8 @@ export function planPrompt(o: {
   ].join('\n');
   const lines: string[] = [];
   lines.push(`曲: ${o.title}${o.genre ? `（${o.genre}）` : ''}`);
-  lines.push(`元の譜面（${o.sourceLabel ?? 'MASTER'}）: Lv${o.masterLevel.toFixed(2)} / ${featureSummary(feat)}`);
+  const listed = o.listedLevel !== undefined && Math.abs(o.listedLevel - o.masterLevel) >= 0.05 ? `（登録は Lv${o.listedLevel.toFixed(2)}）` : '';
+  lines.push(`元の譜面（${o.sourceLabel ?? 'MASTER'}）: Lv${o.masterLevel.toFixed(2)}${listed} / ${featureSummary(feat)}`);
   lines.push(
     `作る難易度: ${o.diff}（目標 Lv${o.target.min.toFixed(2)}〜${o.target.max.toFixed(2)}${o.target.center !== undefined ? `、めやす Lv${o.target.center.toFixed(2)}` : ''}）`,
   );

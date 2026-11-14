@@ -6929,8 +6929,17 @@ button.gp-kv:hover span {
   gap: 8px;
 }
 
-.gen-judge.ai {
-  border-color: var(--amber-line);
+/* AI の判定（参考）。反映するレベルは上の計算 */
+.gen-ai-judge {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gen-ai-judge .ai-reasons {
+  margin: 2px 0;
 }
 
 .gen-lv {

@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
+import type { BgmCheck } from './bgm';
 import type { LibBox, LibChart, LibSong, SlotKey } from './scan';
-import { addableSlots, bpmText, boxCounts, bytesText, filterCounts, fixSetDef, levelText, matchQuery, outsideRel, rootSpecs, saveBoxLabel, saveWhere, setDefFor, sourceFor, topChart, viewSongs, warnCount } from './view';
+import {
+  addableSlots,
+  bgmCheckedCount,
+  bgmOf,
+  bpmText,
+  boxCounts,
+  bytesText,
+  canSeparate,
+  filterCounts,
+  fixSetDef,
+  levelText,
+  matchQuery,
+  outsideRel,
+  rootSpecs,
+  saveBoxLabel,
+  saveWhere,
+  setDefFor,
+  sourceFor,
+  suggestsSeparation,
+  topChart,
+  viewSongs,
+  warnCount,
+} from './view';
 
 function chart(file: string, slot: SlotKey | null, level: number | null, ai = false): LibChart {
   return {
@@ -94,12 +117,51 @@ describe('しぼりこみ・並べ替え', () => {
 
   it('しぼりこみの数', () => {
     expect(warnCount(songs[2])).toBe(1);
-    expect(filterCounts(songs, { b: ['e.dtx'] })).toEqual({ missing: 2, mylevel: 0, edited: 1, ai: 1, drive: 1, synced: 0, draft: 1, checks: 1 });
+    expect(filterCounts(songs, { drafts: { b: ['e.dtx'] } })).toEqual({ missing: 2, mylevel: 0, bgmdrums: 0, edited: 1, ai: 1, drive: 1, synced: 0, draft: 1, checks: 1 });
     expect(viewSongs(songs, { ...q, filter: 'ai' }).map((s) => s.id)).toEqual(['b']);
     // 同期で変わった曲（場所の鍵:曲のフォルダの並び）
     const synced = new Set([`${songs[0].root}:${songs[0].path.join('/')}`]);
-    expect(filterCounts(songs, {}, synced).synced).toBe(1);
+    expect(filterCounts(songs, { drafts: {}, synced }).synced).toBe(1);
     expect(viewSongs(songs, { ...q, filter: 'synced', synced }).map((s) => s.id)).toEqual([songs[0].id]);
+  });
+});
+
+describe('BGM にドラム入り（ステム分解をすすめる）', () => {
+  const check = (chart: string, state: BgmCheck['state'], sig = '1:1'): BgmCheck => ({ chart, chartSig: sig, path: 'bgm.ogg', name: 'bgm.ogg', sig: '9:9', state, perMin: state === 'drums' ? 250 : 2 });
+  const songs = [
+    song('a', { charts: [chart('mas.dtx', 'MAS', 8)] }),
+    song('b', { charts: [chart('bsc.dtx', 'BSC', 2), chart('ext.dtx', 'EXT', 6)] }),
+    song('c', { charts: [chart('mas.dtx', 'MAS', 8)] }),
+    song('g', { charts: [chart('mas.gda', 'MAS', 8)] }),
+    song('d', { charts: [chart('mas.dtx', 'MAS', 8)], drums: false }),
+  ];
+
+  it('調べるのは、いちばん上が .dtx のドラムの譜面の曲だけ', () => {
+    expect(songs.map(canSeparate)).toEqual([true, true, true, false, false]);
+  });
+
+  it('結果は、いまのいちばん上の譜面（名前・大きさ・更新時刻が同じ）を調べたものだけ使う', () => {
+    const bgm = { a: check('MAS.DTX', 'drums'), b: check('bsc.dtx', 'drums'), c: check('mas.dtx', 'drums', '1:2') };
+    expect(bgmOf(songs[0], bgm)?.state).toBe('drums');
+    // いちばん上ではない譜面を調べた・譜面が変わった
+    expect(bgmOf(songs[1], bgm)).toBeUndefined();
+    expect(bgmOf(songs[2], bgm)).toBeUndefined();
+    expect(bgmOf(songs[0], undefined)).toBeUndefined();
+  });
+
+  it('ドラム入りだけをすすめる（ドラム抜き・名前からドラム抜き・BGM なし・読めないはすすめない）', () => {
+    for (const st of ['clean', 'named', 'none', 'missing', 'error'] as const) expect(suggestsSeparation(songs[0], { a: check('mas.dtx', st) })).toBe(false);
+    expect(suggestsSeparation(songs[0], { a: check('mas.dtx', 'drums') })).toBe(true);
+    // ドラムの譜面が無い曲・.gda の曲はすすめない
+    expect(suggestsSeparation(songs[4], { d: check('mas.dtx', 'drums') })).toBe(false);
+    expect(suggestsSeparation(songs[3], { g: check('mas.gda', 'drums') })).toBe(false);
+  });
+
+  it('しぼりこみの数と、調べた曲の数', () => {
+    const bgm = { a: check('mas.dtx', 'drums'), b: check('ext.dtx', 'clean'), d: check('mas.dtx', 'drums') };
+    expect(filterCounts(songs, { drafts: {}, bgm }).bgmdrums).toBe(1);
+    expect(viewSongs(songs, { q: '', sort: 'title', box: null, filter: 'bgmdrums', drafts: {}, bgm }).map((s) => s.id)).toEqual(['a']);
+    expect(bgmCheckedCount(songs, bgm)).toEqual({ can: 3, checked: 2 });
   });
 });
 

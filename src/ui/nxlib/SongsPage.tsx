@@ -6,12 +6,13 @@ import { storageQuota } from '../../drive/api';
 import { tokenValid, useDriveAuth } from '../../drive/auth';
 import { openNxGen, openNxSong, nxPreviewLoader } from '../../nxlib/actions';
 import type { LibSong } from '../../nxlib/scan';
-import { ensureNxPerm, forgetNxPlace, laterNxExtra, pickNxExtra, pickNxPlace, refreshDrafts, rescanNx, setNxView, stopNxScan, useNxLib, type NxState } from '../../nxlib/store';
-import { boxCounts, bpmText, bytesText, chartCount, chartIn, filterCounts, NX_FILTERS, viewSongs, type NxFilter, type NxSort } from '../../nxlib/view';
+import { ensureNxPerm, forgetNxPlace, laterNxExtra, pickNxExtra, pickNxPlace, refreshDrafts, rescanNx, setNxView, startBgmScan, stopBgmScan, stopNxScan, useNxLib, type NxState } from '../../nxlib/store';
+import { bgmCheckedCount, boxCounts, bpmText, bytesText, chartCount, chartIn, filterCounts, NX_FILTERS, suggestsSeparation, viewSongs, type NxFilter, type NxSort } from '../../nxlib/view';
 import { insertLevel, usePlayLevel } from '../../store/playLevel';
 import { useGuideline } from '../../store/guideline';
 import { GuidelinePage } from '../GuidelinePage';
 import { toggleAudition, useStopAuditionOnClose } from '../../store/audition';
+import { useDrums } from '../../store/drums';
 import { goHome, useEditor } from '../../store/editor';
 import { confirmDialog } from '../dialogs';
 import { Icon } from '../icons';
@@ -33,6 +34,8 @@ export function filterName(f: NxFilter): string {
       const p = insertLevel();
       return p !== null ? tr(`${p.toFixed(1)} を足せる`, `Can add a ${p.toFixed(1)}`) : tr('遊ぶレベルを足せる', 'Can add your level');
     }
+    case 'bgmdrums':
+      return tr('BGM にドラム入り', 'Drums in the BGM');
     case 'edited':
       return tr('エディタで直した', 'Edited in the editor');
     case 'ai':
@@ -48,7 +51,7 @@ export function filterName(f: NxFilter): string {
   }
 }
 
-export const FILTER_COLOR: Record<NxFilter, string> = { missing: '#b78cff', mylevel: '#ff8fc7', edited: '#4cc2ff', ai: '#c9b3ff', drive: '#5bd69a', synced: '#5fd4cf', draft: '#ffc768', checks: '#ff9a5c' };
+export const FILTER_COLOR: Record<NxFilter, string> = { missing: '#b78cff', mylevel: '#ff8fc7', bgmdrums: '#7aa2ff', edited: '#4cc2ff', ai: '#c9b3ff', drive: '#5bd69a', synced: '#5fd4cf', draft: '#ffc768', checks: '#ff9a5c' };
 
 /** 出すしぼりこみ（「同期で変わった曲」は PC どうしの同期をしているときだけ、「遊ぶレベルを足せる」は遊ぶレベルを決めたときだけ） */
 export function shownFilters(syncOn: boolean, hasPlay: boolean): NxFilter[] {
@@ -88,9 +91,10 @@ function useView() {
   const box = useNxLib((s) => s.box);
   const filter = useNxLib((s) => s.filter);
   const drafts = useNxLib((s) => s.drafts);
+  const bgm = useNxLib((s) => s.bgm);
   const synced = useSyncedSet();
   const play = usePlayLevel((s) => s.v);
-  return useMemo(() => viewSongs(songs, { q, sort, box, filter, drafts, synced, play }), [songs, q, sort, box, filter, drafts, synced, play]);
+  return useMemo(() => viewSongs(songs, { q, sort, box, filter, drafts, synced, bgm, play }), [songs, q, sort, box, filter, drafts, synced, bgm, play]);
 }
 
 function permText(st: Pick<NxState, 'perm'>, atStart: boolean): string {
@@ -240,6 +244,7 @@ export function SongsPage() {
             </div>
           </div>
         )}
+        {filter === 'bgmdrums' && <BgmScanNotice />}
         <div className="nx-lh">
           <span className="c-song">{tr('曲', 'Song')}</span>
           <span className="c-chips">{tr('難易度とレベル', 'Difficulties and levels')}</span>
@@ -273,6 +278,69 @@ export function SongsPage() {
       </div>
       <div className="nx-det scroll">{firstScan ? <NxScanInfo /> : selSong ? <NxDetail key={selSong.id} s={selSong} /> : <NxNoSel />}</div>
       <NxFoot />
+    </div>
+  );
+}
+
+/** 1 曲の BGM を聞くのにかかるおよその秒（読み込み・3 か所の採譜。調べたときの PC で 1.5〜2 秒） */
+const BGM_SEC = 2;
+
+/**
+ * 「BGM にドラム入り」でしぼりこんだときの知らせ：BGM は曲を選んだときに聞くので、まだの曲はまとめて調べられる
+ * （押したときだけ。一覧の画面を離れたらやめる）
+ */
+function BgmScanNotice() {
+  const songs = useNxLib((s) => s.songs);
+  const bgm = useNxLib((s) => s.bgm);
+  const scan = useNxLib((s) => s.bgmScan);
+  const perm = useNxLib((s) => s.perm);
+  const listenOn = useDrums((d) => d.enabled);
+  const { can, checked } = useMemo(() => bgmCheckedCount(songs, bgm), [songs, bgm]);
+  const left = can - checked;
+  const min = Math.max(1, Math.round((left * BGM_SEC) / 60));
+  return (
+    <div className="nx-notice info">
+      {Icon.info(14)}
+      <div>
+        <span>
+          {tr(
+            `BGM にドラムが入っている曲です（ステム分解してドラム抜きの BGM にすると、DTXMania で叩いている感じが出ます）。BGM は、曲を選んだときに 3 か所を 12 秒ずつ聞いて調べます。調べた曲 ${checked} / ${can}`,
+            `Songs whose BGM has drums in it (splitting the stems for a BGM without drums makes DTXMania feel like you are playing). A BGM is checked by listening to 3 parts of 12 s each when you choose the song. Checked: ${checked} of ${can}`,
+          )}
+        </span>
+        {scan ? (
+          <div className="nx-notice-acts nx-bgm-prog">
+            <span className="nx-prog">
+              <i style={{ width: `${Math.min(100, (scan.done / Math.max(1, scan.total)) * 100)}%` }} />
+            </span>
+            <span className="lbl mono">
+              {scan.done}/{scan.total}
+            </span>
+            <button className="btn small" onClick={stopBgmScan}>
+              {tr('止める', 'Stop')}
+            </button>
+          </div>
+        ) : (
+          left > 0 && (
+            <div className="nx-notice-acts nx-bgm-prog">
+              <button
+                className="btn small primary"
+                disabled={!listenOn}
+                onClick={async () => {
+                  if (perm === 'granted' || (await ensureNxPerm())) startBgmScan();
+                }}
+              >
+                {tr(`まだの ${left} 曲を調べる`, `Check the other ${left} ${pl(left, 'song')}`)}
+              </button>
+              <span className="lbl">
+                {listenOn
+                  ? tr(`1 曲 ${BGM_SEC} 秒ほど（全部で約 ${min} 分）。音はどこにも送りません`, `About ${BGM_SEC} s a song (about ${min} min in all). The audio is never uploaded`)
+                  : tr('エディタの右のパネルの「ドラムの採譜モデルで打点を聞き取る」をオンにすると調べられます', "Turn on “Detect hits with the drum transcription model” in the editor's right panel to check them")}
+              </span>
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 }
@@ -328,7 +396,12 @@ export function NxPromises() {
     <ul className="nx-promises">
       <li>
         {Icon.eye(14)}
-        <span>{tr('読むのは名前と小さいファイル（set.def・譜面・成績・画像）だけ。音や動画は読みません。', 'Only names and small files are read (set.def, charts, records, images). No audio or video.')}</span>
+        <span>
+          {tr(
+            '読むのは名前と小さいファイル（set.def・譜面・成績・画像）。音は、選んだ曲の BGM にドラムが入っているかを聞くときだけ（ブラウザの中で）。動画は読みません。',
+            'Reads names and small files (set.def, charts, records, images). Audio only to hear whether a chosen song’s BGM has drums (inside the browser). No video.',
+          )}
+        </span>
       </li>
       <li>
         {Icon.pencil(14)}
@@ -488,15 +561,17 @@ function NxTool({ searchRef, shown }: { searchRef: React.RefObject<HTMLInputElem
   const filter = useNxLib((s) => s.filter);
   const songs = useNxLib((s) => s.songs);
   const drafts = useNxLib((s) => s.drafts);
+  const bgm = useNxLib((s) => s.bgm);
   const scan = useNxLib((s) => s.scan);
   const checking = useNxLib((s) => s.checking);
+  const bgmScan = useNxLib((s) => s.bgmScan);
   const at = useNxLib((s) => s.at);
   const changed = useNxLib((s) => s.changed);
   const prevFolders = useNxLib((s) => s.folders);
   const synced = useSyncedSet();
   const syncOn = usePcSync((s) => s.settings.on);
   const play = usePlayLevel((s) => s.v);
-  const counts = useMemo(() => (filter ? filterCounts(songs, drafts, synced, play) : null), [filter, songs, drafts, synced, play]);
+  const counts = useMemo(() => (filter ? filterCounts(songs, { drafts, synced, bgm, play }) : null), [filter, songs, drafts, synced, bgm, play]);
   const syncN = useMemo(() => (syncOn ? syncedFolders(songs).n : 0), [syncOn, songs]);
   const n = songs.length;
   const charts = useMemo(() => chartCount(songs), [songs]);
@@ -559,6 +634,7 @@ function NxTool({ searchRef, shown }: { searchRef: React.RefObject<HTMLInputElem
           {time && shown === n && tr(` · ${time} に読み込み`, ` · read ${time}`)}
           {changed > 0 && changed < n && shown === n && tr(`（変わった曲 ${changed} を読み直し）`, ` (${changed} changed ${pl(changed, 'song')} re-read)`)}
           {checking && tr(` · 点検中 ${checking.done}/${checking.total}`, ` · checking ${checking.done}/${checking.total}`)}
+          {bgmScan && tr(` · BGM を聞いています ${bgmScan.done}/${bgmScan.total}`, ` · listening to BGMs ${bgmScan.done}/${bgmScan.total}`)}
         </span>
       )}
     </div>
@@ -569,6 +645,7 @@ function NxSide() {
   const songs = useNxLib((s) => s.songs);
   const boxes = useNxLib((s) => s.boxes);
   const drafts = useNxLib((s) => s.drafts);
+  const bgm = useNxLib((s) => s.bgm);
   const box = useNxLib((s) => s.box);
   const filter = useNxLib((s) => s.filter);
   const place = useNxLib((s) => s.place);
@@ -578,7 +655,7 @@ function NxSide() {
   const synced = useSyncedSet();
   const play = usePlayLevel((s) => s.v);
   const bc = useMemo(() => boxCounts(songs), [songs]);
-  const fc = useMemo(() => filterCounts(songs, drafts, synced, play), [songs, drafts, synced, play]);
+  const fc = useMemo(() => filterCounts(songs, { drafts, synced, bgm, play }), [songs, drafts, synced, bgm, play]);
   const outsideN = bc.get('') ?? 0;
   return (
     <nav className="nx-side scroll">
@@ -654,6 +731,7 @@ function SongRows({ list, skeleton, issues }: { list: LibSong[]; skeleton: numbe
   const sel = useNxLib((s) => s.sel);
   const thumbs = useNxLib((s) => s.thumbs);
   const drafts = useNxLib((s) => s.drafts);
+  const bgm = useNxLib((s) => s.bgm);
   const syncOn = usePcSync((s) => s.settings.on);
   const log = usePcSync((s) => s.log);
   const changes = useMemo(() => (syncOn ? recentChanges(log) : null), [syncOn, log]);
@@ -680,7 +758,17 @@ function SongRows({ list, skeleton, issues }: { list: LibSong[]; skeleton: numbe
     <div className="nx-rows scroll" ref={ref} onScroll={(e) => setTop(e.currentTarget.scrollTop)} role="listbox" aria-label={tr('曲の一覧', 'Song list')}>
       <div style={{ height: (list.length + skeleton) * ROW, position: 'relative' }}>
         {list.slice(start, end).map((s, i) => (
-          <SongRow key={s.id} s={s} y={(start + i) * ROW} on={s.id === sel} thumb={thumbs[s.id]} draft={(drafts[s.id]?.length ?? 0) > 0} issues={issues} sync={changes ? { change: changes.get(songKey(s)) } : undefined} />
+          <SongRow
+            key={s.id}
+            s={s}
+            y={(start + i) * ROW}
+            on={s.id === sel}
+            thumb={thumbs[s.id]}
+            draft={(drafts[s.id]?.length ?? 0) > 0}
+            bgmDrums={suggestsSeparation(s, bgm)}
+            issues={issues}
+            sync={changes ? { change: changes.get(songKey(s)) } : undefined}
+          />
         ))}
         {Array.from({ length: skeleton }, (_, i) => (
           <div key={`sk${i}`} className="nx-row skel" style={{ top: (list.length + i) * ROW }} aria-hidden="true">
@@ -701,8 +789,26 @@ function SongRows({ list, skeleton, issues }: { list: LibSong[]; skeleton: numbe
   );
 }
 
-function SongRow({ s, y, on, thumb, draft, issues, sync }: { s: LibSong; y: number; on: boolean; thumb?: string; draft: boolean; issues: boolean; sync?: { change?: RecentChange } }) {
-  const pills = sync && !issues ? withSyncPills(songPills(s, draft, issues), s, sync.change) : songPills(s, draft, issues);
+function SongRow({
+  s,
+  y,
+  on,
+  thumb,
+  draft,
+  bgmDrums,
+  issues,
+  sync,
+}: {
+  s: LibSong;
+  y: number;
+  on: boolean;
+  thumb?: string;
+  draft: boolean;
+  bgmDrums: boolean;
+  issues: boolean;
+  sync?: { change?: RecentChange };
+}) {
+  const pills = sync && !issues ? withSyncPills(songPills(s, draft, issues, bgmDrums), s, sync.change) : songPills(s, draft, issues, bgmDrums);
   const more = s.charts.filter((c) => !c.slot).length;
   return (
     <div

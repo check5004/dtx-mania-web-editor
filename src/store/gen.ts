@@ -43,9 +43,10 @@ export interface SourceRef {
   slot: Slot;
   file: string;
   doc: DtxDoc;
-  /** 登録レベル ÷ 機械的な推定（作った譜面の計算値にかけて登録レベルの目盛りにする） */
-  calib: number;
+  /** 登録レベル（無ければ計算） */
   level: number;
+  /** 計算のレベル（エディタの推定と同じ。目標の幅はこれから決める） */
+  calc: number;
 }
 
 /** 曲に既にあるほかの難易度 */
@@ -56,12 +57,13 @@ export interface ExistingChart {
   file: string;
   /** いま開いている譜面の時間の並び・WAV 番号の上に写した譜面（gen/project） */
   doc: DtxDoc;
-  /** 登録レベル（#DLEVEL）。無ければ推定 × 開いている譜面の倍率 */
+  /** 登録レベル（#DLEVEL）。無ければ計算 */
   level: number;
   registered: boolean;
   /** 作者の譜面か、このアプリで作った譜面か */
   origin: ChartOrigin;
-  calib: number;
+  /** 計算のレベル（その譜面をエディタで開いたときの推定と同じ） */
+  calc: number;
   /** 下の難易度へ移した譜面なら、元の難易度と set.def の名前（あいだに作る。gen/insert） */
   movedFrom?: Difficulty;
   fromLabel?: string;
@@ -134,10 +136,10 @@ export interface GenState {
   masterFile: string;
   masterLabel: string;
   masterLevel: number;
+  /** いま開いている譜面の計算のレベル（エディタの推定と同じ） */
+  masterCalc: number;
   /** いま開いている譜面の難易度（set.def の難易度名かファイル名から。分からなければ MASTER） */
   sourceSlot: Slot;
-  /** 登録レベル ÷ 機械的な推定（開いている譜面で合わせる倍率） */
-  calib: number;
   spans: SectionSpan[];
   /** 曲に既にあるほかの難易度（下へ移した譜面は移した先に） */
   charts: Partial<Record<Slot, ExistingChart>>;
@@ -206,8 +208,8 @@ export const useGen = create<GenState>(() => ({
   masterFile: '',
   masterLabel: 'MASTER',
   masterLevel: 5,
+  masterCalc: 5,
   sourceSlot: 'MASTER',
-  calib: 1,
   spans: [],
   charts: {},
   chartsLoading: false,
@@ -227,7 +229,6 @@ function patchDiff(d: Difficulty, patch: Partial<DiffState>) {
   set((s) => ({ diffs: { ...s.diffs, [d]: { ...s.diffs[d], ...patch } } }));
 }
 
-const clampCalib = (x: number) => Math.max(0.6, Math.min(1.6, x));
 const sameFile = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 // ---- 曲の中の難易度 -----------------------------------------------------------------------
@@ -243,21 +244,37 @@ export function keepsExisting(s: Pick<GenState, 'charts' | 'diffs' | 'sourceSlot
   return slot === 'MASTER' || !isAbove(s.sourceSlot, slot) || !s.diffs[slot as Difficulty].enabled;
 }
 
-/** レベルが決まっている譜面（開いている譜面と、残す既存の譜面） */
+/** レベルが決まっている譜面（開いている譜面と、残す既存の譜面）の登録レベル（ゲームに出る #DLEVEL。無ければ計算）。並びにだけ使う */
 export function knownLevels(s: GenState = get()): Partial<Record<Slot, number>> {
   const k: Partial<Record<Slot, number>> = { [s.sourceSlot]: s.masterLevel };
   for (const slot of SLOTS) if (keepsExisting(s, slot)) k[slot] = s.charts[slot]!.level;
   return k;
 }
 
+/** レベルが決まっている譜面の計算のレベル（エディタの推定と同じ）。作る譜面と同じ物差しで、目標の幅はこれから決める */
+export function knownCalcs(s: GenState = get()): Partial<Record<Slot, number>> {
+  const k: Partial<Record<Slot, number>> = { [s.sourceSlot]: s.masterCalc };
+  for (const slot of SLOTS) if (keepsExisting(s, slot)) k[slot] = s.charts[slot]!.calc;
+  return k;
+}
+
+/**
+ * 決まっている譜面から、作る譜面を離すレベル：上の譜面なら登録と計算の低い方（どちらでも 0.3 以上易しく）、
+ * 下の譜面なら高い方（どちらでも 0.3 以上難しく）。作る譜面のレベルは計算で測るので計算でそろえ、
+ * 登録でも並びが逆にならないようにする（ゲームの中で上の難易度より高い Lv が出ないように）
+ */
+export function stairLevel(level: number, calc: number, up: boolean): number {
+  return up ? Math.min(level, calc) : Math.max(level, calc);
+}
+
 /** 作る元：いちばん近い上の、残す譜面（開いている譜面か、作り直さない既存の譜面） */
 export function sourceFor(s: GenState, d: Difficulty): SourceRef | null {
   if (!s.master) return null;
-  const open: SourceRef = { slot: s.sourceSlot, file: s.masterFile, doc: s.master, calib: s.calib, level: s.masterLevel };
+  const open: SourceRef = { slot: s.sourceSlot, file: s.masterFile, doc: s.master, level: s.masterLevel, calc: s.masterCalc };
   for (const slot of SLOTS.slice(0, slotRank(d)).reverse()) {
     if (slot === s.sourceSlot) return open;
     const c = s.charts[slot];
-    if (c && keepsExisting(s, slot)) return { slot, file: c.file, doc: c.doc, calib: c.calib, level: c.level };
+    if (c && keepsExisting(s, slot)) return { slot, file: c.file, doc: c.doc, level: c.level, calc: c.calc };
   }
   return open;
 }
@@ -271,10 +288,12 @@ function isMade(s: Pick<GenState, 'sourceSlot' | 'charts' | 'diffs'>, slot: Slot
   return slot !== 'MASTER' && isAbove(s.sourceSlot, slot) && s.diffs[slot].enabled && !keepsExisting(s, slot);
 }
 
-/** 上・下の隣の譜面：レベル（計算。既存の譜面は登録）、AI の判定があればそれ、方針 */
+/**
+ * 上・下の隣の譜面：離すレベル（作った譜面は計算。元の譜面・既存の譜面は登録と計算の、上なら低い方・下なら高い方）と方針
+ */
 export interface StairNeighbors {
-  upper: { slot: Slot; level: number; shown: number; plan: DifficultyPlan | null } | null;
-  lower: { slot: Slot; level: number; shown: number } | null;
+  upper: { slot: Slot; level: number; plan: DifficultyPlan | null } | null;
+  lower: { slot: Slot; level: number } | null;
 }
 
 const matchCache = new WeakMap<DtxDoc, WeakMap<DtxDoc, Set<number>>>();
@@ -297,20 +316,20 @@ export function stairsFor(s: GenState, d: Difficulty, root: SourceRef, pending: 
   const r = slotRank(d);
   for (const slot of SLOTS.slice(0, r).reverse()) {
     if (slot === root.slot) {
-      out.upper = { slot, level: root.level, shown: root.level, plan: null };
+      out.upper = { slot, level: stairLevel(root.level, root.calc, true), plan: null };
       break;
     }
     if (!isMade(s, slot) || pending.has(slot)) continue;
     const u = s.diffs[slot];
     if (!u.result || u.src?.doc !== root.doc) continue;
     out.within = keptIds(u.result.fate);
-    out.upper = { slot, level: calcLevel(u), shown: shownLevel(u), plan: u.plan };
+    out.upper = { slot, level: calcLevel(u), plan: u.plan };
     break;
   }
   for (const slot of SLOTS.slice(r + 1)) {
     if (keepsExisting(s, slot)) {
       for (const id of matchedIds(root.doc, s.charts[slot]!.doc)) out.atLeast.add(id);
-      out.lower ??= { slot, level: s.charts[slot]!.level, shown: s.charts[slot]!.level };
+      out.lower ??= { slot, level: stairLevel(s.charts[slot]!.level, s.charts[slot]!.calc, false) };
       break;
     }
     if (!isMade(s, slot)) continue;
@@ -321,7 +340,7 @@ export function stairsFor(s: GenState, d: Difficulty, root: SourceRef, pending: 
       continue;
     }
     for (const id of keptIds(l.result.fate)) out.atLeast.add(id);
-    out.lower ??= { slot, level: calcLevel(l), shown: shownLevel(l) };
+    out.lower ??= { slot, level: calcLevel(l) };
   }
   return out;
 }
@@ -367,18 +386,19 @@ function floorOf(s: GenState): number | null {
     const r = simplify({ doc: src.doc, rung: MAX_RUNG, sections: defaultPlan(s.spans).sections, keep: s.keep });
     m.set(key, (lv = levelOfDoc(r.doc)));
   }
-  return lv * src.calib;
+  return lv;
 }
 
 /** 目標の幅を決め直す（既存の譜面を読んだ・作り直すかを変えた・必ず残すものを変えた・めやすを手で変えた） */
 export function recomputeTargets() {
   const s = get();
   if (!s.master) return;
-  const known = knownLevels(s);
+  // 目標の幅は計算（作る譜面と同じ物差し）から。登録レベルは並びにだけ使う
+  const known = knownCalcs(s);
   const make = belowSource(s).filter((d) => known[d] === undefined);
   const manual: Partial<Record<Difficulty, number>> = {};
   for (const d of make) if (s.diffs[d].manual !== null) manual[d] = s.diffs[d].manual!;
-  const bands = targetBands({ known, make, floor: known.BASIC === undefined ? floorOf(s) : null, manual, inserted: insertedSlots(s) });
+  const bands = targetBands({ known, listed: knownLevels(s), make, floor: known.BASIC === undefined ? floorOf(s) : null, manual, inserted: insertedSlots(s) });
   set((st) => {
     const diffs = { ...st.diffs };
     for (const d of DIFFICULTIES) if (bands[d]) diffs[d] = { ...diffs[d], target: bands[d]! };
@@ -398,9 +418,9 @@ export function initGen(): Promise<void> {
   const g = get();
   if (g.master === s.doc) return loading;
   const doc = s.doc;
-  const mech = levelOfDoc(doc);
-  const masterLevel = levelOfField(doc.fields['DLEVEL'], doc.fields['DLVDEC']) ?? levelOf(doc)?.level ?? mech;
-  const calib = clampCalib(masterLevel / Math.max(0.5, mech));
+  // 計算のレベルはエディタの「確かめる」の推定レベルと同じ（作った譜面もこれで測り、そのまま #DLEVEL に書く）
+  const mech = levelOf(doc)?.level ?? levelOfDoc(doc);
+  const masterLevel = levelOfField(doc.fields['DLEVEL'], doc.fields['DLVDEC']) ?? mech;
   const last = lastMeasure(doc);
   const spans = sectionSpans(useSidecar.getState().sections, last);
   const base = s.meta.fileName.replace(/\.dtx$/i, '').toLowerCase();
@@ -414,8 +434,8 @@ export function initGen(): Promise<void> {
     masterFile: s.meta.fileName,
     masterLabel: fromSetDef ?? sourceSlot,
     masterLevel,
+    masterCalc: mech,
     sourceSlot,
-    calib,
     spans,
     charts: {},
     chartsLoading: !!s.folder,
@@ -469,18 +489,18 @@ async function loadCharts(folder: SongFolder, token: number) {
     const projected = projectCharts(base, found.map((x) => x.doc));
     const charts: Partial<Record<Slot, ExistingChart>> = {};
     found.forEach((x, i) => {
-      // 計算のレベルは写した譜面で（下の難易度を作るときに測るのも写した譜面なので、倍率がそろう）
-      const mech = levelOfDoc(projected[i]);
+      // 計算のレベルは、その譜面をエディタで開いたときの推定と同じ（読んだままの譜面で測る。写した譜面で測っても手元の 6 曲では同じ値）
+      const mech = levelOfDoc(x.doc);
       const reg = levelOfField(x.doc.fields['DLEVEL'], x.doc.fields['DLVDEC']);
       charts[x.slot] = {
         slot: x.slot,
         label: x.label,
         file: x.file,
         doc: projected[i],
-        level: reg ?? Math.min(9.99, mech * g.calib),
+        level: reg ?? mech,
         registered: reg !== null,
         origin: originOf(x.doc),
-        calib: reg !== null ? clampCalib(reg / Math.max(0.5, mech)) : g.calib,
+        calc: mech,
       };
     });
     set((st) => {
@@ -562,15 +582,19 @@ export function offeredMove(s: Pick<GenState, 'sourceSlot' | 'charts' | 'diffs' 
   return to && !insertedSlots(s).includes(to) ? to : null;
 }
 
-/** 空けた難易度のはじめのめやす：前に入れたレベルが上下の譜面のあいだに入れば、それ。入らなければ自動（上下の譜面のあいだ） */
+/**
+ * 空けた難易度のはじめのめやす：前に入れたレベルが上下の譜面のあいだに入れば、それ。入らなければ自動（上下の譜面のあいだ）。
+ * あいだは目標の幅と同じく、上の譜面の登録と計算の低い方・下の譜面の高い方から 0.3 離す
+ */
 function rememberedAimFor(s: GenState, d: Difficulty): number | null {
   const r = insertLevel();
   if (r === null) return null;
   const known = knownLevels(s);
+  const calcs = knownCalcs(s);
   const up = SLOTS.slice(0, slotRank(d)).filter((x) => known[x] !== undefined).pop();
   const down = SLOTS.slice(slotRank(d) + 1).find((x) => known[x] !== undefined);
-  if (up && r > known[up]! - KNOWN_GAP) return null;
-  if (down && r < known[down]! + KNOWN_GAP) return null;
+  if (up && r > stairLevel(known[up]!, calcs[up] ?? known[up]!, true) - KNOWN_GAP) return null;
+  if (down && r < stairLevel(known[down]!, calcs[down] ?? known[down]!, false) + KNOWN_GAP) return null;
   return r;
 }
 
@@ -707,18 +731,17 @@ function inTarget(lv: number, t: { min: number; max: number }) {
   return lv >= t.min - 1e-9 && lv <= t.max + 1e-9;
 }
 
-/** 計算のレベル（登録レベルの目盛りに合わせたもの） */
-export function calcLevel(ds: DiffState, calib = ds.src?.calib ?? get().calib): number {
-  return ds.result ? Math.min(9.99, ds.result.level * calib) : 0;
+/**
+ * 作った譜面のレベル：エディタの「確かめる」の推定レベルと同じ計算（check/level）。そのまま #DLEVEL に書くので、
+ * 反映した譜面をエディタで開くと同じ値が出る（2026-11-14 楯さん「作ったあとの難易度が、エディタで計算し直すとずれる」。
+ * 前は元の譜面の登録レベル ÷ 推定の倍率をかけ、AI の判定があればそれを書いていた）
+ */
+export function calcLevel(ds: DiffState): number {
+  return ds.result ? ds.result.level : 0;
 }
 
-/** 書き出しと判定に使うレベル：AI の判定があればそれ、無ければ計算 */
-export function shownLevel(ds: DiffState, calib = ds.src?.calib ?? get().calib): number {
-  return ds.judge && !ds.judgeStale ? ds.judge.level : calcLevel(ds, calib);
-}
-
-export function isPassing(ds: DiffState, calib = ds.src?.calib ?? get().calib): boolean {
-  return !!ds.result && ds.issues === 0 && inTarget(shownLevel(ds, calib), ds.target);
+export function isPassing(ds: DiffState): boolean {
+  return !!ds.result && ds.issues === 0 && inTarget(calcLevel(ds), ds.target);
 }
 
 function issueCount(doc: DtxDoc): number {
@@ -731,16 +754,23 @@ export function slotLabel(s: GenState, slot: Slot): string {
   return s.charts[slot]?.label ?? slot;
 }
 
+/** AI に渡すレベル：計算（目標の幅と同じ物差し）。登録が違えば、それも添える */
+function levelForAi(calc: number, listed: number): string {
+  // i18n-ignore（AI へのプロンプト）
+  return `Lv${calc.toFixed(2)}${Math.abs(listed - calc) >= 0.05 ? `（登録は Lv${listed.toFixed(2)}）` : ''}`;
+}
+
 /** 曲にあるほかの難易度（AI の方針に渡す。作る元の譜面は別の行で渡すので除く） */
 function othersForPlan(s: GenState, d: Difficulty, src: Slot): string[] {
   const out: string[] = [];
   const known = knownLevels(s);
+  const calcs = knownCalcs(s);
   for (const slot of SLOTS) {
     if (slot === d || slot === src || known[slot] === undefined) continue;
     const c = s.charts[slot];
     // i18n-ignore-start（AI へのプロンプト）
     const who = slot === s.sourceSlot ? '開いている譜面' : c?.origin === 'human' ? '既存・作者の譜面' : '既存・このアプリで作った譜面';
-    out.push(`${slot}（${who}）Lv${known[slot]!.toFixed(2)}`);
+    out.push(`${slot}（${who}）${levelForAi(calcs[slot] ?? known[slot]!, known[slot]!)}`);
     // i18n-ignore-end
   }
   return out;
@@ -757,13 +787,13 @@ function neighborsForPlan(s: GenState, d: Difficulty, src: SourceRef, pending: R
     if (slot === d || slot === src.slot || isAbove(slot, src.slot)) continue;
     let pick: { doc: DtxDoc; who: string; level: number; plan?: SectionPlan[] | null; rung?: number } | null = null;
     // i18n-ignore-start（AI へのプロンプト）
-    if (slot === s.sourceSlot && s.master) pick = { doc: s.master, who: '開いている譜面', level: s.masterLevel };
+    if (slot === s.sourceSlot && s.master) pick = { doc: s.master, who: '開いている譜面', level: s.masterCalc };
     else if (keepsExisting(s, slot)) {
       const c = s.charts[slot]!;
-      pick = { doc: c.doc, who: c.origin === 'human' ? '既存・作者の譜面' : '既存・このアプリで作った譜面', level: c.level };
+      pick = { doc: c.doc, who: c.origin === 'human' ? '既存・作者の譜面' : '既存・このアプリで作った譜面', level: c.calc };
     } else if (isMade(s, slot) && !pending.has(slot) && s.diffs[slot].result) {
       const x = s.diffs[slot];
-      pick = { doc: x.result!.doc, who: x.planSource === 'ai' ? '作りたて・AI の方針' : '作りたて・標準の方針', level: shownLevel(x), plan: x.plan?.sections, rung: x.result!.rung };
+      pick = { doc: x.result!.doc, who: x.planSource === 'ai' ? '作りたて・AI の方針' : '作りたて・標準の方針', level: calcLevel(x), plan: x.plan?.sections, rung: x.result!.rung };
     }
     // i18n-ignore-end
     if (!pick) continue;
@@ -806,7 +836,9 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
           diff,
           target: ds.target,
           sourceLabel: src.slot,
-          masterLevel: src.level,
+          // レベルは目標の幅と同じ計算で渡す（登録が違えば添える）
+          masterLevel: src.calc,
+          listedLevel: src.level,
           others: othersForPlan(g, diff, src.slot),
           neighbors: neighborsForPlan(g, diff, src, pending),
           sections: g.spans,
@@ -832,38 +864,38 @@ export async function generate(diff: Difficulty, opts: { useAi?: boolean; pendin
     //    上の難易度が薄くした区間は、こちらも同じだけ薄くする（考え方をそろえる）
     const st = stairsFor(get(), diff, src, pending);
     if (st.upper?.plan) plan = { ...plan, sections: alignPlan(plan.sections, st.upper.plan.sections, st.upper.slot) };
-    // 3. 配置と再調整（機械的な推定で、めやすの近くを狙う。幅の中なら合格）。上の難易度に無い音は置かず、下の難易度にある音は残す
+    // 3. 配置と再調整（計算のレベル＝エディタの推定で、めやすの近くを狙う。幅の中なら合格）。上の難易度に無い音は置かず、下の難易度にある音は残す
     const base = { doc: src.doc, sections: plan.sections, keep: get().keep, overrides, within: st.within ?? undefined, atLeast: st.atLeast };
-    const calib = src.calib;
     const t = ds.target;
     // 隣の難易度とのあいだ（上より 0.3 下、下より 0.3 上）にも収める（作りたての上の難易度が目標より易しく出たときなど）
     const step = stepRange(st.upper?.level ?? null, st.lower?.level ?? null);
     const aim0 = aimOf(t);
     const aim = clampRange(aim0, step);
     const clipped = aim.min !== aim0.min || aim.max !== aim0.max;
-    const rawAim = { min: aim.min / calib, max: aim.max / calib };
-    // 省く順番は曲全体で同じ。セクションの役割（AI の方針）は段のあいだの調整にだけ使うので、どの方針でも目標まで下げられる
-    let result = generateToTarget(base, rawAim);
-    // 4. AI 判定。幅から外れたら、AI と計算のずれのぶん狙いを動かして1回だけ作り直す（段のあいだの細かい調整も使う）。
-    //    AI の判定は 0.1〜0.2 ほどぶれるので、作り直しはめやすを狙い、2つのうち幅に近い方を採る。
-    //    幅は隣の難易度とのあいだ（判定の目盛り）に狭め、作り直しの狙いも隣の難易度とのあいだに収める
-    //    （上の難易度のすぐ下まで濃くして、難しさの段階がほとんど無くならないように）
+    // 省く順番は曲全体で同じ。セクションの役割（AI の方針）は段のあいだの調整にだけ使うので、どの方針でも目標まで下げられる。
+    // 段の間が広くて狙いに入らないときは、目標の幅（隣の難易度とのあいだに狭めたもの）に入る段を先に採る
+    const pass = clampRange(t, step);
+    let result = generateToTarget(base, aim, pass);
+    // 4. AI 判定（参考）。反映するレベルは計算のまま。AI が幅から外れたと見たら、AI と計算のずれのぶん狙いを動かして
+    //    1回だけ作り直す。狙いは幅（隣の難易度とのあいだに狭めたもの）の中に収め、反映するレベル（計算）は幅から出さない。
+    //    AI の判定は 0.1〜0.2 ほどぶれるので、2つのうち AI の判定が幅に近い方を採る
     let judge: JudgeResult | null = null;
     const stairs: StairSets = { within: st.within, atLeast: st.atLeast };
     if (useAi) {
       patchDiff(diff, { status: 'judging', result, issues: issueCount(result.doc), src, stairs });
       const sections = useSidecar.getState().sections;
-      // 難易度の名前（BASIC など）は渡さない。難しい曲は BASIC でもレベルが高いので、名前に引っ張られて低く判定しないように
-      judge = await judgeDoc(result.doc, { title, sections, mech: result.level * calib, quiet: true });
+      // 頼み方はエディタの「AIのレベル判定」と同じ（難易度の名前は渡さない。難しい曲は BASIC でもレベルが高いので、名前に引っ張られないように）
+      judge = await judgeDoc(result.doc, { title, sections, mech: result.level, quiet: true });
       if (judge) {
         cost += judge.cost;
-        const want = clampRange(t, stepRange(st.upper?.shown ?? null, st.lower?.shown ?? null));
+        const want = pass;
         if (!inTarget(judge.level, want)) {
           const wantCenter = Math.max(want.min, Math.min(want.max, t.center));
-          const center = Math.max(step.min, Math.min(step.max, wantCenter - (judge.level - result.level * calib)));
-          const r2 = generateToTarget(base, { min: (center - 0.1) / calib, max: (center + 0.1) / calib });
-          if (r2.rung !== result.rung || r2.ease !== result.ease) {
-            const j2 = await judgeDoc(r2.doc, { title, sections, mech: r2.level * calib, quiet: true });
+          const center = Math.max(want.min, Math.min(want.max, wantCenter - (judge.level - result.level)));
+          const r2 = generateToTarget(base, clampRange({ min: center - 0.1, max: center + 0.1 }, want), want);
+          // 作り直しても、反映するレベル（計算）は幅から遠ざけない
+          if ((r2.rung !== result.rung || r2.ease !== result.ease) && targetGap(r2.level, want) <= targetGap(result.level, want) + 1e-9) {
+            const j2 = await judgeDoc(r2.doc, { title, sections, mech: r2.level, quiet: true });
             if (j2) {
               cost += j2.cost;
               if (targetGap(j2.level, want) <= targetGap(judge.level, want)) {
@@ -1461,7 +1493,8 @@ export async function writeOut(): Promise<boolean> {
     const ds = g.diffs[diff];
     const doc: DtxDoc = structuredClone(ds.result!.doc);
     if (end > 0) doc.endMeasure = end;
-    setField(doc, 'DLEVEL', levelToField(shownLevel(ds)));
+    // エディタの推定レベルと同じ計算（開くと「確かめる」の推定と同じ値）
+    setField(doc, 'DLEVEL', levelToField(calcLevel(ds)));
     // このアプリで作った印（NX の表示は変わらない）
     markOrigin(doc, ds.src?.file ?? g.masterFile);
     const { bytes } = encodeDtx(serializeDtx(doc), 'shift_jis');
