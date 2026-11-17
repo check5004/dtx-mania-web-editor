@@ -65,7 +65,7 @@ export function useSyncedSet(): ReadonlySet<string> | undefined {
   return useMemo(() => (on ? syncedSongs(log) : undefined), [on, log]);
 }
 
-function sortName(s: NxSort): string {
+export function sortName(s: NxSort): string {
   switch (s) {
     case 'updated':
       return tr('更新日（新しい順）', 'Updated (newest first)');
@@ -82,7 +82,7 @@ function sortName(s: NxSort): string {
   }
 }
 
-const SORTS: NxSort[] = ['updated', 'title', 'artist', 'bpm', 'level', 'checks'];
+export const SORTS: NxSort[] = ['updated', 'title', 'artist', 'bpm', 'level', 'checks'];
 
 function useView() {
   const songs = useNxLib((s) => s.songs);

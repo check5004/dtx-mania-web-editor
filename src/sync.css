@@ -1505,36 +1505,6 @@
 .ps-howto .arr {
   color: var(--dim);
 }
-.nx-tile .ps-badge {
-  position: absolute;
-  left: 8px;
-  bottom: 52px;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: 9px;
-  font-size: 10px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  background: rgba(18, 38, 28, 0.92);
-  color: var(--ok);
-}
-.nx-tile .ps-badge.merge {
-  background: rgba(42, 29, 16, 0.92);
-  color: #ffb86b;
-}
-.nx-tile .ps-badge.up {
-  background: rgba(17, 34, 58, 0.92);
-  color: #8dbbff;
-}
-.nx-tile .ps-sub {
-  font-size: 10.5px;
-  color: var(--mute);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 1100px) {
   .ps-tiles {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1560,18 +1530,81 @@
   }
 }
 
-/* ホームのカードのタイル（同期で変わった曲）・同期のチップ */
-.nx-tile.ps-t {
-  position: relative;
-}
-button.nx-home-chip.ps-start {
-  cursor: pointer;
-}
-button.nx-home-chip.ps-start:hover {
-  border-color: #3a4452;
-  color: var(--text);
-}
 /* 右の「Drive」の行は、PC どうしの同期をしているときは隠す（上の「同期」に出す） */
 .nx-info .k[hidden] {
   display: none;
+}
+
+/* ---- ホームの「Google Drive」のカードの PC どうしの同期の 1 行（src/ui/sync/home.tsx の PcSyncHomeRow） ---- */
+.ps-home-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line2);
+  background: var(--bg);
+  min-width: 0;
+}
+
+.ps-home-row .ps-hr-i {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #13291f;
+  color: #7fdcae;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ps-home-row .ps-hr-t {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ps-home-row .ps-hr-t b {
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ps-home-row .ps-hr-t .pc {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--raise);
+  color: var(--text3);
+}
+
+.ps-home-row .ps-hr-t .lbl {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ps-home-row .btn {
+  flex: none;
+}
+
+.ps-home-row.run .ps-hr-i {
+  background: #10202b;
+  color: var(--accent);
+}
+
+.ps-home-row.warn {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+}
+
+.ps-home-row.warn .ps-hr-i {
+  background: #2a2213;
+  color: var(--amber);
 }

@@ -19,6 +19,7 @@ import { clearNxLib, loadKv, loadList, loadPlace, loadThumbs, pruneThumbs, saveK
 import { dtxPathsOf, relDtxPath } from './parse';
 import { boxKeyOf, chartsSig, markDuplicates, scanLibrary, songIdOf, type LibBox, type LibSong, type ScanRoot } from './scan';
 import { bgmOf, canSeparate, rootSpecs, topChart, type NxFilter, type NxSort } from './view';
+import { loadNxView, saveNxView } from './viewPrefs';
 
 export type NxPerm = 'granted' | 'prompt' | 'denied';
 
@@ -93,10 +94,17 @@ export const useNxLib = create<NxState>(() => ({
   filter: null,
   sel: null,
   guide: false,
+  // 前に見ていた並べ替え・BOX・しぼりこみ・選んだ曲（曲の一覧とホームのカードで同じ。src/nxlib/viewPrefs.ts）
+  ...loadNxView(),
 }));
 
 const get = useNxLib.getState;
 const set = useNxLib.setState;
+
+// 見せ方が変わったら残す（探す言葉は残さない）
+useNxLib.subscribe((s, p) => {
+  if (s.sort !== p.sort || s.box !== p.box || s.filter !== p.filter || s.sel !== p.sel) saveNxView({ sort: s.sort, box: s.box, filter: s.filter, sel: s.sel });
+});
 
 // ---- 許可 ---------------------------------------------------------------------------
 
@@ -163,6 +171,9 @@ export function initNxLib(): Promise<void> {
       thumbs: urls,
       bgm: bgm && typeof bgm === 'object' ? bgm : {},
     });
+    // 前に選んでいた BOX が無くなっていたら、すべてに戻す
+    const box = get().box;
+    if (box && !get().boxes.some((b) => b.key === box)) set({ box: null });
     void refreshDrafts();
   })();
   return initing;

@@ -7,7 +7,7 @@ import { confirmDialog } from './dialogs';
 import { privacyUrl } from './HomeLinks';
 import { Icon } from './icons';
 import { sizeText } from './LocalStorage';
-import { PcSyncSettingsCard } from './sync/home';
+import { PcSyncHomeRow, PcSyncSettingsCard } from './sync/home';
 
 /** ホームの「データはどこに置くか」の一行（Drive につないでいれば、そう書く） */
 export function PrivacyLine() {
@@ -21,7 +21,7 @@ export function PrivacyLine() {
   );
 }
 
-/** ホームの「Google Drive」：つなぐ・Drive から開く */
+/** ホームの「Google Drive」：つなぐ・Drive から開く・PC どうしの同期の 1 行 */
 export function DriveHomeCard({ tablet = false }: { tablet?: boolean }) {
   const connected = useDriveAuth((s) => s.connected);
   const email = useDriveAuth((s) => s.email);
@@ -68,6 +68,8 @@ export function DriveHomeCard({ tablet = false }: { tablet?: boolean }) {
           </button>
         </div>
       )}
+      {/* PC どうしの同期（PC の Chrome・Edge で DTXMania の曲を使っているとき） */}
+      {!tablet && <PcSyncHomeRow />}
     </section>
   );
 }

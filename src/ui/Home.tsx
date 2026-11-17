@@ -20,6 +20,7 @@ import { InstallCard } from './pwa/InstallCard';
 import { LogoMark } from './LogoMark';
 import { HomeLinks } from './HomeLinks';
 import { NxHomeCard } from './nxlib/NxHomeCard';
+import { useNxLib } from '../nxlib/store';
 import { SyncChip } from './sync/parts';
 import { PcSyncBanner } from './sync/home';
 
@@ -122,6 +123,7 @@ function HomeDesktop() {
   const hasDoc = useEditor((s) => s.doc.header.length > 0 || s.doc.chips.length > 0);
   const direct = supportsDirectWrite();
   const local = useLocalSongs((s) => s.ready);
+  const nxPlaced = useNxLib((s) => s.ready && s.supported && !!s.place);
   // 本体の曲が増えた・消えたら一覧を読み直す
   const localVer = useLocalSongs((s) => s.ver);
 
@@ -199,6 +201,9 @@ function HomeDesktop() {
             </span>
           </div>
         )}
+        {/* DTXMania のフォルダを選んだら、DTXMania の曲のカードを 3 つの入口の上に（エディタから戻ってすぐ続きの曲が見えるように） */}
+        {nxPlaced && <NxHomeCard />}
+
         <div className="home-cards">
           <div
             className={`home-card drop ${over ? 'over' : ''}`}
@@ -273,7 +278,7 @@ function HomeDesktop() {
           </div>
         </div>
 
-        <NxHomeCard />
+        {!nxPlaced && <NxHomeCard />}
 
         {recent.length === 0 && recentSection}
 

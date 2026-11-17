@@ -1677,6 +1677,18 @@ button.nx-dc.add:hover {
 .nx-home-ttl h3 {
   margin: 0;
   font-size: 16px;
+  white-space: nowrap;
+}
+
+/* 見出しの右の印（狭い窓では見出しを割らずに、印のほうを 2 行に） */
+.nx-home-hchips {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px 8px;
 }
 
 .nx-home-ttl .lbl {
@@ -1749,63 +1761,14 @@ button.nx-dc.add:hover {
   height: 34px;
 }
 
-.nx-home-sub {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: -6px;
-}
-
-.nx-tiles {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.nx-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  text-align: left;
-  color: var(--text);
-}
-
-.nx-tile img,
+/* 名前の 1 文字目（画像の無い曲の棚のタイル） */
 .nx-tile-ph {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 8px;
-  border: 1px solid var(--line2);
-  display: block;
-  object-fit: cover;
-  transition: border-color 0.12s;
-}
-
-.nx-tile-ph {
-  display: flex;
   align-items: center;
   justify-content: center;
   font-size: 34px;
   font-weight: 700;
   color: hsl(var(--h) 40% 78%);
   background: linear-gradient(150deg, hsl(var(--h) 35% 22%), hsl(calc(var(--h) + 40) 30% 12%));
-}
-
-.nx-tile:hover img,
-.nx-tile:hover .nx-tile-ph {
-  border-color: var(--accent);
-}
-
-.nx-tile .t {
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 4 つの難易度のレベル（ホームのカード） */
@@ -1855,16 +1818,40 @@ button.nx-dc.add:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.nx-home-quick {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+/* ---- ホームのカードの曲の棚（src/ui/nxlib/NxHomeCard.tsx）。一覧と同じしぼりこみ・並べ替えで、横に送って全部の曲を見る ---- */
+
+button.nx-home-chip {
+  cursor: pointer;
 }
 
-.nx-home-quick button {
+button.nx-home-chip:hover {
+  border-color: #3a4452;
+  color: var(--text);
+}
+
+.nx-home-guide b {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #ffd3ea;
+  background: #3a1d2d;
+  border: 1px solid #6b3352;
+}
+
+.nx-home-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.nx-htab {
+  --c: var(--accent);
   height: 28px;
-  padding: 0 10px;
-  border-radius: 7px;
+  padding: 0 11px;
+  border-radius: 14px;
   border: 1px solid var(--line2);
   background: var(--card);
   font-size: 12px;
@@ -1872,22 +1859,402 @@ button.nx-dc.add:hover {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  white-space: nowrap;
+  flex: none;
 }
 
-.nx-home-quick button:hover {
+.nx-htab:hover {
   border-color: #3a4452;
   color: var(--text);
 }
 
-.nx-home-quick .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 4px;
+.nx-htab .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--c);
   flex: none;
 }
 
-.nx-home-quick b {
+.nx-htab b {
+  font-size: 11.5px;
   color: var(--text);
+}
+
+.nx-htab.on {
+  background: color-mix(in srgb, var(--c) 15%, var(--bg));
+  border-color: color-mix(in srgb, var(--c) 55%, var(--bg));
+  color: color-mix(in srgb, var(--c) 72%, white);
+}
+
+.nx-htab.on b {
+  color: inherit;
+}
+
+.nx-home-box {
+  max-width: 240px;
+}
+
+.nx-sel.nx-home-sort {
+  height: 34px;
+  font-size: 12px;
+  background: var(--bg);
+}
+
+.nx-home-sort select {
+  height: 32px;
+  font-size: 12px;
+}
+
+.nx-home-row .nx-search .nx-x {
+  flex: none;
+}
+
+.nx-home-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 12px;
+  border-radius: 8px;
+  background: #121b2b;
+  border: 1px solid #2a3b5c;
+  font-size: 12px;
+  color: #cbd9f5;
+}
+
+.nx-home-hint > svg {
+  color: #7aa2ff;
+  flex: none;
+}
+
+.nx-shelf-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nx-shelf {
+  position: relative;
+  min-width: 0;
+}
+
+.nx-shelf-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  border-radius: 8px;
+}
+
+.nx-shelf-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.nx-shelf-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.nx-shelf-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.nx-shelf-pad {
+  flex: none;
+  height: 1px;
+}
+
+.nx-shelf-nav {
+  position: absolute;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  margin-top: -17px;
+  border-radius: 17px;
+  border: 1px solid var(--line3);
+  background: rgba(20, 26, 34, 0.94);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  padding: 0;
+}
+
+.nx-shelf-nav:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.nx-shelf-nav.l {
+  left: -15px;
+}
+
+.nx-shelf-nav.r {
+  right: -15px;
+}
+
+.nx-shelf-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+
+.nx-shelf-foot > .lbl:first-child {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-shelf-foot .mono {
+  flex: none;
+}
+
+.nx-shelf-bar {
+  position: relative;
+  flex: none;
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line2);
+  overflow: hidden;
+}
+
+.nx-shelf-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 6px;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: left 0.15s;
+}
+
+.nx-shelf-empty {
+  min-height: 120px;
+  border: 1px dashed var(--line3);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.nx-stile {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.nx-stile-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.nx-stile .art {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line2);
+  background: #0b0f14;
+  transition: border-color 0.12s;
+}
+
+.nx-stile .art img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.nx-stile .art .nx-tile-ph {
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+
+.nx-stile-open:hover .art,
+.nx-stile-open:focus-visible .art {
+  border-color: var(--accent);
+}
+
+/* 選んでいる曲（前に開いた曲）に輪 */
+.nx-stile.on .art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  pointer-events: none;
+}
+
+.nx-stile .t {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-stile-draft {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--amber);
+  border: 2px solid rgba(11, 14, 19, 0.85);
+}
+
+.nx-stile-look {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(11, 14, 19, 0.8);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.nx-stile:hover .nx-stile-look,
+.nx-stile-look:focus-visible {
+  opacity: 1;
+}
+
+.nx-stile-look:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.nx-stile-lv > * {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.nx-stile-lv > button {
+  cursor: pointer;
+}
+
+.nx-stile-lv > button:not(.x):hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.nx-stile-lv > button.x {
+  font-size: 12px;
+}
+
+.nx-stile-lv > button.x:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 「難易度が足りない」のとき：＋ を目立たせる */
+.nx-stile-lv.hot > .x {
+  border: 1px dashed rgba(183, 140, 255, 0.75);
+  background: rgba(183, 140, 255, 0.1);
+  color: #dccbff;
+}
+
+.nx-stile-act {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid;
+  font-size: 11.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.nx-stile-act svg {
+  flex: none;
+}
+
+.nx-stile-act.ai {
+  background: #1d1830;
+  border-color: #4a3d78;
+  color: #d2c2ff;
+}
+
+.nx-stile-act.ai:hover {
+  background: #251e3d;
+  border-color: #6a58a8;
+}
+
+.nx-stile-act.stem {
+  background: #13212c;
+  border-color: #2b5470;
+  color: var(--accent);
+}
+
+.nx-stile-act.stem:hover {
+  background: #172a38;
+  border-color: #3a6a8b;
+}
+
+.nx-stile-act.draft {
+  background: var(--amber-bg);
+  border-color: var(--amber-line);
+  color: var(--amber);
+}
+
+.nx-stile-act.warn {
+  background: #24170f;
+  border-color: #6b4127;
+  color: #ffb27f;
+}
+
+.nx-stile.skel .art {
+  border-style: dashed;
 }
 
 /* 初めてのカードの右：一覧のイメージ */
@@ -1935,14 +2302,6 @@ button.nx-dc.add:hover {
 }
 
 @media (max-width: 1100px) {
-  .nx-tiles {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .nx-tile:nth-child(n + 5) {
-    display: none;
-  }
-
   .nx-home.first {
     flex-direction: column;
   }

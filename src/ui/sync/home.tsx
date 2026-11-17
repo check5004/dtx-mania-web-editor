@@ -1,15 +1,14 @@
-// PC どうしの同期：ホームの帯（同期した・している・ログインが切れた）、「DTXMania の曲」のカードの次の同期と同期で変わった曲、
+// PC どうしの同期：ホームの帯（同期した・している・ログインが切れた）、ホームの「Google Drive」のカードの同期の 1 行、
 // 設定の「Google Drive」の PC どうしの同期。
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useState } from 'react';
 import { pl, tr } from '../../i18n';
 import { openNxPage } from '../../nxlib/actions';
-import type { LibSong } from '../../nxlib/scan';
-import { setNxView, useNxLib } from '../../nxlib/store';
-import { openSyncPanel, songKey, stopPcSync, syncNow, usePcSync } from '../../sync/store';
+import { useNxLib } from '../../nxlib/store';
+import { openSyncPanel, stopPcSync, syncNow, usePcSync } from '../../sync/store';
 import { confirmDialog } from '../dialogs';
 import { Icon } from '../icons';
 import { updText } from '../nxlib/parts';
-import { agoText, changedHere, chartName, hm, newsText, progressText, recentChanges, runSentence, runSum, runTitle, scopeName, useNow, type RecentChange } from './common';
+import { agoText, hm, progressText, runSentence, runSum, runTitle, scopeName, useNow } from './common';
 import { openSetup, syncedFolders } from './parts';
 
 /** 帯を閉じた（その同期より新しい同期まで出さない） */
@@ -258,141 +257,94 @@ export function PcSyncBanner() {
   );
 }
 
-/** ホームのカードの「次の同期 21:51（5 分ごと）」 */
-export function SyncNextChip() {
+/**
+ * ホームの「Google Drive」のカードの 1 行：PC どうしの同期の様子（同期した・次・止まっている・確かめてほしいこと）と記録。
+ * まだなら「はじめる…」（DTXMania の曲を使っているときだけ）。同期で何が変わったかは、上の帯（同期したあと）と記録で見る
+ */
+export function PcSyncHomeRow() {
+  const supported = useNxLib((s) => s.supported);
+  const place = useNxLib((s) => !!s.place);
+  const songs = useNxLib((s) => s.songs);
   const on = usePcSync((s) => s.settings.on);
+  const pc = usePcSync((s) => s.settings.pc);
+  const scope = usePcSync((s) => s.settings.scope);
   const status = usePcSync((s) => s.status);
   const next = usePcSync((s) => s.next);
+  const at = usePcSync((s) => s.state.at);
+  const progress = usePcSync((s) => s.progress);
+  const asks = usePcSync((s) => s.log[0]?.asks.length ?? 0);
+  const n = useMemo(() => (on ? syncedFolders(songs).n : 0), [on, songs]);
   const now = useNow();
+  if (!supported) return null;
   if (!on) {
+    if (!place) return null;
     return (
-      <button
-        className="nx-home-chip ps-start"
-        onClick={openSetup}
-        title={tr('作る PC と遊ぶ PC の曲と成績を、Google Drive で合わせます', 'Keep songs and records in step between your PCs through Google Drive')}
-      >
-        {Icon.cloud(12)}
-        {tr('PC どうしの同期…', 'PC sync…')}
-      </button>
+      <div className="ps-home-row">
+        <span className="ps-hr-i">{Icon.pc(15)}</span>
+        <span className="ps-hr-t">
+          <b>{tr('PC どうしの同期', 'PC sync')}</b>
+          <span className="lbl">{tr('作る PC と遊ぶ PC の DTXMania の曲と成績を、Google Drive で合わせます', 'Keeps DTXMania songs and records in step between the PC you make on and the PC you play on')}</span>
+        </span>
+        <button className="btn small" onClick={openSetup}>
+          {Icon.cloud(13)}
+          {tr('はじめる…', 'Set up…')}
+        </button>
+      </div>
     );
   }
-  const text =
-    status === 'busy'
-      ? tr('同期中', 'Syncing')
-      : status === 'auth' || status === 'perm' || status === 'error'
-        ? tr('同期は止まっています', 'Sync is stopped')
-        : next > now
-          ? tr(`次の同期 ${hm(next)}（5 分ごと）`, `Next sync ${hm(next)} (every 5 min)`)
-          : tr('同期を待っています', 'Waiting to sync');
-  return (
-    <button className="nx-home-chip ps-start" onClick={() => openSyncPanel('log')}>
-      {Icon.cloud(12)}
-      {text}
-    </button>
-  );
-}
-
-/** 「同期で変わった曲」のタイルの印と下の 1 行 */
-function tileBadge(c: RecentChange, s: LibSong): { k: string; b: string; w: string } {
-  const from = c.from ? tr(`${c.from} で直した`, `changed on ${c.from}`) : '';
-  if (c.isNew)
-    return {
-      k: '',
-      b: tr('新しい曲', 'New song'),
-      w: [s.path.slice(0, -1).join(' / '), from].filter(Boolean).join(' · '),
-    };
-  if (c.merged)
-    return {
-      k: 'merge',
-      b: tr('成績をまとめた', 'Merged records'),
-      w: tr('両方の PC で遊んだ', 'Played on both PCs'),
-    };
-  if (c.charts.length)
-    return {
-      k: '',
-      b: tr(`譜面 ${c.charts.length}`, `${c.charts.length} ${pl(c.charts.length, 'chart')}`),
-      w: [c.charts.map((x) => chartName(s, x)).join(tr('・', ', ')), from].filter(Boolean).join(' · '),
-    };
-  if (c.got) return { k: '', b: tr(`取った ${c.got}`, `Got ${c.got}`), w: from };
-  if (c.scores) {
-    const n = c.news.filter((x) => !x.merged)[0];
-    return {
-      k: '',
-      b: c.plays ? tr(`成績 +${c.plays}`, `Records +${c.plays}`) : tr('成績', 'Records'),
-      w: n ? newsText(n, chartName(s, n.chart)) : '',
-    };
+  let cls = '';
+  let icon: React.ReactNode = Icon.checkCircle(15);
+  let text: string;
+  let act: { label: string; run: () => void } | null = null;
+  if (status === 'busy') {
+    cls = 'run';
+    icon = <span className="ps-spin">{Icon.refresh(15)}</span>;
+    text = progressText(progress);
+  } else if (status === 'auth') {
+    cls = 'warn';
+    icon = Icon.warn(15);
+    text = tr('Google Drive のログインが切れています', 'Your Google Drive sign-in expired');
+    act = { label: tr('ログインして同期', 'Sign in and sync'), run: syncNow };
+  } else if (status === 'perm') {
+    cls = 'warn';
+    icon = Icon.warn(15);
+    text = tr('DTXMania のフォルダの許可が要ります', 'Access to the DTXMania folder is needed');
+    act = { label: tr('許可して同期', 'Allow and sync'), run: syncNow };
+  } else if (status === 'error') {
+    cls = 'warn';
+    icon = Icon.warn(15);
+    text = tr('同期できませんでした', "Couldn't sync");
+    act = { label: tr('もう一度', 'Try again'), run: syncNow };
+  } else if (asks) {
+    cls = 'warn';
+    icon = Icon.info(15);
+    text = tr(`確かめてほしいことが ${asks} 件あります`, `${asks} ${pl(asks, 'thing')} to check`);
+  } else {
+    text = at ? tr(`同期しました · ${agoText(at, now)}`, `Synced · ${agoText(at, now)}`) : tr('同期を待っています', 'Waiting to sync');
+    if (next > now) text += tr(` · 次は ${hm(next)}`, ` · next at ${hm(next)}`);
   }
-  if (c.newer)
-    return {
-      k: 'merge',
-      b: tr('新しい方に', 'Kept newer'),
-      w: tr('両方で直されていた', 'Changed on both PCs'),
-    };
-  return { k: 'merge', b: tr('消した', 'Deleted'), w: from };
-}
-
-/** 「DTXMania の曲」のカード：同期で変わった曲（24 時間。無ければ出さない） */
-export function SyncedTiles({ thumbs }: { thumbs: Record<string, string> }) {
-  const on = usePcSync((s) => s.settings.on);
-  const log = usePcSync((s) => s.log);
-  const songs = useNxLib((s) => s.songs);
-  const list = useMemo(() => {
-    if (!on) return [];
-    const ch = recentChanges(log);
-    const seen = new Set<string>();
-    const out: { s: LibSong; c: RecentChange }[] = [];
-    for (const s of songs) {
-      const k = songKey(s);
-      const c = ch.get(k);
-      if (!c || !changedHere(c) || seen.has(k)) continue;
-      seen.add(k);
-      out.push({ s, c });
-    }
-    return out.sort((a, b) => b.c.at - a.c.at);
-  }, [on, log, songs]);
-  if (!list.length) return null;
-  const head = list.slice(0, 6);
   return (
-    <>
-      <div className="nx-home-sub">
-        <span className="lbl">{tr(`同期で変わった曲 · ${list.length}`, `Changed by sync · ${list.length}`)}</span>
-        <span className="lbl">{tr('押すと一覧でその曲を出します', 'Press to show it in the list')}</span>
-      </div>
-      <div className="nx-tiles">
-        {head.map(({ s, c }) => {
-          const b = tileBadge(c, s);
-          return (
-            <button
-              key={s.id}
-              className="nx-tile ps-t"
-              title={s.path.join('/')}
-              onClick={() => {
-                setNxView({ q: '', box: null, filter: 'synced', sel: s.id });
-                void openNxPage();
-              }}
-            >
-              {thumbs[s.id] && s.image ? (
-                <img src={thumbs[s.id]} alt="" draggable={false} />
-              ) : (
-                <span
-                  className="nx-tile-ph"
-                  style={
-                    {
-                      '--h': [...(s.title || '?')][0].codePointAt(0)! % 360,
-                    } as CSSProperties
-                  }
-                >
-                  {[...(s.title || '?')][0]}
-                </span>
-              )}
-              <span className={`ps-badge ${b.k}`}>{b.b}</span>
-              <span className="t">{s.title}</span>
-              <span className="ps-sub">{b.w || ' '}</span>
-            </button>
-          );
-        })}
-      </div>
-    </>
+    <div className={`ps-home-row ${cls}`}>
+      <span className="ps-hr-i">{icon}</span>
+      <span className="ps-hr-t">
+        <b>
+          {tr('PC どうしの同期', 'PC sync')}
+          {pc && <span className="pc">{pc}</span>}
+        </b>
+        <span className="lbl">
+          {text}
+          {tr(` · ${scopeName({ scope })} ${n} 曲`, ` · ${scopeName({ scope })}: ${n}`)}
+        </span>
+      </span>
+      {act && (
+        <button className="btn small ps-amber" onClick={act.run}>
+          {act.label}
+        </button>
+      )}
+      <button className="btn small" onClick={() => openSyncPanel('log')}>
+        {asks && !act ? tr('記録で答える', 'Answer in the log') : tr('記録を見る', 'See the log')}
+      </button>
+    </div>
   );
 }
 
