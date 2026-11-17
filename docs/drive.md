@@ -95,6 +95,7 @@ DTXMania の DTXFiles のように曲を集めたフォルダを曲フォルダ�
   - プライバシーポリシー: `https://check5004.github.io/dtx-mania-web-editor/privacy.html`（`public/privacy.html`）
   - 利用規約: `https://check5004.github.io/dtx-mania-web-editor/terms.html`（`public/terms.html`）
   - 承認済みドメイン: `check5004.github.io`
+  - アプリのロゴ: アイコンの絵（`scripts/icon-art.mjs` の `iconSvg({ mode: 'maskable' })`。丸く切り抜かれても欠けない）を 120×120 の PNG にした物。ブランドの確認をしていないので、Google の画面には出ない。
   - 2 枚とも日本語と English を 1 枚に書き、`?lang=ja|en`・アプリで選んだ言語（localStorage `dtxe.lang`）・ブラウザの言語の順で片方を出す。Service Worker はこの 2 枚を取っておかず、ネットから読む（`skipFile`・`routeOf`）。Drive で読み書きする物・ほかのサービスへ送る物を変えたら、プライバシーポリシーも直して日付を新しくする。
 - ブランドの確認（「ブランディング」の「ブランドを確認」）はしていない。していないと、Google のログインの画面にはアプリの名前とロゴの代わりに `check5004.github.io` と出る（使うのには困らない）。確認するには Search Console で `check5004.github.io` の持ち主だと示す必要があり、ドメインのいちばん上（`https://check5004.github.io/`）にファイルかタグを置くので `check5004.github.io` という名前のリポジトリが要る。github.io のような共有のドメインは通りにくいので、名前とロゴを出したくなったら独自ドメインにしてからがよい。
 - 生成元に無い所（`localhost` など）ではログインできない。開発中に本物の Drive で試すなら、生成元に足す。
