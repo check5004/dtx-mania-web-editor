@@ -1,0 +1,351 @@
+<!doctype html>
+<!-- 利用規約（日本語と English）。Google の OAuth 同意画面（Google Auth Platform › ブランディング）に、この URL を書いている。
+     アプリのホームの下からリンクする（src/ui/HomeLinks.tsx の termsUrl）。見た目と言語の決め方は privacy.html と同じ（直すときは両方）。
+     中身を変えたら「最終更新」の日付（両方の言語）を新しくし、privacy.html と食い違わないようにする。 -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>利用規約 / Terms of Use — DTX Web Editor</title>
+    <meta name="description" content="The terms for using DTX Web Editor, a free drum chart editor for DTXMania." />
+    <meta name="theme-color" content="#0b0e13" />
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+    <link rel="icon" type="image/svg+xml" href="icons/mark.svg" />
+    <style>
+      :root {
+        --bg: #0b0e13;
+        --card: #12161d;
+        --line: #1e242d;
+        --text: #e7ebf1;
+        --text2: #c9d1dc;
+        --mute: #8b95a4;
+        --accent: #4cc2ff;
+        --code: #1c222b;
+        color-scheme: dark;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f6f7f9;
+          --card: #ffffff;
+          --line: #dfe3e8;
+          --text: #161a20;
+          --text2: #333a44;
+          --mute: #5d6672;
+          --accent: #0a6fb0;
+          --code: #eceff3;
+          color-scheme: light;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text2);
+        font-family: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
+        font-size: 15px;
+        line-height: 1.8;
+      }
+      .wrap {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 20px max(16px, env(safe-area-inset-right)) 48px max(16px, env(safe-area-inset-left));
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      header .app {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      header img {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+      }
+      .langs {
+        margin-left: auto;
+        display: flex;
+        gap: 4px;
+      }
+      .langs a {
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--mute);
+        font-size: 13px;
+        text-decoration: none;
+      }
+      html[data-lang='ja'] .langs a[hreflang='ja'],
+      html[data-lang='en'] .langs a[hreflang='en'] {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      html[data-lang='ja'] article[lang='en'],
+      html[data-lang='en'] article[lang='ja'] {
+        display: none;
+      }
+      /* スクリプトが動かず両方の言語を出すときだけ、あいだに線 */
+      html:not([data-lang]) article + article {
+        margin-top: 48px;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+      }
+      h1 {
+        margin: 28px 0 4px;
+        color: var(--text);
+        font-size: 26px;
+        line-height: 1.4;
+      }
+      h2 {
+        margin: 36px 0 8px;
+        color: var(--text);
+        font-size: 19px;
+        line-height: 1.5;
+      }
+      h3 {
+        margin: 22px 0 4px;
+        color: var(--text);
+        font-size: 15.5px;
+      }
+      p,
+      ul {
+        margin: 6px 0 10px;
+      }
+      ul {
+        padding-left: 1.3em;
+      }
+      li + li {
+        margin-top: 4px;
+      }
+      b {
+        color: var(--text);
+      }
+      a {
+        color: var(--accent);
+        text-underline-offset: 3px;
+      }
+      code {
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: var(--code);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        overflow-wrap: anywhere;
+      }
+      .meta {
+        margin: 0 0 18px;
+        color: var(--mute);
+        font-size: 13px;
+      }
+      .summary {
+        margin: 18px 0 8px;
+        padding: 6px 18px 8px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+      }
+      .summary h2 {
+        margin-top: 12px;
+        font-size: 16px;
+      }
+      footer {
+        margin-top: 48px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 20px;
+        font-size: 13px;
+      }
+      footer a {
+        color: var(--mute);
+      }
+    </style>
+    <script>
+      // 言語を決める（?lang → アプリで選んだ言語 → ブラウザの言語）。決まった言語だけを出す
+      (function () {
+        var l = null;
+        try {
+          l = new URLSearchParams(location.search).get('lang');
+        } catch (e) {}
+        if (l !== 'ja' && l !== 'en') {
+          try {
+            l = localStorage.getItem('dtxe.lang');
+          } catch (e) {}
+        }
+        if (l !== 'ja' && l !== 'en') l = /^ja\b/i.test(navigator.language || '') ? 'ja' : 'en';
+        document.documentElement.lang = l;
+        document.documentElement.setAttribute('data-lang', l);
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="app" href="./"><img src="icons/icon-192.png" alt="" />DTX Web Editor</a>
+        <nav class="langs" aria-label="Language">
+          <a href="?lang=ja" hreflang="ja" lang="ja">日本語</a>
+          <a href="?lang=en" hreflang="en" lang="en">English</a>
+        </nav>
+      </header>
+
+      <article lang="ja">
+        <h1>利用規約</h1>
+        <p class="meta">最終更新：2026年11月18日</p>
+        <p>この規約は、DTX Web Editor（以下「このアプリ」）を使うときの決まりです。このアプリを使うと、この規約に同意したものとします。</p>
+
+        <h2>1. このアプリについて</h2>
+        <ul>
+          <li>このアプリは、個人の開発者 check5004（以下「開発者」）が無料で公開している、DTXMania 向けのドラム譜面エディタです。</li>
+          <li>DTXMania の非公式のツールで、DTXMania の作者とは関係ありません。</li>
+          <li>
+            ソースコードは <a href="https://github.com/check5004/dtx-mania-web-editor/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT ライセンス</a>で公開しています。中で使っている AI のモデルと標準キットの音には、それぞれのライセンスがあります（採譜のモデルは非商用に限ります。<a href="https://github.com/check5004/dtx-mania-web-editor#クレジット" target="_blank" rel="noreferrer">README のクレジット</a>）。
+          </li>
+        </ul>
+
+        <h2>2. あなたのデータ</h2>
+        <ul>
+          <li>あなたが作った譜面や、取り込んだ音・動画は、あなたの物です。開発者が権利を求めることはありません。</li>
+          <li>データは、あなたの端末の中・あなたが選んだフォルダ・つないだ Google Drive に保存されます。開発者は控えを持っていないので、消えたデータを戻せません。大事な曲は、ZIP の書き出しや Drive への保存で控えを取ってください。</li>
+          <li>データの扱いは<a href="privacy.html" data-keep-lang>プライバシーポリシー</a>に書いています。</li>
+        </ul>
+
+        <h2>3. 著作権など</h2>
+        <ul>
+          <li>原曲・動画・音源など、ほかの人に権利がある物を使うときは、その権利を守ってください。権利のある曲を、許可なくほかの人に配ることなどはしないでください。</li>
+          <li>このアプリで作った物をどう使うかの責任は、あなたにあります。</li>
+        </ul>
+
+        <h2>4. ほかのサービス</h2>
+        <ul>
+          <li>Google Drive・OpenRouter・YouTube などのサービスは、それぞれの規約に従って使ってください。</li>
+          <li>AI の機能の料金は、あなたの OpenRouter のアカウントにかかります。開発者には入りません。</li>
+        </ul>
+
+        <h2>5. してはいけないこと</h2>
+        <ul>
+          <li>法令や公序良俗に反すること</li>
+          <li>ほかの人の権利（著作権・プライバシーなど）を侵すこと</li>
+          <li>このアプリや、つながるサービスに大きな負荷をかけたり、じゃましたりすること</li>
+        </ul>
+
+        <h2>6. 保証しないこと</h2>
+        <p>このアプリは、今ある状態のままで提供します。不具合が無いこと、いつでも使えること、あなたの目的に合うこと、作った譜面が DTXMania で必ず読めることは保証しません。</p>
+
+        <h2>7. 責任</h2>
+        <p>このアプリを使って起きた損害（データが消えた、ほかのサービスの料金がかかった、など）について、開発者は法令で許される範囲で責任を負いません。ただし、開発者の故意または重大な過失による場合は、この限りではありません。</p>
+
+        <h2>8. 変更・終了</h2>
+        <p>開発者は、このアプリの中身を変えたり、公開をやめたりすることがあります。この規約を変えるときは、このページを書きかえ、上の日付を新しくします。変えたあとに使ったときは、新しい規約に同意したものとします。</p>
+
+        <h2>9. 準拠法</h2>
+        <p>この規約は、日本の法律に従って解釈します。</p>
+
+        <h2>10. 問い合わせ</h2>
+        <p><a href="https://github.com/check5004/dtx-mania-web-editor/issues" target="_blank" rel="noreferrer">GitHub の Issues</a> から送ってください。</p>
+      </article>
+
+      <article lang="en">
+        <h1>Terms of Use</h1>
+        <p class="meta">Last updated: November 18, 2026</p>
+        <p>These terms apply when you use DTX Web Editor ("the app"). By using the app, you agree to these terms.</p>
+
+        <h2>1. About the app</h2>
+        <ul>
+          <li>The app is a drum chart editor for DTXMania, published for free by an individual developer, check5004 ("the developer").</li>
+          <li>It is an unofficial tool for DTXMania and is not affiliated with the authors of DTXMania.</li>
+          <li>
+            The source code is published under the <a href="https://github.com/check5004/dtx-mania-web-editor/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a>. The AI models and the standard kit sounds used in the app have their own licenses (the drum transcription model is for non-commercial use only; see the
+            <a href="https://github.com/check5004/dtx-mania-web-editor#クレジット" target="_blank" rel="noreferrer">credits in the README</a>).
+          </li>
+        </ul>
+
+        <h2>2. Your data</h2>
+        <ul>
+          <li>The charts you make and the audio and videos you bring in are yours. The developer claims no rights to them.</li>
+          <li>Your data is stored on your device, in folders you chose, and in the Google Drive you connected. The developer keeps no copies, so lost data can't be restored. Keep backups of important songs with ZIP export or by saving to Drive.</li>
+          <li>How your data is handled is described in the <a href="privacy.html" data-keep-lang>Privacy Policy</a>.</li>
+        </ul>
+
+        <h2>3. Copyright and other rights</h2>
+        <ul>
+          <li>When you use songs, videos, sounds, or anything else that others hold rights to, respect those rights. For example, don't share copyrighted songs with others without permission.</li>
+          <li>You are responsible for how you use what you make with the app.</li>
+        </ul>
+
+        <h2>4. Other services</h2>
+        <ul>
+          <li>Use services such as Google Drive, OpenRouter, and YouTube under their own terms.</li>
+          <li>Charges for AI features are billed to your own OpenRouter account. The developer receives nothing.</li>
+        </ul>
+
+        <h2>5. What you must not do</h2>
+        <ul>
+          <li>Break the law or act against public order and morals</li>
+          <li>Infringe the rights of others (copyright, privacy, and so on)</li>
+          <li>Put a heavy load on, or interfere with, the app or the services it connects to</li>
+        </ul>
+
+        <h2>6. No warranty</h2>
+        <p>The app is provided as is. The developer does not guarantee that it is free of bugs, always available, fit for your purpose, or that the charts you make will always load in DTXMania.</p>
+
+        <h2>7. Liability</h2>
+        <p>To the extent permitted by law, the developer is not liable for any damage that results from using the app (such as lost data or charges from other services), except where caused by the developer's intent or gross negligence.</p>
+
+        <h2>8. Changes and ending the service</h2>
+        <p>The developer may change the app or stop publishing it. When these terms change, the developer will update this page and the date above. If you use the app after a change, you agree to the new terms.</p>
+
+        <h2>9. Governing law</h2>
+        <p>These terms are governed by the laws of Japan.</p>
+
+        <h2>10. Contact</h2>
+        <p>Please write through <a href="https://github.com/check5004/dtx-mania-web-editor/issues" target="_blank" rel="noreferrer">GitHub Issues</a>.</p>
+      </article>
+
+      <footer>
+        <a href="./">DTX Web Editor</a>
+        <a href="privacy.html" data-keep-lang>プライバシーポリシー / Privacy Policy</a>
+        <a href="https://github.com/check5004/dtx-mania-web-editor" target="_blank" rel="noreferrer">GitHub</a>
+      </footer>
+    </div>
+    <script>
+      // 言語のボタンとプライバシーポリシーへのリンクに、今の言語を付ける（ページを読み直さずに切り替える）
+      (function () {
+        var root = document.documentElement;
+        function keep() {
+          var l = root.getAttribute('data-lang');
+          document.querySelectorAll('a[data-keep-lang]').forEach(function (a) {
+            a.setAttribute('href', a.getAttribute('href').split('?')[0] + '?lang=' + l);
+          });
+        }
+        document.querySelectorAll('.langs a').forEach(function (a) {
+          a.addEventListener('click', function (e) {
+            var l = a.getAttribute('hreflang');
+            e.preventDefault();
+            root.lang = l;
+            root.setAttribute('data-lang', l);
+            try {
+              history.replaceState(null, '', '?lang=' + l);
+            } catch (err) {}
+            keep();
+            window.scrollTo(0, 0);
+          });
+        });
+        keep();
+      })();
+    </script>
+  </body>
+</html>

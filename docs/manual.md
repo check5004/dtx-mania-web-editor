@@ -4,9 +4,9 @@ DTXMania 向けの、ブラウザで動くドラム譜面エディタの、す�
 
 **公開ページ:** https://check5004.github.io/dtx-mania-web-editor/
 
-曲・譜面・音は、ブラウザの中と、あなたが選んだフォルダ（つないだときは Google Drive も）だけで扱います。このサイトのサーバーには何も送りません。
+曲・譜面・音は、ブラウザの中と、あなたが選んだフォルダ（つないだときは Google Drive も）だけで扱います。このサイトのサーバーには何も送りません。くわしくは[プライバシーポリシー](https://check5004.github.io/dtx-mania-web-editor/privacy.html?lang=ja)と[利用規約](https://check5004.github.io/dtx-mania-web-editor/terms.html?lang=ja)（アプリのホームのいちばん下からも開けます）。
 
-アプリのホームのいちばん下に、説明書（README）と GitHub のこのリポジトリへのリンク、いまの版を出しています（README は日本語だけです）。
+アプリのホームのいちばん下に、説明書（README）と GitHub のこのリポジトリへのリンク、プライバシーポリシー・利用規約（日本語と English）、いまの版を出しています（README は日本語だけです）。
 
 ## 言語（日本語 / English）
 

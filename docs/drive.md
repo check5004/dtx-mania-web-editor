@@ -88,8 +88,15 @@ DTXMania の DTXFiles のように曲を集めたフォルダを曲フォルダ�
 - OAuth クライアント（ウェブ アプリケーション）: `918924939494-oirrr67hcpk8nps7ul494g6m720at5jv.apps.googleusercontent.com`（公開して良い値）
 - 承認済みの JavaScript 生成元: `https://check5004.github.io`
 - 承認済みのリダイレクト URI: `https://check5004.github.io/dtx-mania-web-editor/`（ホーム画面のアプリで小窓が開けないときのページ切り替え用）
-- スコープは `drive.file` だけ（このアプリが作ったファイルだけ見える）。審査は要らない。
-- 公開ステータスは「テスト」（テストユーザーだけ使える）。テストのままだと許可が 7 日で切れ、週に 1 回ほど Google の確認画面が出る。出したくなければ Google Auth Platform の「対象」で「アプリを公開」にする（`drive.file` だけなら「確認されていないアプリ」の警告も出ない）。
+- スコープは `drive.file` だけ（このアプリが作ったファイルだけ見える。Google の分け方では「機密性の低いスコープ」）。だから審査（確認）は要らず、「確認されていないアプリ」の警告も、100 人までの上限も無い。Google Auth Platform の「データアクセス」にも `drive.file` だけを入れる（機密性の高い・制限付きのスコープを入れると審査が要る。`drive` や `drive.readonly` は制限付き）。
+- 公開ステータスは「本番」にする（「対象」→「アプリを公開」）。「テスト」のままだと、テストユーザーに入れた人しかログインできず、許可も 7 日で切れる。
+- 本番のアプリには、「ブランディング」にホームページ・プライバシーポリシー・利用規約のリンクが要る（v0.59.1〜）。
+  - アプリのホームページ: `https://check5004.github.io/dtx-mania-web-editor/`（ホームのいちばん下から下の 2 つへリンクしている。`src/ui/HomeLinks.tsx`）
+  - プライバシーポリシー: `https://check5004.github.io/dtx-mania-web-editor/privacy.html`（`public/privacy.html`）
+  - 利用規約: `https://check5004.github.io/dtx-mania-web-editor/terms.html`（`public/terms.html`）
+  - 承認済みドメイン: `check5004.github.io`
+  - 2 枚とも日本語と English を 1 枚に書き、`?lang=ja|en`・アプリで選んだ言語（localStorage `dtxe.lang`）・ブラウザの言語の順で片方を出す。Service Worker はこの 2 枚を取っておかず、ネットから読む（`skipFile`・`routeOf`）。Drive で読み書きする物・ほかのサービスへ送る物を変えたら、プライバシーポリシーも直して日付を新しくする。
+- ブランドの確認（「ブランディング」の「ブランドを確認」）はしていない。していないと、Google のログインの画面にはアプリの名前とロゴの代わりに `check5004.github.io` と出る（使うのには困らない）。確認するには Search Console で `check5004.github.io` の持ち主だと示す必要があり、ドメインのいちばん上（`https://check5004.github.io/`）にファイルかタグを置くので `check5004.github.io` という名前のリポジトリが要る。github.io のような共有のドメインは通りにくいので、名前とロゴを出したくなったら独自ドメインにしてからがよい。
 - 生成元に無い所（`localhost` など）ではログインできない。開発中に本物の Drive で試すなら、生成元に足す。
 
 ## 試験

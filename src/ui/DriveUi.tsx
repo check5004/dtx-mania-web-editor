@@ -4,6 +4,7 @@ import { pl, tr } from '../i18n';
 import { checkDriveSongs, cleanDriveJunk, connectDrive, openFromDrive, pullNow, pushNow, timeText, useDriveSync } from '../app/driveActions';
 import { canRedirect, loadGis, setPrefs, signOut, useDriveAuth } from '../drive/auth';
 import { confirmDialog } from './dialogs';
+import { privacyUrl } from './HomeLinks';
 import { Icon } from './icons';
 import { sizeText } from './LocalStorage';
 import { PcSyncSettingsCard } from './sync/home';
@@ -53,7 +54,10 @@ export function DriveHomeCard({ tablet = false }: { tablet?: boolean }) {
           : tr(
               'つなぐと、保存した曲を音ごと Google Drive にも送り、ほかの iPad・PC から続きを開けます。Drive には「DTX Web Editor」フォルダを作り、このアプリが作った物だけを読み書きします。',
               'Connect to also send saved songs with their audio to Google Drive and continue on another iPad or PC. It creates a "DTX Web Editor" folder and only reads and writes what this app created.',
-            )}
+            )}{' '}
+        <a href={privacyUrl('google')} target="_blank" rel="noreferrer">
+          {tr('データの扱い', 'How your data is handled')}
+        </a>
       </p>
       {!connected && (
         <div className="local-row">
@@ -94,7 +98,10 @@ export function DriveSettings() {
           {tr(
             'マイドライブに「DTX Web Editor」フォルダを作り、曲フォルダと同じ並び（譜面・原曲・ステム・作業ファイル）で保存します。Drive の画面からフォルダごと落とせば、そのまま DTXMania で使えます。このアプリが作ったファイルしか見えない許可（drive.file）なので、ほかのファイルは読みません。',
             'Creates a "DTX Web Editor" folder in My Drive and saves each song like its song folder (charts, original audio, stems, work files). Download the folder from Drive and it works in DTXMania as is. The permission (drive.file) only covers files this app created, so nothing else is read.',
-          )}
+          )}{' '}
+          <a href={privacyUrl('google')} target="_blank" rel="noreferrer">
+            {tr('プライバシーポリシー', 'Privacy Policy')}
+          </a>
         </p>
         <div className="row" style={{ gap: 8 }}>
           {a.connected ? (

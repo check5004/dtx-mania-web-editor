@@ -266,6 +266,7 @@ PC は Chrome か Edge がおすすめです。曲フォルダへのじかの保
 - [耳コピの精度の測り方と結果](docs/bench.md)
 - [Safari・iPad のメモ](docs/safari.md)
 - [Google Drive への保存のしくみ](docs/drive.md)
+- [プライバシーポリシー](https://check5004.github.io/dtx-mania-web-editor/privacy.html?lang=ja)・[利用規約](https://check5004.github.io/dtx-mania-web-editor/terms.html?lang=ja)
 
 ## クレジット
 
