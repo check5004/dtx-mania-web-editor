@@ -1,4 +1,5 @@
 // PC どうしの同期の本体：DTXMania の曲のフォルダと、Google Drive の「DTX Web Editor/DTXFiles/<BOX>/<曲>」を合わせる。
+// PC は何台でもよい（Drive がまん中。それぞれの PC が Drive と合わせ、ほかの PC の変化は Drive を通して届く）。
 // 1. Drive の曲の一覧（印 dtxe=song の付いたフォルダ。BOX のフォルダは dtxe=dir）と、この PC の曲（DTXMania の曲の一覧）を比べて組にする
 //    （前に合わせた曲は .dtxe-drive.json の id で、初めてなら DTXFiles からの並びで。並びが違って曲名とアーティストが同じなら聞く）
 // 2. 曲ごとに、ファイルを 3 つ（前に合わせたとき・この PC・Drive）で比べて決め（src/sync/plan.ts）、送る・取る・まとめる
@@ -15,7 +16,7 @@ import { ghostSection, isScoreIni, kindOf, scoreGroupOf, VIDEO_FILE } from './ki
 import { needsMd5, planSong, statSame, type Act, type BaseRec, type LocalStat, type RemoteStat } from './plan';
 import { parseScoreIni } from '../nxlib/parse';
 import { decodeScore, drumSummary, encodeScore, mergeScoreIni, type Side } from './scoreIni';
-import { emptyReport, type RunReport, type ScoreNews, type SongReport, type SyncProgressInfo, type SyncSettings, type SyncState } from './types';
+import { addName, emptyReport, type PcInfo, type RunReport, type ScoreNews, type SongReport, type SyncProgressInfo, type SyncSettings, type SyncState } from './types';
 
 export const LIB_NAME = 'DTXFiles';
 export const BACKUP_NAME = '控え'; // i18n-ignore Drive のフォルダの名前（言語で変えない）
@@ -80,7 +81,9 @@ interface DriveSongRef {
   time: number;
   /** 成績だけの曲（ほかの PC が「成績だけ合わせる」で作った） */
   play: boolean;
+  /** 曲のフォルダを作った PC の名前と印 */
   dev?: string;
+  devId?: string;
 }
 
 /** この PC の曲のフォルダ */
@@ -121,6 +124,9 @@ const folderKey = (root: string, path: readonly string[]) => `${root}:${normPath
 const titleKey = (s: string) => s.normalize('NFKC').trim().toLowerCase();
 const nameKey = (title: string, artist: string) => `${titleKey(title)}\u0000${titleKey(artist)}`;
 const iso = (ms: number) => new Date(ms).toISOString();
+
+/** Drive に書いた「送った PC」（名前と印） */
+type Dev = { dev?: string; devId?: string };
 
 /** MD5 の控え（下見と本番で 2 回計算しない） */
 const md5Cache = new Map<string, string>();
@@ -203,6 +209,8 @@ export class SyncRun {
   private done = 0;
   private total = 0;
   private bytes = 0;
+  /** PC の印 → 今の名前（.sync から） */
+  private names: Map<string, string>;
 
   constructor(private readonly o: RunOptions) {
     this.st = o.state;
@@ -211,7 +219,24 @@ export class SyncRun {
     this.dry = !!o.dry;
     this.now = o.now ?? Date.now;
     this.progress = o.progress ?? (() => {});
+    this.names = new Map((o.state.pcs ?? []).map((p) => [p.id, p.name]));
     this.report = { at: this.now(), pc: o.settings.pc, why: o.why, songs: [], asks: [], ...(o.dry ? { dry: true } : {}) };
+  }
+
+  /** Drive に書く「送った PC」（名前と印。名前が同じ PC・名前を変えた PC も印で見分ける） */
+  devProps(): Record<string, string> {
+    return { dev: this.set.pc, ...(this.set.pcId ? { devId: this.set.pcId } : {}) };
+  }
+
+  /** ファイル・曲を送った PC の名前（今の名前。分からなければ送ったときの名前） */
+  nameOf(r: Dev): string | undefined {
+    return (r.devId && this.names.get(r.devId)) || r.dev || undefined;
+  }
+
+  /** ほかの PC が送った物なら、その PC の名前（この PC が送った物・送った PC が分からない物は null） */
+  otherOf(r: Dev): string | null {
+    if (r.devId) return r.devId === this.set.pcId ? null : (this.nameOf(r) ?? null);
+    return r.dev && r.dev !== this.set.pc ? r.dev : null;
   }
 
   async run(): Promise<RunReport> {
@@ -238,6 +263,11 @@ export class SyncRun {
     const recent = this.st.skew !== undefined && this.now() - (this.st.clockAt ?? 0) < 30 * 60_000;
     if (!this.dry && !((this.o.why === 'timer' || this.o.why === 'save') && recent)) await this.checkClock();
     else if (this.st.skew !== undefined) this.clockOff = Math.abs(this.st.skew) > CLOCK_LIMIT;
+    // 下見：同期している PC の名前だけ読む（何も書かない）
+    if (this.dry && this.rootId) {
+      const dir = await this.childDir(this.rootId, 'sync', SYNC_NAME, false);
+      if (dir) await this.readPcs(dir);
+    }
     let ok = false;
     try {
       const drive = this.rootId ? await this.listDriveSongs() : [];
@@ -329,7 +359,7 @@ export class SyncRun {
       } catch {
         // 説明が JSON でない
       }
-      out.push({ id: f.id, name: f.name, parent, lib, info, time: Date.parse(f.modifiedTime ?? '') || 0, play: f.appProperties?.play === '1', dev: f.appProperties?.dev });
+      out.push({ id: f.id, name: f.name, parent, lib, info, time: Date.parse(f.modifiedTime ?? '') || 0, play: f.appProperties?.play === '1', dev: f.appProperties?.dev, devId: f.appProperties?.devId });
     }
     return out;
   }
@@ -350,7 +380,7 @@ export class SyncRun {
         const def = ld ? await fileIn(ld, 'box.def') : null;
         if (def) {
           const file = await def.getFile();
-          const res = await upload({ name: def.name, parent: id, data: file, modifiedTime: iso(file.lastModified), appProperties: { dev: this.set.pc } });
+          const res = await upload({ name: def.name, parent: id, data: file, modifiedTime: iso(file.lastModified), appProperties: this.devProps() });
           this.mine[res.id] = res.md5Checksum ?? '';
         }
       }
@@ -492,19 +522,26 @@ export class SyncRun {
     return null;
   }
 
-  /** この PC の名前を .sync に書き、PC の時計と Drive の時計の差を見る */
+  /**
+   * この PC の名前を .sync に書き、PC の時計と Drive の時計の差を見る。同期している PC の一覧も読み直す。
+   * ほかの PC がこの PC を一覧から外していたら（.sync のファイルがゴミ箱）、新しく書いて一覧に戻る
+   */
   private async checkClock() {
     if (!this.rootId) return;
-    const dir = await this.childDir(this.rootId, 'sync', SYNC_NAME, true);
+    const dir = (await this.childDir(this.rootId, 'sync', SYNC_NAME, true))!;
     const body = new Blob([JSON.stringify({ v: 1, pc: this.set.pc, at: this.now() })], { type: 'application/json' });
+    const props = { dtxe: 'pc', pc: this.set.pc, ...(this.set.pcId ? { devId: this.set.pcId } : {}) };
     const t0 = this.now();
-    let res: DriveFile;
-    try {
-      res = await upload({ id: this.st.pcFile, name: `${this.set.pcId}.json`, parent: this.st.pcFile ? undefined : dir!, data: body, appProperties: { dtxe: 'pc', pc: this.set.pc } });
-    } catch (e) {
-      if (!(e instanceof DriveError) || e.status !== 404) throw e;
-      res = await upload({ name: `${this.set.pcId}.json`, parent: dir!, data: body, appProperties: { dtxe: 'pc', pc: this.set.pc } });
+    let res: DriveFile | null = null;
+    if (this.st.pcFile) {
+      try {
+        res = await upload({ id: this.st.pcFile, name: `${this.set.pcId}.json`, data: body, appProperties: props });
+      } catch (e) {
+        if (e instanceof DriveError && e.reason === 'auth') throw e;
+        res = null;
+      }
     }
+    if (!res || res.trashed) res = await upload({ name: `${this.set.pcId}.json`, parent: dir, data: body, appProperties: props });
     const t1 = this.now();
     this.st.pcFile = res.id;
     this.st.clockAt = this.now();
@@ -514,6 +551,13 @@ export class SyncRun {
       this.st.skew = server - (t0 + t1) / 2;
       this.clockOff = Math.abs(this.st.skew) > CLOCK_LIMIT;
     }
+    await this.readPcs(dir);
+  }
+
+  /** 同期している PC（.sync の中。新しく同期した順）。名前はファイルを送った PC の名前を今の名前で出すのに使う */
+  private async readPcs(dir: string) {
+    this.st.pcs = await readPcList(dir);
+    for (const p of this.st.pcs) this.names.set(p.id, p.name);
   }
 
   // ---- 組にする ---------------------------------------------------------------------
@@ -750,7 +794,7 @@ export class SyncRun {
           driveLib: lib.join('/'),
           localLib: same.lib!.join('/'),
           local: { time: same.updated, charts: same.charts },
-          remote: { time: d.info.u ?? d.time, dev: d.dev },
+          remote: { time: d.info.u ?? d.time, dev: this.nameOf(d) },
         });
         // 答えるまで、この PC の曲も新しく送らない（ほかの曲もそのフォルダに入れない）
         const i = lj ? jobs.indexOf(lj) : -1;
@@ -874,16 +918,6 @@ export class SyncRun {
     else delete link.play;
     const recs = first ? {} : { ...link.files };
     const open = !this.o.take && !!(dir && this.lib.isOpen && (await this.lib.isOpen(dir, place)));
-    // Drive
-    let tree: DriveTree | null = null;
-    const remote = new Map<string, RemoteStat>();
-    if (job.drive) {
-      const known = this.st.songs[job.drive.id];
-      if (first || !known || known.recheck || this.dirty === 'all' || this.dirty.has(job.drive.id)) {
-        tree = await listTree(job.drive.id);
-        for (const [k, r] of tree.files) remote.set(k, { id: r.id, path: r.path, md5: r.md5, size: r.size, time: Date.parse(r.modifiedTime) || 0, ...(r.dev ? { dev: r.dev } : {}) });
-      } else for (const [k, r] of Object.entries(recs)) remote.set(k, { id: r.id, path: r.path, md5: r.md5, size: r.size, time: 0 });
-    }
     // 合わせるファイルだけ
     const noVideo = !this.set.video || !!link.noVideo;
     const keep = (path: string) => {
@@ -891,6 +925,19 @@ export class SyncRun {
       if (play) return this.set.scores;
       return job.mode === 'all' && !(noVideo && VIDEO_FILE.test(path));
     };
+    // Drive
+    let tree: DriveTree | null = null;
+    const remote = new Map<string, RemoteStat>();
+    if (job.drive) {
+      const known = this.st.songs[job.drive.id];
+      // この PC で変わった（足した・直した・消した）ファイルがある曲は、Drive の中を読み直してから決める。
+      // Drive の変化を聞いたのは同期の始めなので、そのあとでほかの PC が同じファイルを送っていたら、上書き・ゴミ箱にせず、まとめる・新しい方にする
+      const changedHere = [...loc.stats].some(([k, l]) => keep(l.path) && !statSame(l, recs[k])) || Object.entries(recs).some(([k, r]) => keep(r.path) && !loc.stats.has(k));
+      if (first || !known || known.recheck || changedHere || this.dirty === 'all' || this.dirty.has(job.drive.id)) {
+        tree = await listTree(job.drive.id);
+        for (const [k, r] of tree.files) remote.set(k, { id: r.id, path: r.path, md5: r.md5, size: r.size, time: Date.parse(r.modifiedTime) || 0, ...(r.dev ? { dev: r.dev } : {}), ...(r.devId ? { devId: r.devId } : {}) });
+      } else for (const [k, r] of Object.entries(recs)) remote.set(k, { id: r.id, path: r.path, md5: r.md5, size: r.size, time: 0 });
+    }
     for (const m of [loc.stats, remote] as Map<string, { path: string }>[]) for (const [k, v] of m) if (!keep(v.path)) m.delete(k);
     for (const k of Object.keys(recs)) if (!keep(recs[k].path)) delete recs[k];
     // MD5（要るときだけ）
@@ -925,10 +972,10 @@ export class SyncRun {
     for (const a of acts) {
       if (a.op !== 'ask') continue;
       const l = loc.stats.get(a.key)!;
-      this.report.asks.push({ id: `f:${songKey}:${a.key}`, kind: 'file', why: a.why, title: job.title, lib: job.lib.join('/'), path: a.path, local: { time: l.mtime, size: l.size }, remote: { time: a.remote.time, size: a.remote.size, dev: a.remote.dev } });
+      this.report.asks.push({ id: `f:${songKey}:${a.key}`, kind: 'file', why: a.why, title: job.title, lib: job.lib.join('/'), path: a.path, local: { time: l.mtime, size: l.size }, remote: { time: a.remote.time, size: a.remote.size, dev: this.nameOf(a.remote) } });
     }
     if (this.dry) {
-      summarize(rep, acts, loc.stats, remote);
+      summarize(rep, acts, loc.stats, this);
       return rep;
     }
     // ---- ここから書く ----
@@ -946,7 +993,7 @@ export class SyncRun {
       const local = job.local!;
       const boxFrom = local.path.length - job.lib.length;
       const parent = await this.ensureLibDirs(job.lib.slice(0, -1), (i) => this.songDir(local.root, local.path.slice(0, boxFrom + i + 1)));
-      const f = await createFolder(job.lib[job.lib.length - 1], parent, { appProperties: { dtxe: 'song', ...(job.mode === 'play' ? { play: '1' } : {}), dev: this.set.pc }, description: JSON.stringify(this.infoOf(job, loc.stats)) });
+      const f = await createFolder(job.lib[job.lib.length - 1], parent, { appProperties: { dtxe: 'song', ...(job.mode === 'play' ? { play: '1' } : {}), ...this.devProps() }, description: JSON.stringify(this.infoOf(job, loc.stats)) });
       this.mine[f.id] = 'dir';
       driveId = f.id;
       rep.driveId = driveId;
@@ -998,9 +1045,6 @@ export class SyncRun {
   }
 
   // Exec から使う
-  get pc() {
-    return this.set.pc;
-  }
   noteMine(id: string, md5: string) {
     this.mine[id] = md5;
   }
@@ -1059,13 +1103,21 @@ class Exec {
     return (scoreGroupOf(key) ?? key).split('/').pop()!;
   }
 
-  private noteGot(a: { key: string; path: string }, bytes: number, dev?: string) {
+  private noteGot(a: { key: string; path: string }, bytes: number, remote?: Dev) {
     if (kindOf(a.path) === 'play') {
       const c = this.chart(a.key);
       if (!this.rep.scoresGot.includes(c)) this.rep.scoresGot.push(c);
     } else this.rep.got.push(a.path);
     this.rep.gotBytes += bytes;
-    if (dev && dev !== this.r.pc) this.rep.from = dev;
+    if (remote) this.noteFrom(a.path, remote);
+  }
+
+  /** 取った物を送った PC（譜面・音と成績を分けて。何台からでも） */
+  private noteFrom(path: string, remote: Dev) {
+    const who = this.r.otherOf(remote);
+    if (!who) return;
+    if (kindOf(path) === 'play') this.rep.scoresFrom = addName(this.rep.scoresFrom, who);
+    else this.rep.from = addName(this.rep.from, who);
   }
 
   private noteSent(a: { key: string; path: string }, bytes: number) {
@@ -1103,7 +1155,7 @@ class Exec {
   private async put(key: string, path: string, id: string | undefined, file: File): Promise<void> {
     this.r.step('up', this.job.title, path.split('/').pop()!);
     const parent = id ? undefined : await this.ensureDir(path);
-    const res = await upload({ id, name: path.split('/').pop()!, parent, data: file, modifiedTime: iso(file.lastModified), appProperties: { dev: this.r.pc } });
+    const res = await upload({ id, name: path.split('/').pop()!, parent, data: file, modifiedTime: iso(file.lastModified), appProperties: this.r.devProps() });
     this.r.noteMine(res.id, res.md5Checksum ?? '');
     this.rec(key, { id: res.id, md5: res.md5Checksum ?? '', size: file.size, mtime: file.lastModified, path });
     this.r.addBytes(file.size);
@@ -1171,7 +1223,7 @@ class Exec {
         return;
       case 'down':
         await this.get(a.key, a.path, a.remote);
-        this.noteGot(a, a.remote.size, a.remote.dev);
+        this.noteGot(a, a.remote.size, a.remote);
         return;
       case 'trash':
         await trashFile(a.remote.id).catch((e) => {
@@ -1192,12 +1244,12 @@ class Exec {
       case 'keepLocal': {
         // Drive の版を控えへ写してから、この PC の版を送る
         const dir = await this.r.backupFolder(this.link.name || this.job.lib[this.job.lib.length - 1], a.path);
-        const bak = await copyFile(a.remote.id, { name: a.path.split('/').pop()!, parents: [dir], appProperties: { dtxe: 'bak', dev: a.remote.dev ?? '' } });
+        const bak = await copyFile(a.remote.id, { name: a.path.split('/').pop()!, parents: [dir], appProperties: { dtxe: 'bak', dev: a.remote.dev ?? '', ...(a.remote.devId ? { devId: a.remote.devId } : {}) } });
         this.r.noteMine(bak.id, bak.md5Checksum ?? '');
         const l = this.stats.get(a.key)!;
         await this.put(a.key, a.path, a.remote.id, this.file(a.key));
         this.noteSent(a, l.size);
-        this.rep.newer.push({ path: a.path, kept: 'local', backup: bak.id, dev: a.remote.dev, localTime: l.mtime, remoteTime: a.remote.time });
+        this.rep.newer.push({ path: a.path, kept: 'local', backup: bak.id, dev: this.r.nameOf(a.remote), localTime: l.mtime, remoteTime: a.remote.time });
         return;
       }
       case 'keepRemote': {
@@ -1205,11 +1257,11 @@ class Exec {
         const dir = await this.r.backupFolder(this.link.name || this.job.lib[this.job.lib.length - 1], a.path);
         const l = this.stats.get(a.key)!;
         const f = this.file(a.key);
-        const bak = await upload({ name: a.path.split('/').pop()!, parent: dir, data: f, modifiedTime: iso(l.mtime), appProperties: { dtxe: 'bak', dev: this.r.pc } });
+        const bak = await upload({ name: a.path.split('/').pop()!, parent: dir, data: f, modifiedTime: iso(l.mtime), appProperties: { dtxe: 'bak', ...this.r.devProps() } });
         this.r.noteMine(bak.id, bak.md5Checksum ?? '');
         await this.get(a.key, a.path, a.remote);
-        this.noteGot(a, a.remote.size, a.remote.dev);
-        this.rep.newer.push({ path: a.path, kept: 'remote', backup: bak.id, dev: a.remote.dev, localTime: l.mtime, remoteTime: a.remote.time });
+        this.noteGot(a, a.remote.size, a.remote);
+        this.rep.newer.push({ path: a.path, kept: 'remote', backup: bak.id, dev: this.r.nameOf(a.remote), localTime: l.mtime, remoteTime: a.remote.time });
         return;
       }
       case 'merge': {
@@ -1223,14 +1275,14 @@ class Exec {
         await writeFile(this.folder, l.path, bytes);
         this.wroteLocal = true;
         const file = await this.folder.files.get(a.key)!.getFile();
-        const res = await upload({ id: a.remote.id, name: l.path.split('/').pop()!, data: file, modifiedTime: iso(file.lastModified), appProperties: { dev: this.r.pc } });
+        const res = await upload({ id: a.remote.id, name: l.path.split('/').pop()!, data: file, modifiedTime: iso(file.lastModified), appProperties: this.r.devProps() });
         this.r.noteMine(res.id, res.md5Checksum ?? '');
         this.rec(a.key, { id: res.id, md5: res.md5Checksum ?? '', size: file.size, mtime: file.lastModified, path: l.path });
         this.setBase(a.key, m.text, res.md5Checksum ?? '');
         // 前にまとめた成績が無い（初めて）：同じ回数を 2 回数えないよう、回数は多い方
         this.rep.merged.push({ chart: this.chart(a.key), plays: drumSummary(m.text).plays - drumSummary(mine.text).plays, ...(base === null ? { max: true } : {}) });
         this.addNews(a.key, mine.text, m.text, true);
-        if (a.remote.dev && a.remote.dev !== this.r.pc) this.rep.from = a.remote.dev;
+        this.noteFrom(a.path, a.remote);
         return;
       }
       case 'ghost': {
@@ -1251,7 +1303,7 @@ class Exec {
 }
 
 /** 計画から、何が起きるか（下見） */
-function summarize(rep: SongReport, acts: readonly Act[], local: Map<string, LocalStat>, remote: Map<string, RemoteStat>) {
+function summarize(rep: SongReport, acts: readonly Act[], local: Map<string, LocalStat>, run: Pick<SyncRun, 'nameOf' | 'otherOf'>) {
   const chart = (key: string) => (scoreGroupOf(key) ?? key).split('/').pop()!;
   const add = (list: string[], c: string) => {
     if (!list.includes(c)) list.push(c);
@@ -1265,7 +1317,7 @@ function summarize(rep: SongReport, acts: readonly Act[], local: Map<string, Loc
         if (play) add(rep.scoresSent, chart(a.key));
         else rep.sent.push(a.path);
         rep.sentBytes += size;
-        if (a.op === 'keepLocal') rep.newer.push({ path: a.path, kept: 'local', dev: a.remote.dev, localTime: local.get(a.key)!.mtime, remoteTime: a.remote.time });
+        if (a.op === 'keepLocal') rep.newer.push({ path: a.path, kept: 'local', dev: run.nameOf(a.remote), localTime: local.get(a.key)!.mtime, remoteTime: a.remote.time });
         break;
       }
       case 'down':
@@ -1273,12 +1325,19 @@ function summarize(rep: SongReport, acts: readonly Act[], local: Map<string, Loc
         if (play) add(rep.scoresGot, chart(a.key));
         else rep.got.push(a.path);
         rep.gotBytes += a.remote.size;
-        if (a.remote.dev) rep.from = a.remote.dev;
-        if (a.op === 'keepRemote') rep.newer.push({ path: a.path, kept: 'remote', dev: a.remote.dev, localTime: local.get(a.key)!.mtime, remoteTime: a.remote.time });
+        {
+          const who = run.otherOf(a.remote);
+          if (who && play) rep.scoresFrom = addName(rep.scoresFrom, who);
+          else if (who) rep.from = addName(rep.from, who);
+        }
+        if (a.op === 'keepRemote') rep.newer.push({ path: a.path, kept: 'remote', dev: run.nameOf(a.remote), localTime: local.get(a.key)!.mtime, remoteTime: a.remote.time });
         break;
-      case 'merge':
+      case 'merge': {
         rep.merged.push({ chart: chart(a.key), plays: 0 });
+        const who = run.otherOf(a.remote);
+        if (who) rep.scoresFrom = addName(rep.scoresFrom, who);
         break;
+      }
       case 'trash':
         rep.trashed.push(a.path);
         break;
@@ -1292,7 +1351,6 @@ function summarize(rep: SongReport, acts: readonly Act[], local: Map<string, Loc
         break;
     }
   }
-  void remote;
 }
 
 /**
@@ -1412,7 +1470,11 @@ export async function resumeSong(o: { lib: LibAccess; root: string; path: string
   o.lib.touched?.(o.root, o.path);
 }
 
-/** 控えの版に戻す（その版をもう一度新しい方として送る。どちらの PC もその版になる） */
+function devPropsOf(s: Pick<SyncSettings, 'pc' | 'pcId'>): Record<string, string> {
+  return { dev: s.pc, ...(s.pcId ? { devId: s.pcId } : {}) };
+}
+
+/** 控えの版に戻す（その版をもう一度新しい方として送る。どの PC もその版になる） */
 export async function restoreBackup(o: { lib: LibAccess; state: SyncState; settings: SyncSettings; driveId: string; path: string; backupId: string }): Promise<void> {
   const s = o.state.songs[o.driveId];
   if (!s) throw new Error(tr('この曲はもう同期していません', 'This song is no longer synced'));
@@ -1439,16 +1501,50 @@ export async function restoreBackup(o: { lib: LibAccess; state: SyncState; setti
   }
   let res: DriveFile;
   try {
-    res = await upload({ id, name: at.split('/').pop()!, parent, data: file, modifiedTime: iso(file.lastModified), appProperties: { dev: o.settings.pc } });
+    res = await upload({ id, name: at.split('/').pop()!, parent, data: file, modifiedTime: iso(file.lastModified), appProperties: devPropsOf(o.settings) });
   } catch (e) {
     if (!(e instanceof DriveError && e.status === 404)) throw e;
     id = undefined;
-    res = await upload({ name: at.split('/').pop()!, parent: o.driveId, data: file, modifiedTime: iso(file.lastModified), appProperties: { dev: o.settings.pc } });
+    res = await upload({ name: at.split('/').pop()!, parent: o.driveId, data: file, modifiedTime: iso(file.lastModified), appProperties: devPropsOf(o.settings) });
   }
   o.state.mine[res.id] = res.md5Checksum ?? '';
   link.files[key] = { id: res.id, md5: res.md5Checksum ?? '', size: file.size, mtime: file.lastModified, path: at };
   await writeIn(dir, LINK_FILE, new Blob([JSON.stringify(link)]));
   o.lib.touched?.(s.root, s.path);
+}
+
+// ---- 同期している PC ---------------------------------------------------------------------
+
+/** .sync の中の PC（同じ PC が 2 つあれば新しい方。新しく同期した順） */
+async function readPcList(dir: string): Promise<PcInfo[]> {
+  const files = await listFiles(`'${q(dir)}' in parents and appProperties has { key='dtxe' and value='pc' } and trashed = false`);
+  const by = new Map<string, PcInfo>();
+  for (const f of files) {
+    const id = f.appProperties?.devId || f.name.replace(/\.json$/i, '');
+    const at = Date.parse(f.modifiedTime ?? '') || 0;
+    const have = by.get(id);
+    if (have && have.at >= at) continue;
+    by.set(id, { id, name: f.appProperties?.pc ?? '', at, file: f.id });
+  }
+  return [...by.values()].sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
+}
+
+/** 同期している PC を Drive から読む（何も作らない。まだ誰も同期していなければ空） */
+export async function listPcs(): Promise<PcInfo[]> {
+  const root = await appRoot(false);
+  if (!root) return [];
+  const dir = (await listFiles(`'${q(root)}' in parents and appProperties has { key='dtxe' and value='sync' } and mimeType = '${FOLDER_MIME}' and trashed = false`))[0];
+  return dir ? readPcList(dir.id) : [];
+}
+
+/**
+ * 同期している PC の一覧から外す（使わなくなった PC。.sync のファイルを Drive のゴミ箱へ）。
+ * その PC のファイルと Drive の曲はそのまま。その PC がまた同期すると、一覧に戻る
+ */
+export async function forgetPc(p: Pick<PcInfo, 'file'>): Promise<void> {
+  await trashFile(p.file).catch((e) => {
+    if (!(e instanceof DriveError && e.status === 404)) throw e;
+  });
 }
 
 export type { BaseRec };

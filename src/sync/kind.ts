@@ -1,7 +1,8 @@
 // PC どうしの同期で、曲のフォルダのファイルを「作るファイル」と「遊ぶファイル」に分ける。
 // - 遊ぶファイル（play）：DTXMania が譜面の隣に書く成績 <譜面>.score.ini と、ゴースト <譜面>.<hiscore|hiskill|lastplay>.<dr|gt|bs>.ghost。
-//   両方の PC で遊んだら中身をまとめる（src/sync/scoreIni.ts）。自動では消さない。
-// - 作るファイル（make）：そのほか（譜面・set.def・音・画像・動画・作業ファイル）。両方で直したら新しい方＋控え。
+//   この PC とほかの PC で遊んだら中身をまとめる（src/sync/scoreIni.ts）。自動では消さない。
+// - 作るファイル（make）：そのほか（譜面・set.def・音・画像・動画・作業ファイル）。この PC とほかの PC で直したら新しい方＋控え。
+// 「作る」「遊ぶ」はファイルの種類で、PC の役割ではない（どの PC も作れて遊べる）。
 // どれも DTXManiaNX のソース（CStageResult.cs・CScoreIni.cs）で確かめた名前。
 
 export type FileKind = 'make' | 'play';

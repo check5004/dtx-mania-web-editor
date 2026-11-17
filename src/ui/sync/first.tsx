@@ -5,11 +5,11 @@ import { pl, tr } from '../../i18n';
 import { useNxLib } from '../../nxlib/store';
 import { bytesText } from '../../nxlib/view';
 import { BACKUP_NAME } from '../../sync/engine';
-import { openSyncPanel, startFirst, usePcSync } from '../../sync/store';
+import { openSyncPanel, pcsOf, startFirst, usePcSync } from '../../sync/store';
 import type { Ask, RunReport, SongReport } from '../../sync/types';
 import { Icon } from '../icons';
 import { updText } from '../nxlib/parts';
-import { chartName, libSongOf, progressText } from './common';
+import { chartName, libSongOf, otherPcs, pcNames, progressText } from './common';
 
 /** 聞くことの、おすすめの答え */
 export function recommended(a: Ask): string {
@@ -21,7 +21,7 @@ export function recommended(a: Ask): string {
 
 /** 聞くことの答えの選び方 */
 export function askChoices(a: Ask, pc: string): { v: string; t: string; d: string }[] {
-  const other = a.kind === 'file' ? a.remote.dev || tr('ほかの PC', 'the other PC') : '';
+  const other = a.kind === 'file' ? a.remote.dev || tr('ほかの PC', 'another PC') : '';
   switch (a.kind) {
     case 'file':
       return [
@@ -88,7 +88,7 @@ export function askHead(a: Ask, songName: (lib: string, path: string) => string)
           a.why === 'clock'
             ? tr('この PC の時計が Drive と 5 分以上ずれているので、どちらが新しいか決められません。', "This PC's clock is more than 5 minutes off from Drive, so it can't tell which is newer.")
             : tr(
-                'この PC の方が新しい日付です。初めて合わせるので、どちらの PC で直したか分からないので聞きます。',
+                'この PC の方が新しい日付です。初めて合わせるので、どの PC で直したのか分からず、聞きます。',
                 "This PC's copy has a newer date. This is the first sync, so it can't tell which PC changed it.",
               ),
       };
@@ -282,6 +282,9 @@ export function FirstPanel() {
   const progress = usePcSync((s) => s.progress);
   const error = usePcSync((s) => s.error);
   const pc = usePcSync((s) => s.settings.pc);
+  const pcId = usePcSync((s) => s.settings.pcId);
+  const pcs = usePcSync(pcsOf);
+  const others = otherPcs(pcs, { pc, pcId }).map((p) => p.name);
   const songs = useNxLib((s) => s.songs);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<Tab>('all');
@@ -415,7 +418,7 @@ export function FirstPanel() {
       h: tr('まとめる', 'Merge'),
       v: String(sum.merged),
       u: tr('譜面', pl(sum.merged, 'chart')),
-      s: tr('両方の DTXMania で遊んでいた成績。いい記録を残し、回数は多い方に', 'Records played in DTXMania on both PCs. The better records are kept, the larger play count wins'),
+      s: tr('この PC でも、ほかの PC の DTXMania でも遊んでいた成績。いい記録を残し、回数は多い方に', 'Records played in DTXMania both here and on other PCs. The better records are kept, the larger play count wins'),
     },
     {
       cls: '',
@@ -425,8 +428,8 @@ export function FirstPanel() {
       v: String(sum.newer),
       u: tr('ファイル', pl(sum.newer, 'file')),
       s: tr(
-        `両方にあって中身が違う譜面・音（${sum.newerSongs} 曲）。古い方は控えへ`,
-        `Charts and sounds that differ on both sides (${sum.newerSongs} ${pl(sum.newerSongs, 'song')}). Older ones go to backups`,
+        `この PC と Drive で中身が違う譜面・音（${sum.newerSongs} 曲）。古い方は控えへ`,
+        `Charts and sounds that differ between this PC and Drive (${sum.newerSongs} ${pl(sum.newerSongs, 'song')}). Older ones go to backups`,
       ),
     },
     {
@@ -461,6 +464,11 @@ export function FirstPanel() {
               `この PC の DTXMania の曲（${folders} 曲）と Google Drive の曲を比べました。まだ何も書き換えていません。`,
               `Compared this PC's DTXMania songs (${folders}) with the songs on Google Drive. Nothing has been changed yet.`,
             )}
+            {others.length > 0 &&
+              tr(
+                ` Drive には、ほかの PC（${pcNames(others, 3)}）が同期した曲と成績があります。`,
+                ` Drive holds the songs and records your other ${pl(others.length, 'PC')} (${pcNames(others, 3)}) synced.`,
+              )}
           </p>
         </div>
         {pc && <span className="ps-me">{tr(`この PC：${pc}`, `This PC: ${pc}`)}</span>}

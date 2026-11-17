@@ -1,15 +1,18 @@
-// PC どうしの同期をはじめる・設定を変える画面（PC の名前・合わせる曲・一緒に合わせるもの・Drive の空き・いつ合わせるか）と、
+// PC どうしの同期をはじめる・設定を変える画面（同期している PC・この PC の名前・合わせる曲・一緒に合わせるもの・Drive の空き・いつ合わせるか）と、
 // 「全部の曲」を選んだときの容量の警告。大きさは曲のフォルダのファイルの大きさを数える（中身は読まない）。
+// PC は何台でもよく、役割は無い（どの PC も作れて遊べる）。Drive がまん中で、それぞれの PC が Drive と合わせる。
 import { useEffect, useMemo, useState } from 'react';
 import { pl, tr } from '../../i18n';
 import { signIn, tokenValid, useDriveAuth } from '../../drive/auth';
 import type { LibSong } from '../../nxlib/scan';
 import { ensureNxPerm, pickNxPlace, useNxLib } from '../../nxlib/store';
 import { boxRel, boxRootKey, bytesText } from '../../nxlib/view';
-import { driveSpace, inScope, libKeyFn, measureSongs, openSyncPanel, previewFirst, saveSettings, songKey, stopPcSync, syncNow, usePcSync, type LibKeyFn, type SongSize } from '../../sync/store';
-import { DEFAULT_SETTINGS, type SyncSettings } from '../../sync/types';
+import { driveSpace, inScope, libKeyFn, measureSongs, openSyncPanel, pcsOf, previewFirst, refreshPcs, removePc, saveSettings, songKey, stopPcSync, syncNow, usePcSync, type LibKeyFn, type SongSize } from '../../sync/store';
+import { DEFAULT_SETTINGS, type PcInfo, type SyncSettings } from '../../sync/types';
+import { toast } from '../../store/editor';
 import { confirmDialog } from '../dialogs';
 import { Icon } from '../icons';
+import { otherPcs, pcSeenText, useNow } from './common';
 
 type Draft = Pick<SyncSettings, 'pc' | 'scope' | 'boxes' | 'songs' | 'video' | 'scores' | 'scoresOnly'>;
 
@@ -32,6 +35,24 @@ function upTime(bytes: number): string {
 function planName(limit: number): string {
   return limit <= FREE_LIMIT ? tr('無料 15 GB', 'free 15 GB') : bytesText(limit);
 }
+
+/** この PC の名前の例（役割でなく、PC の形・置き場所の名前） */
+function nameChips(): string[] {
+  return [tr('デスクトップ', 'Desktop'), tr('ノートPC', 'Laptop'), tr('リビングPC', 'Living room PC')];
+}
+
+const nameKey = (n: string) => n.trim().toLowerCase();
+
+/** ほかの PC と重ならない、はじめの名前（例から。全部使っていれば「PC 2」…） */
+function freeName(others: readonly PcInfo[]): string {
+  const used = new Set(others.map((p) => nameKey(p.name)));
+  const free = nameChips().find((n) => !used.has(nameKey(n)));
+  if (free) return free;
+  for (let i = 2; ; i++) if (!used.has(nameKey(`PC ${i}`))) return `PC ${i}`;
+}
+
+/** しばらく同期していない PC（一覧で薄く出す。使わなくなったなら外せる） */
+const QUIET = 30 * 86_400_000;
 
 /** 曲・BOX の場所 → Drive での並び（DTXMania の曲を読み直したら作り直す） */
 function useLibKeyFn(): LibKeyFn | null {
@@ -145,8 +166,13 @@ export function SetupPanel() {
   const place = useNxLib((s) => s.place);
   const perm = useNxLib((s) => s.perm);
   const token = useDriveAuth((a) => a.token);
+  const pcs = usePcSync(pcsOf);
+  const others = useMemo(() => otherPcs(pcs, settings), [pcs, settings]);
+  const now = useNow();
+  /** 名前を選んだ・入れた（まだなら、ほかの PC の一覧を読んだら重ならない名前にする） */
+  const [named, setNamed] = useState(!!settings.pc);
   const [d, setD] = useState<Draft>(() => ({
-    pc: settings.pc || tr('作るPC', 'Making PC'),
+    pc: settings.pc || freeName(others),
     scope: settings.scope,
     boxes: settings.boxes,
     songs: settings.songs,
@@ -160,6 +186,18 @@ export function SetupPanel() {
   const keyFn = useLibKeyFn();
   const space = useDriveSpace();
   const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
+  const setName = (pc: string) => {
+    setNamed(true);
+    set({ pc });
+  };
+
+  // 同期している PC を Drive から読み直す（ログインしていれば。何も書かない）
+  useEffect(() => {
+    void refreshPcs();
+  }, [token]);
+  useEffect(() => {
+    if (!named) setD((x) => ({ ...x, pc: freeName(others) }));
+  }, [others, named]);
 
   // 曲のフォルダごとに 1 つ（set.def の曲は 1 フォルダに何曲もある）と、Drive での並び
   const folders = useMemo(() => {
@@ -221,6 +259,26 @@ export function SetupPanel() {
   const close = () => openSyncPanel(null);
   const signedIn = !!token && tokenValid();
   const name = d.pc.trim();
+  /** 同じ名前のほかの PC（印で見分けるので同期はできる。記録で見分けにくい） */
+  const twin = name ? others.find((p) => nameKey(p.name) === nameKey(name)) : undefined;
+  const chips = nameChips().filter((n) => n === d.pc || !others.some((p) => nameKey(p.name) === nameKey(n)));
+
+  const forget = async (p: PcInfo) => {
+    const ok = await confirmDialog({
+      title: tr(`「${p.name}」を同期している PC から外しますか？`, `Remove "${p.name}" from the synced PCs?`),
+      body: tr(
+        '使わなくなった PC を一覧から片付けます。その PC のファイルと、Drive の曲・成績はそのまま残ります。その PC でまた同期すると、一覧に戻ります。',
+        'This tidies a PC you no longer use out of the list. Its files, and the songs and records on Drive, stay as they are. If that PC syncs again, it comes back to the list.',
+      ),
+      ok: tr('一覧から外す', 'Remove from the list'),
+    });
+    if (!ok) return;
+    try {
+      await removePc(p);
+    } catch (e) {
+      toast(tr(`外せませんでした: ${e instanceof Error ? e.message : String(e)}`, `Couldn't remove it: ${e instanceof Error ? e.message : String(e)}`), 'error', 8000);
+    }
+  };
 
   const next = () => {
     const p = { ...d, pc: name };
@@ -279,8 +337,8 @@ export function SetupPanel() {
           <h2>{settings.on ? tr('PC どうしの同期の設定', 'PC sync settings') : tr('Google Drive で PC どうしを同期する', 'Sync your PCs through Google Drive')}</h2>
           <p>
             {tr(
-              '作る PC で直した曲は遊ぶ PC の DTXMania へ、遊ぶ PC の成績は作る PC へ。同じ Google アカウントの Drive を通して、ファイルごとに比べて合わせます。',
-              'Songs fixed on the PC you make on go to DTXMania on the PC you play on, and records go the other way. Files are compared one by one through the Drive of the same Google account.',
+              'この PC の DTXMania の曲を、同じ Google アカウントの Drive を通して、ほかの PC と合わせます。PC は何台でもよく、どの PC でも作れて遊べます。ファイルごとに比べて合わせます。',
+              'Keeps the DTXMania songs on this PC in step with your other PCs through the Drive of the same Google account. Any number of PCs, and each one can both make and play. Files are compared one by one.',
             )}
           </p>
         </div>
@@ -288,17 +346,7 @@ export function SetupPanel() {
           {Icon.close(14)}
         </button>
       </div>
-      <div className="ps-flow">
-        <span className="pcb">{tr('作るPC：譜面・音・画像', 'Making PC: charts, sounds, images')}</span>
-        <span className="arr">⇄</span>
-        <span className="pcb drive">
-          {Icon.cloud(12)}
-          Google Drive
-        </span>
-        <span className="arr">⇄</span>
-        <span className="pcb">{tr('遊ぶPC：成績・ゴースト', 'Playing PC: records, ghosts')}</span>
-        <span className="lbl">{tr('どちら向きにも流れます', 'Both ways')}</span>
-      </div>
+      <PcHub me={name} others={others} now={now} signedIn={signedIn} onForget={(p) => void forget(p)} />
 
       {!place ? (
         <div className="nx-notice info">
@@ -325,19 +373,29 @@ export function SetupPanel() {
             <div className="ps-sb">
               <span className="h">{tr('この PC の名前', 'Name of this PC')}</span>
               <div className="ps-row">
-                <input className="ps-field" value={d.pc} maxLength={20} onChange={(e) => set({ pc: e.target.value })} aria-label={tr('この PC の名前', 'Name of this PC')} />
-                {[tr('作るPC', 'Making PC'), tr('遊ぶPC', 'Playing PC'), tr('ノートPC', 'Laptop')].map((n) => (
-                  <button key={n} className={`ps-c ${d.pc === n ? 'on' : ''}`} onClick={() => set({ pc: n })}>
+                <input className="ps-field" value={d.pc} maxLength={20} onChange={(e) => setName(e.target.value)} aria-label={tr('この PC の名前', 'Name of this PC')} />
+                {chips.map((n) => (
+                  <button key={n} className={`ps-c ${d.pc === n ? 'on' : ''}`} onClick={() => setName(n)}>
                     {n}
                   </button>
                 ))}
               </div>
-              <span className="lbl">
-                {tr(
-                  'どちらの PC でも作れて遊べます。名前は「どの PC で変わったか」として記録と知らせに出すだけです。',
-                  'Either PC can make and play. The name only shows in the log and notices as "which PC changed it".',
-                )}
-              </span>
+              {twin ? (
+                <span className="d warn">
+                  {Icon.warn(12)}
+                  {tr(
+                    `ほかの PC にも「${twin.name}」があります（前の同期 ${pcSeenText(twin, now)}）。同期はできますが、記録でどちらの PC か見分けやすいよう、別の名前がおすすめです。`,
+                    `Another PC is also called "${twin.name}" (last sync ${pcSeenText(twin, now)}). Syncing still works, but a different name makes the log easier to read.`,
+                  )}
+                </span>
+              ) : (
+                <span className="lbl">
+                  {tr(
+                    '名前は「どの PC で変わったか」として、記録と知らせに出すだけです。役割は決めません（どの PC でも作れて遊べます）。',
+                    'The name only shows in the log and notices as "which PC changed it". It sets no role (every PC can make and play).',
+                  )}
+                </span>
+              )}
             </div>
           </div>
 
@@ -497,8 +555,8 @@ export function SetupPanel() {
                   {tr('成績とゴースト（DTXMania が書く *.score.ini・*.ghost）', 'Records and ghosts (*.score.ini, *.ghost written by DTXMania)')}
                   <small>
                     {tr(
-                      '合わせる曲の分。小さいファイルです。両方の PC で遊んでも、いい記録を残して回数は足します',
-                      'For the synced songs. Small files. Even if you play on both PCs, the better records are kept and play counts are added up',
+                      '合わせる曲の分。小さいファイルです。いくつの PC で遊んでも、いい記録を残して回数は足します',
+                      'For the synced songs. Small files. However many PCs you play on, the better records are kept and play counts are added up',
                     )}
                   </small>
                 </span>
@@ -520,8 +578,8 @@ export function SetupPanel() {
                     {d.scope === 'all'
                       ? tr('全部の曲を合わせるので、成績も全部合わせます', 'All songs are synced, so all records are too')
                       : tr(
-                          `両方の PC にある曲の成績をそろえます。${totals.rest.charts.toLocaleString()} 譜面ぶん。はじめは時間がかかります`,
-                          `Keeps records in step for songs on both PCs. ${totals.rest.charts.toLocaleString()} ${pl(totals.rest.charts, 'chart')}. The first time takes a while`,
+                          `ほかの PC にもある曲の成績をそろえます。${totals.rest.charts.toLocaleString()} 譜面ぶん。はじめは時間がかかります`,
+                          `Keeps records in step for songs your other PCs also have. ${totals.rest.charts.toLocaleString()} ${pl(totals.rest.charts, 'chart')}. The first time takes a while`,
                         )}
                   </small>
                 </span>
@@ -582,8 +640,8 @@ export function SetupPanel() {
           <>
             <span className="lbl">
               {tr(
-                '2 台目の PC でも、ここから始めます。Drive にある曲とこの PC の曲を比べて、始める前に何が起きるかを見せます。',
-                'Start here on your second PC too. The songs on Drive and on this PC are compared, and you see what will happen before anything starts.',
+                'ほかの PC も、それぞれここから始めます（何台でも）。Drive にある曲とこの PC の曲を比べて、始める前に何が起きるかを見せます。',
+                'Start here on each of your other PCs too (any number). The songs on Drive and on this PC are compared, and you see what will happen before anything starts.',
               )}
             </span>
             <button className="btn ghost" onClick={close}>
@@ -595,6 +653,62 @@ export function SetupPanel() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 同期している PC：この PC ⇄ Google Drive ⇄ ほかの PC（何台でも）。Drive がまん中で、どの PC も同じ。
+ * ほかの PC は前の同期の新しい順。使わなくなった PC は × で一覧から外せる
+ */
+function PcHub({ me, others, now, signedIn, onForget }: { me: string; others: readonly PcInfo[]; now: number; signedIn: boolean; onForget: (p: PcInfo) => void }) {
+  return (
+    <div className="ps-hub">
+      <div className="ps-hub-row">
+        <span className="pcb me">
+          {Icon.pc(13)}
+          <b>{me || tr('この PC', 'This PC')}</b>
+          {me && <span className="w">{tr('この PC', 'this PC')}</span>}
+        </span>
+        <span className="arr">⇄</span>
+        <span className="pcb drive">
+          {Icon.cloud(13)}
+          Google Drive
+        </span>
+        <span className="arr">⇄</span>
+        <div className="ps-hub-others">
+          {others.map((p) => (
+            <span key={p.id || p.name} className={`pcb ${now - p.at > QUIET ? 'quiet' : ''}`} title={tr(`前の同期 ${pcSeenText(p, now)}`, `Last sync ${pcSeenText(p, now)}`)}>
+              {Icon.pc(13)}
+              <b>{p.name || '—'}</b>
+              <span className="w">{pcSeenText(p, now)}</span>
+              {p.file && (
+                <button className="ib x" onClick={() => onForget(p)} aria-label={tr(`「${p.name}」を一覧から外す`, `Remove "${p.name}" from the list`)} title={tr('一覧から外す…', 'Remove from the list…')}>
+                  {Icon.close(10)}
+                </button>
+              )}
+            </span>
+          ))}
+          <span className="pcb add">
+            {Icon.plus(12)}
+            {others.length ? tr('何台でも', 'Any number') : tr('ほかの PC（何台でも）', 'Your other PCs (any number)')}
+          </span>
+        </div>
+      </div>
+      <span className="lbl">
+        {tr(
+          '譜面・音・画像も、成績・ゴーストも、それぞれの PC と Drive のあいだを両向きに流れます。',
+          'Charts, sounds and images, and records and ghosts, all flow both ways between each PC and Drive.',
+        )}
+        {others.length > 0
+          ? tr(
+              ' 使わなくなった PC は × で一覧から外せます（その PC がまた同期すると戻ります）。',
+              ' Remove a PC you no longer use with × (it comes back if that PC syncs again).',
+            )
+          : signedIn
+            ? tr(' ほかの PC はまだ同期していません。', ' No other PC has synced yet.')
+            : tr(' ほかの PC は、ログインすると出ます。', ' Your other PCs show up after you sign in.')}
+      </span>
     </div>
   );
 }

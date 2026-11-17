@@ -7,12 +7,12 @@ import type { LibSong } from '../../nxlib/scan';
 import { useNxLib } from '../../nxlib/store';
 import { bytesText } from '../../nxlib/view';
 import { useEditor } from '../../store/editor';
-import { answerAndSync, markDone, openSyncPanel, pcSyncPlace, restoreFromLog, syncNow, usePcSync, type LogEntry } from '../../sync/store';
+import { answerAndSync, markDone, openSyncPanel, pcSyncPlace, pcsOf, restoreFromLog, syncNow, usePcSync, type LogEntry } from '../../sync/store';
 import { BACKUP_NAME } from '../../sync/engine';
-import type { Ask, SongReport } from '../../sync/types';
+import type { Ask, PcInfo, SongReport } from '../../sync/types';
 import { Icon } from '../icons';
 import { updText } from '../nxlib/parts';
-import { agoText, chartName, fileList, hm, isChartFile, libSongOf, newsText, progressText, runTitle, samePath, scopeName, useNow } from './common';
+import { agoText, chartName, fileList, hm, isChartFile, libSongOf, newsText, pcNames, pcSeenText, progressText, runTitle, samePath, scopeName, sourcesOf, useNow } from './common';
 import { AskCard, recommended } from './first';
 
 /** 控えを Drive の画面で開く */
@@ -27,6 +27,7 @@ export function LogDrawer() {
   const progress = usePcSync((s) => s.progress);
   const error = usePcSync((s) => s.error);
   const songs = useNxLib((s) => s.songs);
+  const pcs = usePcSync(pcsOf);
   const now = useNow();
   const asks = log[0]?.asks ?? [];
   const runs = log.filter((l) => !l.dry);
@@ -100,6 +101,7 @@ export function LogDrawer() {
           </button>
         </div>
         {state}
+        <PcRow pcs={pcs} me={set} now={now} />
       </div>
       <div className="ps-body">
         {asks.length > 0 && <Asks asks={asks} songs={songs} log={log} pc={set.pc} busy={status === 'busy'} />}
@@ -116,6 +118,25 @@ export function LogDrawer() {
         </span>
       </div>
     </aside>
+  );
+}
+
+/** 同期している PC（この PC も。何台でも）。前の同期の新しい順 */
+function PcRow({ pcs, me, now }: { pcs: readonly PcInfo[]; me: { pc: string; pcId: string }; now: number }) {
+  const isMe = (p: { id: string; name: string }) => (me.pcId ? p.id === me.pcId : p.name === me.pc);
+  const list = pcs.some(isMe) || !me.pc ? pcs : [{ id: me.pcId, name: me.pc, at: 0, file: '' }, ...pcs];
+  if (!list.length) return null;
+  return (
+    <div className="ps-pcs" aria-label={tr('同期している PC', 'Synced PCs')}>
+      <span className="lbl">{tr(`同期している PC ${list.length} 台`, `${list.length} synced ${pl(list.length, 'PC')}`)}</span>
+      {list.map((p) => (
+        <span key={p.id || p.name} className={`ps-pc ${isMe(p) ? 'me' : ''}`} title={p.at ? tr(`前の同期 ${pcSeenText(p, now)}`, `Last sync ${pcSeenText(p, now)}`) : ''}>
+          {Icon.pc(12)}
+          <b>{p.name || '—'}</b>
+          <span className="w">{isMe(p) ? tr('この PC', 'this PC') : pcSeenText(p, now)}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -163,7 +184,7 @@ function Run({ l, songs, me }: { l: LogEntry; songs: readonly LibSong[]; me: str
   const evs: ReactNode[] = [];
   const name = (s: SongReport) => s.title || s.lib.split('/').pop() || s.lib;
   const song = (s: SongReport) => libSongOf(songs, s);
-  const from = useMemo(() => [...new Set(l.songs.map((s) => s.from).filter((x): x is string => !!x))], [l.songs]);
+  const from = useMemo(() => [...new Set(l.songs.flatMap((s) => [...sourcesOf(s).make, ...sourcesOf(s).play]))], [l.songs]);
   const boxes = useNxLib((st) => st.boxes);
   // BOX の名前（box.def の #TITLE。無ければ「DTXFiles.」を除いたフォルダ名。DTXMania と同じ）
   const boxName = (dir: string) => boxes.find((b) => b.dirName.toLowerCase() === dir.toLowerCase())?.title ?? dir.replace(/^dtxfiles\./i, '');
@@ -191,17 +212,19 @@ function Run({ l, songs, me }: { l: LogEntry; songs: readonly LibSong[]; me: str
   for (const s of l.songs.filter((x) => x.merged.length)) {
     const news = (s.news ?? []).filter((n) => n.merged);
     const max = s.merged.every((m) => m.max);
+    const others = sourcesOf(s).play;
+    const who = others.length ? pcNames(others) : '';
     evs.push(
       <Ev key={`merged:${s.lib}`} ic="merge" icon={Icon.merge(13)} title={tr(`成績をまとめました · ${name(s)}`, `Merged records · ${name(s)}`)}>
         <span>
           {max
             ? tr(
-                '両方の DTXMania に成績がありました。いい方の記録を残し、回数は多い方にしました（初めて合わせたので、同じ回を 2 回数えないように）。',
-                'Both PCs had records in DTXMania. The better records were kept and the larger play count was used (first time, so the same plays are not counted twice).',
+                `この PC と ${who || 'ほかの PC'} の DTXMania に、どちらも成績がありました。いい方の記録を残し、回数は多い方にしました（初めて合わせたので、同じ回を 2 回数えないように）。`,
+                `This PC and ${who || 'another PC'} both had records in DTXMania. The better records were kept and the larger play count was used (first time, so the same plays are not counted twice).`,
               )
             : tr(
-                '両方の DTXMania で遊んでいました。いい方の記録を残し、回数は両方で増えた分を足しました。',
-                'It was played in DTXMania on both PCs. The better records were kept and the play counts from both were added up.',
+                `この PC と ${who || 'ほかの PC'} の DTXMania で遊んでいました。いい方の記録を残し、回数はそれぞれで増えた分を足しました。`,
+                `It was played in DTXMania on this PC and on ${who || 'another PC'}. The better records were kept and the plays from each were added up.`,
               )}
           {news.length > 0 && ` ${news.map((n) => newsText(n, chartName(song(s), n.chart))).join(tr('・', ', '))}`}
         </span>
@@ -216,7 +239,7 @@ function Run({ l, songs, me }: { l: LogEntry; songs: readonly LibSong[]; me: str
       <Ev key={`new:${s.lib}`} ic="down" icon={Icon.arrowDown(13)} title={tr(`新しい曲を取り込みました · ${name(s)}`, `Got a new song · ${name(s)}`)}>
         <span>
           {box ? tr(`BOX「${box}」に入れました`, `Put into the BOX "${box}"`) : tr('BOX の外に入れました', 'Put outside any BOX')}
-          {s.from ? tr(`（${s.from} から）`, ` (from ${s.from})`) : ''}
+          {sourcesOf(s).make.length ? tr(`（${pcNames(sourcesOf(s).make)} から）`, ` (from ${pcNames(sourcesOf(s).make)})`) : ''}
           {tr('。DTXMania の Fast Reload で出ます。', '. It shows up after Fast Reload in DTXMania.')}
         </span>
       </Ev>,
@@ -244,7 +267,7 @@ function Run({ l, songs, me }: { l: LogEntry; songs: readonly LibSong[]; me: str
                 : ''}
               {charts.length && charts.length < s.got.length ? tr(' · ', ' · ') : ''}
               {charts.length < s.got.length ? fileList(s.got.filter((p) => !isChartFile(p))) : ''}
-              {s.from ? tr(`（${s.from}）`, ` (${s.from})`) : ''}
+              {sourcesOf(s).make.length ? tr(`（${pcNames(sourcesOf(s).make)}）`, ` (${pcNames(sourcesOf(s).make)})`) : ''}
             </Ln>
           );
         })}
@@ -467,11 +490,11 @@ function Ln({ nm, children }: { nm: string; children: ReactNode }) {
   );
 }
 
-/** 両方で直されていたファイル：どちらを残したか・控えに戻す・これでよい */
+/** この PC とほかの PC の両方で直されていたファイル：どちらを残したか・控えに戻す・これでよい */
 function Newer({ l, s, n, song, me }: { l: LogEntry; s: SongReport; n: SongReport['newer'][number]; song: LibSong | undefined; me: string }) {
   const [busy, setBusy] = useState(false);
   const done = !!l.done?.includes(n.path);
-  const other = n.dev || tr('ほかの PC', 'the other PC');
+  const other = n.dev || tr('ほかの PC', 'another PC');
   const here = me ? tr(`${me}（この PC）`, `${me} (this PC)`) : tr('この PC', 'This PC');
   const name = s.title || s.lib;
   const file = n.path.split('/').pop() ?? n.path;
@@ -502,7 +525,7 @@ function Newer({ l, s, n, song, me }: { l: LogEntry; s: SongReport; n: SongRepor
       <div className="hd">
         <span className="ps-ei merge">{Icon.merge(13)}</span>
         <div className="ps-eb">
-          <b>{tr(`両方で直されていたファイル · ${what}`, `Changed on both PCs · ${what}`)}</b>
+          <b>{tr(`ほかの PC でも直されていたファイル · ${what}`, `Also changed on another PC · ${what}`)}</b>
           <span>
             {l.why === 'first'
               ? tr(
@@ -560,8 +583,8 @@ function Newer({ l, s, n, song, me }: { l: LogEntry; s: SongReport; n: SongRepor
       )}
       <span className="lbl">
         {tr(
-          '控えは Drive の「DTX Web Editor / 控え」に 30 日残します（ほかの PC には取りません）。戻すと、どちらの PC も控えの版になります。',
-          `Backups stay in "DTX Web Editor / ${BACKUP_NAME}" on Drive for 30 days (not downloaded to other PCs). Restoring puts the backup version on both PCs.`,
+          '控えは Drive の「DTX Web Editor / 控え」に 30 日残します（ほかの PC には取りません）。戻すと、どの PC も控えの版になります（ほかの PC は次の同期で）。',
+          `Backups stay in "DTX Web Editor / ${BACKUP_NAME}" on Drive for 30 days (not downloaded to other PCs). Restoring puts the backup version on every PC (the others on their next sync).`,
         )}
       </span>
     </div>

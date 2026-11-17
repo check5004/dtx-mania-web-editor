@@ -2,6 +2,7 @@
 
 - 画面に出す文は `tr('日本語', 'English')` で両方書き、`node scripts/i18n-check.mjs` を 0 件にする。
 - ゲームは「DTXMania」と呼ぶ。画面の文・README・説明書・README の図に「NX」「DTXManiaNX」と書かない（楯さんの決め。`npm test` の `src/gameName.test.ts` が見張る）。コードの名前（nxlib など）とコメントはそのままでよい。
+- PC どうしの同期は PC が何台でもよく、PC に役割は無い（どの PC も作れて遊べる）。画面の文・README・説明書で PC を役割の名前（作る PC・遊ぶ PC・エディタ PC など）や「2 台目」「両方の PC」で呼ばず、「この PC」「ほかの PC」と書く（楯さんの決め。`npm test` の `src/pcRoles.test.ts` が見張る）。
 - 確かめは `npx tsc -b` と `npm test`。公開は `npm run deploy`（テストとビルドを通してから gh-pages に置く）。
 
 ## Safari・iPad（詳しくは docs/safari.md）

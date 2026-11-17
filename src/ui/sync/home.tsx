@@ -4,11 +4,11 @@ import { useMemo, useState } from 'react';
 import { pl, tr } from '../../i18n';
 import { openNxPage } from '../../nxlib/actions';
 import { useNxLib } from '../../nxlib/store';
-import { openSyncPanel, stopPcSync, syncNow, usePcSync } from '../../sync/store';
+import { openSyncPanel, pcsOf, stopPcSync, syncNow, usePcSync } from '../../sync/store';
 import { confirmDialog } from '../dialogs';
 import { Icon } from '../icons';
 import { updText } from '../nxlib/parts';
-import { agoText, hm, progressText, runSentence, runSum, runTitle, scopeName, useNow } from './common';
+import { agoText, hm, otherPcs, pcNames, progressText, runSentence, runSum, runTitle, scopeName, useNow } from './common';
 import { openSetup, syncedFolders } from './parts';
 
 /** 帯を閉じた（その同期より新しい同期まで出さない） */
@@ -190,13 +190,13 @@ export function PcSyncBanner() {
       icon: Icon.merge(12),
       t: tr('成績をまとめた曲', 'Songs with merged records'),
       n: sum.mergedSongs,
-      dim: tr('（両方で遊んでいた）', ' (played on both)'),
+      dim: tr('（ほかの PC でも遊んでいた）', ' (also played on another PC)'),
     });
   if (sum.newer)
     pills.push({
       ic: 'merge',
       icon: Icon.history(12),
-      t: tr('両方で直したファイル', 'Files changed on both'),
+      t: tr('ほかの PC でも直されていたファイル', 'Files also changed on another PC'),
       n: sum.newer,
       dim: tr('（新しい方に）', ' (newer kept)'),
     });
@@ -217,8 +217,8 @@ export function PcSyncBanner() {
             {runSentence(latest, sum)}
             {sum.newer > 0 &&
               tr(
-                '両方で直したファイルは新しい方にしました（記録で控えの版に戻せます）。',
-                ' Files changed on both PCs were set to the newer one (a backup can be restored from the log).',
+                'ほかの PC でも直されていたファイルは、新しい方にしました（記録で控えの版に戻せます）。',
+                ' Files also changed on another PC were set to the newer one (a backup can be restored from the log).',
               )}
           </span>
         </span>
@@ -267,6 +267,8 @@ export function PcSyncHomeRow() {
   const songs = useNxLib((s) => s.songs);
   const on = usePcSync((s) => s.settings.on);
   const pc = usePcSync((s) => s.settings.pc);
+  const pcId = usePcSync((s) => s.settings.pcId);
+  const pcs = usePcSync(pcsOf);
   const scope = usePcSync((s) => s.settings.scope);
   const status = usePcSync((s) => s.status);
   const next = usePcSync((s) => s.next);
@@ -283,7 +285,7 @@ export function PcSyncHomeRow() {
         <span className="ps-hr-i">{Icon.pc(15)}</span>
         <span className="ps-hr-t">
           <b>{tr('PC どうしの同期', 'PC sync')}</b>
-          <span className="lbl">{tr('作る PC と遊ぶ PC の DTXMania の曲と成績を、Google Drive で合わせます', 'Keeps DTXMania songs and records in step between the PC you make on and the PC you play on')}</span>
+          <span className="lbl">{tr('DTXMania の曲と成績を、ほかの PC と Google Drive で合わせます（PC は何台でも）', 'Keeps DTXMania songs and records in step with your other PCs through Google Drive (any number of PCs)')}</span>
         </span>
         <button className="btn small" onClick={openSetup}>
           {Icon.cloud(13)}
@@ -292,6 +294,8 @@ export function PcSyncHomeRow() {
       </div>
     );
   }
+  /** 同期している PC の数（この PC も） */
+  const nPc = otherPcs(pcs, { pc, pcId }).length + 1;
   let cls = '';
   let icon: React.ReactNode = Icon.checkCircle(15);
   let text: string;
@@ -334,6 +338,7 @@ export function PcSyncHomeRow() {
         <span className="lbl">
           {text}
           {tr(` · ${scopeName({ scope })} ${n} 曲`, ` · ${scopeName({ scope })}: ${n}`)}
+          {nPc > 1 && tr(` · PC ${nPc} 台`, ` · ${nPc} PCs`)}
         </span>
       </span>
       {act && (
@@ -352,6 +357,8 @@ export function PcSyncHomeRow() {
 export function PcSyncSettingsCard() {
   const set = usePcSync((s) => s.settings);
   const at = usePcSync((s) => s.state.at);
+  const pcs = usePcSync(pcsOf);
+  const others = otherPcs(pcs, set).map((p) => p.name);
   const supported = useNxLib((s) => s.supported);
   const place = useNxLib((s) => s.place);
   const songs = useNxLib((s) => s.songs);
@@ -377,8 +384,8 @@ export function PcSyncSettingsCard() {
       </div>
       <p className="lbl">
         {tr(
-          '作る PC と遊ぶ PC の DTXMania の曲を、Google Drive の「DTX Web Editor / DTXFiles」で合わせます。譜面・音は新しい方に（古い方は控えに 30 日）、成績とゴーストは両方の記録をまとめます。アプリを開いたとき・開いている間は 5 分ごと・保存したときに合わせます。',
-          'Keeps the DTXMania songs on the PC you make on and the PC you play on in step through "DTX Web Editor / DTXFiles" on Google Drive. Charts and sounds take the newer one (the older is kept as a backup for 30 days); records and ghosts are merged. It syncs when the app opens, every 5 minutes while open, and when you save.',
+          'DTXMania の曲を、Google Drive の「DTX Web Editor / DTXFiles」を通して、ほかの PC と合わせます。PC は何台でもよく、どの PC でも作れて遊べます。譜面・音は新しい方に（古い方は控えに 30 日）、成績とゴーストはどの PC の記録もまとめます。アプリを開いたとき・開いている間は 5 分ごと・保存したときに合わせます。',
+          'Keeps your DTXMania songs in step with your other PCs through "DTX Web Editor / DTXFiles" on Google Drive. Any number of PCs, and each one can both make and play. Charts and sounds take the newer one (the older is kept as a backup for 30 days); records and ghosts from every PC are merged. It syncs when the app opens, every 5 minutes while open, and when you save.',
         )}
       </p>
       {set.on && (
@@ -387,6 +394,8 @@ export function PcSyncSettingsCard() {
             `${scopeName(set)} ${synced.n} 曲 · 前の同期 ${at ? agoText(at, now) : 'まだ'}`,
             `${scopeName(set)}: ${synced.n} ${pl(synced.n, 'song')} · last sync ${at ? agoText(at, now) : 'not yet'}`,
           )}
+          {others.length > 0 &&
+            tr(` · ほかの PC ${others.length} 台（${pcNames(others)}）`, ` · ${others.length} other ${pl(others.length, 'PC')} (${pcNames(others)})`)}
         </p>
       )}
       <div className="row" style={{ gap: 8 }}>

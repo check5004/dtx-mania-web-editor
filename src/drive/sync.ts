@@ -137,8 +137,9 @@ export interface RemoteEntry {
   md5: string;
   size: number;
   modifiedTime: string;
-  /** 送った PC の名前（PC どうしの同期で送ったファイル） */
+  /** 送った PC の名前と印（PC どうしの同期で送ったファイル） */
   dev?: string;
+  devId?: string;
 }
 
 export interface LocalEntry {
@@ -322,7 +323,7 @@ export async function listTree(folderId: string): Promise<DriveTree> {
       // Google ドキュメントなど（中身を取れない）は見ない
       if (f.mimeType.startsWith('application/vnd.google-apps')) continue;
       if (!syncedPath(path)) continue;
-      const e: RemoteEntry = { id: f.id, path, md5: f.md5Checksum ?? '', size: Number(f.size ?? 0), modifiedTime: f.modifiedTime ?? '', ...(f.appProperties?.dev ? { dev: f.appProperties.dev } : {}) };
+      const e: RemoteEntry = { id: f.id, path, md5: f.md5Checksum ?? '', size: Number(f.size ?? 0), modifiedTime: f.modifiedTime ?? '', ...(f.appProperties?.dev ? { dev: f.appProperties.dev } : {}), ...(f.appProperties?.devId ? { devId: f.appProperties.devId } : {}) };
       // 同じ名前が2つあれば新しい方
       const old = files.get(key);
       if (!old || old.modifiedTime < e.modifiedTime) files.set(key, e);

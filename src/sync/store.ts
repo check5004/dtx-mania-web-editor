@@ -14,11 +14,11 @@ import type { LibSong } from '../nxlib/scan';
 import { dropNxFolder, ensureNxPerm, nxPlaceOf, refreshNxFolder, rootDirOf, useNxLib } from '../nxlib/store';
 import { outsideRel, rootSpecs } from '../nxlib/view';
 import { toast, useEditor } from '../store/editor';
-import { libKey, restoreBackup, resumeSong, runSync, stopSong, type LibAccess, type LibSongRef } from './engine';
+import { forgetPc, libKey, listPcs, restoreBackup, resumeSong, runSync, stopSong, type LibAccess, type LibSongRef } from './engine';
 import { VIDEO_FILE, kindOf } from './kind';
 import { holdLock, lockHeld, withSyncLock } from './lock';
 import { addRun, type LogEntry } from './runlog';
-import { DEFAULT_SETTINGS, emptyState, type RunReport, type SyncProgressInfo, type SyncSettings, type SyncState } from './types';
+import { DEFAULT_SETTINGS, emptyState, type PcInfo, type RunReport, type SyncProgressInfo, type SyncSettings, type SyncState } from './types';
 
 export type { LogEntry };
 
@@ -50,6 +50,8 @@ export interface PcSyncState {
   previewing: boolean;
   /** 開いている画面 */
   panel: null | 'setup' | 'first' | 'log';
+  /** 設定の画面・下見で Drive から読んだ、同期している PC（同期すると記録の state.pcs を使う） */
+  pcsLive: PcInfo[] | null;
 }
 
 /** localStorage の設定（まだ無い・読めないときは null） */
@@ -78,7 +80,40 @@ export const usePcSync = create<PcSyncState>(() => ({
   preview: null,
   previewing: false,
   panel: null,
+  pcsLive: null,
 }));
+
+const NO_PCS: PcInfo[] = [];
+
+/** 同期している PC（この PC も。新しく同期した順。まだ分からなければ空） */
+export function pcsOf(s: Pick<PcSyncState, 'pcsLive' | 'state'>): PcInfo[] {
+  return s.pcsLive ?? s.state.pcs ?? NO_PCS;
+}
+
+/** 設定の画面を開いた：同期している PC を Drive から読み直す（ログインしていれば。何も書かない） */
+export async function refreshPcs(): Promise<void> {
+  if (!tokenValid()) return;
+  try {
+    set({ pcsLive: await listPcs() });
+  } catch {
+    // 読めなければ、前に読んだ一覧のまま
+  }
+}
+
+/** 使わなくなった PC を一覧から外す（その PC のファイルと Drive の曲はそのまま。その PC がまた同期すると戻る） */
+export async function removePc(p: PcInfo): Promise<void> {
+  if (!tokenValid() && !(await signIn({ action: 'connect' }))) return;
+  await forgetPc(p);
+  const drop = (list: PcInfo[] | null | undefined) => list?.filter((x) => x.id !== p.id);
+  set({ pcsLive: drop(get().pcsLive) ?? null });
+  await exclusive(async () => {
+    await reload();
+    const st = get().state;
+    if (st.pcs) set({ state: { ...st, pcs: drop(st.pcs) } });
+    await saveState();
+    ping();
+  });
+}
 
 const get = usePcSync.getState;
 const set = usePcSync.setState;
@@ -385,7 +420,7 @@ async function runLocked(ask: RunAsk): Promise<RunReport | null | typeof SCANNIN
   let logged = false;
   try {
     rep = await runSync({ settings: s.settings, lib, state, why: ask.why, only: ask.only, take: ask.take, progress: (p) => set({ progress: p }) });
-    set({ status: 'idle', state: { ...state }, ...(ask.only ? {} : { next: (state.full ?? Date.now()) + SYNC_EVERY }) });
+    set({ status: 'idle', state: { ...state }, pcsLive: null, ...(ask.only ? {} : { next: (state.full ?? Date.now()) + SYNC_EVERY }) });
     logged = addLog(rep, !!ask.only);
     for (const fn of listeners) fn(rep, { why: ask.why, take: !!ask.take });
     return rep;
@@ -533,7 +568,7 @@ export async function previewFirst(p: Partial<SyncSettings>): Promise<void> {
     // 下見は記録を書きかえないように写しで
     const state: SyncState = JSON.parse(JSON.stringify(st.state));
     const rep = await runSync({ settings: { ...st.settings, on: true }, lib, state, why: 'first', dry: true, progress: (pr) => set({ progress: pr }) });
-    set({ preview: rep });
+    set({ preview: rep, ...(state.pcs ? { pcsLive: state.pcs } : {}) });
   } catch (e) {
     set({ error: errText(e) });
   } finally {
@@ -614,7 +649,7 @@ export async function restoreFromLog(at: number, driveId: string, path: string, 
       ping({ touched: [...touchedSongs.values()] });
     });
     await refreshTouched();
-    toast(tr(`控えの版に戻しました（${path}）。ほかの PC も次の同期でこの版になります`, `Restored the backup (${path}). Other PCs get this version on their next sync`), 'ok', 6000);
+    toast(tr(`控えの版に戻しました（${path}）。ほかの PC も、それぞれ次の同期でこの版になります`, `Restored the backup (${path}). Other PCs get this version on their next sync`), 'ok', 6000);
   } catch (e) {
     toast(tr(`戻せませんでした: ${errText(e)}`, `Couldn't restore: ${errText(e)}`), 'error', 8000);
   }

@@ -1,13 +1,14 @@
-// PC どうしの同期（作るPC と 遊ぶPC を Google Drive で合わせる）の形。
+// PC どうしの同期（同じ Google アカウントの Drive で、何台の PC でも合わせる）の形。
+// どの PC も作れて遊べる（PC に役割は無い）。Drive がまん中で、それぞれの PC は Drive と合わせる。
 // 決まりは docs/drive.md の「PC どうしの同期」。
 
 /** この PC の設定（このブラウザに残す） */
 export interface SyncSettings {
   /** 同期する */
   on: boolean;
-  /** この PC の名前（「作るPC」「遊ぶPC」など。記録と知らせに出すだけ） */
+  /** この PC の名前（「デスクトップ」「ノートPC」など。記録と知らせに出すだけ） */
   pc: string;
-  /** この PC の印（.sync/<pcId>.json） */
+  /** この PC の印（.sync/<pcId>.json。Drive に送ったファイルの devId。名前が同じ PC・名前を変えた PC も見分ける） */
   pcId: string;
   /** made：作った曲（このアプリで直した・Drive に送った曲と、足した BOX・曲）。all：全部の曲 */
   scope: 'made' | 'all';
@@ -52,6 +53,17 @@ export interface IndexSong {
   recheck?: boolean;
 }
 
+/** 同期している PC（Drive の「DTX Web Editor/.sync/<pcId>.json」。この PC も入る） */
+export interface PcInfo {
+  /** PC の印（設定の pcId） */
+  id: string;
+  name: string;
+  /** その PC が前に .sync を書いた時刻（開いたとき・押したとき・30 分ごとの同期） */
+  at: number;
+  /** .sync/<pcId>.json の Drive の id（一覧から外すとき） */
+  file: string;
+}
+
 /** この PC の同期の記録（このブラウザに残す。PC ごと・Google アカウントごと） */
 export interface SyncState {
   v: 1;
@@ -77,6 +89,8 @@ export interface SyncState {
   answers: Record<string, string>;
   /** 前の同期の設定（変わったら Drive の曲の中を全部読み直す） */
   sig?: string;
+  /** 同期している PC（.sync から。読んだとき） */
+  pcs?: PcInfo[];
 }
 
 export function emptyState(account = ''): SyncState {
@@ -85,7 +99,7 @@ export function emptyState(account = ''): SyncState {
 
 /** 聞くこと（初めての同期の画面・記録に出す。答えるまでその曲・ファイルは待つ） */
 export type Ask =
-  /** 両方にあって中身が違う作るファイルで、この PC の版が新しい（初めて合わせる曲）・PC の時計がずれている */
+  /** この PC と Drive で中身が違う作るファイルで、この PC の版が新しい（初めて合わせる曲）・PC の時計がずれている。dev は Drive の版を送った PC の名前 */
   | { id: string; kind: 'file'; why: 'first' | 'clock'; title: string; lib: string; path: string; local: { time: number; size: number }; remote: { time: number; size: number; dev?: string } }
   /** 場所は違うが曲名とアーティストが同じ曲（同じ曲か） */
   | { id: string; kind: 'same'; title: string; artist: string; driveId: string; driveLib: string; localLib: string; local: { time: number; charts: number }; remote: { time: number; dev?: string } }
@@ -107,7 +121,7 @@ export interface ScoreNews {
   /** 今のいちばんいいランク（SS・S・A…）と達成率 */
   rank: string | null;
   skill: number | null;
-  /** 両方で遊んでいたので、まとめた */
+  /** この PC でもほかの PC でも遊んでいたので、まとめた */
   merged?: boolean;
 }
 
@@ -137,7 +151,7 @@ export interface SongReport {
   /** 取った・まとめた成績の中身（増えた回数・自己ベスト） */
   news?: ScoreNews[];
   scoresSent: string[];
-  /** 両方で直した作るファイル：新しい方を残した。backup は控え（Drive のファイルの id） */
+  /** この PC とほかの PC（dev。Drive の版を送った PC の名前）の両方で直した作るファイル：新しい方を残した。backup は控え（Drive のファイルの id） */
   newer: { path: string; kept: 'local' | 'remote'; backup?: string; dev?: string; localTime: number; remoteTime: number }[];
   /** Drive ではゴミ箱へ（この PC で消した）・この PC でも消した（ほかの PC で消した） */
   trashed: string[];
@@ -152,9 +166,27 @@ export interface SongReport {
   removed?: boolean;
   /** Drive に同じ曲が 2 つあったので、この PC が使っていない方（driveId）をゴミ箱に移した */
   dup?: boolean;
-  /** ほかの PC の名前（取った物を送った PC） */
-  from?: string;
+  /**
+   * 取った譜面・音などを送った、ほかの PC の名前（何台からでも）。v0.60 までの記録は 1 つの文字（その曲で最後に取った物の PC）。
+   * 読むときは fromNames()
+   */
+  from?: string | string[];
+  /** 取った・まとめた成績を送った（遊んだ）、ほかの PC の名前 */
+  scoresFrom?: string[];
   error?: string;
+}
+
+/** 記録の PC の名前の並び（前の版の 1 つの文字も） */
+export function fromNames(x: string | readonly string[] | undefined): string[] {
+  if (!x) return [];
+  return typeof x === 'string' ? [x] : [...x];
+}
+
+/** 名前を足す（同じ名前は 1 つ） */
+export function addName(list: string | readonly string[] | undefined, name: string): string[] {
+  const out = fromNames(list);
+  if (name && !out.includes(name)) out.push(name);
+  return out;
 }
 
 export function emptyReport(title: string, lib: string, driveId: string, where: SongReport['where']): SongReport {

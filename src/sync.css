@@ -364,8 +364,17 @@
   line-height: 1.6;
 }
 
-/* 設定 */
-.ps-flow {
+/* 設定：同期している PC（この PC ⇄ Drive ⇄ ほかの PC。何台でも） */
+.ps-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0f1319;
+  border: 1px solid var(--line);
+}
+.ps-hub-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -373,24 +382,78 @@
   color: var(--text2);
   flex-wrap: wrap;
 }
-.ps-flow .pcb {
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 12px;
+.ps-hub-others {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ps-hub .pcb {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
   background: #161b22;
   border: 1px solid var(--line3);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  max-width: 100%;
 }
-.ps-flow .pcb.drive {
+.ps-hub .pcb b {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ps-hub .pcb .w {
+  color: var(--mute);
+  font-size: 11px;
+}
+.ps-hub .pcb.me {
+  background: #132331;
+  border-color: var(--accent);
+}
+.ps-hub .pcb.drive {
   border-color: #1f4a35;
   background: #0f1c16;
   color: #bdebd2;
 }
-.ps-flow .arr {
+.ps-hub .pcb.quiet {
+  opacity: 0.6;
+}
+.ps-hub .pcb.add {
+  border-style: dashed;
+  background: transparent;
+  color: var(--mute);
+}
+.ps-hub .pcb .x {
+  display: inline-flex;
+  color: var(--mute);
+  margin-right: -4px;
+}
+.ps-hub .pcb .x:hover {
+  color: var(--text);
+}
+.ps-hub .arr {
   color: var(--dim);
+}
+.ps-hub > .lbl {
+  line-height: 1.6;
+}
+.ps-sb > .d.warn {
+  font-size: 11.5px;
+  color: var(--amber);
+  line-height: 1.55;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+.ps-sb > .d.warn svg {
+  flex: none;
+  margin-top: 2px;
 }
 .ps-st {
   display: flex;
@@ -1173,6 +1236,44 @@
 }
 
 /* ---- 記録 ---- */
+/* 同期している PC（この PC も。何台でも） */
+.ps-pcs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+}
+.ps-pcs > .lbl {
+  margin-right: 2px;
+}
+.ps-pc {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 12px;
+  background: #161b22;
+  border: 1px solid var(--line3);
+  color: var(--text2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.ps-pc b {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ps-pc .w {
+  color: var(--mute);
+  font-size: 11px;
+}
+.ps-pc.me {
+  background: #132331;
+  border-color: #24435a;
+}
 .ps-drawer-back {
   position: fixed;
   inset: 0;

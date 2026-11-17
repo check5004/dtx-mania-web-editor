@@ -4,7 +4,7 @@ import { locale, pl, tr } from '../../i18n';
 import type { LibSong } from '../../nxlib/scan';
 import { SLOT_LABEL } from '../../nxlib/view';
 import { songKey, type LogEntry } from '../../sync/store';
-import type { RunReport, ScoreNews, SongReport, SyncProgressInfo, SyncSettings } from '../../sync/types';
+import { fromNames, type PcInfo, type RunReport, type ScoreNews, type SongReport, type SyncProgressInfo, type SyncSettings } from '../../sync/types';
 import { updText } from '../nxlib/parts';
 
 /** 時刻の言葉（「2 分前」）を、時間がたったら書き直す */
@@ -38,6 +38,34 @@ export function agoText(t: number, now = Date.now()): string {
     return tr(`${n} 時間前`, `${n} ${pl(n, 'hour')} ago`);
   }
   return updText(t);
+}
+
+/** PC の名前を並べる（「デスクトップ・ノートPC」。多ければ「ほか 2 台」） */
+export function pcNames(list: readonly string[], max = 2): string {
+  const head = list.slice(0, max).join(tr('・', ', '));
+  return list.length > max ? tr(`${head} ほか ${list.length - max} 台`, `${head} and ${list.length - max} more`) : head;
+}
+
+/** 同期している PC の、この PC でない分（新しく同期した順） */
+export function otherPcs(pcs: readonly PcInfo[], me: { pcId: string; pc: string }): PcInfo[] {
+  return pcs.filter((p) => (me.pcId ? p.id !== me.pcId : p.name !== me.pc));
+}
+
+/** 「ほかの PC」の 1 台の様子（前の同期から） */
+export function pcSeenText(p: Pick<PcInfo, 'at'>, now = Date.now()): string {
+  return p.at ? agoText(p.at, now) : tr('まだ', 'not yet');
+}
+
+/**
+ * 記録の曲で、取った譜面・音を送った PC と、取った・まとめた成績を送った PC。
+ * v0.60 までの記録は 1 つの文字（その曲で最後に取った物の PC）なので、取った物の種類で分ける
+ */
+export function sourcesOf(s: SongReport): { make: string[]; play: string[] } {
+  if (typeof s.from === 'string' && !s.scoresFrom) {
+    const play = s.merged.length > 0 || s.scoresGot.length > 0;
+    return { make: s.got.length ? [s.from] : [], play: play ? [s.from] : [] };
+  }
+  return { make: fromNames(s.from), play: s.scoresFrom ?? [] };
 }
 
 /** 合わせる曲の名前（設定） */
@@ -128,7 +156,9 @@ export interface RecentChange {
   sent: number;
   scoresSent: number;
   deleted: number;
-  from?: string;
+  /** 取った譜面・音を送った PC と、取った・まとめた成績を送った PC */
+  from: string[];
+  scoresFrom: string[];
   news: ScoreNews[];
 }
 
@@ -152,6 +182,8 @@ export function recentChanges(log: readonly LogEntry[], since = Date.now() - 86_
         sent: 0,
         scoresSent: 0,
         deleted: 0,
+        from: [],
+        scoresFrom: [],
         news: [],
       };
       c.at = Math.max(c.at, l.at);
@@ -168,7 +200,9 @@ export function recentChanges(log: readonly LogEntry[], since = Date.now() - 86_
         c.plays += n.plays;
         c.news.push(n);
       }
-      c.from ??= s.from;
+      const src = sourcesOf(s);
+      for (const x of src.make) if (!c.from.includes(x)) c.from.push(x);
+      for (const x of src.play) if (!c.scoresFrom.includes(x)) c.scoresFrom.push(x);
       out.set(k, c);
     }
   }
@@ -183,12 +217,13 @@ export function changedHere(c: RecentChange | undefined): boolean {
 /** 一覧の行の印（同期で変わったこと。無ければ「同期」） */
 export function changePill(c: RecentChange | undefined): { k: 'got' | 'merged'; label: string; title: string; icon?: 'down' } | null {
   if (!c || !changedHere(c)) return null;
-  const from = c.from ? tr(`（${c.from} から）`, ` (from ${c.from})`) : '';
+  const from = c.from.length ? tr(`（${pcNames(c.from)} から）`, ` (from ${pcNames(c.from)})`) : '';
+  const scoresFrom = c.scoresFrom.length ? tr(`（${pcNames(c.scoresFrom)} から）`, ` (from ${pcNames(c.scoresFrom)})`) : '';
   if (c.merged)
     return {
       k: 'merged',
       label: tr('まとめた', 'Merged'),
-      title: tr('両方の PC で遊んでいた成績をまとめました', 'Records played on both PCs were merged'),
+      title: tr(`ほかの PC でも遊んでいた成績をまとめました${scoresFrom}`, `Records also played on another PC were merged${scoresFrom}`),
     };
   if (c.isNew)
     return {
@@ -215,14 +250,14 @@ export function changePill(c: RecentChange | undefined): { k: 'got' | 'merged'; 
     return {
       k: 'got',
       label: c.plays ? tr(`成績 +${c.plays}`, `Records +${c.plays}`) : tr('成績', 'Records'),
-      title: tr(`ほかの PC で遊んだ成績を取りました${from}`, `Got records played on another PC${from}`),
+      title: tr(`ほかの PC で遊んだ成績を取りました${scoresFrom}`, `Got records played on another PC${scoresFrom}`),
       icon: 'down',
     };
   if (c.newer)
     return {
       k: 'merged',
       label: tr('新しい方に', 'Kept newer'),
-      title: tr('両方で直されていたファイルを、新しい方にしました（記録から戻せます）', 'Files changed on both PCs were set to the newer one (restorable from the log)'),
+      title: tr('ほかの PC でも直されていたファイルを、新しい方にしました（記録から戻せます）', 'Files also changed on another PC were set to the newer one (restorable from the log)'),
     };
   return {
     k: 'merged',
@@ -237,13 +272,14 @@ export interface SongSyncView {
     kind: 'sent' | 'got' | 'newer';
     at: number;
     n: number;
-    from?: string;
+    /** 送った PC の名前（何台からでも） */
+    from: string[];
   };
   play?: {
     kind: 'got' | 'merged' | 'sent';
     at: number;
     n: number;
-    from?: string;
+    from: string[];
     news: ScoreNews[];
   };
   error?: { at: number; text: string };
@@ -264,16 +300,17 @@ export function songSyncView(log: readonly LogEntry[], root: string, path: reado
         if (s.later.length) out.later = { at: l.at, n: s.later.length };
         if (s.wait.length) out.wait = { at: l.at, n: s.wait.length };
       }
+      const src = sourcesOf(s);
       if (!out.make) {
         if (s.newer.length)
           out.make = {
             kind: 'newer',
             at: l.at,
             n: s.newer.length,
-            from: s.newer[0].dev,
+            from: [...new Set(s.newer.map((n) => n.dev).filter((x): x is string => !!x))],
           };
-        else if (s.got.length) out.make = { kind: 'got', at: l.at, n: s.got.length, from: s.from };
-        else if (s.sent.length) out.make = { kind: 'sent', at: l.at, n: s.sent.length };
+        else if (s.got.length) out.make = { kind: 'got', at: l.at, n: s.got.length, from: src.make };
+        else if (s.sent.length) out.make = { kind: 'sent', at: l.at, n: s.sent.length, from: [] };
       }
       if (!out.play) {
         if (s.merged.length)
@@ -281,6 +318,7 @@ export function songSyncView(log: readonly LogEntry[], root: string, path: reado
             kind: 'merged',
             at: l.at,
             n: s.merged.length,
+            from: src.play,
             news: s.news ?? [],
           };
         else if (s.scoresGot.length)
@@ -288,7 +326,7 @@ export function songSyncView(log: readonly LogEntry[], root: string, path: reado
             kind: 'got',
             at: l.at,
             n: s.scoresGot.length,
-            from: s.from,
+            from: src.play,
             news: s.news ?? [],
           };
         else if (s.scoresSent.length)
@@ -296,6 +334,7 @@ export function songSyncView(log: readonly LogEntry[], root: string, path: reado
             kind: 'sent',
             at: l.at,
             n: s.scoresSent.length,
+            from: [],
             news: [],
           };
       }
@@ -354,20 +393,33 @@ export function runSum(rep: RunReport): RunSum {
   return s;
 }
 
-/** 1 回の同期を一文で（ホームの帯）：「作るPC で直した曲を取り、この PC で遊んだ成績を送りました。」 */
+/** 1 回の同期を一文で（ホームの帯）：「ノートPC で直した曲を取り、この PC で遊んだ成績を送りました。」 */
 export function runSentence(rep: RunReport, sum: RunSum): string {
-  const froms = [...new Set(rep.songs.map((s) => s.from).filter((x): x is string => !!x))];
-  const from = froms.length === 1 ? froms[0] : '';
+  const make = new Set<string>();
+  const play = new Set<string>();
+  for (const s of rep.songs) {
+    const src = sourcesOf(s);
+    for (const x of src.make) make.add(x);
+    for (const x of src.play) play.add(x);
+  }
+  // 送った PC が 1〜2 台なら名前で（3 台より多ければ「ほかの PC」）
+  const who = (set: Set<string>) => (set.size > 0 && set.size <= 2 ? pcNames([...set]) : '');
   const parts: string[] = [];
   const gotMake = sum.newSongs + sum.chartSongs + sum.gotSongs > 0;
-  if (gotMake && sum.scoreSongs)
-    parts.push(from ? tr(`${from} で直した曲と遊んだ成績を取り`, `got songs changed and records played on ${from}`) : tr('ほかの PC で直した曲と遊んだ成績を取り', 'got songs changed and records played on the other PCs'));
-  else if (gotMake) parts.push(from ? tr(`${from} で直した曲を取り`, `got songs changed on ${from}`) : tr('ほかの PC で直した曲を取り', 'got songs changed on the other PC'));
-  else if (sum.scoreSongs) parts.push(from ? tr(`${from} で遊んだ成績を取り`, `got records played on ${from}`) : tr('ほかの PC で遊んだ成績を取り', 'got records played on the other PC'));
+  if (gotMake && sum.scoreSongs) {
+    const w = who(new Set([...make, ...play]));
+    parts.push(w ? tr(`${w} で直した曲と遊んだ成績を取り`, `got songs changed and records played on ${w}`) : tr('ほかの PC で直した曲と遊んだ成績を取り', 'got songs changed and records played on other PCs'));
+  } else if (gotMake) {
+    const w = who(make);
+    parts.push(w ? tr(`${w} で直した曲を取り`, `got songs changed on ${w}`) : tr('ほかの PC で直した曲を取り', 'got songs changed on other PCs'));
+  } else if (sum.scoreSongs) {
+    const w = who(play);
+    parts.push(w ? tr(`${w} で遊んだ成績を取り`, `got records played on ${w}`) : tr('ほかの PC で遊んだ成績を取り', 'got records played on other PCs'));
+  }
   if (sum.sentSongs && sum.sentScoreSongs) parts.push(tr('この PC で直した曲と遊んだ成績を送り', 'sent songs changed and records played here'));
   else if (sum.sentSongs) parts.push(tr('この PC で直した曲を送り', 'sent songs changed here'));
   else if (sum.sentScoreSongs) parts.push(tr('この PC で遊んだ成績を送り', 'sent records played here'));
-  if (sum.mergedSongs) parts.push(tr('両方で遊んだ成績をまとめ', 'merged records played on both'));
+  if (sum.mergedSongs) parts.push(tr('ほかの PC でも遊んでいた成績をまとめ', 'merged records also played on other PCs'));
   if (!parts.length) return tr('取った物・送った物は、記録で確かめられます。', 'See what was got and sent in the log.');
   const en = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
   return tr(`${parts.join('、')}ました。`, `${en.charAt(0).toUpperCase()}${en.slice(1)}.`);

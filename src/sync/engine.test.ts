@@ -1,11 +1,12 @@
-// PC どうしの同期を通しで確かめる：偽の Drive（fakeDrive）と、2 台の PC の DTXFiles（メモリのフォルダ）。
+// PC どうしの同期を通しで確かめる：偽の Drive（fakeDrive）と、何台かの PC の DTXFiles（メモリのフォルダ）。
+// PC に役割は無い（どの PC も作れて遊べる）。make・play は、その試験でおもに直す PC・遊ぶ PC というだけ。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeDrive } from '../drive/fakeDrive.testutil';
 import { MemDirHandle, now, tick } from './memfs.testutil';
 
 const { setDriveAuth } = await import('../drive/api');
 const { forgetRoot, parseLink } = await import('../drive/sync');
-const { runSync, restoreBackup, stopSong } = await import('./engine');
+const { runSync, restoreBackup, stopSong, listPcs, forgetPc } = await import('./engine');
 const { DEFAULT_SETTINGS, emptyState } = await import('./types');
 type LibAccess = import('./engine').LibAccess;
 type LibSongRef = import('./engine').LibSongRef;
@@ -106,9 +107,9 @@ function makeSong(p: Pc) {
   p.root.put(`${SONG}/mstr.dtxe.json`, '{"v":1}');
 }
 
-describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
-  it('作るPC の曲を Drive の DTXFiles/<BOX>/<曲> に送り、遊ぶPC に同じ BOX で取る（box.def も）', async () => {
-    const make = pc('作るPC');
+describe('PC どうしの同期（2 台で）', () => {
+  it('デスクトップ の曲を Drive の DTXFiles/<BOX>/<曲> に送り、ノートPC に同じ BOX で取る（box.def も）', async () => {
+    const make = pc('デスクトップ');
     makeSong(make);
     // 直していない曲は送らない（作った曲だけ）
     make.root.put('J-POP/Other/other.dtx', '#TITLE Other');
@@ -120,7 +121,7 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     // 送っただけでも、一覧を読み直す（「同期する曲」の印が付く）
     expect(make.touched).toEqual([SONG]);
 
-    const play = pc('遊ぶPC');
+    const play = pc('ノートPC');
     // 下見：何も書かずに、取る曲を出す
     const dry = await sync(play, { dry: true, why: 'first' });
     expect(dry.songs.map((s) => [s.lib, s.where, s.got.length])).toEqual([[SONG, 'none', 5]]);
@@ -130,13 +131,13 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     expect(play.root.read('オリジナル/box.def')).toBe('#TITLE オリジナル\r\n');
   });
 
-  it('同期しないまま作る・遊ぶが進んでも、譜面は作るPC から、成績は遊ぶPC から届く（聞かない）', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+  it('同期しないまま作る・遊ぶが進んでも、譜面はデスクトップ から、成績はノートPC から届く（聞かない）', async () => {
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
-    // 同時に進む：作るPC は MASTER を直し、遊ぶPC は遊んだ（成績とゴーストを NX が書く）
+    // 同時に進む：デスクトップ は MASTER を直し、ノートPC は遊んだ（成績とゴーストを NX が書く）
     make.root.put(`${SONG}/mstr.dtx`, '#TITLE Neon Skyline\r\n#BPM 150\r\n#00111: 01\r\n');
     play.root.put(`${SONG}/mstr.dtx.score.ini`, score(1, 845100, '2026/11/13 21:40:00', ['1.26/11/13 Cleared (S)']));
     play.root.put(`${SONG}/mstr.dtx.hiscore.dr.ghost`, 'GHOST-PLAY');
@@ -154,14 +155,14 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('両方の PC で遊んだら、成績をまとめる（回数は足し、いい記録は良い方。ゴーストはその方から）', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     make.root.put(`${SONG}/mstr.dtx.score.ini`, score(5, 700000, '2026/11/10 20:00:00', ['5.26/11/10 Cleared']));
     make.root.put(`${SONG}/mstr.dtx.hiscore.dr.ghost`, 'GHOST-OLD');
     await sync(make);
     await sync(play);
-    // 作るPC で 2 回（点は低い）、遊ぶPC で 4 回（いい点）
+    // デスクトップ で 2 回（点は低い）、ノートPC で 4 回（いい点）
     make.root.put(`${SONG}/mstr.dtx.score.ini`, score(7, 650000, '2026/11/12 23:05:00', ['7.26/11/12 Failed', '6.26/11/12 Failed', '5.26/11/10 Cleared']));
     make.root.put(`${SONG}/mstr.dtx.lastplay.dr.ghost`, 'LAST-MAKE');
     play.root.put(`${SONG}/mstr.dtx.score.ini`, score(9, 845100, '2026/11/13 21:40:00', ['9.26/11/13 Cleared (S)', '8.26/11/13 Cleared', '7.26/11/11 Cleared', '6.26/11/11 Cleared', '5.26/11/10 Cleared']));
@@ -183,12 +184,12 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('初めての同期で両方に成績があったら、回数は多い方に（同じ回数を 2 回数えない）。いい記録は良い方', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     make.root.put(`${SONG}/mstr.dtx.score.ini`, score(2, 500000, '2026/11/10 20:00:00', ['2.26/11/10 Cleared', '1.26/11/10 Cleared']));
     await sync(make, { why: 'first' });
     // 前に USB で写した曲（写したあとに 3 回遊んだ）
-    const play = pc('遊ぶPC');
+    const play = pc('ノートPC');
     makeSong(play);
     play.root.put(`${SONG}/mstr.dtx.score.ini`, score(5, 600000, '2026/11/12 21:00:00', ['5.26/11/12 Cleared', '4.26/11/12 Cleared', '3.26/11/11 Cleared']));
     const r = await sync(play, { why: 'first' });
@@ -199,8 +200,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('両方で同じ譜面を直したら新しい方を残し、もう一方は控えへ（控えから戻せる）', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
@@ -208,10 +209,10 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     play.root.put(`${SONG}/adv.dtx`, 'ADV-BY-PLAY'); // あとで直した
     await sync(make);
     const r = await sync(play);
-    expect(r.songs[0].newer.map((n) => [n.path, n.kept, n.dev])).toEqual([['adv.dtx', 'local', '作るPC']]);
+    expect(r.songs[0].newer.map((n) => [n.path, n.kept, n.dev])).toEqual([['adv.dtx', 'local', 'デスクトップ']]);
     await sync(make);
     expect(make.root.read(`${SONG}/adv.dtx`)).toBe('ADV-BY-PLAY');
-    // 作るPC の版は Drive の控えに
+    // デスクトップ の版は Drive の控えに
     const bak = drive.tree('DTX Web Editor/控え');
     expect(bak).toHaveLength(1);
     expect(bak[0]).toMatch(/^\d{4}-\d{2}-\d{2}\/Neon Skyline\/adv\.dtx$/);
@@ -225,8 +226,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('両方で直して、あとで同期した PC の版が古いとき：Drive の版を取って控えへ。先に送った PC は送り直さない', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
@@ -235,9 +236,9 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     const r1 = await sync(make);
     expect(r1.songs[0].sent).toEqual(['adv.dtx']);
     const r2 = await sync(play);
-    expect(r2.songs[0].newer.map((n) => [n.path, n.kept, n.dev])).toEqual([['adv.dtx', 'remote', '作るPC']]);
+    expect(r2.songs[0].newer.map((n) => [n.path, n.kept, n.dev])).toEqual([['adv.dtx', 'remote', 'デスクトップ']]);
     expect(play.root.read(`${SONG}/adv.dtx`)).toBe('ADV-BY-MAKE');
-    // 作るPC：何も変わっていない
+    // デスクトップ：何も変わっていない
     const r3 = await sync(make);
     expect(r3.songs).toEqual([]);
     const r4 = await sync(play);
@@ -245,8 +246,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('この PC で消したファイルは Drive でゴミ箱へ、ほかの PC でも消える（成績は消さない）', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     make.root.put(`${SONG}/old.wav`, 'WAV');
     make.root.put(`${SONG}/mstr.dtx.score.ini`, score(1, 1, ''));
@@ -264,7 +265,7 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('一度にたくさん消えていたら、消さずに戻す', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     await sync(make);
     // 譜面を 1 つ残す（曲のフォルダのまま）
@@ -276,8 +277,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('DTXMania が開いていて書けないファイルは、次の同期で', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
@@ -295,7 +296,7 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('変わっていなければ、Drive の曲の中を読み直さない（changes で見る）', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     await sync(make);
     await sync(make);
@@ -309,11 +310,11 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('初めての同期で、この PC の版がほかの PC の譜面を置きかえるときは聞く', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     await sync(make);
     // USB で前に写した曲（譜面を少し直して新しい）
-    const play = pc('遊ぶPC');
+    const play = pc('ノートPC');
     makeSong(play);
     play.root.put(`${SONG}/adv.dtx`, 'ADV-LOCAL-NEWER');
     play.root.put(`${SONG}/mstr.dtx`, '#TITLE Neon Skyline\r\n#BPM 150\r\n'); // 同じ中身
@@ -332,15 +333,15 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     const root = drive.add({ name: 'DTX Web Editor', parents: ['root'], appProperties: { dtxe: 'root' } });
     const song = drive.add({ name: 'Paper Moon', parents: [root.id], appProperties: { dtxe: 'song' }, description: JSON.stringify({ t: 'Paper Moon', a: 'iPad' }) });
     drive.add({ name: 'paper.dtx', parents: [song.id], content: new TextEncoder().encode('#TITLE Paper Moon') });
-    const play = pc('遊ぶPC', { importBox: 'オリジナル' });
+    const play = pc('ノートPC', { importBox: 'オリジナル' });
     await sync(play);
     expect(play.root.read('オリジナル/Paper Moon/paper.dtx')).toBe('#TITLE Paper Moon');
     expect(drive.byPath(`${LIB}/オリジナル/Paper Moon/paper.dtx`)).toBeTruthy();
   });
 
   it('開いている曲は、この PC の譜面を書きかえない（成績は合わせる）', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
@@ -358,10 +359,10 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('場所が違って曲名とアーティストが同じなら、同じ曲か聞く（答えるまで送りも取りもしない）', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     await sync(make);
-    const play = pc('遊ぶPC');
+    const play = pc('ノートPC');
     play.root.put('Neon Skyline/mstr.dtx', '#TITLE Neon Skyline');
     play.root.put('Neon Skyline/mstr.dtxe.json', '{}');
     const dry = await sync(play, { dry: true, why: 'first' });
@@ -374,8 +375,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('ほかの PC で同期から外した曲（Drive のゴミ箱）：この PC の曲は残し、同期からも外す', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     const r = await sync(make);
     await sync(play);
@@ -386,15 +387,15 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('曲のフォルダごと消して「ほかの PC でも消す」：ほかの PC でも、前のままなら消す（直していたら残す）', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
-    const note = pc('ノートPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
+    const living = pc('リビングPC');
     makeSong(make);
     await sync(make);
     await sync(play);
-    await sync(note);
-    // ノートPC では直していた
-    note.root.put(`${SONG}/adv.dtx`, 'ADV-NOTE');
+    await sync(living);
+    // リビングPC では直していた
+    living.root.put(`${SONG}/adv.dtx`, 'ADV-NOTE');
     make.root.remove(SONG);
     const r = await sync(make);
     expect(r.asks.map((a) => a.kind)).toEqual(['gone']);
@@ -403,14 +404,14 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     const r2 = await sync(play);
     expect(r2.songs[0].removed).toBe(true);
     expect(play.root.list()).toEqual(['オリジナル/box.def']);
-    const r3 = await sync(note);
+    const r3 = await sync(living);
     expect(r3.songs[0].removed).toBeUndefined();
-    expect(note.root.read(`${SONG}/adv.dtx`)).toBe('ADV-NOTE');
-    expect(note.root.read(`${SONG}/.dtxe-drive.json`)).toContain('"skip":true');
+    expect(living.root.read(`${SONG}/adv.dtx`)).toBe('ADV-NOTE');
+    expect(living.root.read(`${SONG}/.dtxe-drive.json`)).toContain('"skip":true');
   });
 
   it('曲のフォルダが無いとき「Drive から取り直す」：取り直す', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     await sync(make);
     make.root.remove(SONG);
@@ -421,8 +422,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('同期をやめた曲：Drive ではゴミ箱へ、ほかの PC は曲を残して同期から外す', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
@@ -431,16 +432,16 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     await sync(play);
     expect(play.root.read(`${SONG}/mstr.dtx`)).toContain('#BPM 150');
     expect(play.root.read(`${SONG}/.dtxe-drive.json`)).toContain('"skip":true');
-    // 作るPC で直しても、もう送らない
+    // デスクトップ で直しても、もう送らない
     make.root.put(`${SONG}/mstr.dtx`, 'CHANGED');
     const r = await sync(make);
     expect(r.songs).toEqual([]);
   });
 
   it('同期しない曲も成績だけ合わせる：両方の PC にある曲の成績をまとめ、無い PC には取らない', async () => {
-    const make = pc('作るPC', { scoresOnly: true });
-    const play = pc('遊ぶPC', { scoresOnly: true });
-    const note = pc('ノートPC', { scoresOnly: true });
+    const make = pc('デスクトップ', { scoresOnly: true });
+    const play = pc('ノートPC', { scoresOnly: true });
+    const living = pc('リビングPC', { scoresOnly: true });
     for (const p of [make, play]) {
       p.root.put('J-POP/Sunny/sunny.dtx', '#TITLE Sunny');
       p.root.put('J-POP/Sunny/sunny.wav', 'WAV');
@@ -450,10 +451,10 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     expect(r1.songs.map((s) => [s.lib, s.play, s.scoresSent])).toEqual([['J-POP/Sunny', true, ['sunny.dtx']]]);
     // 譜面・音は送らない
     expect(drive.tree(LIB)).toEqual(['J-POP/Sunny/sunny.dtx.score.ini']);
-    // 遊ぶPC にも成績が届く
+    // ノートPC にも成績が届く
     await sync(play);
     expect(play.root.read('J-POP/Sunny/sunny.dtx.score.ini')).toContain('PlayCountDrums=2');
-    // 両方で遊ぶ（作るPC で 2 回、遊ぶPC で 3 回）
+    // 両方で遊ぶ（デスクトップ で 2 回、ノートPC で 3 回）
     make.root.put('J-POP/Sunny/sunny.dtx.score.ini', score(4, 500000, '2026/11/13 19:00:00', ['4.26/11/13 Cleared', '3.26/11/13 Cleared', '2.26/11/12 Cleared']));
     play.root.put('J-POP/Sunny/sunny.dtx.score.ini', score(5, 600000, '2026/11/13 20:00:00', ['5.26/11/13 Cleared', '4.26/11/13 Cleared', '3.26/11/13 Cleared', '2.26/11/12 Cleared']));
     await sync(make);
@@ -462,12 +463,12 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     await sync(make);
     expect(make.root.read('J-POP/Sunny/sunny.dtx.score.ini')).toContain('PlayCountDrums=7');
     // 曲の無い PC には成績だけの曲を取らない
-    await sync(note);
-    expect(note.root.list()).toEqual([]);
+    await sync(living);
+    expect(living.root.list()).toEqual([]);
   });
 
   it('曲の無い成績だけの曲は Drive に作らない（まだ遊んでいない）', async () => {
-    const make = pc('作るPC', { scoresOnly: true });
+    const make = pc('デスクトップ', { scoresOnly: true });
     make.root.put('J-POP/Sunny/sunny.dtx', '#TITLE Sunny');
     await sync(make);
     expect(drive.tree(LIB)).toEqual([]);
@@ -475,8 +476,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('設定を変えたら（動画も送る）、Drive の曲の中を読み直して足りない物を取る', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC', { video: false });
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC', { video: false });
     makeSong(make);
     make.root.put(`${SONG}/movie.mp4`, 'MP4');
     await sync(make);
@@ -494,8 +495,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     drive = new FakeDrive(() => tick(1000) + 10 * 60_000);
     vi.stubGlobal('fetch', drive.fetch);
     setDriveAuth(async () => drive.token, () => {});
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     await sync(make);
     await sync(play);
@@ -512,8 +513,8 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
   });
 
   it('保存したとき（1 曲だけ）は、ほかの曲の Drive の変化を次の同期に残す', async () => {
-    const make = pc('作るPC');
-    const play = pc('遊ぶPC');
+    const make = pc('デスクトップ');
+    const play = pc('ノートPC');
     makeSong(make);
     make.root.put('オリジナル/Second/second.dtx', '#TITLE Second');
     make.root.put('オリジナル/Second/second.dtxe.json', '{}');
@@ -546,7 +547,7 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
 
     for (const how of ['つないでいない', 'つないであるが一覧の印が古い'] as const) {
       it(`前の版で Drive の直下に保存した曲は、DTXFiles の同じ所の曲と同じ曲として合わせる（${how}）`, async () => {
-        const make = pc('作るPC', { scope: 'all' });
+        const make = pc('デスクトップ', { scope: 'all' });
         make.root.put(`${NANI}/nani.dtx`, '#TITLE なにが悪い');
         make.root.put(`${NANI}/bgm.ogg`, 'OGG');
         const old = oldDriveSong();
@@ -573,13 +574,13 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     }
 
     it('前の版が Drive に 2 つ作ってしまった曲：使っていない方を Drive のゴミ箱に移し、「この PC に無い」とは聞かない', async () => {
-      const make = pc('作るPC');
+      const make = pc('デスクトップ');
       makeSong(make);
       const r1 = await sync(make);
       const keep = r1.songs[0].driveId;
       // 前の版の初めての同期で作った、もう 1 つの同じ曲（この PC の記録にも残っている。前に「この PC だけ消したままにする」と答えていても）
       const box = drive.byPath(`${LIB}/オリジナル`)!;
-      const dup = drive.add({ name: 'Neon Skyline', parents: [box.id], appProperties: { dtxe: 'song', dev: '作るPC' }, description: JSON.stringify({ t: 'Neon Skyline', a: 'Demo', u: now() }) });
+      const dup = drive.add({ name: 'Neon Skyline', parents: [box.id], appProperties: { dtxe: 'song', dev: 'デスクトップ' }, description: JSON.stringify({ t: 'Neon Skyline', a: 'Demo', u: now() }) });
       drive.add({ name: 'mstr.dtx', parents: [dup.id], content: enc(make.root.read(`${SONG}/mstr.dtx`)!) });
       make.state.songs[dup.id] = { ...make.state.songs[keep], dirs: { '': dup.id } };
       make.state.answers[`g:${dup.id}`] = 'leave';
@@ -599,12 +600,12 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     });
 
     it('片付けた方とつないでいたほかの PC は、残した方につなぎ直す（同期から外さない）', async () => {
-      const make = pc('作るPC');
-      const play = pc('遊ぶPC');
+      const make = pc('デスクトップ');
+      const play = pc('ノートPC');
       makeSong(play);
       const r0 = await sync(play);
       const other = drive.files.get(r0.songs[0].driveId)!;
-      // 作るPC が、遊ぶPC の方に気づかずにもう 1 つ作ってしまった（前の版の形）
+      // デスクトップ が、ノートPC の方に気づかずにもう 1 つ作ってしまった（前の版の形）
       other.appProperties = { ...other.appProperties, dtxe: 'hidden' };
       makeSong(make);
       const r1 = await sync(make);
@@ -618,7 +619,7 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
       expect(r3.asks).toEqual([]);
       expect(r3.songs.filter((s) => s.error)).toEqual([]);
       expect(linkOf(play, SONG)).toBe(keep);
-      // 遊ぶPC の曲は残り、同期も続く
+      // ノートPC の曲は残り、同期も続く
       make.root.put(`${SONG}/mstr.dtx`, 'MSTR-NEW');
       await sync(make);
       await sync(play);
@@ -626,15 +627,15 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     });
 
     it('前の曲を消して同じ所に別の曲を置いたときは、今までどおり「この PC に無い」と聞く（ゴミ箱には移さない）', async () => {
-      const make = pc('作るPC');
+      const make = pc('デスクトップ');
       makeSong(make);
       const was = (await sync(make)).songs[0].driveId;
-      // 遊ぶPC で作って同期した別の曲
-      const play = pc('遊ぶPC');
+      // ノートPC で作って同期した別の曲
+      const play = pc('ノートPC');
       play.root.put('Rock/Other Song/other.dtx', '#TITLE Other Song');
       play.root.put('Rock/Other Song/other.dtxe.json', '{"v":1}');
       const other = (await sync(play)).songs[0].driveId;
-      // 作るPC で Neon Skyline を消して、同じ所に Other Song を写した（つなぎの記録ごと）
+      // デスクトップ で Neon Skyline を消して、同じ所に Other Song を写した（つなぎの記録ごと）
       await (await make.root.getDirectoryHandle('オリジナル')).removeEntry('Neon Skyline', { recursive: true });
       for (const p of play.root.list().filter((x) => x.startsWith('Rock/Other Song/'))) make.root.put(`${SONG}/${p.slice('Rock/Other Song/'.length)}`, play.root.read(p)!);
       for (let i = 0; i < 2; i++) {
@@ -648,7 +649,7 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     });
 
     it('一覧に出ていない曲でも、フォルダがあれば「この PC に無い」と聞かずに合わせる（一覧が古いとき）', async () => {
-      const make = pc('作るPC');
+      const make = pc('デスクトップ');
       makeSong(make);
       await sync(make);
       make.root.put(`${SONG}/adv.dtx`, 'ADV-NEW');
@@ -662,14 +663,14 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     });
 
     it('Drive の同じ所に同じ曲が 2 つあっても、初めての PC は新しい方とだけ合わせる（行ったり来たりしない・聞かない）', async () => {
-      const make = pc('作るPC');
+      const make = pc('デスクトップ');
       makeSong(make);
       const r1 = await sync(make);
       const keep = r1.songs[0].driveId;
       const box = drive.byPath(`${LIB}/オリジナル`)!;
-      const old = drive.add({ name: 'Neon Skyline', parents: [box.id], appProperties: { dtxe: 'song', dev: '作るPC' }, description: JSON.stringify({ t: 'Neon Skyline', a: 'Demo', u: 1 }) });
+      const old = drive.add({ name: 'Neon Skyline', parents: [box.id], appProperties: { dtxe: 'song', dev: 'デスクトップ' }, description: JSON.stringify({ t: 'Neon Skyline', a: 'Demo', u: 1 }) });
       drive.add({ name: 'mstr.dtx', parents: [old.id], content: enc('OLD') });
-      const play = pc('遊ぶPC');
+      const play = pc('ノートPC');
       const r2 = await sync(play);
       expect(r2.asks).toEqual([]);
       expect(linkOf(play, SONG)).toBe(keep);
@@ -679,16 +680,16 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
         expect(r.asks).toEqual([]);
         expect(linkOf(play, SONG)).toBe(keep);
       }
-      // 作るPC も聞かない
+      // デスクトップ も聞かない
       expect((await sync(make, { why: 'timer' })).asks).toEqual([]);
     });
   });
 
   it('答えていない「確かめてほしい」は、次の同期でも聞き続ける（勝手に決めない・Drive に同じファイルを作らない）', async () => {
-    const make = pc('作るPC');
+    const make = pc('デスクトップ');
     makeSong(make);
     await sync(make);
-    const play = pc('遊ぶPC');
+    const play = pc('ノートPC');
     makeSong(play);
     play.root.put(`${SONG}/adv.dtx`, 'ADV-LOCAL-NEWER');
     await sync(play, { why: 'first' });
@@ -698,5 +699,153 @@ describe('PC どうしの同期（作るPC と 遊ぶPC）', () => {
     }
     expect(drive.text(`${LIB}/${SONG}/adv.dtx`)).toContain('#DLEVEL 50');
     expect(drive.tree(LIB).filter((f) => f.endsWith('adv.dtx'))).toHaveLength(1);
+  });
+});
+
+describe('PC は何台でも（役割は無い）', () => {
+  it('3 台：どの PC で直しても遊んでも、ほかの PC に届く（どの PC から取ったかも）', async () => {
+    const desk = pc('デスクトップ');
+    const note = pc('ノートPC');
+    const living = pc('リビングPC');
+    makeSong(desk);
+    await sync(desk);
+    await sync(note);
+    await sync(living);
+    for (const p of [note, living]) expect(p.root.read(`${SONG}/mstr.dtx`)).toContain('#BPM 150');
+    // ノートPC で譜面を直し、リビングPC で遊んだ
+    note.root.put(`${SONG}/adv.dtx`, 'ADV-NOTE');
+    living.root.put(`${SONG}/mstr.dtx.score.ini`, score(1, 845100, '2026/11/13 21:40:00', ['1.26/11/13 Cleared (S)']));
+    await sync(note);
+    const rl = await sync(living);
+    expect(rl.songs[0].got).toEqual(['adv.dtx']);
+    expect(rl.songs[0].from).toEqual(['ノートPC']);
+    expect(rl.songs[0].scoresSent).toEqual(['mstr.dtx']);
+    const rd = await sync(desk);
+    expect(rd.songs[0].got).toEqual(['adv.dtx']);
+    expect(rd.songs[0].from).toEqual(['ノートPC']);
+    expect(rd.songs[0].scoresGot).toEqual(['mstr.dtx']);
+    expect(rd.songs[0].scoresFrom).toEqual(['リビングPC']);
+    const rn = await sync(note);
+    expect(rn.songs[0].scoresGot).toEqual(['mstr.dtx']);
+    expect(rn.songs[0].scoresFrom).toEqual(['リビングPC']);
+    for (const p of [desk, note, living]) {
+      expect(p.root.read(`${SONG}/adv.dtx`)).toBe('ADV-NOTE');
+      expect(p.root.read(`${SONG}/mstr.dtx.score.ini`)).toContain('PlayCountDrums=1');
+    }
+  });
+
+  it('3 台で同じ譜面を遊んでも、成績は 1 つにまとまる（回数はそれぞれで増えた分を足す）', async () => {
+    const desk = pc('デスクトップ');
+    const note = pc('ノートPC');
+    const living = pc('リビングPC');
+    makeSong(desk);
+    desk.root.put(`${SONG}/mstr.dtx.score.ini`, score(5, 700000, '2026/11/10 20:00:00', ['5.26/11/10 Cleared']));
+    await sync(desk);
+    await sync(note);
+    await sync(living);
+    // 同期しないまま 3 台で遊んだ（2 回・4 回・3 回）
+    desk.root.put(`${SONG}/mstr.dtx.score.ini`, score(7, 650000, '2026/11/12 23:05:00', ['7.26/11/12 Failed', '6.26/11/12 Failed', '5.26/11/10 Cleared']));
+    note.root.put(`${SONG}/mstr.dtx.score.ini`, score(9, 845100, '2026/11/13 21:40:00', ['9.26/11/13 Cleared (S)', '8.26/11/13 Cleared', '7.26/11/11 Cleared', '6.26/11/11 Cleared', '5.26/11/10 Cleared']));
+    living.root.put(`${SONG}/mstr.dtx.score.ini`, score(8, 720000, '2026/11/13 22:10:00', ['8.26/11/13 Cleared', '7.26/11/13 Cleared', '6.26/11/12 Cleared', '5.26/11/10 Cleared']));
+    await sync(desk);
+    const rn = await sync(note);
+    expect(rn.songs[0].merged).toEqual([{ chart: 'mstr.dtx', plays: 2 }]);
+    expect(rn.songs[0].scoresFrom).toEqual(['デスクトップ']);
+    const rl = await sync(living);
+    expect(rl.songs[0].merged).toEqual([{ chart: 'mstr.dtx', plays: 6 }]);
+    await sync(desk);
+    await sync(note);
+    for (const p of [desk, note, living]) {
+      const t = p.root.read(`${SONG}/mstr.dtx.score.ini`)!;
+      expect(t).toContain('PlayCountDrums=14');
+      expect(t).toContain('Score=845100');
+    }
+  });
+
+  it('同じ名前の PC が 2 台あっても、印で見分ける（ほかの PC の物として取り、名前で出す）', async () => {
+    const a = pc('ノートPC', { pcId: 'pc-a' });
+    const b = pc('ノートPC', { pcId: 'pc-b' });
+    makeSong(a);
+    await sync(a);
+    const r1 = await sync(b);
+    expect(r1.songs[0].got).toHaveLength(5);
+    expect(r1.songs[0].from).toEqual(['ノートPC']);
+    b.root.put(`${SONG}/adv.dtx`, 'ADV-B');
+    await sync(b);
+    // Drive のファイルには、送った PC の名前と印
+    expect(drive.byPath(`${LIB}/${SONG}/adv.dtx`)?.appProperties).toMatchObject({ dev: 'ノートPC', devId: 'pc-b' });
+    const r2 = await sync(a);
+    expect(r2.songs[0].got).toEqual(['adv.dtx']);
+    expect(r2.songs[0].from).toEqual(['ノートPC']);
+    expect((await listPcs()).map((p) => p.id).sort()).toEqual(['pc-a', 'pc-b']);
+  });
+
+  it('名前を変えた PC から取った物は、今の名前で出す', async () => {
+    const desk = pc('デスクトップ');
+    const note = pc('ノートPC');
+    makeSong(desk);
+    await sync(desk);
+    desk.settings = { ...desk.settings, pc: 'メインPC' };
+    await sync(desk);
+    const r = await sync(note);
+    expect(r.songs[0].from).toEqual(['メインPC']);
+    expect((await listPcs()).map((p) => p.name).sort()).toEqual(['ノートPC', 'メインPC'].sort());
+  });
+
+  it('同期している PC の一覧：同期すると加わり、外しても、その PC がまた同期すると戻る', async () => {
+    const desk = pc('デスクトップ');
+    const note = pc('ノートPC');
+    const living = pc('リビングPC');
+    makeSong(desk);
+    await sync(desk);
+    await sync(note);
+    await sync(living);
+    const names = async () => (await listPcs()).map((p) => p.name).sort();
+    expect(await names()).toEqual(['デスクトップ', 'ノートPC', 'リビングPC'].sort());
+    // 記録にも残る（新しく同期した順）
+    expect(living.state.pcs?.map((p) => p.name)).toEqual(['リビングPC', 'ノートPC', 'デスクトップ']);
+    // 使わなくなった PC を一覧から外す：その PC の曲と Drive の曲はそのまま
+    await forgetPc((await listPcs()).find((p) => p.name === 'リビングPC')!);
+    expect(await names()).toEqual(['デスクトップ', 'ノートPC'].sort());
+    expect(drive.tree(LIB)).toContain('オリジナル/Neon Skyline/mstr.dtx');
+    expect(living.root.read(`${SONG}/mstr.dtx`)).toContain('#BPM 150');
+    expect((await sync(note)).asks).toEqual([]);
+    expect(note.state.pcs?.map((p) => p.name).sort()).toEqual(['デスクトップ', 'ノートPC'].sort());
+    // その PC がまた同期すると、一覧に戻る（1 台のまま）
+    await sync(living);
+    expect(await names()).toEqual(['デスクトップ', 'ノートPC', 'リビングPC'].sort());
+  });
+
+  it('下見（初めての同期の画面）は、同期している PC を読むだけ（この PC を一覧に足さない）', async () => {
+    const desk = pc('デスクトップ');
+    makeSong(desk);
+    await sync(desk);
+    const note = pc('ノートPC');
+    await sync(note, { dry: true, why: 'first' });
+    expect(note.state.pcs?.map((p) => p.name)).toEqual(['デスクトップ']);
+    expect((await listPcs()).map((p) => p.name)).toEqual(['デスクトップ']);
+  });
+
+  it('この PC で直した曲は Drive の中を読み直してから送る（同期の途中でほかの PC が同じファイルを送っていても、上書きしない）', async () => {
+    const desk = pc('デスクトップ');
+    const note = pc('ノートPC');
+    makeSong(desk);
+    await sync(desk);
+    await sync(note);
+    // ノートPC が mstr.dtx を直して送った。デスクトップは、その直前に Drive の変化を聞いていた（まだ見えていない）
+    note.root.put(`${SONG}/mstr.dtx`, 'MSTR-NOTE');
+    await sync(note);
+    desk.state.token = String(drive.changeLog.length);
+    // デスクトップでも同じ譜面を直していた（こちらが新しい）
+    desk.root.put(`${SONG}/mstr.dtx`, 'MSTR-DESK');
+    const r = await sync(desk);
+    expect(r.songs[0].newer).toMatchObject([{ path: 'mstr.dtx', kept: 'local', dev: 'ノートPC' }]);
+    // ノートPC の版は控えに残る
+    const bak = drive.files.get(r.songs[0].newer[0].backup!)!;
+    expect(new TextDecoder().decode(bak.content)).toBe('MSTR-NOTE');
+    expect(drive.text(`${LIB}/${SONG}/mstr.dtx`)).toBe('MSTR-DESK');
+    // ノートPC は新しい方を取る
+    await sync(note);
+    expect(note.root.read(`${SONG}/mstr.dtx`)).toBe('MSTR-DESK');
   });
 });

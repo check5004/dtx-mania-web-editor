@@ -164,8 +164,9 @@ export class FakeDrive {
   private write(id: string | undefined, meta: Record<string, unknown>, content: Uint8Array): FakeFile {
     const mt = typeof meta.modifiedTime === 'string' ? meta.modifiedTime : undefined;
     if (id) {
+      // ゴミ箱のファイルにも書ける（Google と同じ。ゴミ箱のまま）
       const f = this.files.get(id);
-      if (!f || f.trashed) throw new Error('404');
+      if (!f) throw new Error('404');
       f.content = content;
       f.modifiedTime = mt ?? this.now();
       if (meta.appProperties) f.appProperties = { ...f.appProperties, ...(meta.appProperties as Record<string, string>) };

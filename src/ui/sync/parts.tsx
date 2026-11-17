@@ -7,11 +7,11 @@ import type { LibSong } from '../../nxlib/scan';
 import { ensureNxPerm, useNxLib } from '../../nxlib/store';
 import { bytesText } from '../../nxlib/view';
 import { toast } from '../../store/editor';
-import { addSyncSong, inScope, openSyncPanel, songKey, songLibKey, stopSyncSong, syncNow, usePcSync } from '../../sync/store';
+import { addSyncSong, inScope, openSyncPanel, pcsOf, songKey, songLibKey, stopSyncSong, syncNow, usePcSync } from '../../sync/store';
 import { confirmDialog } from '../dialogs';
 import { Icon } from '../icons';
 import { updText, type Pill } from '../nxlib/parts';
-import { agoText, changePill, chartName, hm, newsText, progressText, scopeName, songSyncView, useNow, type RecentChange } from './common';
+import { agoText, changePill, chartName, hm, newsText, otherPcs, pcNames, progressText, scopeName, songSyncView, useNow, type RecentChange } from './common';
 
 /** 設定の画面を開く（操作の中で。DTXMania のフォルダの許可が要れば一緒に聞く） */
 export function openSetup() {
@@ -131,6 +131,7 @@ export function SyncSideCard() {
   const status = usePcSync((s) => s.status);
   const at = usePcSync((s) => s.state.at);
   const next = usePcSync((s) => s.next);
+  const pcs = usePcSync(pcsOf);
   const songs = useNxLib((s) => s.songs);
   const now = useNow();
   const synced = useMemo(() => syncedFolders(songs), [songs]);
@@ -141,7 +142,7 @@ export function SyncSideCard() {
           {Icon.cloud(13)}
           {tr('PC どうしの同期', 'PC sync')}
         </div>
-        <p>{tr('作る PC と遊ぶ PC の曲と成績を、Google Drive で合わせます。', 'Keeps songs and records in step between the PC you make on and the PC you play on, through Google Drive.')}</p>
+        <p>{tr('DTXMania の曲と成績を、ほかの PC と Google Drive で合わせます。PC は何台でも、どれでも作れて遊べます。', 'Keeps DTXMania songs and records in step with your other PCs through Google Drive. Any number of PCs, and each can make and play.')}</p>
         <div>
           <button className="btn small" onClick={openSetup}>
             {tr('はじめる…', 'Set up…')}
@@ -163,6 +164,7 @@ export function SyncSideCard() {
             : next > now
               ? tr(`${hm(next)}（5 分ごと）`, `${hm(next)} (every 5 min)`)
               : '—';
+  const others = otherPcs(pcs, set);
   return (
     <div className="ps-card">
       <div className="h">
@@ -175,6 +177,12 @@ export function SyncSideCard() {
       <div className="k">
         <span>{tr('この PC', 'This PC')}</span>
         <b>{set.pc || '—'}</b>
+      </div>
+      <div className="k">
+        <span>{tr('ほかの PC', 'Other PCs')}</span>
+        <b className="ellipsis" title={others.map((p) => p.name).join(tr('・', ', '))}>
+          {others.length ? tr(`${others.length} 台（${pcNames(others.map((p) => p.name), 1)}）`, `${others.length} (${pcNames(others.map((p) => p.name), 1)})`) : tr('まだありません', 'None yet')}
+        </b>
       </div>
       <div className="k">
         <span>{tr('曲', 'Songs')}</span>
@@ -268,31 +276,43 @@ export function SyncSongSection({ s }: { s: LibSong }) {
   else if (view.make?.kind === 'got')
     make = (
       <span className="to">
-        {view.make.from
-          ? tr(`← ${view.make.from} の版を取りました ${when(view.make.at)}`, `← Got the version from ${view.make.from} ${when(view.make.at)}`)
+        {view.make.from.length
+          ? tr(`← ${pcNames(view.make.from)} の版を取りました ${when(view.make.at)}`, `← Got the version from ${pcNames(view.make.from)} ${when(view.make.at)}`)
           : tr(`← Drive から取りました ${when(view.make.at)}`, `← Got from Drive ${when(view.make.at)}`)}
       </span>
     );
-  else if (view.make?.kind === 'newer')
+  else if (view.make?.kind === 'newer') {
+    const w = view.make.from.length ? pcNames(view.make.from) : '';
     make = (
       <span className="to">
-        {tr(`両方で直されていたので、新しい方にしました ${when(view.make.at)}（記録から戻せます）`, `Changed on both PCs, so the newer one was kept ${when(view.make.at)} (restorable from the log)`)}
+        {tr(
+          `${w || 'ほかの PC'} でも直されていたので、新しい方にしました ${when(view.make.at)}（記録から戻せます）`,
+          `Also changed on ${w || 'another PC'}, so the newer one was kept ${when(view.make.at)} (restorable from the log)`,
+        )}
       </span>
     );
+  }
   else make = on ? (linked ? tr('Drive と同じです', 'Same as Drive') : tr('次の同期で Drive に送ります', 'Sent to Drive on the next sync')) : tr('合わせていません', 'Not synced');
 
   let play: React.ReactNode;
   if (!settings.scores) play = tr('合わせません（設定で切っています）', 'Not synced (turned off in the settings)');
   else if (view.play?.kind === 'got') {
     const n = view.play.news.filter((x) => !x.merged).slice(0, 2);
+    const w = view.play.from.length ? pcNames(view.play.from) : '';
     play = (
       <span className="to">
-        {tr(`← 取り込みました ${when(view.play.at)}`, `← Got ${when(view.play.at)}`)}
+        {w ? tr(`← ${w} で遊んだ成績を取り込みました ${when(view.play.at)}`, `← Got the records played on ${w} ${when(view.play.at)}`) : tr(`← 取り込みました ${when(view.play.at)}`, `← Got ${when(view.play.at)}`)}
         {n.length > 0 && tr(`（${n.map((x) => newsText(x, chartName(s, x.chart))).join('・')}）`, ` (${n.map((x) => newsText(x, chartName(s, x.chart))).join(', ')})`)}
       </span>
     );
-  } else if (view.play?.kind === 'merged')
-    play = <span className="to">{tr(`両方の PC で遊んでいたので、まとめました ${when(view.play.at)}`, `Played on both PCs, so the records were merged ${when(view.play.at)}`)}</span>;
+  } else if (view.play?.kind === 'merged') {
+    const w = view.play.from.length ? pcNames(view.play.from) : '';
+    play = (
+      <span className="to">
+        {tr(`${w || 'ほかの PC'} でも遊んでいたので、まとめました ${when(view.play.at)}`, `Also played on ${w || 'another PC'}, so the records were merged ${when(view.play.at)}`)}
+      </span>
+    );
+  }
   else if (view.play?.kind === 'sent') play = <span className="to up">{tr(`→ Drive に送りました ${when(view.play.at)}`, `→ Sent to Drive ${when(view.play.at)}`)}</span>;
   else play = on || scope === 'play' ? tr('まだ変わっていません', 'No changes yet') : tr('合わせていません', 'Not synced');
 
@@ -348,8 +368,8 @@ export function SyncSongSection({ s }: { s: LibSong }) {
         )}
         <p className="ps-note">
           {tr(
-            '成績（*.score.ini・*.ghost）は DTXMania が書くファイルで、譜面とは別です。両方で変わっても、ファイルごとに合わせるので聞かずにまとまります。',
-            'Records (*.score.ini, *.ghost) are written by DTXMania and are separate from the charts. Even if both PCs change them, they are merged file by file without asking.',
+            '成績（*.score.ini・*.ghost）は DTXMania が書くファイルで、譜面とは別です。いくつの PC で変わっても、ファイルごとに合わせるので聞かずにまとまります。',
+            'Records (*.score.ini, *.ghost) are written by DTXMania and are separate from the charts. However many PCs change them, they are merged file by file without asking.',
           )}
         </p>
       </div>

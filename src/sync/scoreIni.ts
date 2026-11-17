@@ -1,4 +1,5 @@
-// DTXMania が譜面の隣に書く成績（<譜面>.score.ini）を、2 台の PC の分からまとめる。
+// DTXMania が譜面の隣に書く成績（<譜面>.score.ini）を、この PC の分と Drive の分（ほかの PC のどれかが送った物）からまとめる。
+// 何台の PC で遊んでも、それぞれの同期で 2 つずつまとめれば、どの PC の回も 1 回ずつ数える（前に合わせたときから増えた分を足すので）。
 // 書き方は DTXManiaNX の CScoreIni.tExport と同じ（Shift_JIS・CRLF、[File] と 9 つの節）。知らない行・節もそのまま残す。
 // - [HiScore.*]：Score が大きい方の節を丸ごと。[HiSkill.*]：PlaySkill が大きい方。[LastPlay.*]：DateTime が新しい方
 //   （ゴースト *.hiscore.dr.ghost などは、節を取った方から取る。pick で返す）
@@ -178,7 +179,7 @@ export interface ScoreMerge {
   pick: Record<string, Side>;
 }
 
-/** 2 台の PC の score.ini をまとめる。base は前に合わせたときの中身（無ければ初めての同期） */
+/** この PC と Drive の score.ini をまとめる。base は前に合わせたときの中身（無ければ初めての同期） */
 export function mergeScoreIni(base: string | null, local: ScoreSide, remote: ScoreSide): ScoreMerge {
   const L = parseIni(local.text);
   const R = parseIni(remote.text);
