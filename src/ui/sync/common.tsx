@@ -407,8 +407,13 @@ export function runSentence(rep: RunReport, sum: RunSum): string {
   const parts: string[] = [];
   const gotMake = sum.newSongs + sum.chartSongs + sum.gotSongs > 0;
   if (gotMake && sum.scoreSongs) {
-    const w = who(new Set([...make, ...play]));
-    parts.push(w ? tr(`${w} で直した曲と遊んだ成績を取り`, `got songs changed and records played on ${w}`) : tr('ほかの PC で直した曲と遊んだ成績を取り', 'got songs changed and records played on other PCs'));
+    const wm = who(make);
+    const wp = who(play);
+    const same = make.size === play.size && [...make].every((x) => play.has(x));
+    const w = same ? wm : who(new Set([...make, ...play]));
+    // 直した PC と遊んだ PC が違えば、分けて書く
+    if (!same && wm && wp) parts.push(tr(`${wm} で直した曲と、${wp} で遊んだ成績を取り`, `got songs changed on ${wm} and records played on ${wp}`));
+    else parts.push(w ? tr(`${w} で直した曲と遊んだ成績を取り`, `got songs changed and records played on ${w}`) : tr('ほかの PC で直した曲と遊んだ成績を取り', 'got songs changed and records played on other PCs'));
   } else if (gotMake) {
     const w = who(make);
     parts.push(w ? tr(`${w} で直した曲を取り`, `got songs changed on ${w}`) : tr('ほかの PC で直した曲を取り', 'got songs changed on other PCs'));

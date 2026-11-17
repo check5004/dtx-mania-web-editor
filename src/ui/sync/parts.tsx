@@ -181,7 +181,7 @@ export function SyncSideCard() {
       <div className="k">
         <span>{tr('ほかの PC', 'Other PCs')}</span>
         <b className="ellipsis" title={others.map((p) => p.name).join(tr('・', ', '))}>
-          {others.length ? tr(`${others.length} 台（${pcNames(others.map((p) => p.name), 1)}）`, `${others.length} (${pcNames(others.map((p) => p.name), 1)})`) : tr('まだありません', 'None yet')}
+          {others.length === 1 ? others[0].name || '—' : others.length ? tr(`${others.length} 台`, `${others.length}`) : tr('まだありません', 'None yet')}
         </b>
       </div>
       <div className="k">
