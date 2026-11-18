@@ -1,0 +1,1 @@
+var e=`/dtx-mania-web-editor/assets/ogg-6ukCYODe.wasm`;export{e as default};

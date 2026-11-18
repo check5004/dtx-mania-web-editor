@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<defs>
+  <linearGradient id="mk-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1D2839"/><stop offset="1" stop-color="#07090D"/></linearGradient>
+  <linearGradient id="mk-shell" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2C7FC4"/><stop offset="0.35" stop-color="#8FDBFF"/><stop offset="0.6" stop-color="#5B8DF0"/><stop offset="1" stop-color="#5A44B8"/></linearGradient>
+  <linearGradient id="mk-fade" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0.75"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <mask id="mk-m" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="url(#mk-fade)"/></mask>
+</defs>
+<rect width="64" height="64" rx="14" fill="url(#mk-bg)"/>
+<g mask="url(#mk-m)" opacity="0.7"><path d="M15 41 L24 41 L28 6 L25 6 Z" fill="#4FC3F7"/><path d="M27.5 41 L36.5 41 L33.5 6 L30.5 6 Z" fill="#FFD54F"/><path d="M40 41 L49 41 L39 6 L36 6 Z" fill="#9C84E0"/></g>
+<rect x="17.5" y="30" width="7" height="4" rx="1.2" fill="#4FC3F7"/>
+<rect x="28.5" y="19" width="6" height="3.5" rx="1.1" fill="#FFD54F"/>
+<rect x="39.5" y="24" width="6.5" height="3.6" rx="1.1" fill="#9C84E0"/>
+<rect x="22" y="14" width="5" height="3" rx="1" fill="#4FC3F7"/>
+<path d="M10 44 V52 A22 6.5 0 0 0 54 52 V44 Z" fill="url(#mk-shell)"/>
+<ellipse cx="32" cy="44" rx="22" ry="6.5" fill="#E9EEF4"/>
+<ellipse cx="32" cy="43.6" rx="19" ry="5" fill="#FFFFFF"/>
+<ellipse cx="32" cy="43.6" rx="7" ry="2" fill="#FFD54F"/>
+<rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.3" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.5"/>
+</svg>
